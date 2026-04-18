@@ -121,6 +121,11 @@ static int getWallpaperMode() {
     return std::clamp<int>(**PMODE, 0, 2);
 }
 
+static bool getOverviewBlur() {
+    static auto* const* PBLUR = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:blur")->getDataStaticPtr();
+    return **PBLUR;
+}
+
 static float getWorkspaceRenderedPitch(PHLMONITOR monitor, float scale) {
     return monitor->m_size.y * scale + sc<float>(getWorkspaceGap());
 }
@@ -938,6 +943,20 @@ void CScrollOverview::render() {
         renderWallpaperLayers(getOverviewWorkspaceBox(pMonitor.lock(), 1.F, Vector2D{}, 0.F), 1.F, NOW);
     } else
         g_pHyprOpenGL->clear(CHyprColor{0.F, 0.F, 0.F, 1.F});
+
+    if (getOverviewBlur() && WALLPAPERMODE != 1) {
+        CRectPassElement::SRectData blurData;
+        blurData.box           = CBox{{}, pMonitor->m_size * pMonitor->m_scale};
+        blurData.color         = CHyprColor{0.F, 0.F, 0.F, 0.F};
+        blurData.blur          = true;
+        blurData.blurA         = 1.F;
+        blurData.round         = 0;
+        blurData.roundingPower = 2.F;
+        blurData.xray          = false;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(blurData));
+        g_pHyprRenderer->m_renderPass.render(CRegion{CBox{{}, pMonitor->m_size}});
+        g_pHyprRenderer->m_renderPass.clear();
+    }
 
     Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
 
