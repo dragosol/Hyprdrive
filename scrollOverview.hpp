@@ -47,9 +47,9 @@ class CScrollOverview : public IOverview {
     void   seedRememberedSelections();
     void   redrawAll(bool forcelowres = false);
     void   onWorkspaceChange();
-    void   renderWallpaperLayers(const CBox& workspaceBox, float renderScale, const Time::steady_tp& now);
-    void   renderWorkspaceLive(size_t workspaceIdx, size_t activeIdx, float renderScale, const Time::steady_tp& now, std::vector<SRenderedWindow>& renderedWindows);
-    void   renderWindowLive(PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now);
+    void   renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now);
+    void   renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
+    void   renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
     bool   moveWindowSelection(const std::string& direction);
     void   rememberSelection(PHLWINDOW window);
@@ -64,19 +64,13 @@ class CScrollOverview : public IOverview {
     void   restoreForcedLayerVisibility();
     size_t activeWorkspaceIndex() const;
 
-    bool   damageDirty              = false;
     size_t viewportCurrentWorkspace = 0;
     bool   rebuildPending           = false;
     bool   workspaceSyncPending     = false;
 
-    struct SWindowImage {
-        PHLWINDOWREF pWindow;
-    };
-
     struct SWorkspaceImage {
-        PHLWORKSPACE                  pWorkspace;
-        CBox                          box;
-        std::vector<SP<SWindowImage>> windowImages;
+        PHLWORKSPACE              pWorkspace;
+        std::vector<PHLWINDOWREF> windows;
     };
 
     Vector2D                         lastMousePosLocal = Vector2D{};
@@ -84,6 +78,7 @@ class CScrollOverview : public IOverview {
     PHLWINDOWREF                     closeOnWindow;
 
     std::vector<SP<SWorkspaceImage>> images;
+    std::vector<SRenderedWindow>     renderedWindows;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
 
     struct SForcedSurfaceVisibility {
@@ -126,8 +121,7 @@ class CScrollOverview : public IOverview {
     CHyprSignalListener             workspaceRemovedHook;
     CHyprSignalListener             workspaceActiveHook;
 
-    bool                             swipe             = false;
-    bool                             swipeWasCommenced = false;
+    bool                             swipe = false;
 
     friend class CScrollOverviewPassElement;
 };
