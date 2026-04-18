@@ -1,4 +1,5 @@
 #include "scrollOverview.hpp"
+#include <algorithm>
 #include <any>
 #define private public
 #include <hyprland/src/render/Renderer.hpp>
@@ -89,6 +90,83 @@ static bool isTopLayerFocused(PHLMONITOR monitor) {
     }
 
     return layerOwner && layerOwner->m_monitor == monitor && layerOwner->m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+}
+
+struct SSurfaceOpacityOverride {
+    WP<CWLSurfaceResource> surface;
+    float                  opacity = 1.F;
+};
+
+static void overrideSurfaceOpacity(std::vector<SSurfaceOpacityOverride>& overrides, SP<CWLSurfaceResource> surface, float opacity) {
+    if (!surface)
+        return;
+
+    const auto HLSURFACE = Desktop::View::CWLSurface::fromResource(surface);
+    if (!HLSURFACE)
+        return;
+
+    for (auto& entry : overrides) {
+        if (entry.surface.lock() == surface) {
+            HLSURFACE->m_overallOpacity = opacity;
+            return;
+        }
+    }
+
+    overrides.push_back({surface, HLSURFACE->m_overallOpacity});
+    HLSURFACE->m_overallOpacity = opacity;
+}
+
+static void overrideWindowSurfaceOpacity(const PHLWINDOW& window, std::vector<SSurfaceOpacityOverride>& overrides, float opacity) {
+    if (!window || !window->wlSurface() || !window->wlSurface()->resource())
+        return;
+
+    window->wlSurface()->resource()->breadthfirst(
+        [&overrides, opacity](SP<CWLSurfaceResource> surface, const Vector2D&, void*) { overrideSurfaceOpacity(overrides, surface, opacity); }, nullptr);
+
+    if (window->m_isX11 || !window->m_popupHead)
+        return;
+
+    window->m_popupHead->breadthfirst([&overrides, opacity](WP<Desktop::View::CPopup> popup, void*) {
+        if (!popup || !popup->aliveAndVisible() || !popup->wlSurface() || !popup->wlSurface()->resource())
+            return;
+
+        popup->wlSurface()->resource()->breadthfirst(
+            [&overrides, opacity](SP<CWLSurfaceResource> surface, const Vector2D&, void*) { overrideSurfaceOpacity(overrides, surface, opacity); }, nullptr);
+    }, nullptr);
+}
+
+static void restoreSurfaceOpacityOverrides(std::vector<SSurfaceOpacityOverride>& overrides) {
+    for (auto& entry : overrides) {
+        const auto SURFACE = entry.surface.lock();
+        if (!SURFACE)
+            continue;
+
+        const auto HLSURFACE = Desktop::View::CWLSurface::fromResource(SURFACE);
+        if (!HLSURFACE)
+            continue;
+
+        HLSURFACE->m_overallOpacity = entry.opacity;
+    }
+
+    overrides.clear();
+}
+
+static float getOverviewWindowTargetOpacity(const PHLWINDOW& window) {
+    if (!window)
+        return 1.F;
+
+    static auto* const* PACTIVEOPACITY     = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:active_opacity")->getDataStaticPtr();
+    static auto* const* PINACTIVEOPACITY   = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:inactive_opacity")->getDataStaticPtr();
+    static auto* const* PFULLSCREENOPACITY = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:fullscreen_opacity")->getDataStaticPtr();
+
+    const bool  fullscreen     = window->isFullscreen();
+    const bool  active         = Desktop::focusState()->window() == window;
+    float       targetOpacity  = fullscreen ? **PFULLSCREENOPACITY : active ? **PACTIVEOPACITY : **PINACTIVEOPACITY;
+    const auto& ruleOpacityVar = fullscreen ? window->m_ruleApplicator->alphaFullscreen() : active ? window->m_ruleApplicator->alpha() : window->m_ruleApplicator->alphaInactive();
+
+    targetOpacity = ruleOpacityVar.valueOr(Desktop::Types::SAlphaValue{}).applyAlpha(targetOpacity);
+
+    return std::clamp(targetOpacity, 0.F, 1.F);
 }
 
 static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float yoff) {
@@ -765,9 +843,19 @@ void CScrollOverview::renderWindowLive(PHLWINDOW window, float workspaceYOffset,
     modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_SCALE, scale->value());
     modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_TRANSLATE, Vector2D{WINDOWBOX.x / pMonitor->m_scale, WINDOWBOX.y / pMonitor->m_scale});
 
+    const float TARGETOPACITY = getOverviewWindowTargetOpacity(window);
+    std::vector<SSurfaceOpacityOverride> surfaceOpacityOverrides;
+    overrideWindowSurfaceOpacity(window, surfaceOpacityOverrides, TARGETOPACITY);
+    auto restoreSurfaceOpacities = Hyprutils::Utils::CScopeGuard([&surfaceOpacityOverrides] { restoreSurfaceOpacityOverrides(surfaceOpacityOverrides); });
+
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
     g_pHyprRenderer->renderWindow(window, pMonitor.lock(), now, true, RENDER_PASS_ALL, true, true);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = SRenderModifData{}}));
+
+    if (!g_pHyprRenderer->m_renderPass.empty()) {
+        g_pHyprRenderer->m_renderPass.render(CRegion{CBox{{}, pMonitor->m_size}});
+        g_pHyprRenderer->m_renderPass.clear();
+    }
 }
 
 void CScrollOverview::redrawWorkspace(PHLWORKSPACE workspace, bool forcelowres) {
