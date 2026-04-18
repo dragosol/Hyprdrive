@@ -10,9 +10,18 @@ A great start to configure this plugin would be adding this code to the `plugin`
 plugin {
     scrolloverview {
         gesture_distance = 300 # how far is the "max" for the gesture
+        scale = 0.5 # preferred overview scale
         workspace_gap = 0
         wallpaper = 0 # 0: global only, 1: per-workspace only, 2: both
         blur = false # blur only the main overview wallpaper
+
+        shadow {
+            enabled = true
+            range = 4
+            render_power = 3
+            ignore_window = true
+            color = rgba(1a1a1aee)
+        }
 
         scrolling {
             scroll_moves_up_down = true
@@ -27,9 +36,21 @@ plugin {
 | property | type | description | default |
 | --- | --- | --- | --- |
 |gesture_distance | number | how far is the max for the gesture | `300`|
+|scale | float | overview scale, [0.1 - 0.9]. Overrides `scrolling.default_zoom` if set | unset |
 |workspace_gap | number | gap between visible workspaces in the overview, in pixels | `0`|
 |wallpaper | int | wallpaper mode: `0` global only, `1` per-workspace only, `2` both | `0`|
 |blur | bool | blur the main overview wallpaper without blurring workspace wallpapers | `false`|
+
+#### Subcategory `shadow`
+
+Controls the shadow around each workspace card. `enabled` defaults to `false`; all other unset values fall back to `decoration:shadow:*`.
+| property | type | description | default |
+| --- | --- | --- | --- |
+| enabled | bool | draw a shadow around each workspace card | false |
+| range | int | shadow range in layout px | `decoration:shadow:range` |
+| render_power | int | shadow falloff power | `decoration:shadow:render_power` |
+| ignore_window | bool | draw only around the workspace card, not behind its rectangle | `decoration:shadow:ignore_window` |
+| color | color | shadow color | `decoration:shadow:color` |
 
 #### Subcategory `scrolling`
 

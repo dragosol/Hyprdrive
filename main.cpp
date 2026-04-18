@@ -241,9 +241,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom", Hyprlang::FLOAT{0.5});
 
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:gesture_distance", Hyprlang::INT{200});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:scale", Hyprlang::FLOAT{-1.F});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:workspace_gap", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:wallpaper", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:blur", Hyprlang::INT{0});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:shadow:enabled", Hyprlang::INT{0});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:shadow:range", Hyprlang::INT{-1});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:shadow:render_power", Hyprlang::INT{-1});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:shadow:ignore_window", Hyprlang::INT{-1});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:shadow:color", Hyprlang::INT{-1});
 
     HyprlandAPI::reloadConfig();
 

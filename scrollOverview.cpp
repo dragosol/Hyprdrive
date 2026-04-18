@@ -205,6 +205,50 @@ static bool getOverviewBlur() {
     return **PBLUR;
 }
 
+static float getOverviewConfiguredScale() {
+    static auto* const* PSCALE       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scale")->getDataStaticPtr();
+    static auto* const* PDEFAULTZOOM = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom")->getDataStaticPtr();
+
+    const float configuredScale = **PSCALE;
+    const float fallbackScale   = **PDEFAULTZOOM;
+
+    return std::clamp(configuredScale >= 0.1F ? configuredScale : fallbackScale, 0.1F, 0.9F);
+}
+
+struct SOverviewShadowConfig {
+    bool       enabled     = false;
+    int        range       = 0;
+    int        renderPower = 1;
+    bool       ignoreWindow = true;
+    CHyprColor color       = CHyprColor{0, 0, 0, 0};
+};
+
+static SOverviewShadowConfig getOverviewShadowConfig() {
+    static auto* const* PENABLED     = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:shadow:enabled")->getDataStaticPtr();
+    static auto* const* PRANGE       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:shadow:range")->getDataStaticPtr();
+    static auto* const* PRENDERPOWER = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:shadow:render_power")->getDataStaticPtr();
+    static auto* const* PIGNORE      = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:shadow:ignore_window")->getDataStaticPtr();
+    static auto* const* PCOLOR       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:shadow:color")->getDataStaticPtr();
+
+    static auto* const* PGLOBALRANGE       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:shadow:range")->getDataStaticPtr();
+    static auto* const* PGLOBALRENDERPOWER = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:shadow:render_power")->getDataStaticPtr();
+    static auto* const* PGLOBALIGNORE      = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:shadow:ignore_window")->getDataStaticPtr();
+    static auto* const* PGLOBALCOLOR       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:shadow:color")->getDataStaticPtr();
+
+    const int range       = **PRANGE >= 0 ? **PRANGE : **PGLOBALRANGE;
+    const int renderPower = **PRENDERPOWER >= 0 ? **PRENDERPOWER : **PGLOBALRENDERPOWER;
+    const int ignore      = **PIGNORE >= 0 ? **PIGNORE : **PGLOBALIGNORE;
+    const auto color      = **PCOLOR >= 0 ? **PCOLOR : **PGLOBALCOLOR;
+
+    return {
+        .enabled      = !!**PENABLED,
+        .range        = std::max(0, range),
+        .renderPower  = std::clamp(renderPower, 1, 4),
+        .ignoreWindow = !!ignore,
+        .color        = CHyprColor(color),
+    };
+}
+
 static float getWorkspaceRenderedPitch(PHLMONITOR monitor, float scale) {
     return monitor->m_size.y * scale + sc<float>(getWorkspaceGap());
 }
@@ -253,8 +297,6 @@ CScrollOverview::~CScrollOverview() {
 }
 
 CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn_), swipe(swipe_) {
-    static auto* const* PDEFAULTZOOM = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom")->getDataStaticPtr();
-
     const auto          PMONITOR = Desktop::focusState()->monitor();
     pMonitor                     = PMONITOR;
 
@@ -267,7 +309,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     viewOffset->setUpdateCallback(damageMonitor);
 
     if (!swipe)
-        *scale = std::clamp(**PDEFAULTZOOM, 0.1F, 0.9F);
+        *scale = getOverviewConfiguredScale();
 
     lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
 
@@ -461,6 +503,45 @@ void CScrollOverview::renderWallpaperLayers(const CBox& workspaceBox, float rend
         return;
 
     renderOverviewLayerLevel(pMonitor.lock(), ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, workspaceBox, renderScale, now);
+}
+
+static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale) {
+    if (!monitor)
+        return;
+
+    const auto SHADOW = getOverviewShadowConfig();
+    if (!SHADOW.enabled || SHADOW.range <= 0 || SHADOW.color.a == 0.F)
+        return;
+
+    static auto* const* PGLOBALRENDERPOWER = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:shadow:render_power")->getDataStaticPtr();
+
+    const auto PREVRENDERPOWER = **PGLOBALRENDERPOWER;
+    **PGLOBALRENDERPOWER       = SHADOW.renderPower;
+    auto restoreRenderPower    = Hyprutils::Utils::CScopeGuard([PREVRENDERPOWER] {
+        static auto* const* PGLOBALRENDERPOWER = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:shadow:render_power")->getDataStaticPtr();
+        **PGLOBALRENDERPOWER                   = PREVRENDERPOWER;
+    });
+
+    const int RANGE = sc<int>(std::round(SHADOW.range * monitor->m_scale * overviewScale));
+    if (RANGE <= 0)
+        return;
+
+    const auto FULLBOX = workspaceBox.copy().expand(RANGE);
+    if (FULLBOX.width < 1 || FULLBOX.height < 1)
+        return;
+
+    if (!SHADOW.ignoreWindow) {
+        g_pHyprOpenGL->renderRoundedShadow(FULLBOX, 0, 2.F, RANGE, SHADOW.color, 1.F);
+        return;
+    }
+
+    const auto SAVEDDAMAGE = g_pHyprOpenGL->m_renderData.damage;
+    g_pHyprOpenGL->m_renderData.damage = FULLBOX;
+    g_pHyprOpenGL->m_renderData.damage.subtract(workspaceBox).intersect(SAVEDDAMAGE);
+
+    g_pHyprOpenGL->renderRoundedShadow(FULLBOX, 0, 2.F, RANGE, SHADOW.color, 1.F);
+
+    g_pHyprOpenGL->m_renderData.damage = SAVEDDAMAGE;
 }
 
 size_t CScrollOverview::activeWorkspaceIndex() const {
@@ -960,6 +1041,8 @@ void CScrollOverview::renderWorkspaceLive(PHLWORKSPACE workspace, const Time::st
 
     const auto WORKSPACEBOX = getOverviewWorkspaceBox(pMonitor.lock(), scale->value(), viewOffset->value(), WORKSPACEYOFFSET);
 
+    renderOverviewWorkspaceShadow(pMonitor.lock(), WORKSPACEBOX, scale->value());
+
     if (getWallpaperMode() != 0)
         renderWallpaperLayers(WORKSPACEBOX, scale->value(), now);
 
@@ -1284,36 +1367,31 @@ void CScrollOverview::setClosing(bool closing_) {
 }
 
 void CScrollOverview::resetSwipe() {
-    static auto* const* PDEFAULTZOOM = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom")->getDataStaticPtr();
-
     if (closing) {
         close();
         return;
     }
 
-    (*scale)    = **PDEFAULTZOOM;
+    (*scale)    = getOverviewConfiguredScale();
     m_isSwiping = false;
 }
 
 void CScrollOverview::onSwipeUpdate(double delta) {
-    static auto* const* PDEFAULTZOOM = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom")->getDataStaticPtr();
     static auto* const* PDISTANCE    = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:gesture_distance")->getDataStaticPtr();
 
     m_isSwiping = true;
 
     const float PERC = closing ? std::clamp(delta / (double)**PDISTANCE, 0.0, 1.0) : 1.0 - std::clamp(delta / (double)**PDISTANCE, 0.0, 1.0);
 
-    scale->setValueAndWarp(hyprlerp(1.F, **PDEFAULTZOOM, PERC));
+    scale->setValueAndWarp(hyprlerp(1.F, getOverviewConfiguredScale(), PERC));
 }
 
 void CScrollOverview::onSwipeEnd() {
-    static auto* const* PDEFAULTZOOM = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom")->getDataStaticPtr();
-
     if (closing) {
         close();
         return;
     }
 
-    (*scale)    = **PDEFAULTZOOM;
+    (*scale)    = getOverviewConfiguredScale();
     m_isSwiping = false;
 }
