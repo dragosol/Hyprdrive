@@ -26,6 +26,7 @@
 #include <hyprland/src/render/pass/Pass.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
+#include <hyprland/src/render/pass/SurfacePassElement.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
 #undef private
 #include "OverviewPassElement.hpp"
@@ -282,6 +283,32 @@ static float getOverviewHorizontalOverlap(const PHLWINDOW& a, const PHLWINDOW& b
     const double overlap = std::min(APOS.x + ASIZE.x, BPOS.x + BSIZE.x) - std::max(APOS.x, BPOS.x);
 
     return std::max(0.F, sc<float>(overlap));
+}
+
+static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITOR monitor, float renderScale, size_t firstElement) {
+    if (!window || !monitor)
+        return;
+
+    const int   rounding      = sc<int>(std::round(window->rounding() * monitor->m_scale * renderScale));
+    const float roundingPower = window->roundingPower();
+
+    if (rounding <= 0)
+        return;
+
+    auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+    for (size_t i = firstElement; i < passElements.size(); ++i) {
+        const auto& passElement = passElements[i];
+        if (!passElement || !passElement->element)
+            continue;
+
+        auto* surfacePassElement = dynamic_cast<CSurfacePassElement*>(passElement->element.get());
+        if (!surfacePassElement || surfacePassElement->m_data.pWindow != window || surfacePassElement->m_data.popup)
+            continue;
+
+        surfacePassElement->m_data.dontRound     = false;
+        surfacePassElement->m_data.rounding      = rounding;
+        surfacePassElement->m_data.roundingPower = roundingPower;
+    }
 }
 
 CScrollOverview::~CScrollOverview() {
@@ -1076,7 +1103,9 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
     auto restoreSurfaceOpacities = Hyprutils::Utils::CScopeGuard([&surfaceOpacityOverrides] { restoreSurfaceOpacityOverrides(surfaceOpacityOverrides); });
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
+    const auto firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
     g_pHyprRenderer->renderWindow(window, monitor, now, true, RENDER_PASS_ALL, true, true);
+    roundStandaloneWindowPassElements(window, monitor, renderScale, firstWindowPassElement);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = SRenderModifData{}}));
 
     if (!g_pHyprRenderer->m_renderPass.empty()) {
