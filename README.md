@@ -1,20 +1,20 @@
-# HyprExpo
-HyprExpo is an overview plugin like Gnome, KDE or wf.
+# ScrollOverview
+ScrollOverview is an overview plugin like Gnome, KDE or wf.
   
-![HyprExpo](https://github.com/user-attachments/assets/e89df9d2-9800-4268-9929-239ad9bc3a54)
+![ScrollOverview](https://github.com/user-attachments/assets/e89df9d2-9800-4268-9929-239ad9bc3a54)
   
 ## Config
 A great start to configure this plugin would be adding this code to the `plugin` section of your hyprland configuration file:  
 ```ini
 # .config/hypr/hyprland.conf
 plugin {
-    hyprexpo {
-        columns = 3
-        gap_size = 5
-        bg_col = rgb(111111)
-        workspace_method = center current # [center/first] [workspace] e.g. first 1 or center m+1
-
+    scrolloverview {
         gesture_distance = 300 # how far is the "max" for the gesture
+
+        scrolling {
+            scroll_moves_up_down = true
+            default_zoom = 0.5
+        }
     }
 }
 ```
@@ -23,16 +23,11 @@ plugin {
 
 | property | type | description | default |
 | --- | --- | --- | --- |
-|columns | number | how many desktops are displayed on one line | `3`|
-|gap_size | number | gap between desktops | `5`|
-|bg_col | color | color in gaps (between desktops) | `rgb(000000)`|
-|workspace_method | [center/first] [workspace] | position of the desktops | `center current`|
-|skip_empty | boolean | whether the grid displays workspaces sequentially by id using selector "r" (`false`) or skips empty workspaces using selector "m" (`true`) | `false`|
 |gesture_distance | number | how far is the max for the gesture | `300`|
 
 #### Subcategory `scrolling`
 
-Applies to the scrolling layout overview
+Applies to the only overview implementation used by this plugin
 | property | type | description | default |
 | --- | --- | --- | --- |
 | scroll_moves_up_down | bool | if enabled, scrolling will move workspaces up/down instead of zooming | true |
@@ -43,18 +38,18 @@ Applies to the scrolling layout overview
 
 | name | description | arguments |
 | -- | -- | -- | 
-| hyprexpo-gesture | same as gesture, but for hyprexpo gestures. Supports: `expo`. | Same as gesture |
+| scrolloverview-gesture | same as gesture, but for ScrollOverview gestures. Supports: `expo`. | Same as gesture |
 
 ### Binding
 ```bash
 # hyprland.conf
-bind = MODIFIER, KEY, hyprexpo:expo, OPTION
+bind = MODIFIER, KEY, scrolloverview:expo, OPTION
 ```
 
 Example:  
 ```bash
-# This will toggle HyprExpo when SUPER+g is pressed
-bind = SUPER, g, hyprexpo:expo, toggle
+# This will toggle ScrollOverview when SUPER+g is pressed
+bind = SUPER, g, scrolloverview:expo, toggle
 ```
 
 Here are a list of options you can use:  
@@ -66,4 +61,3 @@ off | hides the overview
 disable | same as `off`
 on | displays the overview
 enable | same as `on`
-

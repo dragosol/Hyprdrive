@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(hyprexpo
-    DESCRIPTION "hyprexpo plugin for Hyprland"
+project(scrolloverview
+    DESCRIPTION "scrolloverview plugin for Hyprland"
     VERSION 0.1
 )
 
@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 23)
 
 file(GLOB_RECURSE SRC "*.cpp")
 
-add_library(hyprexpo SHARED ${SRC})
+add_library(scrolloverview SHARED ${SRC})
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET
@@ -22,6 +22,6 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     wayland-server
     xkbcommon
 )
-target_link_libraries(hyprexpo PRIVATE rt PkgConfig::deps)
+target_link_libraries(scrolloverview PRIVATE rt PkgConfig::deps)
 
-install(TARGETS hyprexpo)
+install(TARGETS scrolloverview)

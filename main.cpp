@@ -9,10 +9,6 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/layout/algorithm/Algorithm.hpp>
-#include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
-#include <hyprland/src/layout/space/Space.hpp>
-#include <hyprland/src/layout/supplementary/WorkspaceAlgoMatcher.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
@@ -21,9 +17,8 @@
 using namespace Hyprutils::String;
 
 #include "globals.hpp"
-#include "overview.hpp"
 #include "scrollOverview.hpp"
-#include "ExpoGesture.hpp"
+#include "OverviewGesture.hpp"
 
 // Methods
 inline CFunctionHook* g_pRenderWorkspaceHook = nullptr;
@@ -34,17 +29,6 @@ typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
 
 static bool g_unloading = false;
-
-static bool isScrollingWorkspace(const PHLWORKSPACE& workspace) {
-    if (!workspace || !workspace->m_space)
-        return false;
-
-    const auto algorithm = workspace->m_space->algorithm();
-    if (!algorithm || !algorithm->tiledAlgo())
-        return false;
-
-    return Layout::Supplementary::algoMatcher()->getNameForTiledAlgo(&typeid(*algorithm->tiledAlgo())) == "scrolling";
-}
 
 // Do NOT change this function.
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
@@ -86,8 +70,6 @@ static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
 }
 
 static SDispatchResult onExpoDispatcher(std::string arg) {
-    IS_SCROLLING = isScrollingWorkspace(Desktop::focusState()->monitor()->m_activeWorkspace);
-
     if (g_pOverview && g_pOverview->m_isSwiping)
         return {.success = false, .error = "already swiping"};
 
@@ -103,12 +85,7 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
             g_pOverview->close();
         else {
             renderingOverview = true;
-
-            if (IS_SCROLLING)
-                g_pOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
-            else
-                g_pOverview = makeShared<COverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
-
+            g_pOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
             renderingOverview = false;
         }
         return {};
@@ -124,16 +101,13 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
         return {};
 
     renderingOverview = true;
-    if (IS_SCROLLING)
-        g_pOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
-    else
-        g_pOverview = makeShared<COverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
+    g_pOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
     renderingOverview = false;
     return {};
 }
 
 static void failNotif(const std::string& reason) {
-    HyprlandAPI::addNotification(PHANDLE, "[hyprexpo] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+    HyprlandAPI::addNotification(PHANDLE, "[scrolloverview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
 static Hyprlang::CParseResult expoGestureKeyword(const char* LHS, const char* RHS) {
@@ -193,7 +167,7 @@ static Hyprlang::CParseResult expoGestureKeyword(const char* LHS, const char* RH
     std::expected<void, std::string> resultFromGesture;
 
     if (data[startDataIdx] == "expo")
-        resultFromGesture = g_pTrackpadGestures->addGesture(makeUnique<CExpoGesture>(), fingerCount, direction, modMask, deltaScale, false);
+        resultFromGesture = g_pTrackpadGestures->addGesture(makeUnique<COverviewGesture>(), fingerCount, direction, modMask, deltaScale, false);
     else if (data[startDataIdx] == "unset")
         resultFromGesture = g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, false);
     else {
@@ -259,23 +233,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_pOverview->onPreRender();
     });
 
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:expo", ::onExpoDispatcher);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "scrolloverview:expo", ::onExpoDispatcher);
 
-    HyprlandAPI::addConfigKeyword(PHANDLE, "hyprexpo-gesture", ::expoGestureKeyword, {});
+    HyprlandAPI::addConfigKeyword(PHANDLE, "scrolloverview-gesture", ::expoGestureKeyword, {});
 
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:columns", Hyprlang::INT{3});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:gap_size", Hyprlang::INT{5});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:bg_col", Hyprlang::INT{0xFF111111});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:workspace_method", Hyprlang::STRING{"center current"});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:skip_empty", Hyprlang::INT{0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:scrolling:scroll_moves_up_down", Hyprlang::INT{1});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:scrolling:default_zoom", Hyprlang::FLOAT{0.5});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:scroll_moves_up_down", Hyprlang::INT{1});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom", Hyprlang::FLOAT{0.5});
 
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprexpo:gesture_distance", Hyprlang::INT{200});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:gesture_distance", Hyprlang::INT{200});
 
     HyprlandAPI::reloadConfig();
 
-    return {"hyprexpo", "A plugin for an overview", "Vaxry", "1.0"};
+    return {"scrolloverview", "A plugin for an overview", "Vaxry", "1.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

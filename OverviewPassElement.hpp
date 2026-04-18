@@ -1,8 +1,6 @@
 #pragma once
 #include <hyprland/src/render/pass/PassElement.hpp>
 
-class COverview;
-
 class COverviewPassElement : public IPassElement {
   public:
     COverviewPassElement();

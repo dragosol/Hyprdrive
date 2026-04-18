@@ -1,26 +1,26 @@
-#include "ExpoGesture.hpp"
+#include "OverviewGesture.hpp"
 
-#include "overview.hpp"
+#include "scrollOverview.hpp"
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 
-void CExpoGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
+void COverviewGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
     ITrackpadGesture::begin(e);
 
     m_lastDelta   = 0.F;
     m_firstUpdate = true;
 
     if (!g_pOverview)
-        g_pOverview = makeShared<COverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
+        g_pOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
     else {
         g_pOverview->selectHoveredWorkspace();
         g_pOverview->setClosing(true);
     }
 }
 
-void CExpoGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {
+void COverviewGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {
     if (m_firstUpdate) {
         m_firstUpdate = false;
         return;
@@ -34,7 +34,7 @@ void CExpoGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {
     g_pOverview->onSwipeUpdate(m_lastDelta);
 }
 
-void CExpoGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
+void COverviewGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
     g_pOverview->setClosing(false);
     g_pOverview->onSwipeEnd();
     g_pOverview->resetSwipe();

@@ -1,6 +1,6 @@
 #include "OverviewPassElement.hpp"
 #include <hyprland/src/render/OpenGL.hpp>
-#include "overview.hpp"
+#include "IOverview.hpp"
 
 COverviewPassElement::COverviewPassElement() {
     ;

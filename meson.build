@@ -1,4 +1,4 @@
-project('hyprexpo', 'cpp',
+project('scrolloverview', 'cpp',
   version: '0.1',
   default_options: ['buildtype=release'],
 )

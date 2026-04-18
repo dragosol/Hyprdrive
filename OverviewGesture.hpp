@@ -2,10 +2,10 @@
 
 #include <hyprland/src/managers/input/trackpad/gestures/ITrackpadGesture.hpp>
 
-class CExpoGesture : public ITrackpadGesture {
+class COverviewGesture : public ITrackpadGesture {
   public:
-    CExpoGesture()          = default;
-    virtual ~CExpoGesture() = default;
+    COverviewGesture()              = default;
+    virtual ~COverviewGesture()     = default;
 
     virtual void begin(const ITrackpadGesture::STrackpadGestureBegin& e);
     virtual void update(const ITrackpadGesture::STrackpadGestureUpdate& e);
