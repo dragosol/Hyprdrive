@@ -1,5 +1,5 @@
 # ScrollOverview
-ScrollOverview is an overview plugin like Gnome, KDE or wf.
+ScrollOverview is an overview plugin like niri.
   
 ![ScrollOverview](https://github.com/user-attachments/assets/e89df9d2-9800-4268-9929-239ad9bc3a54)
   
@@ -22,11 +22,6 @@ plugin {
             ignore_window = true
             color = rgba(1a1a1aee)
         }
-
-        scrolling {
-            scroll_moves_up_down = true
-            default_zoom = 0.5
-        }
     }
 }
 ```
@@ -36,7 +31,7 @@ plugin {
 | property | type | description | default |
 | --- | --- | --- | --- |
 |gesture_distance | number | how far is the max for the gesture | `300`|
-|scale | float | overview scale, [0.1 - 0.9]. Overrides `scrolling.default_zoom` if set | unset |
+|scale | float | overview scale, [0.1 - 0.9] | `0.5` |
 |workspace_gap | number | gap between visible workspaces in the overview, in pixels | `0`|
 |wallpaper | int | wallpaper mode: `0` global only, `1` per-workspace only, `2` both | `0`|
 |blur | bool | blur the main overview wallpaper without blurring workspace wallpapers | `false`|
@@ -51,15 +46,6 @@ Controls the shadow around each workspace card. `enabled` defaults to `false`; a
 | render_power | int | shadow falloff power | `decoration:shadow:render_power` |
 | ignore_window | bool | draw only around the workspace card, not behind its rectangle | `decoration:shadow:ignore_window` |
 | color | color | shadow color | `decoration:shadow:color` |
-
-#### Subcategory `scrolling`
-
-Applies to the only overview implementation used by this plugin
-| property | type | description | default |
-| --- | --- | --- | --- |
-| scroll_moves_up_down | bool | if enabled, scrolling will move workspaces up/down instead of zooming | true |
-| default_zoom | float | default zoom out value, [0.1 - 0.9] | 0.5 |
-
 
 ### Keywords
 

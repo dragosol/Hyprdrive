@@ -206,13 +206,11 @@ static bool getOverviewBlur() {
 }
 
 static float getOverviewConfiguredScale() {
-    static auto* const* PSCALE       = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scale")->getDataStaticPtr();
-    static auto* const* PDEFAULTZOOM = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom")->getDataStaticPtr();
+    static auto* const* PSCALE = (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scale")->getDataStaticPtr();
 
     const float configuredScale = **PSCALE;
-    const float fallbackScale   = **PDEFAULTZOOM;
 
-    return std::clamp(configuredScale >= 0.1F ? configuredScale : fallbackScale, 0.1F, 0.9F);
+    return std::clamp(configuredScale, 0.1F, 0.9F);
 }
 
 struct SOverviewShadowConfig {
@@ -344,14 +342,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             return;
 
         info.cancelled = true;
-
-        static auto* const* PZOOM = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:scroll_moves_up_down")->getDataStaticPtr();
-
-        if (!**PZOOM) {
-            const auto VAL = std::clamp(sc<float>(scale->value() + e.delta / -500.F), 0.05F, 0.95F);
-            *scale         = VAL;
-        } else
-            moveViewportWorkspace(e.delta > 0);
+        moveViewportWorkspace(e.delta > 0);
     };
 
     auto onWindowOpen = [this](PHLWINDOW) {
