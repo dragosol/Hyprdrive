@@ -48,7 +48,7 @@ class CScrollOverview : public IOverview {
     void   renderWorkspaceLive(PHLWORKSPACE workspace, const Time::steady_tp& now);
     void   renderWindowLive(PHLWINDOW window, float workspaceYOffset, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
-    void   moveWindowSelection(const std::string& direction);
+    bool   moveWindowSelection(const std::string& direction);
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
     void   syncFocusedSelection();

@@ -1,6 +1,7 @@
 #include "scrollOverview.hpp"
 #include <algorithm>
 #include <any>
+#include <limits>
 #define private public
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/Compositor.hpp>
@@ -213,6 +214,34 @@ static float getWorkspaceLogicalPitch(PHLMONITOR monitor, float scale) {
     return monitor->m_size.y + sc<float>(getWorkspaceGap()) / safeScale;
 }
 
+static float getOverviewVerticalOverlap(const PHLWINDOW& a, const PHLWINDOW& b) {
+    if (!a || !b)
+        return 0.F;
+
+    const auto APOS  = a->m_realPosition->value();
+    const auto ASIZE = a->m_realSize->value();
+    const auto BPOS  = b->m_realPosition->value();
+    const auto BSIZE = b->m_realSize->value();
+
+    const double overlap = std::min(APOS.y + ASIZE.y, BPOS.y + BSIZE.y) - std::max(APOS.y, BPOS.y);
+
+    return std::max(0.F, sc<float>(overlap));
+}
+
+static float getOverviewHorizontalOverlap(const PHLWINDOW& a, const PHLWINDOW& b) {
+    if (!a || !b)
+        return 0.F;
+
+    const auto APOS  = a->m_realPosition->value();
+    const auto ASIZE = a->m_realSize->value();
+    const auto BPOS  = b->m_realPosition->value();
+    const auto BSIZE = b->m_realSize->value();
+
+    const double overlap = std::min(APOS.x + ASIZE.x, BPOS.x + BSIZE.x) - std::max(APOS.x, BPOS.x);
+
+    return std::max(0.F, sc<float>(overlap));
+}
+
 CScrollOverview::~CScrollOverview() {
     g_pHyprRenderer->makeEGLCurrent();
     restoreForcedSurfaceVisibility();
@@ -365,9 +394,15 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             case XKB_KEY_Right:
             case XKB_KEY_KP_Right: moveWindowSelection("r"); break;
             case XKB_KEY_Up:
-            case XKB_KEY_KP_Up: moveViewportWorkspace(false); break;
+            case XKB_KEY_KP_Up:
+                if (!moveWindowSelection("u"))
+                    moveViewportWorkspace(false);
+                break;
             case XKB_KEY_Down:
-            case XKB_KEY_KP_Down: moveViewportWorkspace(true); break;
+            case XKB_KEY_KP_Down:
+                if (!moveWindowSelection("d"))
+                    moveViewportWorkspace(true);
+                break;
             case XKB_KEY_Return:
             case XKB_KEY_KP_Enter: close(); break;
             default: return;
@@ -401,24 +436,31 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     syncSelectionToViewport();
 }
 
-void CScrollOverview::renderWallpaperLayers(const CBox& workspaceBox, float renderScale, const Time::steady_tp& now) {
-    if (!pMonitor)
+static void renderOverviewLayerLevel(PHLMONITOR monitor, uint32_t layer, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now) {
+    if (!monitor)
         return;
 
     SRenderModifData modif;
     modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_SCALE, renderScale);
-    modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_TRANSLATE, Vector2D{workspaceBox.x / pMonitor->m_scale, workspaceBox.y / pMonitor->m_scale});
+    modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_TRANSLATE, Vector2D{workspaceBox.x / monitor->m_scale, workspaceBox.y / monitor->m_scale});
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
 
-    for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]) {
+    for (auto const& ls : monitor->m_layerSurfaceLayers[layer]) {
         if (!Desktop::View::validMapped(ls.lock()))
             continue;
 
-        g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), now);
+        g_pHyprRenderer->renderLayer(ls.lock(), monitor, now);
     }
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = SRenderModifData{}}));
+}
+
+void CScrollOverview::renderWallpaperLayers(const CBox& workspaceBox, float renderScale, const Time::steady_tp& now) {
+    if (!pMonitor)
+        return;
+
+    renderOverviewLayerLevel(pMonitor.lock(), ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, workspaceBox, renderScale, now);
 }
 
 size_t CScrollOverview::activeWorkspaceIndex() const {
@@ -546,8 +588,6 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
     if (images.empty())
         return;
 
-    size_t activeIdx = activeWorkspaceIndex();
-
     if (viewportCurrentWorkspace == 0 && !up)
         return;
     if (viewportCurrentWorkspace == images.size() - 1 && up)
@@ -558,8 +598,32 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
     else
         viewportCurrentWorkspace--;
 
-    *viewOffset = {viewOffset->value().x, (sc<long>(viewportCurrentWorkspace) - sc<long>(activeIdx)) * getWorkspaceLogicalPitch(pMonitor.lock(), scale->value())};
-    syncSelectionToViewport();
+    const auto& TARGETWORKSPACEIMAGE = images[viewportCurrentWorkspace];
+    if (!TARGETWORKSPACEIMAGE || !TARGETWORKSPACEIMAGE->pWorkspace)
+        return;
+
+    closeOnWindow.reset();
+
+    if (const auto it = rememberedSelection.find(TARGETWORKSPACEIMAGE->pWorkspace->m_id); it != rememberedSelection.end()) {
+        const auto rememberedWindow = it->second.lock();
+        if (rememberedWindow && rememberedWindow->m_workspace == TARGETWORKSPACEIMAGE->pWorkspace && validMapped(rememberedWindow))
+            closeOnWindow = rememberedWindow;
+    }
+
+    if (!closeOnWindow) {
+        for (const auto& img : TARGETWORKSPACEIMAGE->windowImages) {
+            if (!img->pWindow || !validMapped(img->pWindow))
+                continue;
+
+            closeOnWindow = img->pWindow;
+            break;
+        }
+    }
+
+    if (pMonitor && pMonitor->m_activeWorkspace != TARGETWORKSPACEIMAGE->pWorkspace)
+        pMonitor->changeWorkspace(TARGETWORKSPACEIMAGE->pWorkspace, false, true, true);
+
+    damage();
 }
 
 void CScrollOverview::syncSelectionToViewport() {
@@ -624,25 +688,112 @@ void CScrollOverview::syncFocusedSelection() {
     Desktop::focusState()->fullWindowFocus(closeOnWindow.lock(), Desktop::FOCUS_REASON_KEYBIND);
 }
 
-void CScrollOverview::moveWindowSelection(const std::string& direction) {
+bool CScrollOverview::moveWindowSelection(const std::string& direction) {
     if (images.empty() || viewportCurrentWorkspace >= images.size() || direction.empty())
-        return;
+        return false;
 
+    const bool MOVINGLEFT  = direction == "l";
+    const bool MOVINGRIGHT = direction == "r";
+    const bool MOVINGUP    = direction == "u";
+    const bool MOVINGDOWN  = direction == "d";
+
+    if (!MOVINGLEFT && !MOVINGRIGHT && !MOVINGUP && !MOVINGDOWN)
+        return false;
+
+    const auto& WORKSPACEIMAGE = images[viewportCurrentWorkspace];
+    if (!WORKSPACEIMAGE || !WORKSPACEIMAGE->pWorkspace)
+        return false;
+
+    if (!closeOnWindow || closeOnWindow->m_workspace != WORKSPACEIMAGE->pWorkspace || !validMapped(closeOnWindow)) {
+        syncSelectionToViewport();
+        if (!closeOnWindow || closeOnWindow->m_workspace != WORKSPACEIMAGE->pWorkspace || !validMapped(closeOnWindow))
+            return false;
+    }
+
+    const auto CURRENT = closeOnWindow.lock();
+    if (!CURRENT)
+        return false;
+
+    const auto CURRENTCENTER = CURRENT->middle();
+
+    PHLWINDOW bestCandidate;
+    float     bestPrimaryDistance   = std::numeric_limits<float>::max();
+    float     bestSecondaryDistance = std::numeric_limits<float>::max();
+    float     bestOverlap           = -1.F;
+    bool      bestHasOverlap         = false;
+
+    for (const auto& img : WORKSPACEIMAGE->windowImages) {
+        const auto WINDOW = img->pWindow.lock();
+        if (!WINDOW || WINDOW == CURRENT || !validMapped(WINDOW))
+            continue;
+
+        if (WINDOW->m_workspace != WORKSPACEIMAGE->pWorkspace || WINDOW->m_monitor != pMonitor)
+            continue;
+
+        const auto WINDOWCENTER = WINDOW->middle();
+
+        const float PRIMARYDISTANCE =
+            MOVINGRIGHT ? WINDOWCENTER.x - CURRENTCENTER.x : MOVINGLEFT ? CURRENTCENTER.x - WINDOWCENTER.x : MOVINGDOWN ? WINDOWCENTER.y - CURRENTCENTER.y : CURRENTCENTER.y - WINDOWCENTER.y;
+
+        if (PRIMARYDISTANCE <= 0.F)
+            continue;
+
+        const float OVERLAP = MOVINGLEFT || MOVINGRIGHT ? getOverviewVerticalOverlap(CURRENT, WINDOW) : getOverviewHorizontalOverlap(CURRENT, WINDOW);
+        const bool  HASOVERLAP       = OVERLAP > 0.F;
+        const float SECONDARYDISTANCE =
+            MOVINGLEFT || MOVINGRIGHT ? std::abs(WINDOWCENTER.y - CURRENTCENTER.y) : std::abs(WINDOWCENTER.x - CURRENTCENTER.x);
+
+        if ((MOVINGUP || MOVINGDOWN) && !HASOVERLAP)
+            continue;
+
+        if (!bestCandidate) {
+            bestCandidate         = WINDOW;
+            bestPrimaryDistance   = PRIMARYDISTANCE;
+            bestSecondaryDistance = SECONDARYDISTANCE;
+            bestOverlap           = OVERLAP;
+            bestHasOverlap        = HASOVERLAP;
+            continue;
+        }
+
+        if (HASOVERLAP != bestHasOverlap) {
+            if (HASOVERLAP) {
+                bestCandidate         = WINDOW;
+                bestPrimaryDistance   = PRIMARYDISTANCE;
+                bestSecondaryDistance = SECONDARYDISTANCE;
+                bestOverlap           = OVERLAP;
+                bestHasOverlap        = true;
+            }
+
+            continue;
+        }
+
+        if (PRIMARYDISTANCE < bestPrimaryDistance - 0.5F) {
+            bestCandidate         = WINDOW;
+            bestPrimaryDistance   = PRIMARYDISTANCE;
+            bestSecondaryDistance = SECONDARYDISTANCE;
+            bestOverlap           = OVERLAP;
+            continue;
+        }
+
+        if (std::abs(PRIMARYDISTANCE - bestPrimaryDistance) <= 0.5F) {
+            if ((HASOVERLAP && OVERLAP > bestOverlap + 0.5F) || (!HASOVERLAP && SECONDARYDISTANCE < bestSecondaryDistance - 0.5F)) {
+                bestCandidate         = WINDOW;
+                bestPrimaryDistance   = PRIMARYDISTANCE;
+                bestSecondaryDistance = SECONDARYDISTANCE;
+                bestOverlap           = OVERLAP;
+            }
+        }
+    }
+
+    if (!bestCandidate)
+        return false;
+
+    closeOnWindow = bestCandidate;
+    rememberSelection(bestCandidate);
     syncFocusedSelection();
-
-    const auto LASTWINDOW = Desktop::focusState()->window();
-    const auto RESULT     = CKeybindManager::moveFocusTo(direction);
-
-    if (!RESULT.success)
-        return;
-
-    const auto FOCUSED = Desktop::focusState()->window();
-    if (!FOCUSED || FOCUSED == LASTWINDOW)
-        return;
-
-    closeOnWindow = FOCUSED;
-    rememberSelection(FOCUSED);
     damage();
+
+    return true;
 }
 
 SP<CScrollOverview::SWorkspaceImage> CScrollOverview::imageForWorkspace(PHLWORKSPACE w) {
@@ -807,8 +958,12 @@ void CScrollOverview::renderWorkspaceLive(PHLWORKSPACE workspace, const Time::st
     if (!WORKSPACEIMAGE)
         return;
 
+    const auto WORKSPACEBOX = getOverviewWorkspaceBox(pMonitor.lock(), scale->value(), viewOffset->value(), WORKSPACEYOFFSET);
+
     if (getWallpaperMode() != 0)
-        renderWallpaperLayers(getOverviewWorkspaceBox(pMonitor.lock(), scale->value(), viewOffset->value(), WORKSPACEYOFFSET), scale->value(), now);
+        renderWallpaperLayers(WORKSPACEBOX, scale->value(), now);
+
+    renderOverviewLayerLevel(pMonitor.lock(), ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, WORKSPACEBOX, scale->value(), now);
 
     for (const auto& img : WORKSPACEIMAGE->windowImages) {
         if (!img->pWindow || (!img->pWindow->m_isMapped && !img->pWindow->m_fadingOut))
@@ -928,10 +1083,18 @@ void CScrollOverview::onDamageReported() {
 void CScrollOverview::close() {
     closing = true;
 
-    if (!closeOnWindow)
+    const auto SELECTEDWORKSPACE =
+        viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
+
+    if (!closeOnWindow && (!SELECTEDWORKSPACE || SELECTEDWORKSPACE == pMonitor->m_activeWorkspace))
         closeOnWindow = Desktop::focusState()->window();
 
-    if (closeOnWindow == Desktop::focusState()->window())
+    if (!closeOnWindow) {
+        if (SELECTEDWORKSPACE && SELECTEDWORKSPACE != pMonitor->m_activeWorkspace)
+            pMonitor->changeWorkspace(SELECTEDWORKSPACE, false, true, true);
+
+        *viewOffset = Vector2D{};
+    } else if (closeOnWindow == Desktop::focusState()->window())
         *viewOffset = Vector2D{};
     else {
 
@@ -1048,10 +1211,6 @@ void CScrollOverview::render() {
 
     Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
 
-    for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]) {
-        g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), NOW);
-    }
-
     for (const auto& workspaceImage : images) {
         renderWorkspaceLive(workspaceImage->pWorkspace, NOW);
     }
@@ -1105,6 +1264,7 @@ void CScrollOverview::render() {
     for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
         g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), NOW);
     }
+
 }
 
 void CScrollOverview::fullRender() {
