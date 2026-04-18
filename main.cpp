@@ -69,7 +69,7 @@ static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
     ((origAddDamageB)g_pAddDamageHookB->m_original)(thisptr, rg);
 }
 
-static SDispatchResult onExpoDispatcher(std::string arg) {
+static SDispatchResult onOverviewDispatcher(std::string arg) {
     if (g_pOverview && g_pOverview->m_isSwiping)
         return {.success = false, .error = "already swiping"};
 
@@ -110,7 +110,7 @@ static void failNotif(const std::string& reason) {
     HyprlandAPI::addNotification(PHANDLE, "[scrolloverview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
-static Hyprlang::CParseResult expoGestureKeyword(const char* LHS, const char* RHS) {
+static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char* RHS) {
     Hyprlang::CParseResult result;
 
     if (g_unloading)
@@ -166,7 +166,7 @@ static Hyprlang::CParseResult expoGestureKeyword(const char* LHS, const char* RH
 
     std::expected<void, std::string> resultFromGesture;
 
-    if (data[startDataIdx] == "expo")
+    if (data[startDataIdx] == "overview")
         resultFromGesture = g_pTrackpadGestures->addGesture(makeUnique<COverviewGesture>(), fingerCount, direction, modMask, deltaScale, false);
     else if (data[startDataIdx] == "unset")
         resultFromGesture = g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, false);
@@ -233,9 +233,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_pOverview->onPreRender();
     });
 
-    HyprlandAPI::addDispatcherV2(PHANDLE, "scrolloverview:expo", ::onExpoDispatcher);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "scrolloverview:overview", ::onOverviewDispatcher);
 
-    HyprlandAPI::addConfigKeyword(PHANDLE, "scrolloverview-gesture", ::expoGestureKeyword, {});
+    HyprlandAPI::addConfigKeyword(PHANDLE, "scrolloverview-gesture", ::overviewGestureKeyword, {});
 
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:scroll_moves_up_down", Hyprlang::INT{1});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom", Hyprlang::FLOAT{0.5});

@@ -38,18 +38,18 @@ Applies to the only overview implementation used by this plugin
 
 | name | description | arguments |
 | -- | -- | -- | 
-| scrolloverview-gesture | same as gesture, but for ScrollOverview gestures. Supports: `expo`. | Same as gesture |
+| scrolloverview-gesture | same as gesture, but for ScrollOverview gestures. Supports: `overview`. | Same as gesture |
 
 ### Binding
 ```bash
 # hyprland.conf
-bind = MODIFIER, KEY, scrolloverview:expo, OPTION
+bind = MODIFIER, KEY, scrolloverview:overview, OPTION
 ```
 
 Example:  
 ```bash
 # This will toggle ScrollOverview when SUPER+g is pressed
-bind = SUPER, g, scrolloverview:expo, toggle
+bind = SUPER, g, scrolloverview:overview, toggle
 ```
 
 Here are a list of options you can use:  
