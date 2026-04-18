@@ -1056,42 +1056,44 @@ void CScrollOverview::render() {
         renderWorkspaceLive(workspaceImage->pWorkspace, NOW);
     }
 
-    if (closeOnWindow && validMapped(closeOnWindow)) {
-        static auto PACTIVECOL = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.active_border");
-        auto* const ACTIVECOL  = reinterpret_cast<CGradientValueData*>((PACTIVECOL.ptr())->getData());
-        const auto  grad       = closeOnWindow->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOL);
-        const auto  borderSize = closeOnWindow->getRealBorderSize();
+    static auto PACTIVECOL   = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.active_border");
+    static auto PINACTIVECOL = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.inactive_border");
+    auto* const ACTIVECOL    = reinterpret_cast<CGradientValueData*>((PACTIVECOL.ptr())->getData());
+    auto* const INACTIVECOL  = reinterpret_cast<CGradientValueData*>((PINACTIVECOL.ptr())->getData());
 
-        if (borderSize > 0) {
-            size_t workspaceIdx = 0;
-            bool   found        = false;
-            for (size_t i = 0; i < images.size(); ++i) {
-                if (images[i]->pWorkspace == closeOnWindow->m_workspace) {
-                    workspaceIdx = i;
-                    found        = true;
-                    break;
-                }
-            }
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& workspaceImage = images[workspaceIdx];
+        const float workspaceYOff  = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * getWorkspaceRenderedPitch(pMonitor.lock(), SCALE);
 
-            if (found) {
-                const auto  ROUNDINGBASE     = closeOnWindow->rounding();
-                const auto  ROUNDINGPOWER    = closeOnWindow->roundingPower();
-                const auto  CORRECTIONOFFSET = (borderSize * (M_SQRT2 - 1) * std::max(2.0 - ROUNDINGPOWER, 0.0));
-                const auto  OUTERROUND       = ((ROUNDINGBASE + borderSize) - CORRECTIONOFFSET) * pMonitor->m_scale * SCALE;
-                const auto  ROUNDING         = ROUNDINGBASE * pMonitor->m_scale * SCALE;
-                const float selectedYOff     = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * getWorkspaceRenderedPitch(pMonitor.lock(), SCALE);
-                const auto  WINDOWBOX        = getOverviewWindowBox(closeOnWindow.lock(), pMonitor.lock(), SCALE, viewOffset->value(), selectedYOff);
+        for (const auto& img : workspaceImage->windowImages) {
+            const auto window = img->pWindow.lock();
+            if (!window || (!window->m_isMapped && !window->m_fadingOut))
+                continue;
 
-                CBorderPassElement::SBorderData data;
-                data.box           = WINDOWBOX;
-                data.grad1         = grad;
-                data.round         = sc<int>(std::round(ROUNDING));
-                data.outerRound    = sc<int>(std::round(OUTERROUND));
-                data.roundingPower = ROUNDINGPOWER;
-                data.a             = 1.F;
-                data.borderSize    = borderSize;
-                g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
-            }
+            const auto borderSize = window->getRealBorderSize();
+            if (borderSize <= 0)
+                continue;
+
+            const bool  selected        = closeOnWindow == window;
+            const float targetOpacity   = getOverviewWindowTargetOpacity(window);
+            const auto& grad            = selected ? window->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOL)
+                                                   : window->m_ruleApplicator->inactiveBorderColor().valueOr(*INACTIVECOL);
+            const auto  roundingBase    = window->rounding();
+            const auto  roundingPower   = window->roundingPower();
+            const auto  correctionOffset = (borderSize * (M_SQRT2 - 1) * std::max(2.0 - roundingPower, 0.0));
+            const auto  outerRound      = ((roundingBase + borderSize) - correctionOffset) * pMonitor->m_scale * SCALE;
+            const auto  rounding        = roundingBase * pMonitor->m_scale * SCALE;
+            const auto  windowBox       = getOverviewWindowBox(window, pMonitor.lock(), SCALE, viewOffset->value(), workspaceYOff);
+
+            CBorderPassElement::SBorderData data;
+            data.box           = windowBox;
+            data.grad1         = grad;
+            data.round         = sc<int>(std::round(rounding));
+            data.outerRound    = sc<int>(std::round(outerRound));
+            data.roundingPower = roundingPower;
+            data.a             = targetOpacity;
+            data.borderSize    = borderSize;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
         }
     }
 
