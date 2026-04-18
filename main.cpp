@@ -241,6 +241,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:scrolling:default_zoom", Hyprlang::FLOAT{0.5});
 
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:gesture_distance", Hyprlang::INT{200});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:workspace_gap", Hyprlang::INT{0});
+    HyprlandAPI::addConfigValue(PHANDLE, "plugin:scrolloverview:wallpaper", Hyprlang::INT{0});
 
     HyprlandAPI::reloadConfig();
 

@@ -10,6 +10,8 @@ A great start to configure this plugin would be adding this code to the `plugin`
 plugin {
     scrolloverview {
         gesture_distance = 300 # how far is the "max" for the gesture
+        workspace_gap = 0
+        wallpaper = 0 # 0: global only, 1: per-workspace only, 2: both
 
         scrolling {
             scroll_moves_up_down = true
@@ -24,6 +26,8 @@ plugin {
 | property | type | description | default |
 | --- | --- | --- | --- |
 |gesture_distance | number | how far is the max for the gesture | `300`|
+|workspace_gap | number | gap between visible workspaces in the overview, in pixels | `0`|
+|wallpaper | int | wallpaper mode: `0` global only, `1` per-workspace only, `2` both | `0`|
 
 #### Subcategory `scrolling`
 

@@ -44,6 +44,7 @@ class CScrollOverview : public IOverview {
     void   redrawWorkspace(PHLWORKSPACE w, bool forcelowres = false);
     void   redrawAll(bool forcelowres = false);
     void   onWorkspaceChange();
+    void   renderWallpaperLayers(const CBox& workspaceBox, float renderScale, const Time::steady_tp& now);
     void   renderWorkspaceLive(PHLWORKSPACE workspace, const Time::steady_tp& now);
     void   renderWindowLive(PHLWINDOW window, float workspaceYOffset, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
@@ -80,7 +81,6 @@ class CScrollOverview : public IOverview {
         std::vector<SP<SWindowImage>> windowImages;
     };
 
-    CFramebuffer                     backgroundFb;
     CFramebuffer                     floatingFb;
 
     Vector2D                         lastMousePosLocal = Vector2D{};

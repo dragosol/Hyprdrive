@@ -21,6 +21,7 @@
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/config/ConfigDataValues.hpp>
 #include <hyprland/src/render/pass/BorderPassElement.hpp>
+#include <hyprland/src/render/pass/Pass.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
@@ -98,6 +99,35 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
     box.scale(monitor->m_scale).round();
 
     return box;
+}
+
+static CBox getOverviewWorkspaceBox(PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float yoff) {
+    const auto VIEWPORT_CENTER = CBox{{}, monitor->m_size}.middle();
+
+    CBox       box            = {{}, monitor->m_size};
+    box.translate(-VIEWPORT_CENTER).scale(scale).translate(VIEWPORT_CENTER).translate(-viewOffset * scale).translate({0.F, yoff});
+    box.scale(monitor->m_scale).round();
+
+    return box;
+}
+
+static int getWorkspaceGap() {
+    static auto* const* PGAP = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:workspace_gap")->getDataStaticPtr();
+    return std::max<int>(0, **PGAP);
+}
+
+static int getWallpaperMode() {
+    static auto* const* PMODE = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:wallpaper")->getDataStaticPtr();
+    return std::clamp<int>(**PMODE, 0, 2);
+}
+
+static float getWorkspaceRenderedPitch(PHLMONITOR monitor, float scale) {
+    return monitor->m_size.y * scale + sc<float>(getWorkspaceGap());
+}
+
+static float getWorkspaceLogicalPitch(PHLMONITOR monitor, float scale) {
+    const auto safeScale = std::max(scale, 0.01F);
+    return monitor->m_size.y + sc<float>(getWorkspaceGap()) / safeScale;
 }
 
 CScrollOverview::~CScrollOverview() {
@@ -288,6 +318,26 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     syncSelectionToViewport();
 }
 
+void CScrollOverview::renderWallpaperLayers(const CBox& workspaceBox, float renderScale, const Time::steady_tp& now) {
+    if (!pMonitor)
+        return;
+
+    SRenderModifData modif;
+    modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_SCALE, renderScale);
+    modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_TRANSLATE, Vector2D{workspaceBox.x / pMonitor->m_scale, workspaceBox.y / pMonitor->m_scale});
+
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
+
+    for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]) {
+        if (!Desktop::View::validMapped(ls.lock()))
+            continue;
+
+        g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), now);
+    }
+
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = SRenderModifData{}}));
+}
+
 size_t CScrollOverview::activeWorkspaceIndex() const {
     for (size_t i = 0; i < images.size(); ++i) {
         if (images[i]->pWorkspace && images[i]->pWorkspace == startedOn)
@@ -361,7 +411,8 @@ void CScrollOverview::selectHoveredWorkspace() {
 
     const auto VIEWPORT_CENTER = CBox{{}, pMonitor->m_size}.middle();
 
-    float      yoff  = -(float)activeIdx * pMonitor->m_size.y * scale->value();
+    const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(pMonitor.lock(), scale->value());
+    float      yoff           = -(float)activeIdx * WORKSPACEPITCH;
     bool       found = false;
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
@@ -404,7 +455,7 @@ void CScrollOverview::selectHoveredWorkspace() {
         }
         if (found)
             break;
-        yoff += pMonitor->m_size.y * scale->value();
+        yoff += WORKSPACEPITCH;
     }
 }
 
@@ -424,7 +475,7 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
     else
         viewportCurrentWorkspace--;
 
-    *viewOffset = {viewOffset->value().x, (sc<long>(viewportCurrentWorkspace) - sc<long>(activeIdx)) * pMonitor->m_size.y};
+    *viewOffset = {viewOffset->value().x, (sc<long>(viewportCurrentWorkspace) - sc<long>(activeIdx)) * getWorkspaceLogicalPitch(pMonitor.lock(), scale->value())};
     syncSelectionToViewport();
 }
 
@@ -667,11 +718,14 @@ void CScrollOverview::renderWorkspaceLive(PHLWORKSPACE workspace, const Time::st
     }
 
     const auto ACTIVEIDX        = activeWorkspaceIndex();
-    const auto WORKSPACEYOFFSET = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * pMonitor->m_size.y * scale->value();
+    const auto WORKSPACEYOFFSET = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * getWorkspaceRenderedPitch(pMonitor.lock(), scale->value());
     const auto WORKSPACEIMAGE   = imageForWorkspace(workspace);
 
     if (!WORKSPACEIMAGE)
         return;
+
+    if (getWallpaperMode() != 0)
+        renderWallpaperLayers(getOverviewWorkspaceBox(pMonitor.lock(), scale->value(), viewOffset->value(), WORKSPACEYOFFSET), scale->value(), now);
 
     for (const auto& img : WORKSPACEIMAGE->windowImages) {
         if (!img->pWindow || (!img->pWindow->m_isMapped && !img->pWindow->m_fadingOut))
@@ -798,7 +852,8 @@ void CScrollOverview::close() {
 
         size_t activeIdx = activeWorkspaceIndex();
 
-        float yoff  = -(float)activeIdx * pMonitor->m_size.y * scale->value();
+        const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(pMonitor.lock(), scale->value());
+        float      yoff           = -(float)activeIdx * WORKSPACEPITCH;
         bool  found = false;
         for (const auto& wimg : images) {
             for (const auto& img : wimg->windowImages) {
@@ -815,7 +870,7 @@ void CScrollOverview::close() {
             }
             if (found)
                 break;
-            yoff += pMonitor->m_size.y * scale->value();
+            yoff += WORKSPACEPITCH;
         }
     }
 
@@ -858,7 +913,7 @@ void CScrollOverview::onWorkspaceChange() {
     startedOn = pMonitor->m_activeWorkspace;
     redrawAll();
     viewportCurrentWorkspace = activeWorkspaceIndex();
-    viewOffset->setValueAndWarp(Vector2D{0.F, (sc<long>(previousActiveIdx) - sc<long>(viewportCurrentWorkspace)) * pMonitor->m_size.y});
+    viewOffset->setValueAndWarp(Vector2D{0.F, (sc<long>(previousActiveIdx) - sc<long>(viewportCurrentWorkspace)) * getWorkspaceLogicalPitch(pMonitor.lock(), scale->value())});
     *viewOffset = Vector2D{};
     syncSelectionToViewport();
     damage();
@@ -871,11 +926,18 @@ void CScrollOverview::render() {
     const auto VIEWOFFSETPX = viewOffset->value() * SCALE;
     const auto VIEWCENTER   = CBox{{}, pMonitor->m_size}.middle();
 
-    g_pHyprRenderer->renderBackground(pMonitor.lock());
+    const auto WALLPAPERMODE = getWallpaperMode();
 
-    for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]) {
-        g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), NOW);
-    }
+    if (WALLPAPERMODE == 0) {
+        g_pHyprRenderer->renderBackground(pMonitor.lock());
+
+        for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]) {
+            g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), NOW);
+        }
+    } else if (WALLPAPERMODE == 2) {
+        renderWallpaperLayers(getOverviewWorkspaceBox(pMonitor.lock(), 1.F, Vector2D{}, 0.F), 1.F, NOW);
+    } else
+        g_pHyprOpenGL->clear(CHyprColor{0.F, 0.F, 0.F, 1.F});
 
     Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
 
@@ -887,51 +949,53 @@ void CScrollOverview::render() {
         renderWorkspaceLive(workspaceImage->pWorkspace, NOW);
     }
 
-    for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
-        g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), NOW);
-    }
+    if (closeOnWindow && validMapped(closeOnWindow)) {
+        static auto PACTIVECOL = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.active_border");
+        auto* const ACTIVECOL  = reinterpret_cast<CGradientValueData*>((PACTIVECOL.ptr())->getData());
+        const auto  grad       = closeOnWindow->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOL);
+        const auto  borderSize = closeOnWindow->getRealBorderSize();
 
-    if (!closeOnWindow || !validMapped(closeOnWindow))
-        return;
+        if (borderSize > 0) {
+            size_t workspaceIdx = 0;
+            bool   found        = false;
+            for (size_t i = 0; i < images.size(); ++i) {
+                if (images[i]->pWorkspace == closeOnWindow->m_workspace) {
+                    workspaceIdx = i;
+                    found        = true;
+                    break;
+                }
+            }
 
-    static auto PACTIVECOL = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.active_border");
-    auto* const ACTIVECOL  = reinterpret_cast<CGradientValueData*>((PACTIVECOL.ptr())->getData());
-    const auto  grad       = closeOnWindow->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOL);
-    const auto  borderSize = closeOnWindow->getRealBorderSize();
+            if (found) {
+                const auto  ROUNDINGBASE     = closeOnWindow->rounding();
+                const auto  ROUNDINGPOWER    = closeOnWindow->roundingPower();
+                const auto  CORRECTIONOFFSET = (borderSize * (M_SQRT2 - 1) * std::max(2.0 - ROUNDINGPOWER, 0.0));
+                const auto  OUTERROUND       = ((ROUNDINGBASE + borderSize) - CORRECTIONOFFSET) * pMonitor->m_scale * SCALE;
+                const auto  ROUNDING         = ROUNDINGBASE * pMonitor->m_scale * SCALE;
+                const float selectedYOff     = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * getWorkspaceRenderedPitch(pMonitor.lock(), SCALE);
+                const auto  WINDOWBOX        = getOverviewWindowBox(closeOnWindow.lock(), pMonitor.lock(), SCALE, viewOffset->value(), selectedYOff);
 
-    if (borderSize <= 0)
-        return;
-
-    size_t workspaceIdx = 0;
-    bool   found        = false;
-    for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i]->pWorkspace == closeOnWindow->m_workspace) {
-            workspaceIdx = i;
-            found        = true;
-            break;
+                CBorderPassElement::SBorderData data;
+                data.box           = WINDOWBOX;
+                data.grad1         = grad;
+                data.round         = sc<int>(std::round(ROUNDING));
+                data.outerRound    = sc<int>(std::round(OUTERROUND));
+                data.roundingPower = ROUNDINGPOWER;
+                data.a             = 1.F;
+                data.borderSize    = borderSize;
+                g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
+            }
         }
     }
 
-    if (!found)
-        return;
+    if (!g_pHyprRenderer->m_renderPass.empty()) {
+        g_pHyprRenderer->m_renderPass.render(CRegion{CBox{{}, pMonitor->m_size}});
+        g_pHyprRenderer->m_renderPass.clear();
+    }
 
-    const auto  ROUNDINGBASE     = closeOnWindow->rounding();
-    const auto  ROUNDINGPOWER    = closeOnWindow->roundingPower();
-    const auto  CORRECTIONOFFSET = (borderSize * (M_SQRT2 - 1) * std::max(2.0 - ROUNDINGPOWER, 0.0));
-    const auto  OUTERROUND       = ((ROUNDINGBASE + borderSize) - CORRECTIONOFFSET) * pMonitor->m_scale * SCALE;
-    const auto  ROUNDING         = ROUNDINGBASE * pMonitor->m_scale * SCALE;
-    const float selectedYOff     = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * pMonitor->m_size.y * SCALE;
-    const auto  WINDOWBOX        = getOverviewWindowBox(closeOnWindow.lock(), pMonitor.lock(), SCALE, viewOffset->value(), selectedYOff);
-
-    CBorderPassElement::SBorderData data;
-    data.box           = WINDOWBOX;
-    data.grad1         = grad;
-    data.round         = sc<int>(std::round(ROUNDING));
-    data.outerRound    = sc<int>(std::round(OUTERROUND));
-    data.roundingPower = ROUNDINGPOWER;
-    data.a             = 1.F;
-    data.borderSize    = borderSize;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
+    for (auto const& ls : pMonitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
+        g_pHyprRenderer->renderLayer(ls.lock(), pMonitor.lock(), NOW);
+    }
 }
 
 void CScrollOverview::fullRender() {
