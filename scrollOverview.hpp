@@ -38,11 +38,6 @@ class CScrollOverview : public IOverview {
     virtual void fullRender();
 
   private:
-    struct SRenderedWindow {
-        PHLWINDOWREF window;
-        CBox         box;
-    };
-
     void   rebuildWorkspaceImages();
     void   seedRememberedSelections();
     void   redrawAll(bool forcelowres = false);
@@ -78,7 +73,6 @@ class CScrollOverview : public IOverview {
     PHLWINDOWREF                     closeOnWindow;
 
     std::vector<SP<SWorkspaceImage>> images;
-    std::vector<SRenderedWindow>     renderedWindows;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
 
     struct SForcedSurfaceVisibility {

@@ -295,6 +295,77 @@ static void renderOverviewPass(PHLMONITOR monitor) {
     g_pHyprRenderer->m_renderPass.clear();
 }
 
+class COverviewWindowShadowPassElement : public IPassElement {
+  public:
+    struct SData {
+        PHLMONITORREF monitor;
+        CBox          fullBox;
+        CBox          cutoutBox;
+        int           rounding      = 0;
+        float         roundingPower = 2.F;
+        int           range         = 0;
+        CHyprColor    color;
+        float         alpha        = 1.F;
+        bool          ignoreWindow = true;
+        bool          sharp        = false;
+    };
+
+    COverviewWindowShadowPassElement(const SData& data_) : data(data_) {
+        ;
+    }
+
+    virtual void draw(const CRegion& damage) {
+        if (!data.monitor || data.fullBox.width < 1 || data.fullBox.height < 1 || data.range <= 0 || data.color.a == 0.F || data.alpha <= 0.F)
+            return;
+
+        CRegion shadowDamage = damage.copy().intersect(data.fullBox);
+        if (data.ignoreWindow)
+            shadowDamage.subtract(data.cutoutBox.copy().expand(-data.rounding));
+
+        if (shadowDamage.empty())
+            return;
+
+        const auto SAVEDDAMAGE = g_pHyprOpenGL->m_renderData.damage;
+        g_pHyprOpenGL->m_renderData.damage = shadowDamage;
+        auto restoreDamage = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprOpenGL->m_renderData.damage = SAVEDDAMAGE; });
+
+        auto color = data.color;
+        color.a *= data.alpha;
+
+        if (data.sharp)
+            g_pHyprOpenGL->renderRect(data.fullBox, color, {.damage = &shadowDamage, .round = data.rounding, .roundingPower = data.roundingPower});
+        else
+            g_pHyprOpenGL->renderRoundedShadow(data.fullBox, data.rounding, data.roundingPower, data.range, color, 1.F);
+    }
+
+    virtual bool needsLiveBlur() {
+        return false;
+    }
+
+    virtual bool needsPrecomputeBlur() {
+        return false;
+    }
+
+    virtual std::optional<CBox> boundingBox() {
+        const auto MONITOR = data.monitor.lock();
+        if (!MONITOR)
+            return std::nullopt;
+
+        return data.fullBox.copy().scale(1.F / MONITOR->m_scale).round();
+    }
+
+    virtual CRegion opaqueRegion() {
+        return {};
+    }
+
+    virtual const char* passName() {
+        return "COverviewWindowShadowPassElement";
+    }
+
+  private:
+    SData data;
+};
+
 static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITOR monitor, float renderScale, size_t firstElement) {
     if (!window || !monitor)
         return;
@@ -319,6 +390,97 @@ static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITO
         surfacePassElement->m_data.rounding      = rounding;
         surfacePassElement->m_data.roundingPower = roundingPower;
     }
+}
+
+static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, float renderScale, bool selected) {
+    if (!monitor || !window || (!window->m_isMapped && !window->m_fadingOut))
+        return;
+
+    static auto PSHADOWS            = CConfigValue<Hyprlang::INT>("decoration:shadow:enabled");
+    static auto PSHADOWSIZE         = CConfigValue<Hyprlang::INT>("decoration:shadow:range");
+    static auto PSHADOWSHARP        = CConfigValue<Hyprlang::INT>("decoration:shadow:sharp");
+    static auto PSHADOWIGNOREWINDOW = CConfigValue<Hyprlang::INT>("decoration:shadow:ignore_window");
+    static auto PSHADOWSCALE        = CConfigValue<Hyprlang::FLOAT>("decoration:shadow:scale");
+    static auto PSHADOWOFFSET       = CConfigValue<Hyprlang::VEC2>("decoration:shadow:offset");
+    static auto PSHADOWCOL          = CConfigValue<Hyprlang::INT>("decoration:shadow:color");
+    static auto PSHADOWCOLINACTIVE  = CConfigValue<Hyprlang::INT>("decoration:shadow:color_inactive");
+
+    if (*PSHADOWS != 1 || *PSHADOWSIZE <= 0)
+        return;
+
+    if (window->isX11OverrideRedirect() || window->m_X11DoesntWantBorders || !window->m_ruleApplicator->decorate().valueOrDefault() ||
+        window->m_ruleApplicator->noShadow().valueOrDefault())
+        return;
+
+    const auto  borderSize       = window->getRealBorderSize();
+    const auto  roundingBase     = window->rounding();
+    const auto  roundingPower    = window->roundingPower();
+    const auto  correctionOffset = (borderSize * (M_SQRT2 - 1) * std::max(2.0 - roundingPower, 0.0));
+    const auto  outerRound       = roundingBase > 0 ? (roundingBase + borderSize) - correctionOffset : 0;
+    const int   borderPx         = sc<int>(std::round(borderSize * monitor->m_scale));
+    const int   rangePx          = sc<int>(std::round(*PSHADOWSIZE * monitor->m_scale * renderScale));
+    const int   roundingPx       = sc<int>(std::round(outerRound * monitor->m_scale * renderScale));
+    const float shadowScale      = std::clamp(*PSHADOWSCALE, 0.F, 1.F);
+    const auto  shadowOffset     = Vector2D{(*PSHADOWOFFSET).x, (*PSHADOWOFFSET).y} * monitor->m_scale * renderScale;
+
+    if (rangePx <= 0)
+        return;
+
+    CBox outerBorderBox = windowBox.copy().expand(borderPx);
+    CBox shadowBox      = outerBorderBox.copy().expand(rangePx).scaleFromCenter(shadowScale).translate(shadowOffset);
+    shadowBox.round();
+
+    if (shadowBox.width < 1 || shadowBox.height < 1)
+        return;
+
+    const auto shadowColor = CHyprColor(selected ? *PSHADOWCOL : *PSHADOWCOLINACTIVE != -1 ? *PSHADOWCOLINACTIVE : *PSHADOWCOL);
+    if (shadowColor.a == 0.F)
+        return;
+
+    COverviewWindowShadowPassElement::SData data;
+    data.monitor       = monitor;
+    data.fullBox       = shadowBox;
+    data.cutoutBox     = outerBorderBox;
+    data.rounding      = roundingPx;
+    data.roundingPower = roundingPower;
+    data.range         = rangePx;
+    data.color         = shadowColor;
+    data.alpha         = getOverviewWindowTargetOpacity(window);
+    data.ignoreWindow  = *PSHADOWIGNOREWINDOW;
+    data.sharp         = *PSHADOWSHARP;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewWindowShadowPassElement>(data));
+}
+
+static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, float renderScale, bool selected) {
+    if (!monitor || !window || (!window->m_isMapped && !window->m_fadingOut))
+        return;
+
+    const auto borderSize = window->getRealBorderSize();
+    if (borderSize <= 0)
+        return;
+
+    static auto PACTIVECOL   = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.active_border");
+    static auto PINACTIVECOL = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.inactive_border");
+    auto* const ACTIVECOL    = reinterpret_cast<CGradientValueData*>((PACTIVECOL.ptr())->getData());
+    auto* const INACTIVECOL  = reinterpret_cast<CGradientValueData*>((PINACTIVECOL.ptr())->getData());
+
+    const float targetOpacity    = getOverviewWindowTargetOpacity(window);
+    const auto& grad             = selected ? window->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOL) : window->m_ruleApplicator->inactiveBorderColor().valueOr(*INACTIVECOL);
+    const auto  roundingBase     = window->rounding();
+    const auto  roundingPower    = window->roundingPower();
+    const auto  correctionOffset = (borderSize * (M_SQRT2 - 1) * std::max(2.0 - roundingPower, 0.0));
+    const auto  outerRound       = ((roundingBase + borderSize) - correctionOffset) * monitor->m_scale * renderScale;
+    const auto  rounding         = roundingBase * monitor->m_scale * renderScale;
+
+    CBorderPassElement::SBorderData data;
+    data.box           = windowBox;
+    data.grad1         = grad;
+    data.round         = sc<int>(std::round(rounding));
+    data.outerRound    = sc<int>(std::round(outerRound));
+    data.roundingPower = roundingPower;
+    data.a             = targetOpacity;
+    data.borderSize    = borderSize;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
 }
 
 CScrollOverview::~CScrollOverview() {
@@ -1079,7 +1241,6 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
             continue;
 
         renderWindowLive(monitor, window, windowBox, renderScale, now);
-        renderedWindows.push_back({window, windowBox});
     }
 }
 
@@ -1089,6 +1250,8 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
 
     forceWindowVisible(window);
     forceWindowSurfaceVisibility(window);
+
+    renderOverviewWindowShadow(monitor, window, windowBox, renderScale, closeOnWindow == window);
 
     if (g_pHyprRenderer->shouldBlur(window)) {
         CRectPassElement::SRectData blurData;
@@ -1117,6 +1280,7 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
     g_pHyprRenderer->renderWindow(window, monitor, now, true, RENDER_PASS_ALL, true, true);
     roundStandaloneWindowPassElements(window, monitor, renderScale, firstWindowPassElement);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = SRenderModifData{}}));
+    renderOverviewWindowBorder(monitor, window, windowBox, renderScale, closeOnWindow == window);
 
     renderOverviewPass(monitor);
 }
@@ -1300,49 +1464,9 @@ void CScrollOverview::render() {
 
     Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
 
-    renderedWindows.clear();
-    renderedWindows.reserve(g_pCompositor->m_windows.size());
-
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
     }
-
-    static auto PACTIVECOL   = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.active_border");
-    static auto PINACTIVECOL = CConfigValue<Hyprlang::CUSTOMTYPE>("general:col.inactive_border");
-    auto* const ACTIVECOL    = reinterpret_cast<CGradientValueData*>((PACTIVECOL.ptr())->getData());
-    auto* const INACTIVECOL  = reinterpret_cast<CGradientValueData*>((PINACTIVECOL.ptr())->getData());
-
-    for (const auto& renderedWindow : renderedWindows) {
-        const auto window = renderedWindow.window.lock();
-        if (!window || (!window->m_isMapped && !window->m_fadingOut))
-            continue;
-
-        const auto borderSize = window->getRealBorderSize();
-        if (borderSize <= 0)
-            continue;
-
-        const bool  selected         = closeOnWindow == window;
-        const float targetOpacity    = getOverviewWindowTargetOpacity(window);
-        const auto& grad             = selected ? window->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOL)
-                                                : window->m_ruleApplicator->inactiveBorderColor().valueOr(*INACTIVECOL);
-        const auto  roundingBase     = window->rounding();
-        const auto  roundingPower    = window->roundingPower();
-        const auto  correctionOffset = (borderSize * (M_SQRT2 - 1) * std::max(2.0 - roundingPower, 0.0));
-        const auto  outerRound       = ((roundingBase + borderSize) - correctionOffset) * MONITOR->m_scale * SCALE;
-        const auto  rounding         = roundingBase * MONITOR->m_scale * SCALE;
-
-        CBorderPassElement::SBorderData data;
-        data.box           = renderedWindow.box;
-        data.grad1         = grad;
-        data.round         = sc<int>(std::round(rounding));
-        data.outerRound    = sc<int>(std::round(outerRound));
-        data.roundingPower = roundingPower;
-        data.a             = targetOpacity;
-        data.borderSize    = borderSize;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
-    }
-
-    renderOverviewPass(MONITOR);
 
     for (auto const& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
         if (!Desktop::View::validMapped(ls.lock()))
