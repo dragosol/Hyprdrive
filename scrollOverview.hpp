@@ -45,11 +45,20 @@ class CScrollOverview : public IOverview {
     void   renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now);
     void   renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
     void   renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now);
+    void   renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
     bool   moveWindowSelection(const std::string& direction);
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
     void   syncFocusedSelection();
+    PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
+    PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
+    PHLWORKSPACE workspaceAtOverviewCursor(size_t* workspaceIdx = nullptr) const;
+    Vector2D  overviewPointToGlobal(size_t workspaceIdx, const Vector2D& pointLocal) const;
+    CBox      draggedWindowBoxLogical(size_t workspaceIdx) const;
+    void      beginWindowDrag();
+    void      updateWindowDrag();
+    void      endWindowDrag();
     void   forceSurfaceVisibility(SP<CWLSurfaceResource> surface);
     void   forceWindowSurfaceVisibility(PHLWINDOW window);
     void   forceWindowVisible(PHLWINDOW window);
@@ -71,6 +80,15 @@ class CScrollOverview : public IOverview {
     Vector2D                         lastMousePosLocal = Vector2D{};
 
     PHLWINDOWREF                     closeOnWindow;
+    PHLWINDOWREF                     dragPendingWindow;
+    PHLWINDOWREF                     dragActiveWindow;
+    PHLWORKSPACEREF                  dragOriginalWorkspace;
+
+    Vector2D                         dragStartMouseLocal   = Vector2D{};
+    Vector2D                         dragOriginalFloatSize = Vector2D{};
+    CBox                             dragOriginalBox        = CBox{};
+    bool                             dragPointerDown       = false;
+    bool                             dragStartedTiled      = false;
 
     std::vector<SP<SWorkspaceImage>> images;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
