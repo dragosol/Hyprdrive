@@ -1,7 +1,7 @@
 # ScrollOverview
 ScrollOverview is an overview plugin like niri.
   
-![ScrollOverview](https://github.com/user-attachments/assets/e89df9d2-9800-4268-9929-239ad9bc3a54)
+https://github.com/user-attachments/assets/7ab51651-7901-44d4-b906-357f4c2869c1
   
 ## Config
 A great start to configure this plugin would be adding this code to the `plugin` section of your hyprland configuration file:  
