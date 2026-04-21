@@ -924,6 +924,7 @@ static void renderOverviewGroupTabs(PHLMONITOR monitor, const PHLWINDOW& window,
 CScrollOverview::~CScrollOverview() {
     g_pHyprRenderer->makeEGLCurrent();
     emitFullscreenVisibilityState(Desktop::focusState()->window(), false);
+    restoreInputConfigOverrides();
     restoreForcedSurfaceVisibility();
     restoreForcedWindowVisibility();
     restoreForcedLayerVisibility();
@@ -935,6 +936,8 @@ CScrollOverview::~CScrollOverview() {
 CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn_), swipe(swipe_) {
     const auto          PMONITOR = Desktop::focusState()->monitor();
     pMonitor                     = PMONITOR;
+
+    applyInputConfigOverrides();
 
     g_pAnimationManager->createAnimation(1.F, scale, g_pConfigManager->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation({}, viewOffset, g_pConfigManager->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
@@ -955,9 +958,12 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
         lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
 
-        if (dragPointerDown && dragPendingWindow) {
-            info.cancelled = true;
+        if (!dragPointerDown && !dragActiveWindow && isPointerOnTopLayer(pMonitor.lock()))
+            return;
 
+        info.cancelled = true;
+
+        if (dragPointerDown && dragPendingWindow) {
             static auto PDRAGTHRESHOLD = CConfigValue<Hyprlang::INT>("binds:drag_threshold");
 
             if (!dragActiveWindow && dragStartMouseLocal.distanceSq(lastMousePosLocal) > std::pow(*PDRAGTHRESHOLD, 2))
@@ -1457,12 +1463,34 @@ void CScrollOverview::selectHoveredWorkspace() {
     size_t    workspaceIdx = 0;
     PHLWINDOW window       = windowAtOverviewCursor(&workspaceIdx);
 
-    if (!window)
+    if (window) {
+        closeOnWindow            = window;
+        viewportCurrentWorkspace = workspaceIdx;
+        rememberSelection(window);
+        return;
+    }
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
         return;
 
-    closeOnWindow            = window;
-    viewportCurrentWorkspace = workspaceIdx;
-    rememberSelection(window);
+    const auto ACTIVEIDX = activeWorkspaceIndex();
+    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, scale->value());
+
+    for (size_t i = 0; i < images.size(); ++i) {
+        const auto& wimg = images[i];
+        if (!wimg || !wimg->pWorkspace)
+            continue;
+
+        const auto yoff = (sc<long>(i) - sc<long>(ACTIVEIDX)) * PITCH;
+        const auto box  = getOverviewWorkspaceBoxLogical(MONITOR, scale->value(), viewOffset->value(), yoff);
+        if (!box.containsPoint(lastMousePosLocal))
+            continue;
+
+        closeOnWindow.reset();
+        viewportCurrentWorkspace = i;
+        return;
+    }
 }
 
 Vector2D CScrollOverview::overviewPointToGlobal(size_t workspaceIdx, const Vector2D& pointLocal) const {
@@ -2021,6 +2049,49 @@ void CScrollOverview::restoreForcedLayerVisibility() {
     forcedLayerVisibility.clear();
 }
 
+void CScrollOverview::applyInputConfigOverrides() {
+    if (inputConfigOverridden)
+        return;
+
+    static auto* const* PNOWARPS                = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:no_warps")->getDataStaticPtr();
+    static auto* const* PWARPONCHANGEWORKSPACE = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:warp_on_change_workspace")->getDataStaticPtr();
+    static auto* const* PWARPONTOGGLESPECIAL   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:warp_on_toggle_special")->getDataStaticPtr();
+    static auto* const* PWARPBACKAFTERINPUT    = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:warp_back_after_non_mouse_input")->getDataStaticPtr();
+    static auto* const* PFOLLOWMOUSE           = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "input:follow_mouse")->getDataStaticPtr();
+
+    previousNoWarps                    = **PNOWARPS;
+    previousWarpOnChangeWorkspace      = **PWARPONCHANGEWORKSPACE;
+    previousWarpOnToggleSpecial        = **PWARPONTOGGLESPECIAL;
+    previousWarpBackAfterNonMouseInput = **PWARPBACKAFTERINPUT;
+    previousFollowMouse   = **PFOLLOWMOUSE;
+    inputConfigOverridden = true;
+
+    **PNOWARPS                = 1;
+    **PWARPONCHANGEWORKSPACE = 0;
+    **PWARPONTOGGLESPECIAL   = 0;
+    **PWARPBACKAFTERINPUT    = 0;
+    **PFOLLOWMOUSE           = 0;
+}
+
+void CScrollOverview::restoreInputConfigOverrides() {
+    if (!inputConfigOverridden)
+        return;
+
+    static auto* const* PNOWARPS                = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:no_warps")->getDataStaticPtr();
+    static auto* const* PWARPONCHANGEWORKSPACE = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:warp_on_change_workspace")->getDataStaticPtr();
+    static auto* const* PWARPONTOGGLESPECIAL   = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:warp_on_toggle_special")->getDataStaticPtr();
+    static auto* const* PWARPBACKAFTERINPUT    = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "cursor:warp_back_after_non_mouse_input")->getDataStaticPtr();
+    static auto* const* PFOLLOWMOUSE           = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "input:follow_mouse")->getDataStaticPtr();
+
+    **PNOWARPS                = previousNoWarps;
+    **PWARPONCHANGEWORKSPACE = previousWarpOnChangeWorkspace;
+    **PWARPONTOGGLESPECIAL   = previousWarpOnToggleSpecial;
+    **PWARPBACKAFTERINPUT    = previousWarpBackAfterNonMouseInput;
+    **PFOLLOWMOUSE           = previousFollowMouse;
+
+    inputConfigOverridden = false;
+}
+
 void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideFullscreen) {
     if (emittingFullscreenVisibilityState)
         return;
@@ -2273,7 +2344,6 @@ void CScrollOverview::onDamageReported() {
 
 void CScrollOverview::close() {
     closing = true;
-    emitFullscreenVisibilityState(Desktop::focusState()->window(), false);
 
     const auto SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
@@ -2284,47 +2354,50 @@ void CScrollOverview::close() {
     closeOnWindow = getOverviewWindowToShow(closeOnWindow.lock());
 
     if (!closeOnWindow) {
+        const auto ACTIVEIDX = activeWorkspaceIndex();
+        const auto FINALPITCH = getWorkspaceRenderedPitch(pMonitor.lock(), 1.F);
+        *viewOffset = Vector2D{};
+
+        for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+            if (!images[workspaceIdx] || images[workspaceIdx]->pWorkspace != SELECTEDWORKSPACE)
+                continue;
+
+            *viewOffset = Vector2D{0.F, (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * FINALPITCH};
+            break;
+        }
+
         if (SELECTEDWORKSPACE && SELECTEDWORKSPACE != pMonitor->m_activeWorkspace)
             pMonitor->changeWorkspace(SELECTEDWORKSPACE, false, true, true);
-
-        *viewOffset = Vector2D{};
-    } else if (closeOnWindow == Desktop::focusState()->window())
+    } else if (closeOnWindow == Desktop::focusState()->window() && closeOnWindow->m_workspace == pMonitor->m_activeWorkspace)
         *viewOffset = Vector2D{};
     else {
 
-        if (closeOnWindow->m_workspace != pMonitor->m_activeWorkspace) {
-            g_pDesktopAnimationManager->startAnimation(pMonitor->m_activeWorkspace, CDesktopAnimationManager::ANIMATION_TYPE_OUT, true, true);
-            g_pDesktopAnimationManager->startAnimation(closeOnWindow->m_workspace, CDesktopAnimationManager::ANIMATION_TYPE_IN, false, true);
-            pMonitor->changeWorkspace(closeOnWindow->m_workspace, true, true, true);
-        }
+        if (closeOnWindow->m_workspace != pMonitor->m_activeWorkspace)
+            pMonitor->changeWorkspace(closeOnWindow->m_workspace, false, true, true);
 
         Desktop::focusState()->fullWindowFocus(closeOnWindow.lock(), Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
 
-        size_t activeIdx = activeWorkspaceIndex();
-
-        const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(pMonitor.lock(), scale->value());
-        float      yoff           = -(float)activeIdx * WORKSPACEPITCH;
-        bool  found = false;
+        const auto ACTIVEIDX = activeWorkspaceIndex();
+        const auto FINALPITCH = getWorkspaceRenderedPitch(pMonitor.lock(), 1.F);
+        bool       found      = false;
         const auto selectedWindow = getOverviewWindowToShow(closeOnWindow.lock());
-        for (const auto& wimg : images) {
+        for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+            const auto& wimg = images[workspaceIdx];
             for (const auto& windowRef : wimg->windows) {
                 const auto window = getOverviewWindowToShow(windowRef.lock());
                 if (window == selectedWindow && window) {
-                    Vector2D middleOfWindow = CBox{window->m_realPosition->value(), window->m_realSize->value()}.translate({0.F, yoff / scale->value()}).middle() -
-                        CBox{pMonitor->m_position, pMonitor->m_size}.middle();
-
-                    // we need to do this because the window doesnt have to be centered after click
-                    *viewOffset = middleOfWindow +
-                        (CBox{pMonitor->m_position, pMonitor->m_size}.middle() - CBox{window->m_realPosition->value(), window->m_realSize->value()}.middle());
+                    *viewOffset = Vector2D{0.F, (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * FINALPITCH};
                     found = true;
                     break;
                 }
             }
             if (found)
                 break;
-            yoff += WORKSPACEPITCH;
         }
     }
+
+    const auto FINALWINDOW = getOverviewWindowToShow(closeOnWindow.lock());
+    emitFullscreenVisibilityState(FINALWINDOW && FINALWINDOW->m_workspace == pMonitor->m_activeWorkspace ? FINALWINDOW : PHLWINDOW{}, false);
 
     *scale = 1.F;
 

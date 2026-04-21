@@ -67,6 +67,8 @@ class CScrollOverview : public IOverview {
     void   restoreForcedWindowVisibility();
     void   restoreForcedLayerVisibility();
     void   emitFullscreenVisibilityState(PHLWINDOW window, bool hideFullscreen);
+    void   applyInputConfigOverrides();
+    void   restoreInputConfigOverrides();
     size_t activeWorkspaceIndex() const;
 
     size_t viewportCurrentWorkspace = 0;
@@ -91,6 +93,12 @@ class CScrollOverview : public IOverview {
     bool                             dragPointerDown       = false;
     bool                             dragStartedTiled      = false;
     bool                             emittingFullscreenVisibilityState = false;
+    bool                             inputConfigOverridden = false;
+    int                              previousNoWarps = 0;
+    int                              previousWarpOnChangeWorkspace = 0;
+    int                              previousWarpOnToggleSpecial = 0;
+    int                              previousWarpBackAfterNonMouseInput = 0;
+    int                              previousFollowMouse = 0;
 
     std::vector<SP<SWorkspaceImage>> images;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
