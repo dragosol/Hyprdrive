@@ -2354,8 +2354,11 @@ void CScrollOverview::close() {
     const auto SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
 
-    if (!closeOnWindow && (!SELECTEDWORKSPACE || SELECTEDWORKSPACE == pMonitor->m_activeWorkspace))
-        closeOnWindow = Desktop::focusState()->window();
+    if (!closeOnWindow && (!SELECTEDWORKSPACE || SELECTEDWORKSPACE == pMonitor->m_activeWorkspace)) {
+        const auto FOCUSEDWINDOW = getOverviewWindowToShow(Desktop::focusState()->window());
+        if (!SELECTEDWORKSPACE || (FOCUSEDWINDOW && FOCUSEDWINDOW->m_workspace == SELECTEDWORKSPACE))
+            closeOnWindow = FOCUSEDWINDOW;
+    }
 
     closeOnWindow = getOverviewWindowToShow(closeOnWindow.lock());
 
