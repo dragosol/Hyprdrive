@@ -12,6 +12,7 @@
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/animation/AnimationManager.hpp>
 #include <hyprland/src/managers/animation/DesktopAnimationManager.hpp>
+#include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
@@ -35,6 +36,8 @@
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
 #include <hyprland/src/render/pass/SurfacePassElement.hpp>
+#include <hyprland/src/render/decorations/CHyprGroupBarDecoration.hpp>
+#include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
 #undef private
 #include "OverviewPassElement.hpp"
@@ -866,9 +869,31 @@ static void renderOverviewGroupTabs(PHLMONITOR monitor, const PHLWINDOW& window,
     if (!monitor || !window || !window->m_group || window->m_group->size() <= 1)
         return;
 
-    auto* const GROUPBAR = window->getDecorationByType(DECORATION_GROUPBAR);
+    auto* const GROUPBAR = dynamic_cast<CHyprGroupBarDecoration*>(window->getDecorationByType(DECORATION_GROUPBAR));
     if (!GROUPBAR)
         return;
+
+    static auto PHEIGHT          = CConfigValue<Hyprlang::INT>("group:groupbar:height");
+    static auto PINDICATORGAP    = CConfigValue<Hyprlang::INT>("group:groupbar:indicator_gap");
+    static auto PINDICATORHEIGHT = CConfigValue<Hyprlang::INT>("group:groupbar:indicator_height");
+    static auto PRENDERTITLES    = CConfigValue<Hyprlang::INT>("group:groupbar:render_titles");
+    static auto PGRADIENTS       = CConfigValue<Hyprlang::INT>("group:groupbar:gradients");
+    static auto PSTACKED         = CConfigValue<Hyprlang::INT>("group:groupbar:stacked");
+    static auto POUTERGAP        = CConfigValue<Hyprlang::INT>("group:groupbar:gaps_out");
+    static auto PKEEPUPPERGAP    = CConfigValue<Hyprlang::INT>("group:groupbar:keep_upper_gap");
+
+    const auto  ONEBARHEIGHT  = *POUTERGAP + *PINDICATORHEIGHT + *PINDICATORGAP + (*PGRADIENTS || *PRENDERTITLES ? *PHEIGHT : 0);
+    const auto  DESIREDHEIGHT = *PSTACKED ? (ONEBARHEIGHT * window->m_group->size()) + *POUTERGAP * *PKEEPUPPERGAP : *POUTERGAP * (1 + *PKEEPUPPERGAP) + ONEBARHEIGHT;
+    const auto  EDGEPOINT     = g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_TOP, window);
+    CBox        assignedBox   = {window->m_realPosition->value() - Vector2D{0.F, sc<float>(DESIREDHEIGHT)}, {window->m_realSize->value().x, sc<float>(DESIREDHEIGHT)}};
+    assignedBox.translate(-EDGEPOINT);
+
+    if (window->m_workspace && !window->m_pinned)
+        assignedBox.translate(-window->m_workspace->m_renderOffset->value());
+
+    const auto PREVASSIGNEDBOX = GROUPBAR->m_assignedBox;
+    GROUPBAR->m_assignedBox    = assignedBox;
+    auto restoreAssignedBox    = Hyprutils::Utils::CScopeGuard([GROUPBAR, PREVASSIGNEDBOX] { GROUPBAR->m_assignedBox = PREVASSIGNEDBOX; });
 
     SRenderModifData modif;
     modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_SCALE, renderScale);
@@ -884,6 +909,7 @@ static void renderOverviewGroupTabs(PHLMONITOR monitor, const PHLWINDOW& window,
 
 CScrollOverview::~CScrollOverview() {
     g_pHyprRenderer->makeEGLCurrent();
+    emitFullscreenVisibilityState(Desktop::focusState()->window(), false);
     restoreForcedSurfaceVisibility();
     restoreForcedWindowVisibility();
     restoreForcedLayerVisibility();
@@ -904,6 +930,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
     if (!swipe)
         *scale = getOverviewConfiguredScale();
+
+    emitFullscreenVisibilityState(Desktop::focusState()->window(), true);
 
     lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
 
@@ -1020,6 +1048,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     auto onWindowActive = [this](PHLWINDOW window, Desktop::eFocusReason) {
         if (closing)
             return;
+
+        emitFullscreenVisibilityState(window, true);
 
         if (window && window->m_monitor == pMonitor) {
             closeOnWindow = window;
@@ -1942,6 +1972,45 @@ void CScrollOverview::restoreForcedLayerVisibility() {
     forcedLayerVisibility.clear();
 }
 
+void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideFullscreen) {
+    window = getOverviewWindowToShow(window);
+
+    if (!validMapped(window) || !window->m_workspace || window->m_monitor != pMonitor) {
+        if (g_pEventManager)
+            g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});
+        return;
+    }
+
+    if (!hideFullscreen || !window->isFullscreen()) {
+        Event::bus()->m_events.window.fullscreen.emit(window);
+
+        if (g_pEventManager)
+            g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = window->isFullscreen() ? "1" : "0"});
+
+        return;
+    }
+
+    const auto INTERNALFULLSCREEN = window->m_fullscreenState.internal;
+    const auto CLIENTFULLSCREEN   = window->m_fullscreenState.client;
+    const bool WORKSPACEFULL      = window->m_workspace->m_hasFullscreenWindow;
+    const auto WORKSPACEMODE      = window->m_workspace->m_fullscreenMode;
+
+    window->m_fullscreenState.internal         = FSMODE_NONE;
+    window->m_fullscreenState.client           = FSMODE_NONE;
+    window->m_workspace->m_hasFullscreenWindow = false;
+    window->m_workspace->m_fullscreenMode      = FSMODE_NONE;
+
+    Event::bus()->m_events.window.fullscreen.emit(window);
+
+    if (g_pEventManager)
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});
+
+    window->m_fullscreenState.internal         = INTERNALFULLSCREEN;
+    window->m_fullscreenState.client           = CLIENTFULLSCREEN;
+    window->m_workspace->m_hasFullscreenWindow = WORKSPACEFULL;
+    window->m_workspace->m_fullscreenMode      = WORKSPACEMODE;
+}
+
 void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now) {
     const auto& workspaceImage = images[workspaceIdx];
     if (!workspaceImage || !workspaceImage->pWorkspace)
@@ -2029,7 +2098,10 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
     forceWindowVisible(window);
     forceWindowSurfaceVisibility(window);
 
-    renderOverviewWindowShadow(monitor, window, windowBox, renderScale, closeOnWindow == window);
+    const bool FULLSCREEN = window->isFullscreen();
+
+    if (!FULLSCREEN)
+        renderOverviewWindowShadow(monitor, window, windowBox, renderScale, closeOnWindow == window);
 
     if (g_pHyprRenderer->shouldBlur(window)) {
         CRectPassElement::SRectData blurData;
@@ -2037,8 +2109,8 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         blurData.color         = CHyprColor{0, 0, 0, 0};
         blurData.blur          = true;
         blurData.blurA         = std::sqrt(window->m_alpha->value());
-        blurData.round         = sc<int>(std::round(window->rounding() * monitor->m_scale * renderScale));
-        blurData.roundingPower = window->roundingPower();
+        blurData.round         = FULLSCREEN ? 0 : sc<int>(std::round(window->rounding() * monitor->m_scale * renderScale));
+        blurData.roundingPower = FULLSCREEN ? 2.F : window->roundingPower();
         blurData.xray          = window->m_ruleApplicator->xray().valueOr(false);
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(blurData));
     }
@@ -2056,11 +2128,14 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
     const auto firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
     g_pHyprRenderer->renderWindow(window, monitor, now, true, RENDER_PASS_ALL, true, true);
-    roundStandaloneWindowPassElements(window, monitor, renderScale, firstWindowPassElement);
+    if (!FULLSCREEN)
+        roundStandaloneWindowPassElements(window, monitor, renderScale, firstWindowPassElement);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = SRenderModifData{}}));
-    renderOverviewWindowBorder(monitor, window, windowBox, renderScale, closeOnWindow == window);
-    if (workspaceBox)
-        renderOverviewGroupTabs(monitor, window, windowBox, *workspaceBox, renderScale);
+    if (!FULLSCREEN) {
+        renderOverviewWindowBorder(monitor, window, windowBox, renderScale, closeOnWindow == window);
+        if (workspaceBox)
+            renderOverviewGroupTabs(monitor, window, windowBox, *workspaceBox, renderScale);
+    }
 
     renderOverviewPass(monitor);
 }
@@ -2109,6 +2184,7 @@ void CScrollOverview::onDamageReported() {
 
 void CScrollOverview::close() {
     closing = true;
+    emitFullscreenVisibilityState(Desktop::focusState()->window(), false);
 
     const auto SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
@@ -2179,6 +2255,7 @@ void CScrollOverview::onPreRender() {
         workspaceSyncPending = false;
         rebuildPending       = false;
         onWorkspaceChange();
+        emitFullscreenVisibilityState(Desktop::focusState()->window(), true);
         return;
     }
 

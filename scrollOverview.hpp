@@ -66,6 +66,7 @@ class CScrollOverview : public IOverview {
     void   restoreForcedSurfaceVisibility();
     void   restoreForcedWindowVisibility();
     void   restoreForcedLayerVisibility();
+    void   emitFullscreenVisibilityState(PHLWINDOW window, bool hideFullscreen);
     size_t activeWorkspaceIndex() const;
 
     size_t viewportCurrentWorkspace = 0;
