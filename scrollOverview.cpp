@@ -1006,6 +1006,22 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             return;
         }
 
+        constexpr float CLICK_MAX_DRAG_DISTANCE = 10.F;
+
+        if (dragActiveWindow && dragStartMouseLocal.distanceSq(lastMousePosLocal) < CLICK_MAX_DRAG_DISTANCE * CLICK_MAX_DRAG_DISTANCE) {
+            dragPointerDown = false;
+            dragPendingWindow.reset();
+            dragActiveWindow.reset();
+            dragOriginalWorkspace.reset();
+            dragStartedTiled      = false;
+            dragOriginalFloatSize = Vector2D{};
+            dragOriginalBox       = CBox{};
+
+            selectHoveredWorkspace();
+            close();
+            return;
+        }
+
         if (dragActiveWindow) {
             endWindowDrag();
             return;
