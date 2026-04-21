@@ -98,6 +98,20 @@ static bool isTopLayerFocused(PHLMONITOR monitor) {
     return layerOwner && layerOwner->m_monitor == monitor && layerOwner->m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP;
 }
 
+static bool isPointerOnTopLayer(PHLMONITOR monitor) {
+    if (!monitor)
+        return false;
+
+    const auto MOUSECOORDS = g_pInputManager->getMouseCoordsInternal();
+    Vector2D   surfaceCoords;
+    PHLLS      layerSurface;
+
+    if (g_pCompositor->vectorToLayerSurface(MOUSECOORDS, &monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &layerSurface))
+        return true;
+
+    return !!g_pCompositor->vectorToLayerSurface(MOUSECOORDS, &monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &layerSurface);
+}
+
 static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     if (!window)
         return nullptr;
@@ -968,6 +982,9 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        if (!dragPointerDown && !dragActiveWindow && isPointerOnTopLayer(pMonitor.lock()))
+            return;
+
         info.cancelled = true;
 
         if (event.button != BTN_LEFT) {
@@ -1004,6 +1021,9 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
     auto onCursorSelect = [this](auto, Event::SCallbackInfo& info) {
         if (closing)
+            return;
+
+        if (isPointerOnTopLayer(pMonitor.lock()))
             return;
 
         info.cancelled = true;
@@ -1064,6 +1084,17 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         }
 
         damage();
+    };
+
+    auto onWindowFullscreen = [this](PHLWINDOW window) {
+        if (closing || emittingFullscreenVisibilityState)
+            return;
+
+        window = getOverviewWindowToShow(window);
+        if (!window || window->m_monitor != pMonitor || !window->isFullscreen())
+            return;
+
+        emitFullscreenVisibilityState(window, true);
     };
 
     auto onWorkspaceLifecycle = [this](auto) {
@@ -1131,6 +1162,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     windowCloseHook     = Event::bus()->m_events.window.close.listen(onWindowClose);
     windowMoveHook      = Event::bus()->m_events.window.moveToWorkspace.listen(onWindowMove);
     windowActiveHook    = Event::bus()->m_events.window.active.listen(onWindowActive);
+    windowFullscreenHook = Event::bus()->m_events.window.fullscreen.listen(onWindowFullscreen);
     workspaceCreatedHook = Event::bus()->m_events.workspace.created.listen(onWorkspaceLifecycle);
     workspaceRemovedHook = Event::bus()->m_events.workspace.removed.listen(onWorkspaceLifecycle);
     workspaceActiveHook  = Event::bus()->m_events.workspace.active.listen(onWorkspaceActive);
@@ -1973,6 +2005,9 @@ void CScrollOverview::restoreForcedLayerVisibility() {
 }
 
 void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideFullscreen) {
+    if (emittingFullscreenVisibilityState)
+        return;
+
     window = getOverviewWindowToShow(window);
 
     if (!validMapped(window) || !window->m_workspace || window->m_monitor != pMonitor) {
@@ -1982,7 +2017,9 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
     }
 
     if (!hideFullscreen || !window->isFullscreen()) {
+        emittingFullscreenVisibilityState = true;
         Event::bus()->m_events.window.fullscreen.emit(window);
+        emittingFullscreenVisibilityState = false;
 
         if (g_pEventManager)
             g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = window->isFullscreen() ? "1" : "0"});
@@ -2000,7 +2037,9 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
     window->m_workspace->m_hasFullscreenWindow = false;
     window->m_workspace->m_fullscreenMode      = FSMODE_NONE;
 
+    emittingFullscreenVisibilityState = true;
     Event::bus()->m_events.window.fullscreen.emit(window);
+    emittingFullscreenVisibilityState = false;
 
     if (g_pEventManager)
         g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});

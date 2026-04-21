@@ -90,6 +90,7 @@ class CScrollOverview : public IOverview {
     CBox                             dragOriginalBox        = CBox{};
     bool                             dragPointerDown       = false;
     bool                             dragStartedTiled      = false;
+    bool                             emittingFullscreenVisibilityState = false;
 
     std::vector<SP<SWorkspaceImage>> images;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
@@ -129,6 +130,7 @@ class CScrollOverview : public IOverview {
     CHyprSignalListener             windowCloseHook;
     CHyprSignalListener             windowMoveHook;
     CHyprSignalListener             windowActiveHook;
+    CHyprSignalListener             windowFullscreenHook;
     CHyprSignalListener             keyboardKeyHook;
     CHyprSignalListener             workspaceCreatedHook;
     CHyprSignalListener             workspaceRemovedHook;
