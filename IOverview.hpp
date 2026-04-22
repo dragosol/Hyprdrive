@@ -1,6 +1,8 @@
 #pragma once
 #include <hyprland/src/helpers/memory/Memory.hpp>
 
+class CWLSurfaceResource;
+
 class IOverview {
   public:
     IOverview()          = default;
@@ -9,6 +11,8 @@ class IOverview {
     virtual void  render()           = 0;
     virtual void  damage()           = 0;
     virtual void  onDamageReported() = 0;
+    virtual bool  shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) = 0;
+    virtual bool  shouldSuppressRenderDamage() const = 0;
     virtual void  onPreRender()      = 0;
 
     virtual void  setClosing(bool closing) = 0;

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <any>
 #include <array>
+#include <chrono>
 #include <limits>
 #include <optional>
 #include <linux/input-event-codes.h>
@@ -25,6 +26,7 @@
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Group.hpp>
+#include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/view/Popup.hpp>
@@ -147,6 +149,40 @@ static bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
         return false;
 
     return true;
+}
+
+static bool surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) {
+    if (!surface)
+        return false;
+
+    bool hasCallbacks = false;
+    surface->breadthfirst(
+        [&hasCallbacks](SP<CWLSurfaceResource> child, const Vector2D&, void*) {
+            if (!child || child->m_current.callbacks.empty())
+                return;
+
+            hasCallbacks = true;
+        },
+        nullptr);
+
+    return hasCallbacks;
+}
+
+static bool windowHasOverviewAnimation(const PHLWINDOW& window) {
+    if (!window)
+        return false;
+
+    return window->m_realPosition->isBeingAnimated() || window->m_realSize->isBeingAnimated() || window->m_alpha->isBeingAnimated() ||
+        window->m_activeInactiveAlpha->isBeingAnimated() || window->m_movingFromWorkspaceAlpha->isBeingAnimated() || window->m_movingToWorkspaceAlpha->isBeingAnimated() ||
+        window->m_borderFadeAnimationProgress->isBeingAnimated() || window->m_borderAngleAnimationProgress->isBeingAnimated() || window->m_dimPercent->isBeingAnimated() ||
+        window->m_realShadowColor->isBeingAnimated();
+}
+
+static bool layerHasOverviewAnimation(const PHLLS& layer) {
+    if (!Desktop::View::validMapped(layer))
+        return false;
+
+    return layer->m_realPosition->isBeingAnimated() || layer->m_realSize->isBeingAnimated() || layer->m_alpha->isBeingAnimated();
 }
 
 struct SSurfaceOpacityOverride {
@@ -419,6 +455,15 @@ static bool getOverviewBlur() {
     static auto* const* PBLUR = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:blur")->getDataStaticPtr();
     return **PBLUR;
 }
+
+static std::chrono::milliseconds getOverviewIdleFrameInterval() {
+    static auto* const* PFPS = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "misc:render_unfocused_fps")->getDataStaticPtr();
+
+    const int fps = std::clamp<int>(**PFPS, 1, 240);
+    return std::chrono::milliseconds(std::max(1, 1000 / fps));
+}
+
+static constexpr std::chrono::milliseconds OVERVIEW_WINDOW_FRAME_INTERVAL = std::chrono::milliseconds(33);
 
 static bool getHyprlandBlurNewOptimizations() {
     static auto* const* PNEWOPTIMIZATIONS = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "decoration:blur:new_optimizations")->getDataStaticPtr();
@@ -1098,6 +1143,10 @@ static void renderOverviewGroupTabs(PHLMONITOR monitor, const PHLWINDOW& window,
 
 CScrollOverview::~CScrollOverview() {
     g_pHyprRenderer->makeEGLCurrent();
+    if (realtimePreviewTimer) {
+        wl_event_source_remove(realtimePreviewTimer);
+        realtimePreviewTimer = nullptr;
+    }
     emitFullscreenVisibilityState(Desktop::focusState()->window(), false);
     restoreInputConfigOverrides();
     restoreForcedSurfaceVisibility();
@@ -1113,6 +1162,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     pMonitor                     = PMONITOR;
 
     applyInputConfigOverrides();
+    realtimePreviewTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, realtimePreviewTimerCallback, this);
+    scheduleMinimumPreviewFrame();
 
     g_pAnimationManager->createAnimation(1.F, scale, g_pConfigManager->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation({}, viewOffset, g_pConfigManager->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
@@ -2163,8 +2214,11 @@ void CScrollOverview::forceLayersAboveFullscreen() {
             if (!known)
                 forcedLayerVisibility.push_back({ls, ls->m_aboveFullscreen, ls->m_alpha->value()});
 
-            ls->m_aboveFullscreen = true;
-            ls->m_alpha->setValueAndWarp(1.F);
+            if (!ls->m_aboveFullscreen)
+                ls->m_aboveFullscreen = true;
+
+            if (ls->m_alpha->value() != 1.F || ls->m_alpha->goal() != 1.F || ls->m_alpha->isBeingAnimated())
+                ls->m_alpha->setValueAndWarp(1.F);
         }
     }
 }
@@ -2692,11 +2746,316 @@ void CScrollOverview::damage() {
     blockDamageReporting = false;
 }
 
+void CScrollOverview::markBlurDirty() {
+    overviewBlurDirty = true;
+}
+
 void CScrollOverview::onDamageReported() {
-    if (closing)
+    return;
+}
+
+bool CScrollOverview::isVisibleRealtimePreviewWindow(const PHLWINDOW& window) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || !window || !window->isFullscreen() || window->m_monitor != MONITOR)
+        return false;
+
+    const auto ACTIVEIDX = activeWorkspaceIndex();
+    const auto SCALE     = scale->value();
+    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE);
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& workspaceImage = images[workspaceIdx];
+        if (!workspaceImage || !workspaceImage->pWorkspace || workspaceImage->pWorkspace != window->m_workspace)
+            continue;
+
+        const auto fullscreenWindow = getOverviewWindowToShow(workspaceImage->pWorkspace->getFullscreenWindow());
+        if (fullscreenWindow != window)
+            return false;
+
+        const auto WORKSPACEYOFFSET = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * PITCH;
+        const auto WINDOWBOX        = getOverviewWindowBox(window, MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
+        return overviewBoxIntersectsMonitor(WINDOWBOX, MONITOR);
+    }
+
+    return false;
+}
+
+bool CScrollOverview::shouldAllowRealtimePreviewFrame() const {
+    if (lastRealtimePreviewFrame.time_since_epoch().count() == 0)
+        return true;
+
+    return Time::steadyNow() - lastRealtimePreviewFrame >= OVERVIEW_WINDOW_FRAME_INTERVAL;
+}
+
+void CScrollOverview::schedulePreviewFrameAfter(std::chrono::milliseconds delay) {
+    if (!realtimePreviewTimer)
         return;
 
-    damage();
+    const auto DELAY = std::max<int>(1, sc<int>(delay.count()));
+    const auto DUE   = Time::steadyNow() + std::chrono::milliseconds(DELAY);
+
+    if (realtimePreviewTimerArmed && realtimePreviewTimerDue <= DUE)
+        return;
+
+    realtimePreviewTimerArmed = true;
+    realtimePreviewTimerDue   = DUE;
+    wl_event_source_timer_update(realtimePreviewTimer, DELAY);
+}
+
+void CScrollOverview::scheduleMinimumPreviewFrame() {
+    schedulePreviewFrameAfter(getOverviewIdleFrameInterval());
+}
+
+void CScrollOverview::scheduleRealtimePreviewFrame() {
+    const auto NOW     = Time::steadyNow();
+    const auto ELAPSED = lastRealtimePreviewFrame.time_since_epoch().count() == 0 ? OVERVIEW_WINDOW_FRAME_INTERVAL :
+                                                                                   std::chrono::duration_cast<std::chrono::milliseconds>(NOW - lastRealtimePreviewFrame);
+    const auto DELAY   = OVERVIEW_WINDOW_FRAME_INTERVAL - std::min(ELAPSED, OVERVIEW_WINDOW_FRAME_INTERVAL);
+    schedulePreviewFrameAfter(DELAY);
+}
+
+int CScrollOverview::realtimePreviewTimerCallback(void* data) {
+    const auto OVERVIEW = sc<CScrollOverview*>(data);
+    if (!OVERVIEW)
+        return 0;
+
+    OVERVIEW->realtimePreviewTimerArmed = false;
+    OVERVIEW->realtimePreviewTimerDue   = {};
+    OVERVIEW->damage();
+    OVERVIEW->scheduleMinimumPreviewFrame();
+    return 0;
+}
+
+bool CScrollOverview::shouldSuppressRenderDamage() const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || closing)
+        return false;
+
+    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
+        return false;
+
+    const auto ACTIVEIDX = activeWorkspaceIndex();
+    const auto SCALE     = scale->value();
+    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE);
+    const auto DRAGGED   = getOverviewWindowToShow(dragActiveWindow.lock());
+
+    const auto isVisibleAnimatedWindow = [&](const PHLWINDOW& window, float workspaceYOffset) {
+        if (!shouldShowOverviewWindow(window) || window == DRAGGED)
+            return false;
+
+        const auto WINDOWBOX = getOverviewWindowBox(window, MONITOR, SCALE, viewOffset->value(), workspaceYOffset);
+        return overviewBoxIntersectsMonitor(WINDOWBOX, MONITOR) && windowHasOverviewAnimation(window);
+    };
+
+    for (const auto& windowRef : pinnedFloatingWindows) {
+        const auto window = getOverviewWindowToShow(windowRef.lock());
+        if (!shouldShowPinnedFloatingOverviewWindow(window) || window->m_monitor != MONITOR)
+            continue;
+
+        if (windowHasOverviewAnimation(window))
+            return false;
+    }
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& workspaceImage = images[workspaceIdx];
+        if (!workspaceImage || !workspaceImage->pWorkspace)
+            continue;
+
+        const auto WORKSPACEYOFFSET = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * PITCH;
+        const auto WORKSPACEBOX     = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
+        if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, MONITOR))
+            continue;
+
+        const auto workspace        = workspaceImage->pWorkspace;
+        const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
+        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
+            if (isVisibleAnimatedWindow(fullscreenWindow, WORKSPACEYOFFSET))
+                return false;
+
+            continue;
+        }
+
+        for (const auto& windowRef : workspaceImage->windows) {
+            const auto window = getOverviewWindowToShow(windowRef.lock());
+            if (isVisibleAnimatedWindow(window, WORKSPACEYOFFSET))
+                return false;
+        }
+    }
+
+    for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM}) {
+        for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[LAYER]) {
+            if (layerHasOverviewAnimation(layerRef.lock()))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+bool CScrollOverview::shouldBlockSurfaceFeedback() {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || closing)
+        return false;
+
+    const auto ACTIVEIDX = activeWorkspaceIndex();
+    const auto SCALE     = scale->value();
+    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE);
+    const auto DRAGGED   = getOverviewWindowToShow(dragActiveWindow.lock());
+
+    const auto shouldAllowWindowFeedback = [&](const PHLWINDOW& window, float workspaceYOffset) {
+        if (!shouldShowOverviewWindow(window) || window == DRAGGED)
+            return false;
+
+        const auto WINDOWBOX = getOverviewWindowBox(window, MONITOR, SCALE, viewOffset->value(), workspaceYOffset);
+        if (!overviewBoxIntersectsMonitor(WINDOWBOX, MONITOR))
+            return false;
+
+        if (window->isFullscreen() || surfaceTreeHasFrameCallbacks(window->wlSurface() ? window->wlSurface()->resource() : nullptr)) {
+            if (shouldAllowRealtimePreviewFrame()) {
+                lastRealtimePreviewFrame = Time::steadyNow();
+                return true;
+            }
+
+            scheduleRealtimePreviewFrame();
+            return false;
+        }
+
+        return false;
+    };
+
+    for (const auto& windowRef : pinnedFloatingWindows) {
+        const auto window = getOverviewWindowToShow(windowRef.lock());
+        if (!shouldShowPinnedFloatingOverviewWindow(window) || window->m_monitor != MONITOR)
+            continue;
+
+        if (!surfaceTreeHasFrameCallbacks(window->wlSurface() ? window->wlSurface()->resource() : nullptr))
+            continue;
+
+        if (shouldAllowRealtimePreviewFrame()) {
+            lastRealtimePreviewFrame = Time::steadyNow();
+            return false;
+        }
+
+        scheduleRealtimePreviewFrame();
+    }
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& workspaceImage = images[workspaceIdx];
+        if (!workspaceImage || !workspaceImage->pWorkspace)
+            continue;
+
+        const auto WORKSPACEYOFFSET = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * PITCH;
+        const auto WORKSPACEBOX     = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
+        if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, MONITOR))
+            continue;
+
+        const auto workspace        = workspaceImage->pWorkspace;
+        const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
+        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
+            if (shouldAllowWindowFeedback(fullscreenWindow, WORKSPACEYOFFSET))
+                return false;
+
+            continue;
+        }
+
+        for (const auto& windowRef : workspaceImage->windows) {
+            if (shouldAllowWindowFeedback(getOverviewWindowToShow(windowRef.lock()), WORKSPACEYOFFSET))
+                return false;
+        }
+    }
+
+    for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM}) {
+        for (const auto& layerRef : MONITOR->m_layerSurfaceLayers[LAYER]) {
+            const auto layer = layerRef.lock();
+            if (Desktop::View::validMapped(layer) && surfaceTreeHasFrameCallbacks(layer->wlSurface() ? layer->wlSurface()->resource() : nullptr))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || closing || !surface)
+        return true;
+
+    const auto HLSURFACE = Desktop::View::CWLSurface::fromResource(surface);
+    if (!HLSURFACE)
+        return true;
+
+    auto view = HLSURFACE->view();
+    if (!view)
+        return true;
+
+    auto layerOwner = Desktop::View::CLayerSurface::fromView(view);
+    auto windowOwner = Desktop::View::CWindow::fromView(view);
+
+    if (!layerOwner && !windowOwner) {
+        if (const auto POPUP = Desktop::View::CPopup::fromView(view)) {
+            if (const auto T1OWNER = POPUP->getT1Owner(); T1OWNER && T1OWNER->view()) {
+                layerOwner  = Desktop::View::CLayerSurface::fromView(T1OWNER->view());
+                windowOwner = Desktop::View::CWindow::fromView(T1OWNER->view());
+            }
+        }
+    }
+
+    if (layerOwner) {
+        if (layerOwner->m_monitor != MONITOR)
+            return false;
+
+        if (layerOwner->m_layer > ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM)
+            return false;
+
+        markBlurDirty();
+        return true;
+    }
+
+    if (!windowOwner)
+        return true;
+
+    auto window = getOverviewWindowToShow(windowOwner);
+    if (shouldShowPinnedFloatingOverviewWindow(window)) {
+        if (window->m_monitor != MONITOR)
+            return false;
+
+        if (shouldAllowRealtimePreviewFrame())
+            return true;
+
+        scheduleRealtimePreviewFrame();
+        return false;
+    }
+
+    if (!shouldShowOverviewWindow(window) || window->m_monitor != MONITOR || !window->m_workspace)
+        return false;
+
+    const auto ACTIVEIDX = activeWorkspaceIndex();
+    const auto SCALE     = scale->value();
+    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE);
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& workspaceImage = images[workspaceIdx];
+        if (!workspaceImage || workspaceImage->pWorkspace != window->m_workspace)
+            continue;
+
+        const auto fullscreenWindow = getOverviewWindowToShow(workspaceImage->pWorkspace->getFullscreenWindow());
+        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspaceImage->pWorkspace && fullscreenWindow != window)
+            return false;
+
+        const auto WORKSPACEYOFFSET = (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * PITCH;
+        const auto WINDOWBOX        = getOverviewWindowBox(window, MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
+        if (!overviewBoxIntersectsMonitor(WINDOWBOX, MONITOR))
+            return false;
+
+        if (shouldAllowRealtimePreviewFrame())
+            return true;
+
+        scheduleRealtimePreviewFrame();
+        return false;
+
+    }
+
+    return false;
 }
 
 void CScrollOverview::close() {
@@ -2776,6 +3135,7 @@ void CScrollOverview::onPreRender() {
     if (workspaceSyncPending || (pMonitor && pMonitor->m_activeWorkspace && pMonitor->m_activeWorkspace != startedOn)) {
         workspaceSyncPending = false;
         rebuildPending       = false;
+        markBlurDirty();
         onWorkspaceChange();
         emitFullscreenVisibilityState(Desktop::focusState()->window(), true);
         return;
@@ -2783,6 +3143,7 @@ void CScrollOverview::onPreRender() {
 
     if (rebuildPending) {
         rebuildPending = false;
+        markBlurDirty();
         redrawAll();
         syncSelectionToViewport();
         damage();
@@ -2802,6 +3163,7 @@ void CScrollOverview::onWorkspaceChange() {
     viewOffset->setValueAndWarp(Vector2D{0.F, (sc<long>(previousActiveIdx) - sc<long>(viewportCurrentWorkspace)) * getWorkspaceLogicalPitch(pMonitor.lock(), scale->value())});
     *viewOffset = Vector2D{};
     syncSelectionToViewport();
+    markBlurDirty();
     damage();
 }
 
@@ -2810,10 +3172,22 @@ void CScrollOverview::render() {
     if (!MONITOR)
         return;
 
+    const bool PREVBLOCKSURFACEFEEDBACK = g_pHyprRenderer->m_bBlockSurfaceFeedback;
+    g_pHyprRenderer->m_bBlockSurfaceFeedback = PREVBLOCKSURFACEFEEDBACK || shouldBlockSurfaceFeedback();
+    auto restoreSurfaceFeedback = Hyprutils::Utils::CScopeGuard([PREVBLOCKSURFACEFEEDBACK] { g_pHyprRenderer->m_bBlockSurfaceFeedback = PREVBLOCKSURFACEFEEDBACK; });
+
     const auto NOW       = Time::steadyNow();
     const auto ACTIVEIDX = activeWorkspaceIndex();
     const auto SCALE     = scale->value();
     const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE);
+
+    const auto VIEWOFFSET = viewOffset->value();
+    if (!overviewBlurStateValid || std::abs(lastOverviewBlurScale - SCALE) > 0.001F || lastOverviewBlurViewOffset.distanceSq(VIEWOFFSET) > 0.001F) {
+        markBlurDirty();
+        overviewBlurStateValid     = true;
+        lastOverviewBlurScale      = SCALE;
+        lastOverviewBlurViewOffset = VIEWOFFSET;
+    }
 
     const auto WALLPAPERMODE = getWallpaperMode();
 
@@ -2850,10 +3224,14 @@ void CScrollOverview::render() {
         renderWorkspaceBackground(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
     }
 
-    if (hasVisiblePrecomputedBlurWindow(MONITOR, ACTIVEIDX, PITCH, SCALE))
+    const bool NEEDS_PRECOMPUTED_BLUR = hasVisiblePrecomputedBlurWindow(MONITOR, ACTIVEIDX, PITCH, SCALE);
+    if (NEEDS_PRECOMPUTED_BLUR && overviewBlurDirty)
         g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
 
     renderOverviewPass(MONITOR);
+
+    if (NEEDS_PRECOMPUTED_BLUR)
+        overviewBlurDirty = false;
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);

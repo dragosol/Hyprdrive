@@ -8,12 +8,14 @@
 #include <hyprland/src/helpers/signal/Signal.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
+#include <chrono>
 #include <unordered_map>
 #include <vector>
 
 #include "IOverview.hpp"
 
 class CMonitor;
+struct wl_event_source;
 
 class CScrollOverview : public IOverview {
   public:
@@ -22,7 +24,10 @@ class CScrollOverview : public IOverview {
 
     virtual void render();
     virtual void damage();
+    void         markBlurDirty();
     virtual void onDamageReported();
+    virtual bool shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface);
+    virtual bool shouldSuppressRenderDamage() const;
     virtual void onPreRender();
 
     virtual void setClosing(bool closing);
@@ -74,10 +79,21 @@ class CScrollOverview : public IOverview {
     void   applyInputConfigOverrides();
     void   restoreInputConfigOverrides();
     size_t activeWorkspaceIndex() const;
+    bool   shouldBlockSurfaceFeedback();
+    bool   isVisibleRealtimePreviewWindow(const PHLWINDOW& window) const;
+    bool   shouldAllowRealtimePreviewFrame() const;
+    void   scheduleMinimumPreviewFrame();
+    void   schedulePreviewFrameAfter(std::chrono::milliseconds delay);
+    void   scheduleRealtimePreviewFrame();
+    static int realtimePreviewTimerCallback(void* data);
 
     size_t viewportCurrentWorkspace = 0;
     bool   rebuildPending           = false;
     bool   workspaceSyncPending     = false;
+    bool   overviewBlurDirty        = true;
+    bool   overviewBlurStateValid   = false;
+    float  lastOverviewBlurScale    = 1.F;
+    Vector2D lastOverviewBlurViewOffset = Vector2D{};
 
     struct SWorkspaceImage {
         PHLWORKSPACE              pWorkspace;
@@ -98,6 +114,7 @@ class CScrollOverview : public IOverview {
     bool                             dragStartedTiled      = false;
     bool                             emittingFullscreenVisibilityState = false;
     bool                             inputConfigOverridden = false;
+    bool                             realtimePreviewTimerArmed = false;
     int                              previousNoWarps = 0;
     int                              previousWarpOnChangeWorkspace = 0;
     int                              previousWarpOnToggleSpecial = 0;
@@ -131,6 +148,9 @@ class CScrollOverview : public IOverview {
 
     PHLANIMVAR<float>                scale;
     PHLANIMVAR<Vector2D>             viewOffset;
+    Time::steady_tp                  lastRealtimePreviewFrame = {};
+    Time::steady_tp                  realtimePreviewTimerDue = {};
+    wl_event_source*                 realtimePreviewTimer = nullptr;
 
     bool                             closing = false;
 
