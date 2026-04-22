@@ -1,6 +1,7 @@
 #include "scrollOverview.hpp"
 #include <algorithm>
 #include <any>
+#include <array>
 #include <limits>
 #include <optional>
 #include <linux/input-event-codes.h>
@@ -126,6 +127,21 @@ static bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     const auto WINDOW = getOverviewWindowToShow(window);
 
     if (!validMapped(WINDOW))
+        return false;
+
+    if (WINDOW->m_pinned && WINDOW->m_isFloating)
+        return false;
+
+    return true;
+}
+
+static bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
+    const auto WINDOW = getOverviewWindowToShow(window);
+
+    if (!validMapped(WINDOW))
+        return false;
+
+    if (!WINDOW->m_pinned || !WINDOW->m_isFloating)
         return false;
 
     return true;
@@ -311,6 +327,85 @@ static bool overviewBoxIntersectsMonitor(const CBox& box, PHLMONITOR monitor) {
 static int getWorkspaceGap() {
     static auto* const* PGAP = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:scrolloverview:workspace_gap")->getDataStaticPtr();
     return std::max<int>(0, **PGAP);
+}
+
+static double overviewBoxIntersectionArea(const CBox& a, const CBox& b) {
+    const auto INTERSECTION = a.intersection(b);
+    return std::max(0.0, INTERSECTION.width) * std::max(0.0, INTERSECTION.height);
+}
+
+static CBox getPinnedFloatingOverviewWindowBox(PHLMONITOR monitor, const PHLWINDOW& window, float targetOverviewScale, float animationProgress, float* renderScale) {
+    if (!monitor || !window) {
+        if (renderScale)
+            *renderScale = 1.F;
+        return {};
+    }
+
+    const auto WINDOWSIZE = window->m_realSize->value();
+    if (WINDOWSIZE.x <= 0 || WINDOWSIZE.y <= 0) {
+        if (renderScale)
+            *renderScale = 1.F;
+        return {};
+    }
+
+    const CBox WINDOWBOX = {window->m_realPosition->value() - monitor->m_position, WINDOWSIZE};
+    const auto MONITORW  = sc<float>(monitor->m_size.x);
+    const auto MONITORH  = sc<float>(monitor->m_size.y);
+
+    const std::array<CBox, 4> QUADRANTS = {
+        CBox{0.F, 0.F, MONITORW / 2.F, MONITORH / 2.F},
+        CBox{MONITORW / 2.F, 0.F, MONITORW / 2.F, MONITORH / 2.F},
+        CBox{0.F, MONITORH / 2.F, MONITORW / 2.F, MONITORH / 2.F},
+        CBox{MONITORW / 2.F, MONITORH / 2.F, MONITORW / 2.F, MONITORH / 2.F},
+    };
+
+    size_t bestQuadrant = 0;
+    double bestArea     = -1.0;
+    for (size_t i = 0; i < QUADRANTS.size(); ++i) {
+        const auto AREA = overviewBoxIntersectionArea(WINDOWBOX, QUADRANTS[i]);
+        if (AREA <= bestArea)
+            continue;
+
+        bestQuadrant = i;
+        bestArea     = AREA;
+    }
+
+    const bool RIGHT  = bestQuadrant == 1 || bestQuadrant == 3;
+    const bool BOTTOM = bestQuadrant == 2 || bestQuadrant == 3;
+
+    const auto FULLBOX = monitor->logicalBox();
+    const auto WORKBOX = monitor->logicalBoxMinusReserved();
+
+    const float RESERVEDLEFT   = std::max(0.F, sc<float>(WORKBOX.x - FULLBOX.x));
+    const float RESERVEDTOP    = std::max(0.F, sc<float>(WORKBOX.y - FULLBOX.y));
+    const float RESERVEDRIGHT  = std::max(0.F, sc<float>((FULLBOX.x + FULLBOX.width) - (WORKBOX.x + WORKBOX.width)));
+    const float RESERVEDBOTTOM = std::max(0.F, sc<float>((FULLBOX.y + FULLBOX.height) - (WORKBOX.y + WORKBOX.height)));
+
+    const auto WORKSPACEGAP      = sc<float>(getWorkspaceGap());
+    const auto RESERVEDWIDTH     = RIGHT ? RESERVEDRIGHT : RESERVEDLEFT;
+    const auto CALCULATEDWIDTH   = std::max(1.F, sc<float>((MONITORW - MONITORW * targetOverviewScale) / 2.F - 2.F * WORKSPACEGAP - RESERVEDWIDTH));
+    const auto CALCULATEDSCALE   = CALCULATEDWIDTH / sc<float>(WINDOWSIZE.x);
+    const auto WINDOWRENDERSCALE = std::max(CALCULATEDSCALE, targetOverviewScale);
+    const auto PROGRESS          = std::clamp(animationProgress, 0.F, 1.F);
+    const auto CURRENTRENDERSCALE = 1.F + (WINDOWRENDERSCALE - 1.F) * PROGRESS;
+    const auto TARGETWIDTH       = sc<float>(WINDOWSIZE.x) * CURRENTRENDERSCALE;
+    const auto TARGETHEIGHT      = sc<float>(WINDOWSIZE.y) * CURRENTRENDERSCALE;
+
+    if (renderScale)
+        *renderScale = CURRENTRENDERSCALE;
+
+    const float X = RIGHT ? MONITORW - TARGETWIDTH - WORKSPACEGAP - RESERVEDRIGHT : WORKSPACEGAP + RESERVEDLEFT;
+    const float Y = BOTTOM ? MONITORH - TARGETHEIGHT - WORKSPACEGAP - RESERVEDBOTTOM : WORKSPACEGAP + RESERVEDTOP;
+
+    CBox box = {{X, Y}, {TARGETWIDTH, TARGETHEIGHT}};
+    box.scale(monitor->m_scale);
+
+    const CBox ORIGINALBOX = {WINDOWBOX.pos() * monitor->m_scale, WINDOWBOX.size() * monitor->m_scale};
+    box.x                  = ORIGINALBOX.x + (box.x - ORIGINALBOX.x) * PROGRESS;
+    box.y                  = ORIGINALBOX.y + (box.y - ORIGINALBOX.y) * PROGRESS;
+    box.round();
+
+    return box;
 }
 
 static int getWallpaperMode() {
@@ -1093,13 +1188,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
         emitFullscreenVisibilityState(window, true);
 
-        if (window && window->m_monitor == pMonitor) {
+        const auto overviewWindow = getOverviewWindowToShow(window);
+        if (shouldShowOverviewWindow(overviewWindow) && overviewWindow->m_monitor == pMonitor) {
             rebuildPending = true;
-            closeOnWindow = window;
-            rememberSelection(window);
+            closeOnWindow  = overviewWindow;
+            rememberSelection(overviewWindow);
 
             for (size_t i = 0; i < images.size(); ++i) {
-                if (images[i]->pWorkspace == window->m_workspace) {
+                if (images[i]->pWorkspace == overviewWindow->m_workspace) {
                     viewportCurrentWorkspace = i;
                     break;
                 }
@@ -2236,6 +2332,31 @@ void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, 
     renderWindowLive(monitor, WINDOW, windowBox, renderScale, now);
 }
 
+void CScrollOverview::renderPinnedFloatingWindows(PHLMONITOR monitor, float overviewScale, const Time::steady_tp& now) {
+    if (!monitor)
+        return;
+
+    const auto TARGETOVERVIEWSCALE = getOverviewConfiguredScale();
+    const auto ANIMATIONPROGRESS   = (1.F - TARGETOVERVIEWSCALE) > 0.001F ? (1.F - overviewScale) / (1.F - TARGETOVERVIEWSCALE) : 1.F;
+
+    for (const auto& windowRef : pinnedFloatingWindows) {
+        const auto window = getOverviewWindowToShow(windowRef.lock());
+        if (!shouldShowPinnedFloatingOverviewWindow(window))
+            continue;
+
+        if (window->m_monitor != monitor)
+            continue;
+
+        float renderScale = 1.F;
+        CBox  windowBox   = getPinnedFloatingOverviewWindowBox(monitor, window, TARGETOVERVIEWSCALE, ANIMATIONPROGRESS, &renderScale);
+
+        if (!overviewBoxIntersectsMonitor(windowBox, monitor))
+            continue;
+
+        renderWindowLive(monitor, window, windowBox, renderScale, now);
+    }
+}
+
 void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox) {
     if (!window)
         return;
@@ -2292,6 +2413,7 @@ void CScrollOverview::redrawAll(bool forcelowres) {
     for (const auto& img : images) {
         img->windows.clear();
     }
+    pinnedFloatingWindows.clear();
 
     std::unordered_map<WORKSPACEID, SP<SWorkspaceImage>> imagesByWorkspace;
     imagesByWorkspace.reserve(images.size());
@@ -2303,6 +2425,9 @@ void CScrollOverview::redrawAll(bool forcelowres) {
 
     std::vector<PHLWINDOW> addedWindows;
     addedWindows.reserve(g_pCompositor->m_windows.size());
+
+    std::vector<PHLWINDOW> addedPinnedFloatingWindows;
+    addedPinnedFloatingWindows.reserve(g_pCompositor->m_windows.size());
 
     const auto addOverviewWindow = [&](const PHLWINDOW& window) {
         const auto overviewWindow = getOverviewWindowToShow(window);
@@ -2320,11 +2445,24 @@ void CScrollOverview::redrawAll(bool forcelowres) {
         imageIt->second->windows.emplace_back(overviewWindow);
     };
 
+    const auto addPinnedFloatingWindow = [&](const PHLWINDOW& window) {
+        const auto overviewWindow = getOverviewWindowToShow(window);
+        if (!shouldShowPinnedFloatingOverviewWindow(overviewWindow))
+            return;
+
+        if (std::ranges::find(addedPinnedFloatingWindows, overviewWindow) != addedPinnedFloatingWindows.end())
+            return;
+
+        addedPinnedFloatingWindows.emplace_back(overviewWindow);
+        pinnedFloatingWindows.emplace_back(overviewWindow);
+    };
+
     for (const auto& window : g_pCompositor->m_windows) {
         if (getOverviewWindowToShow(window) != window)
             continue;
 
         addOverviewWindow(window);
+        addPinnedFloatingWindow(window);
     }
 
     for (const auto& window : g_pCompositor->m_windows) {
@@ -2332,6 +2470,7 @@ void CScrollOverview::redrawAll(bool forcelowres) {
             continue;
 
         addOverviewWindow(window);
+        addPinnedFloatingWindow(window);
     }
 }
 
@@ -2500,6 +2639,7 @@ void CScrollOverview::render() {
     }
 
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
+    renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
 
     for (auto const& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
         if (!Desktop::View::validMapped(ls.lock()))
