@@ -66,7 +66,7 @@ class CScrollOverview : public IOverview {
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
     PHLWORKSPACE workspaceAtOverviewCursor(size_t* workspaceIdx = nullptr) const;
     Vector2D  overviewPointToGlobal(size_t workspaceIdx, const Vector2D& pointLocal) const;
-    CBox      draggedWindowBoxLogical(size_t workspaceIdx) const;
+    CBox      draggedWindowBox(size_t workspaceIdx) const;
     void      beginWindowDrag();
     void      updateWindowDrag();
     void      endWindowDrag();
@@ -102,7 +102,7 @@ class CScrollOverview : public IOverview {
         std::vector<PHLWINDOWREF> windows;
     };
 
-    Vector2D                         lastMousePosLocal = Vector2D{};
+    Vector2D                         lastMousePosLocal = Vector2D{}; // monitor-local pixel space
 
     PHLWINDOWREF                     closeOnWindow;
     PHLWINDOWREF                     dragPendingWindow;
