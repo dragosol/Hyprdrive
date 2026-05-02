@@ -29,7 +29,7 @@ inline CFunctionHook* g_pDamageSurfaceHook   = nullptr;
 inline CFunctionHook* g_pScheduleFrameHook   = nullptr;
 inline CFunctionHook* g_pSendFrameEventsHook = nullptr;
 inline CFunctionHook* g_pSurfaceFrameHook     = nullptr;
-typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, timespec*, const CBox&);
+typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
 typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
 typedef void (*origDamageSurface)(void*, SP<CWLSurfaceResource>, double, double, double);
@@ -63,7 +63,7 @@ static void hkScheduleFrameForMonitor(void* thisptr, PHLMONITOR monitor, Aquamar
 }
 
 //
-static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, timespec* now, const CBox& geometry) {
+static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
     if (!g_pOverview || renderingOverview || g_pOverview->blockOverviewRendering || g_pOverview->pMonitor != pMonitor)
         ((origRenderWorkspace)(g_pRenderWorkspaceHook->m_original))(thisptr, pMonitor, pWorkspace, now, geometry);
     else {
