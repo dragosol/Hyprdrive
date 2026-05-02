@@ -172,6 +172,37 @@ static void failNotif(const std::string& reason) {
     HyprlandAPI::addNotification(PHANDLE, "[scrolloverview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
+// Helper function to find a function by name and ensure it contains a specific substring in its demangled name (to disambiguate overloads).
+static void* findFnOrThrow(const std::string& name, std::string_view mustContainDemangled) {
+    auto fns = HyprlandAPI::findFunctionsByName(PHANDLE, name);
+    if (fns.empty()) {
+        failNotif(std::format("no fns for hook {}", name));
+        throw std::runtime_error(std::format("[scrolloverview] No fns for hook {}", name));
+    }
+
+    if (mustContainDemangled.empty())
+        return fns[0].address;
+
+    std::vector<SFunctionMatch> matches;
+    matches.reserve(fns.size());
+    for (const auto& fn : fns) {
+        if (fn.demangled.find(mustContainDemangled) != std::string::npos)
+            matches.push_back(fn);
+    }
+
+    if (matches.empty()) {
+        failNotif(std::format("no matching overload for hook {}", name));
+        throw std::runtime_error(std::format("[scrolloverview] No matching overload for hook {}", name));
+    }
+
+    if (matches.size() > 1) {
+        failNotif(std::format("ambiguous overload for hook {} ({} matches)", name, matches.size()));
+        throw std::runtime_error(std::format("[scrolloverview] Ambiguous overload for hook {}", name));
+    }
+
+    return matches[0].address;
+}
+
 static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char* RHS) {
     Hyprlang::CParseResult result;
 
@@ -256,61 +287,41 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[he] Version mismatch");
     }
 
-    auto FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "renderWorkspace");
-    if (FNS.empty()) {
-        failNotif("no fns for hook renderWorkspace");
-        throw std::runtime_error("[he] No fns for hook renderWorkspace");
-    }
+    g_pRenderWorkspaceHook = HyprlandAPI::createFunctionHook(
+        PHANDLE,
+        findFnOrThrow("renderWorkspace", "CHyprRenderer::renderWorkspace("),
+        (void*)hkRenderWorkspace);
 
-    g_pRenderWorkspaceHook = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkRenderWorkspace);
 
-    FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "scheduleFrameForMonitor");
-    if (FNS.empty()) {
-        failNotif("no fns for hook scheduleFrameForMonitor");
-        throw std::runtime_error("[he] No fns for hook scheduleFrameForMonitor");
-    }
+    g_pScheduleFrameHook = HyprlandAPI::createFunctionHook(
+        PHANDLE, 
+        findFnOrThrow("scheduleFrameForMonitor", "CCompositor::scheduleFrameForMonitor("),
+        (void*)hkScheduleFrameForMonitor);
 
-    g_pScheduleFrameHook = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkScheduleFrameForMonitor);
+    g_pDamageSurfaceHook = HyprlandAPI::createFunctionHook(
+        PHANDLE,
+        findFnOrThrow("damageSurface", "CHyprRenderer::damageSurface("),
+        (void*)hkDamageSurface);
 
-    FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "damageSurface");
-    if (FNS.empty()) {
-        failNotif("no fns for hook damageSurface");
-        throw std::runtime_error("[he] No fns for hook damageSurface");
-    }
+    g_pSendFrameEventsHook = HyprlandAPI::createFunctionHook(
+        PHANDLE,
+        findFnOrThrow("sendFrameEventsToWorkspace", "CHyprRenderer::sendFrameEventsToWorkspace("),
+        (void*)hkSendFrameEventsToWorkspace);
 
-    g_pDamageSurfaceHook = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkDamageSurface);
+    g_pSurfaceFrameHook = HyprlandAPI::createFunctionHook(
+        PHANDLE,
+        findFnOrThrow("_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE", ""),
+        (void*)hkSurfaceFrame);
 
-    FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "sendFrameEventsToWorkspace");
-    if (FNS.empty()) {
-        failNotif("no fns for hook sendFrameEventsToWorkspace");
-        throw std::runtime_error("[he] No fns for hook sendFrameEventsToWorkspace");
-    }
+    g_pAddDamageHookB = HyprlandAPI::createFunctionHook(
+        PHANDLE,
+        findFnOrThrow("addDamageEPK15pixman_region32", "CMonitor::addDamage"),
+        (void*)hkAddDamageB);
 
-    g_pSendFrameEventsHook = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkSendFrameEventsToWorkspace);
-
-    FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE");
-    if (FNS.empty()) {
-        failNotif("no fns for hook CWLSurfaceResource::frame");
-        throw std::runtime_error("[he] No fns for hook CWLSurfaceResource::frame");
-    }
-
-    g_pSurfaceFrameHook = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkSurfaceFrame);
-
-    FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "addDamageEPK15pixman_region32");
-    if (FNS.empty()) {
-        failNotif("no fns for hook addDamageEPK15pixman_region32");
-        throw std::runtime_error("[he] No fns for hook addDamageEPK15pixman_region32");
-    }
-
-    g_pAddDamageHookB = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkAddDamageB);
-
-    FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE");
-    if (FNS.empty()) {
-        failNotif("no fns for hook _ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE");
-        throw std::runtime_error("[he] No fns for hook _ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE");
-    }
-
-    g_pAddDamageHookA = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkAddDamageA);
+    g_pAddDamageHookA = HyprlandAPI::createFunctionHook(
+        PHANDLE,
+        findFnOrThrow("_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", ""),
+        (void*)hkAddDamageA);
 
     bool success = g_pRenderWorkspaceHook->hook();
     success      = success && g_pScheduleFrameHook->hook();
