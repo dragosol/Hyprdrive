@@ -1,8 +1,9 @@
-# Else exist specifically for clang
+CXX ?= g++
+
+EXTRA_FLAGS =
+
 ifeq ($(CXX),g++)
-    EXTRA_FLAGS = --no-gnu-unique
-else
-    EXTRA_FLAGS =
+    EXTRA_FLAGS += -fno-gnu-unique
 endif
 
 all:

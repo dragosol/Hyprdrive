@@ -36,4 +36,4 @@ class IOverview {
     bool          m_isSwiping = false;
 };
 
-inline SP<IOverview> g_pOverview;
+inline SP<IOverview> g_pScrollOverview;

@@ -2,32 +2,32 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include "IOverview.hpp"
 
-COverviewPassElement::COverviewPassElement() {
+CScrollOverviewPassElement::CScrollOverviewPassElement() {
     ;
 }
 
-void COverviewPassElement::draw(const CRegion& damage) {
-    g_pOverview->fullRender();
+void CScrollOverviewPassElement::draw(const CRegion& damage) {
+    g_pScrollOverview->fullRender();
 }
 
-bool COverviewPassElement::needsLiveBlur() {
+bool CScrollOverviewPassElement::needsLiveBlur() {
     return false;
 }
 
-bool COverviewPassElement::needsPrecomputeBlur() {
+bool CScrollOverviewPassElement::needsPrecomputeBlur() {
     return false;
 }
 
-std::optional<CBox> COverviewPassElement::boundingBox() {
-    if (!g_pOverview->pMonitor)
+std::optional<CBox> CScrollOverviewPassElement::boundingBox() {
+    if (!g_pScrollOverview->pMonitor)
         return std::nullopt;
 
-    return CBox{{}, g_pOverview->pMonitor->m_size};
+    return CBox{{}, g_pScrollOverview->pMonitor->m_size};
 }
 
-CRegion COverviewPassElement::opaqueRegion() {
-    if (!g_pOverview->pMonitor)
+CRegion CScrollOverviewPassElement::opaqueRegion() {
+    if (!g_pScrollOverview->pMonitor)
         return CRegion{};
 
-    return CBox{{}, g_pOverview->pMonitor->m_size};
+    return CBox{{}, g_pScrollOverview->pMonitor->m_size};
 }

@@ -198,5 +198,3 @@ class CScrollOverview : public IOverview {
 
     friend class CScrollOverviewPassElement;
 };
-
-inline std::unique_ptr<CScrollOverview> g_pScrollOverview;

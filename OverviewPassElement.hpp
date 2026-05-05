@@ -1,10 +1,10 @@
 #pragma once
 #include <hyprland/src/render/pass/PassElement.hpp>
 
-class COverviewPassElement : public IPassElement {
+class CScrollOverviewPassElement : public IPassElement {
   public:
-    COverviewPassElement();
-    virtual ~COverviewPassElement() = default;
+    CScrollOverviewPassElement();
+    virtual ~CScrollOverviewPassElement() = default;
 
     virtual void                draw(const CRegion& damage);
     virtual bool                needsLiveBlur();
@@ -13,6 +13,6 @@ class COverviewPassElement : public IPassElement {
     virtual CRegion             opaqueRegion();
 
     virtual const char*         passName() {
-        return "COverviewPassElement";
+        return "CScrollOverviewPassElement";
     }
 };
