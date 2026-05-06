@@ -53,7 +53,7 @@ class CScrollOverview : public IOverview {
     void   redrawAll(bool forcelowres = false);
     void   onWorkspaceChange();
     void   renderGlobalWallpaper(PHLMONITOR monitor, const Time::steady_tp& now);
-    void   renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now);
+    void   renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now, float alpha = 1.F);
     void   updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperMode, const Time::steady_tp& now);
     void   renderBackdropBlurCache(PHLMONITOR monitor);
     void   renderWorkspaceBackground(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
@@ -68,6 +68,8 @@ class CScrollOverview : public IOverview {
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
     void   syncFocusedSelection();
+    float      workspaceOverviewYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
     PHLWORKSPACE workspaceAtOverviewCursor(size_t* workspaceIdx = nullptr) const;
@@ -115,6 +117,15 @@ class CScrollOverview : public IOverview {
         std::vector<PHLWINDOWREF> windows;
     };
 
+    struct SWorkspaceInsertTransition {
+        bool                             active              = false;
+        WORKSPACEID                      transitionWorkspaceID = WORKSPACE_INVALID;
+        bool                             transitionFadeIn   = true;
+        std::unordered_map<WORKSPACEID, long> oldRelativeSlots;
+        std::unordered_map<WORKSPACEID, long> newRelativeSlots;
+        long                             transitionOldRelativeSlot = 0;
+    };
+
     Vector2D                         lastMousePosLocal = Vector2D{}; // monitor-local pixel space
 
     PHLWINDOWREF                     closeOnWindow;
@@ -149,6 +160,8 @@ class CScrollOverview : public IOverview {
     std::vector<SP<SWorkspaceImage>> images;
     std::vector<PHLWINDOWREF>        pinnedFloatingWindows;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
+    SWorkspaceInsertTransition       workspaceInsertTransition;
+    PHLWORKSPACEREF                  pendingRemovedWorkspace;
 
     struct SForcedSurfaceVisibility {
         WP<CWLSurfaceResource> surface;
@@ -173,6 +186,10 @@ class CScrollOverview : public IOverview {
 
     PHLANIMVAR<float>                scale;
     PHLANIMVAR<Vector2D>             viewOffset;
+    PHLANIMVAR<float>                workspaceInsertProgress;
+    PHLANIMVAR<float>                workspaceInsertFadeProgress;
+    SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceInsertFadeConfig;
+    SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceRemoveFadeConfig;
     Time::steady_tp                  lastRealtimePreviewFrame = {};
     Time::steady_tp                  realtimePreviewTimerDue = {};
     wl_event_source*                 realtimePreviewTimer = nullptr;
