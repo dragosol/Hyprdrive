@@ -96,3 +96,7 @@ off | hides the overview
 disable | same as `off`
 on | displays the overview
 enable | same as `on`
+
+### Supported plugins
+
+- `hyprbars`
