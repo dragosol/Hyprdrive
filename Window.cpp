@@ -266,13 +266,9 @@ static bool shouldOverviewShadowIncludeHyprbar(const PHLWINDOW& window) {
     return *PHYPRBARPARTOFWINDOW && getOverviewHyprbarLogicalHeight(window) > 0.F;
 }
 
-static bool shouldOverviewHyprbarPrecedeBorder(const PHLWINDOW& window) {
+static bool shouldOverviewBorderIncludeHyprbar(const PHLWINDOW& window) {
     static auto PHYPRBARPRECEDENCEOVERBORDER = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_precedence_over_border");
     return *PHYPRBARPRECEDENCEOVERBORDER && getOverviewHyprbarLogicalHeight(window) > 0.F;
-}
-
-static bool shouldOverviewBorderIncludeHyprbar(const PHLWINDOW& window) {
-    return shouldOverviewHyprbarPrecedeBorder(window);
 }
 
 static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const PHLWINDOW& window, float renderScale) {
@@ -296,7 +292,7 @@ static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const
     metrics.hyprbarLogicalHeight    = getOverviewHyprbarLogicalHeight(window);
     metrics.shadowIncludesHyprbar   = shouldOverviewShadowIncludeHyprbar(window);
     metrics.borderIncludesHyprbar   = shouldOverviewBorderIncludeHyprbar(window);
-    metrics.hyprbarHeightPx         = metrics.shadowIncludesHyprbar ? sc<int>(std::round(metrics.hyprbarLogicalHeight * metrics.pxScale)) : 0;
+    metrics.hyprbarHeightPx         = sc<int>(std::round(metrics.hyprbarLogicalHeight * metrics.pxScale));
     metrics.hyprbarHeightPxScaled   = metrics.hyprbarLogicalHeight * metrics.pxScale;
     metrics.hyprbarTopOffsetLogical = metrics.hyprbarLogicalHeight > 0.F ? metrics.hyprbarLogicalHeight + metrics.borderSize : 0.F;
 
@@ -313,13 +309,134 @@ static std::optional<SDecorationPositioningReply> getOverviewTopStickyDecoration
 
     const float HEIGHT  = std::max(0.F, sc<float>(INFO.desiredExtents.topLeft.y));
     const float BORDER  = sc<float>(window->getRealBorderSize());
-    const bool  PRECEDE = shouldOverviewHyprbarPrecedeBorder(window);
+    const bool  PRECEDE = shouldOverviewBorderIncludeHyprbar(window);
     const float WIDTH   = PRECEDE ? window->m_realSize->value().x : window->m_realSize->value().x + BORDER * 2.F;
     const float YOFFSET = PRECEDE ? 0.F : BORDER;
 
     return SDecorationPositioningReply{
         .assignedGeometry = CBox{{-WIDTH / 2.F, -HEIGHT - YOFFSET}, {WIDTH, HEIGHT}},
     };
+}
+
+static CBox getOverviewOuterBorderBox(const CBox& windowBox, const SOverviewWindowMetrics& metrics) {
+    CBox box = windowBox.copy().expand(metrics.borderPx);
+    if (metrics.shadowIncludesHyprbar && metrics.hyprbarHeightPx > 0) {
+        box.y -= metrics.hyprbarHeightPx;
+        box.height += metrics.hyprbarHeightPx;
+    }
+
+    return box;
+}
+
+static CBox getOverviewBorderBox(const CBox& windowBox, const SOverviewWindowMetrics& metrics) {
+    CBox box = windowBox;
+    if (metrics.borderIncludesHyprbar && metrics.hyprbarHeightPx > 0) {
+        box.y -= metrics.hyprbarHeightPx;
+        box.height += metrics.hyprbarHeightPx;
+    }
+
+    return box;
+}
+
+static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState& state, PHLMONITOR monitor, const PHLWINDOW& window, IHyprWindowDecoration* decoration,
+                                            const CBox& windowBox, const SOverviewWindowMetrics& metrics) {
+    if (!monitor || !window || !decoration)
+        return;
+
+    static auto PHYPRBARHEIGHT        = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_height");
+    static auto PHYPRBARTEXTSIZE      = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_text_size");
+    static auto PHYPRBARPADDING       = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_padding");
+    static auto PHYPRBARBUTTONPADDING = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_button_padding");
+    auto* const HYPRBARGLOBALSTATE    = getOverviewHyprbarGlobalState();
+
+    const int previousBarHeight        = *PHYPRBARHEIGHT.ptr();
+    const int previousBarTextSize      = *PHYPRBARTEXTSIZE.ptr();
+    const int previousBarPadding       = *PHYPRBARPADDING.ptr();
+    const int previousBarButtonPadding = *PHYPRBARBUTTONPADDING.ptr();
+    std::vector<float> previousButtonSizes;
+    if (HYPRBARGLOBALSTATE) {
+        previousButtonSizes.reserve(HYPRBARGLOBALSTATE->buttons.size());
+        for (auto& button : HYPRBARGLOBALSTATE->buttons) {
+            previousButtonSizes.push_back(button.size);
+            button.size *= metrics.renderScale;
+            if (button.iconTex && button.iconTex->m_texID != 0)
+                button.iconTex->destroyTexture();
+        }
+    }
+
+    const Vector2D previousWindowPos       = window->m_realPosition->value();
+    const Vector2D previousWindowSize      = window->m_realSize->value();
+    const auto     WORKSPACE               = window->m_workspace;
+    const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !window->m_pinned;
+    const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
+    const auto     previousReplyData       = g_pDecorationPositioner->getDataFor(decoration, window);
+    const auto     previousReply           = previousReplyData ? previousReplyData->lastReply : SDecorationPositioningReply{};
+
+    window->m_realPosition->value() = monitor->m_position + windowBox.pos() / monitor->m_scale - window->m_floatingOffset;
+    window->m_realSize->value()     = windowBox.size() / monitor->m_scale;
+
+    *PHYPRBARHEIGHT.ptr()        = std::max(1, sc<int>(std::round(previousBarHeight * metrics.renderScale)));
+    *PHYPRBARTEXTSIZE.ptr()      = std::max(1, sc<int>(std::round(previousBarTextSize * metrics.renderScale)));
+    *PHYPRBARPADDING.ptr()       = std::max(0, sc<int>(std::round(previousBarPadding * metrics.renderScale)));
+    *PHYPRBARBUTTONPADDING.ptr() = std::max(0, sc<int>(std::round(previousBarButtonPadding * metrics.renderScale)));
+
+    const auto REPLY = getOverviewTopStickyDecorationReply(decoration, window);
+    if (!REPLY) {
+        window->m_realPosition->value() = previousWindowPos;
+        window->m_realSize->value()     = previousWindowSize;
+        *PHYPRBARHEIGHT.ptr()           = previousBarHeight;
+        *PHYPRBARTEXTSIZE.ptr()         = previousBarTextSize;
+        *PHYPRBARPADDING.ptr()          = previousBarPadding;
+        *PHYPRBARBUTTONPADDING.ptr()    = previousBarButtonPadding;
+        if (HYPRBARGLOBALSTATE) {
+            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i) {
+                HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
+                if (HYPRBARGLOBALSTATE->buttons[i].iconTex && HYPRBARGLOBALSTATE->buttons[i].iconTex->m_texID != 0)
+                    HYPRBARGLOBALSTATE->buttons[i].iconTex->destroyTexture();
+            }
+        }
+        return;
+    }
+
+    if (OVERRIDEWORKSPACEOFFSET)
+        WORKSPACE->m_renderOffset->value() = {};
+
+    if (previousReplyData)
+        previousReplyData->lastReply = *REPLY;
+    decoration->onPositioningReply(*REPLY);
+    decoration->draw(monitor, metrics.targetOpacity);
+
+    state.queuedAny = true;
+    state.restoreFns.emplace_back([window, decoration, WORKSPACE, OVERRIDEWORKSPACEOFFSET, previousWindowPos, previousWindowSize, previousWorkspaceOffset, previousReply,
+                                   previousReplyData, previousBarHeight, previousBarTextSize, previousBarPadding, previousBarButtonPadding, previousButtonSizes] {
+        if (!window || !decoration)
+            return;
+
+        window->m_realPosition->value() = previousWindowPos;
+        window->m_realSize->value()     = previousWindowSize;
+        if (OVERRIDEWORKSPACEOFFSET && WORKSPACE)
+            WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
+
+        if (previousReplyData)
+            previousReplyData->lastReply = previousReply;
+        decoration->onPositioningReply(previousReply);
+
+        static auto PHYPRBARHEIGHT        = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_height");
+        static auto PHYPRBARTEXTSIZE      = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_text_size");
+        static auto PHYPRBARPADDING       = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_padding");
+        static auto PHYPRBARBUTTONPADDING = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_button_padding");
+        *PHYPRBARHEIGHT.ptr()             = previousBarHeight;
+        *PHYPRBARTEXTSIZE.ptr()           = previousBarTextSize;
+        *PHYPRBARPADDING.ptr()            = previousBarPadding;
+        *PHYPRBARBUTTONPADDING.ptr()      = previousBarButtonPadding;
+        if (auto* const HYPRBARGLOBALSTATE = getOverviewHyprbarGlobalState()) {
+            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i) {
+                HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
+                if (HYPRBARGLOBALSTATE->buttons[i].iconTex && HYPRBARGLOBALSTATE->buttons[i].iconTex->m_texID != 0)
+                    HYPRBARGLOBALSTATE->buttons[i].iconTex->destroyTexture();
+            }
+        }
+    });
 }
 
 static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const SOverviewWindowMetrics& metrics, bool selected) {
@@ -349,11 +466,7 @@ static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& wind
     if (rangePx <= 0)
         return;
 
-    CBox outerBorderBox = windowBox.copy().expand(metrics.borderPx);
-    if (metrics.hyprbarHeightPx > 0) {
-        outerBorderBox.y -= metrics.hyprbarHeightPx;
-        outerBorderBox.height += metrics.hyprbarHeightPx;
-    }
+    CBox outerBorderBox = getOverviewOuterBorderBox(windowBox, metrics);
     CBox shadowBox = outerBorderBox.copy().expand(rangePx).scaleFromCenter(shadowScale).translate(shadowOffset);
     shadowBox.round();
 
@@ -392,12 +505,7 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
 
     const auto& grad             = selected ? window->m_ruleApplicator->activeBorderColor().valueOr(*ACTIVECOL) : window->m_ruleApplicator->inactiveBorderColor().valueOr(*INACTIVECOL);
 
-    CBox borderBox = windowBox;
-    if (metrics.borderIncludesHyprbar) {
-        const auto hyprbarHeightPx = sc<int>(std::round(metrics.hyprbarLogicalHeight * metrics.pxScale));
-        borderBox.y -= hyprbarHeightPx;
-        borderBox.height += hyprbarHeightPx;
-    }
+    const CBox borderBox = getOverviewBorderBox(windowBox, metrics);
 
     CBorderPassElement::SBorderData data;
     data.box           = borderBox;
@@ -549,100 +657,7 @@ static SOverviewCustomDecorationRenderState renderOverviewCustomDecorations(PHLM
             continue;
 
         if (layer == DECORATION_LAYER_UNDER && isOverviewHyprbarDecoration(deco.get())) {
-            static auto PHYPRBARHEIGHT        = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_height");
-            static auto PHYPRBARTEXTSIZE      = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_text_size");
-            static auto PHYPRBARPADDING       = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_padding");
-            static auto PHYPRBARBUTTONPADDING = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_button_padding");
-            auto* const HYPRBARGLOBALSTATE    = getOverviewHyprbarGlobalState();
-
-            const int previousBarHeight        = *PHYPRBARHEIGHT.ptr();
-            const int previousBarTextSize      = *PHYPRBARTEXTSIZE.ptr();
-            const int previousBarPadding       = *PHYPRBARPADDING.ptr();
-            const int previousBarButtonPadding = *PHYPRBARBUTTONPADDING.ptr();
-            std::vector<float> previousButtonSizes;
-            if (HYPRBARGLOBALSTATE) {
-                previousButtonSizes.reserve(HYPRBARGLOBALSTATE->buttons.size());
-                for (auto& button : HYPRBARGLOBALSTATE->buttons) {
-                    previousButtonSizes.push_back(button.size);
-                    button.size *= metrics.renderScale;
-                    if (button.iconTex && button.iconTex->m_texID != 0)
-                        button.iconTex->destroyTexture();
-                }
-            }
-
-            const Vector2D previousWindowPos         = window->m_realPosition->value();
-            const Vector2D previousWindowSize        = window->m_realSize->value();
-            const auto     WORKSPACE                 = window->m_workspace;
-            const bool     OVERRIDEWORKSPACEOFFSET   = WORKSPACE && !window->m_pinned;
-            const Vector2D previousWorkspaceOffset   = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
-            const auto     previousReplyData         = g_pDecorationPositioner->getDataFor(deco.get(), window);
-            const auto     previousReply             = previousReplyData ? previousReplyData->lastReply : SDecorationPositioningReply{};
-
-            window->m_realPosition->value() = monitor->m_position + windowBox.pos() / monitor->m_scale - window->m_floatingOffset;
-            window->m_realSize->value()     = windowBox.size() / monitor->m_scale;
-
-            *PHYPRBARHEIGHT.ptr()        = std::max(1, sc<int>(std::round(previousBarHeight * metrics.renderScale)));
-            *PHYPRBARTEXTSIZE.ptr()      = std::max(1, sc<int>(std::round(previousBarTextSize * metrics.renderScale)));
-            *PHYPRBARPADDING.ptr()       = std::max(0, sc<int>(std::round(previousBarPadding * metrics.renderScale)));
-            *PHYPRBARBUTTONPADDING.ptr() = std::max(0, sc<int>(std::round(previousBarButtonPadding * metrics.renderScale)));
-
-            const auto REPLY = getOverviewTopStickyDecorationReply(deco.get(), window);
-            if (!REPLY) {
-                window->m_realPosition->value() = previousWindowPos;
-                window->m_realSize->value()     = previousWindowSize;
-                *PHYPRBARHEIGHT.ptr()        = previousBarHeight;
-                *PHYPRBARTEXTSIZE.ptr()      = previousBarTextSize;
-                *PHYPRBARPADDING.ptr()       = previousBarPadding;
-                *PHYPRBARBUTTONPADDING.ptr() = previousBarButtonPadding;
-                if (HYPRBARGLOBALSTATE) {
-                    for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i) {
-                        HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
-                        if (HYPRBARGLOBALSTATE->buttons[i].iconTex && HYPRBARGLOBALSTATE->buttons[i].iconTex->m_texID != 0)
-                            HYPRBARGLOBALSTATE->buttons[i].iconTex->destroyTexture();
-                    }
-                }
-                continue;
-            }
-
-            if (OVERRIDEWORKSPACEOFFSET)
-                WORKSPACE->m_renderOffset->value() = {};
-
-            if (previousReplyData)
-                previousReplyData->lastReply = *REPLY;
-            deco->onPositioningReply(*REPLY);
-            deco->draw(monitor, metrics.targetOpacity);
-
-            state.queuedAny = true;
-            state.restoreFns.emplace_back([window, deco = deco.get(), WORKSPACE, OVERRIDEWORKSPACEOFFSET, previousWindowPos, previousWindowSize, previousWorkspaceOffset, previousReply,
-                                           previousReplyData, previousBarHeight, previousBarTextSize, previousBarPadding, previousBarButtonPadding, previousButtonSizes] {
-                if (!window || !deco)
-                    return;
-
-                window->m_realPosition->value() = previousWindowPos;
-                window->m_realSize->value()     = previousWindowSize;
-                if (OVERRIDEWORKSPACEOFFSET && WORKSPACE)
-                    WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
-
-                if (previousReplyData)
-                    previousReplyData->lastReply = previousReply;
-                deco->onPositioningReply(previousReply);
-
-                static auto PHYPRBARHEIGHT        = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_height");
-                static auto PHYPRBARTEXTSIZE      = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_text_size");
-                static auto PHYPRBARPADDING       = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_padding");
-                static auto PHYPRBARBUTTONPADDING = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_button_padding");
-                *PHYPRBARHEIGHT.ptr()        = previousBarHeight;
-                *PHYPRBARTEXTSIZE.ptr()      = previousBarTextSize;
-                *PHYPRBARPADDING.ptr()       = previousBarPadding;
-                *PHYPRBARBUTTONPADDING.ptr() = previousBarButtonPadding;
-                if (auto* const HYPRBARGLOBALSTATE = getOverviewHyprbarGlobalState()) {
-                    for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i) {
-                        HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
-                        if (HYPRBARGLOBALSTATE->buttons[i].iconTex && HYPRBARGLOBALSTATE->buttons[i].iconTex->m_texID != 0)
-                            HYPRBARGLOBALSTATE->buttons[i].iconTex->destroyTexture();
-                    }
-                }
-            });
+            renderOverviewHyprbarDecoration(state, monitor, window, deco.get(), windowBox, metrics);
             continue;
         }
 
