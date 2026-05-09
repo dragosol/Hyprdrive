@@ -262,13 +262,21 @@ static float getOverviewHyprbarLogicalHeight(const PHLWINDOW& window) {
 }
 
 static bool shouldOverviewShadowIncludeHyprbar(const PHLWINDOW& window) {
+    const float hyprbarHeight = getOverviewHyprbarLogicalHeight(window);
+    if (hyprbarHeight <= 0.F)
+        return false;
+
     static auto PHYPRBARPARTOFWINDOW = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_part_of_window");
-    return *PHYPRBARPARTOFWINDOW && getOverviewHyprbarLogicalHeight(window) > 0.F;
+    return *PHYPRBARPARTOFWINDOW;
 }
 
 static bool shouldOverviewBorderIncludeHyprbar(const PHLWINDOW& window) {
+    const float hyprbarHeight = getOverviewHyprbarLogicalHeight(window);
+    if (hyprbarHeight <= 0.F)
+        return false;
+
     static auto PHYPRBARPRECEDENCEOVERBORDER = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_precedence_over_border");
-    return *PHYPRBARPRECEDENCEOVERBORDER && getOverviewHyprbarLogicalHeight(window) > 0.F;
+    return *PHYPRBARPRECEDENCEOVERBORDER;
 }
 
 static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const PHLWINDOW& window, float renderScale) {
