@@ -7,7 +7,7 @@ commit_pins = [
 ]
 
 [scrolloverview]
-description = "A scrollable overview plugin for Hyprland."
+description = "A scrollable overview plugin for Hyprland with optional hyprbars integration."
 authors = ["yayuuu"]
 output = "scrolloverview.so"
 build = [
