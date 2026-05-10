@@ -3,7 +3,7 @@ name = "hyprland-scroll-overview"
 authors = ["yayuuu"]
 commit_pins = [
     # Hyprland                                  hyprland-scroll-overview
-    ["521ece463c4a9d3d128670688a34756805a4328f", "ef78962d90b088df7c7206ff60e3b875a6a3b71e"], # v0.54.3
+    ["521ece463c4a9d3d128670688a34756805a4328f", "e35c31c73fe36af05e75b7ff530b5ede422f75a9"], # v0.54.3
 ]
 
 [scrolloverview]
