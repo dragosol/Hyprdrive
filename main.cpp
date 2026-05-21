@@ -223,21 +223,25 @@ static void failNotif(const std::string& reason) {
 }
 
 // Helper function to find a function by name and ensure it contains a specific substring in its demangled name (to disambiguate overloads).
-static void* findFnOrThrow(const std::string& name, std::string_view mustContainDemangled) {
+static void* findFnOrThrowAny(const std::string& name, std::initializer_list<std::string_view> demangledNeedles) {
     auto fns = HyprlandAPI::findFunctionsByName(SCROLLOVERVIEW_HANDLE, name);
     if (fns.empty()) {
         failNotif(std::format("no fns for hook {}", name));
         throw std::runtime_error(std::format("[scrolloverview] No fns for hook {}", name));
     }
 
-    if (mustContainDemangled.empty())
+    if (demangledNeedles.size() == 0 || (demangledNeedles.size() == 1 && demangledNeedles.begin()->empty()))
         return fns[0].address;
 
     std::vector<SFunctionMatch> matches;
     matches.reserve(fns.size());
     for (const auto& fn : fns) {
-        if (fn.demangled.find(mustContainDemangled) != std::string::npos)
-            matches.push_back(fn);
+        for (const auto& needle : demangledNeedles) {
+            if (needle.empty() || fn.demangled.find(needle) != std::string::npos) {
+                matches.push_back(fn);
+                break;
+            }
+        }
     }
 
     if (matches.empty()) {
@@ -251,6 +255,10 @@ static void* findFnOrThrow(const std::string& name, std::string_view mustContain
     }
 
     return matches[0].address;
+}
+
+static void* findFnOrThrow(const std::string& name, std::string_view mustContainDemangled) {
+    return findFnOrThrowAny(name, {mustContainDemangled});
 }
 
 static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char* RHS) {
@@ -339,7 +347,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pScrollRenderWorkspaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("renderWorkspace", "CHyprRenderer::renderWorkspace("),
+        findFnOrThrowAny("renderWorkspace", {"CHyprRenderer::renderWorkspace(", "IHyprRenderer::renderWorkspace("}),
         (void*)hkRenderWorkspace);
 
     g_pScrollScheduleFrameHook = HyprlandAPI::createFunctionHook(
@@ -349,12 +357,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pScrollDamageSurfaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("damageSurface", "CHyprRenderer::damageSurface("),
+        findFnOrThrowAny("damageSurface", {"CHyprRenderer::damageSurface(", "IHyprRenderer::damageSurface("}),
         (void*)hkDamageSurface);
 
     g_pScrollSendFrameEventsHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("sendFrameEventsToWorkspace", "CHyprRenderer::sendFrameEventsToWorkspace("),
+        findFnOrThrowAny("sendFrameEventsToWorkspace", {"CHyprRenderer::sendFrameEventsToWorkspace(", "IHyprRenderer::sendFrameEventsToWorkspace("}),
         (void*)hkSendFrameEventsToWorkspace);
 
     g_pScrollSurfaceFrameHook = HyprlandAPI::createFunctionHook(
@@ -390,7 +398,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:enabled", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:range", Hyprlang::INT{-1});
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:render_power", Hyprlang::INT{-1});
-    HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:ignore_window", Hyprlang::INT{-1});
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:color", Hyprlang::INT{-1});
 
     HyprlandAPI::reloadConfig();
@@ -405,5 +412,5 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pScrollOverview.reset();
     disableScrollOverviewHooks();
 
-    g_pConfigManager->reload(); // we need to reload now to clear all the gestures
+    HyprlandAPI::reloadConfig(); // we need to reload now to clear all the gestures
 }

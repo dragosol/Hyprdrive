@@ -7,7 +7,10 @@ class CScrollOverviewPassElement : public IPassElement {
     CScrollOverviewPassElement();
     virtual ~CScrollOverviewPassElement() = default;
 
-    virtual void                draw(const CRegion& damage);
+    virtual std::vector<UP<IPassElement>> draw();
+    virtual ePassElementType              type() {
+        return EK_CUSTOM;
+    }
     virtual bool                needsLiveBlur();
     virtual bool                needsPrecomputeBlur();
     virtual std::optional<CBox> boundingBox();
@@ -31,13 +34,15 @@ class COverviewShadowPassElement : public IPassElement {
         CHyprColor    color;
         float         alpha        = 1.F;
         bool          ignoreWindow = true;
-        bool          sharp        = false;
     };
 
     COverviewShadowPassElement(const SData& data_);
     virtual ~COverviewShadowPassElement() = default;
 
-    virtual void                draw(const CRegion& damage);
+    virtual std::vector<UP<IPassElement>> draw();
+    virtual ePassElementType              type() {
+        return EK_CUSTOM;
+    }
     virtual bool                needsLiveBlur();
     virtual bool                needsPrecomputeBlur();
     virtual std::optional<CBox> boundingBox();

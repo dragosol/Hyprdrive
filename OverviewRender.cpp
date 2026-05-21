@@ -2,11 +2,8 @@
 #include <chrono>
 #include <cmath>
 #include <sstream>
-#define private public
 #include <hyprland/src/render/Renderer.hpp>
-#include <hyprland/src/render/OpenGL.hpp>
-#include <hyprland/src/helpers/math/Math.hpp>
-#undef private
+#include <hyprland/src/render/pass/RectPassElement.hpp>
 
 namespace OverviewRender {
 
@@ -18,58 +15,30 @@ void flushPass(PHLMONITOR monitor) {
     g_pHyprRenderer->m_renderPass.clear();
 }
 
-void renderBlur(PHLMONITOR monitor, const CBox& windowBox, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur) {
-    if (!monitor || alpha <= 0.F)
+void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur) {
+    if (alpha <= 0.F)
         return;
 
-    CRegion blurDamage{windowBox};
-    if (blurDamage.empty())
+    if (box.empty())
         return;
 
-    CRegion drawDamage{CBox{{}, monitor->m_transformedSize}};
+    CRectPassElement::SRectData data;
+    data.box           = box;
+    data.color         = CHyprColor{0.F, 0.F, 0.F, 0.F};
+    data.round         = rounding;
+    data.roundingPower = roundingPower;
+    data.blur          = true;
+    data.blurA         = alpha;
+    data.xray          = usePrecomputedBlur;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(data));
+}
 
-    auto* const SAVEDFB            = g_pHyprOpenGL->m_renderData.currentFB;
-    CFramebuffer* const BLURREDFB = usePrecomputedBlur && g_pHyprOpenGL->m_renderData.pCurrentMonData ? &g_pHyprOpenGL->m_renderData.pCurrentMonData->blurFB :
-                                                                                                          g_pHyprOpenGL->blurMainFramebufferWithDamage(alpha, &blurDamage);
-
-    if (SAVEDFB)
-        SAVEDFB->bind();
-
-    if (!BLURREDFB)
+void renderBlur(PHLMONITOR monitor, const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur) {
+    if (!monitor)
         return;
 
-    const auto BLURREDTEXTURE = BLURREDFB->getTexture();
-    if (!BLURREDTEXTURE)
-        return;
-
-    CBox transformedBox = windowBox;
-    transformedBox.transform(Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform)), monitor->m_transformedSize.x, monitor->m_transformedSize.y);
-
-    const CBox monitorSpaceBox = {transformedBox.pos().x / monitor->m_pixelSize.x * monitor->m_transformedSize.x,
-                                  transformedBox.pos().y / monitor->m_pixelSize.y * monitor->m_transformedSize.y,
-                                  transformedBox.width / monitor->m_pixelSize.x * monitor->m_transformedSize.x,
-                                  transformedBox.height / monitor->m_pixelSize.y * monitor->m_transformedSize.y};
-
-    CHyprOpenGLImpl::STextureRenderData renderData;
-    renderData.damage                               = &drawDamage;
-    renderData.a                                    = alpha;
-    renderData.round                                = rounding;
-    renderData.roundingPower                        = roundingPower;
-    renderData.allowCustomUV                        = true;
-    renderData.allowDim                             = false;
-
-    g_pHyprOpenGL->pushMonitorTransformEnabled(true);
-    const auto SAVEDRENDERMODIF                     = g_pHyprOpenGL->m_renderData.renderModif;
-    const auto SAVEDUVTOPLEFT                       = g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft;
-    const auto SAVEDUVBOTTOMRIGHT                   = g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight;
-    g_pHyprOpenGL->m_renderData.renderModif         = {};
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft     = monitorSpaceBox.pos() / monitor->m_transformedSize;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = (monitorSpaceBox.pos() + monitorSpaceBox.size()) / monitor->m_transformedSize;
-    g_pHyprOpenGL->renderTexture(BLURREDTEXTURE, windowBox, renderData);
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVTopLeft     = SAVEDUVTOPLEFT;
-    g_pHyprOpenGL->m_renderData.primarySurfaceUVBottomRight = SAVEDUVBOTTOMRIGHT;
-    g_pHyprOpenGL->m_renderData.renderModif                 = SAVEDRENDERMODIF;
-    g_pHyprOpenGL->popMonitorTransformEnabled();
+    queueBlur(box, rounding, roundingPower, alpha, usePrecomputedBlur);
+    flushPass(monitor);
 }
 
 }

@@ -14,8 +14,11 @@
 #include <utility>
 #include <vector>
 #define private public
+#define protected public
+#include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/helpers/math/Math.hpp>
+#undef protected
 #undef private
 #include <hyprutils/utils/ScopeGuard.hpp>
 #include "IOverview.hpp"
@@ -87,8 +90,9 @@ CScrollOverviewPassElement::CScrollOverviewPassElement() {
     ;
 }
 
-void CScrollOverviewPassElement::draw(const CRegion& damage) {
+std::vector<UP<IPassElement>> CScrollOverviewPassElement::draw() {
     g_pScrollOverview->fullRender();
+    return {};
 }
 
 bool CScrollOverviewPassElement::needsLiveBlur() {
@@ -117,38 +121,53 @@ COverviewShadowPassElement::COverviewShadowPassElement(const SData& data_) : dat
     ;
 }
 
-void COverviewShadowPassElement::draw(const CRegion& damage) {
-    if (!data.monitor || data.fullBox.width < 1 || data.fullBox.height < 1 || data.range <= 0 || data.color.a == 0.F || data.alpha <= 0.F)
-        return;
+std::vector<UP<IPassElement>> COverviewShadowPassElement::draw() {
+    const auto MONITOR = data.monitor.lock();
+    if (!MONITOR || data.fullBox.width < 1 || data.fullBox.height < 1 || data.range <= 0 || data.color.a == 0.F || data.alpha <= 0.F)
+        return {};
 
-    CRegion shadowDamage = damage.copy().intersect(data.fullBox);
+    CRegion shadowDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.fullBox);
     if (data.ignoreWindow)
         shadowDamage.subtract(roundedRectRegion(data.cutoutBox, data.rounding + 1, data.roundingPower));
 
     if (shadowDamage.empty())
-        return;
+        return {};
 
-    const auto SAVEDDAMAGE = g_pHyprOpenGL->m_renderData.damage;
-    g_pHyprOpenGL->m_renderData.damage = shadowDamage;
-    auto restoreDamage = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprOpenGL->m_renderData.damage = SAVEDDAMAGE; });
-
-    auto color = data.color;
-    color.a *= data.alpha;
-
-    static auto* const* PGLOBALRENDERPOWER = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:render_power")->getDataStaticPtr();
-
-    const auto PREVRENDERPOWER = data.renderPower > 0 ? std::optional<int>(**PGLOBALRENDERPOWER) : std::nullopt;
-    if (data.renderPower > 0)
-        **PGLOBALRENDERPOWER = data.renderPower;
-    auto restoreRenderPower = Hyprutils::Utils::CScopeGuard([PREVRENDERPOWER] {
-        if (PREVRENDERPOWER)
-            **PGLOBALRENDERPOWER = *PREVRENDERPOWER;
+    const auto SAVEDDAMAGE       = g_pHyprRenderer->m_renderData.damage;
+    const auto SAVEDCURRENTWINDOW = g_pHyprRenderer->m_renderData.currentWindow;
+    g_pHyprRenderer->m_renderData.damage = shadowDamage;
+    g_pHyprRenderer->m_renderData.currentWindow.reset();
+    auto restoreRenderData = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE, SAVEDCURRENTWINDOW] {
+        g_pHyprRenderer->m_renderData.damage        = SAVEDDAMAGE;
+        g_pHyprRenderer->m_renderData.currentWindow = SAVEDCURRENTWINDOW;
     });
 
-    if (data.sharp)
-        g_pHyprOpenGL->renderRect(data.fullBox, color, {.damage = &shadowDamage, .round = data.rounding, .roundingPower = data.roundingPower});
-    else
-        g_pHyprOpenGL->renderRoundedShadow(data.fullBox, data.rounding, data.roundingPower, data.range, color, 1.F);
+    auto color = data.color;
+    color.a *= std::clamp(data.alpha, 0.F, 1.F);
+
+    std::optional<Hyprlang::INT> previousRenderPower;
+    if (data.renderPower > 0) {
+        if (const auto VALUE = HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:render_power")) {
+            if (const auto DATA = reinterpret_cast<Hyprlang::INT* const*>(VALUE->getDataStaticPtr()); DATA && *DATA) {
+                previousRenderPower = **DATA;
+                **DATA              = data.renderPower;
+            }
+        }
+    }
+
+    auto restoreRenderPower = Hyprutils::Utils::CScopeGuard([previousRenderPower] {
+        if (!previousRenderPower)
+            return;
+
+        if (const auto VALUE = HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:render_power")) {
+            if (const auto DATA = reinterpret_cast<Hyprlang::INT* const*>(VALUE->getDataStaticPtr()); DATA && *DATA)
+                **DATA = *previousRenderPower;
+        }
+    });
+
+    Render::GL::g_pHyprOpenGL->renderRoundedShadow(data.fullBox, data.rounding, data.roundingPower, data.range, color, 1.F);
+
+    return {};
 }
 
 bool COverviewShadowPassElement::needsLiveBlur() {
