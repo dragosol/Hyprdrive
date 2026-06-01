@@ -56,12 +56,12 @@ struct SOverviewCustomDecorationRenderState {
 };
 
 struct SHyprbarButtonMirror {
-    std::string  cmd     = "";
-    bool         userfg  = false;
-    CHyprColor   fgcol   = CHyprColor(0, 0, 0, 0);
-    CHyprColor   bgcol   = CHyprColor(0, 0, 0, 0);
-    float        size    = 10.F;
-    std::string  icon    = "";
+    std::string         cmd     = "";
+    bool                userfg  = false;
+    CHyprColor          fgcol   = CHyprColor(0, 0, 0, 0);
+    CHyprColor          bgcol   = CHyprColor(0, 0, 0, 0);
+    float               size    = 10.F;
+    std::string         icon    = "";
     SP<Render::ITexture> iconTex;
 };
 
@@ -207,12 +207,25 @@ static float getOverviewHyprbarLogicalHeight(const PHLWINDOW& window) {
     return 0.F;
 }
 
-static bool shouldOverviewShadowIncludeHyprbar(const PHLWINDOW& window) {
-    return false;
+static bool shouldOverviewBorderIncludeHyprbar(const PHLWINDOW& window) {
+    const float hyprbarHeight = getOverviewHyprbarLogicalHeight(window);
+    if (hyprbarHeight <= 0.F)
+        return false;
+
+    static auto PHYPRBARPRECEDENCEOVERBORDER = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_precedence_over_border");
+    return *PHYPRBARPRECEDENCEOVERBORDER;
 }
 
-static bool shouldOverviewBorderIncludeHyprbar(const PHLWINDOW& window) {
-    return false;
+static bool shouldOverviewShadowIncludeHyprbar(const PHLWINDOW& window, bool borderIncludesHyprbar) {
+    const float hyprbarHeight = getOverviewHyprbarLogicalHeight(window);
+    if (hyprbarHeight <= 0.F)
+        return false;
+
+    if (borderIncludesHyprbar)
+        return true;
+
+    static auto PHYPRBARPARTOFWINDOW = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_part_of_window");
+    return *PHYPRBARPARTOFWINDOW;
 }
 
 static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const PHLWINDOW& window, float renderScale) {
@@ -234,8 +247,8 @@ static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const
     metrics.roundingPx              = sc<int>(std::round(metrics.roundingBase * metrics.pxScale));
     metrics.outerRoundPx            = sc<int>(std::round(metrics.outerRound * metrics.pxScale));
     metrics.hyprbarLogicalHeight    = getOverviewHyprbarLogicalHeight(window);
-    metrics.shadowIncludesHyprbar   = shouldOverviewShadowIncludeHyprbar(window);
     metrics.borderIncludesHyprbar   = shouldOverviewBorderIncludeHyprbar(window);
+    metrics.shadowIncludesHyprbar   = shouldOverviewShadowIncludeHyprbar(window, metrics.borderIncludesHyprbar);
     metrics.hyprbarHeightPx         = sc<int>(std::round(metrics.hyprbarLogicalHeight * metrics.pxScale));
     metrics.hyprbarHeightPxScaled   = metrics.hyprbarLogicalHeight * metrics.pxScale;
     metrics.hyprbarTopOffsetLogical = metrics.hyprbarLogicalHeight > 0.F ? metrics.hyprbarLogicalHeight + metrics.borderSize : 0.F;
@@ -243,7 +256,7 @@ static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const
     return metrics;
 }
 
-static std::optional<SDecorationPositioningReply> getOverviewTopStickyDecorationReply(IHyprWindowDecoration* decoration, const PHLWINDOW& window) {
+static std::optional<SDecorationPositioningReply> getOverviewTopStickyDecorationReply(IHyprWindowDecoration* decoration, const PHLWINDOW& window, float heightScale = 1.F) {
     if (!decoration || !window)
         return std::nullopt;
 
@@ -251,7 +264,7 @@ static std::optional<SDecorationPositioningReply> getOverviewTopStickyDecoration
     if (INFO.policy != DECORATION_POSITION_STICKY || INFO.edges != DECORATION_EDGE_TOP)
         return std::nullopt;
 
-    const float HEIGHT  = std::max(0.F, sc<float>(INFO.desiredExtents.topLeft.y));
+    const float HEIGHT  = std::max(0.F, sc<float>(INFO.desiredExtents.topLeft.y) * heightScale);
     const float BORDER  = sc<float>(window->getRealBorderSize());
     const bool  PRECEDE = shouldOverviewBorderIncludeHyprbar(window);
     const float WIDTH   = PRECEDE ? window->m_realSize->value().x : window->m_realSize->value().x + BORDER * 2.F;
@@ -272,6 +285,10 @@ static CBox getOverviewOuterBorderBox(const CBox& windowBox, const SOverviewWind
     return box;
 }
 
+static CBox getOverviewShadowCutoutBox(const CBox& windowBox) {
+    return windowBox;
+}
+
 static CBox getOverviewBorderBox(const CBox& windowBox, const SOverviewWindowMetrics& metrics) {
     CBox box = windowBox;
     if (metrics.borderIncludesHyprbar && metrics.hyprbarHeightPx > 0) {
@@ -287,25 +304,23 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
     if (!monitor || !window || !decoration)
         return;
 
-    static auto PHYPRBARHEIGHT        = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_height");
     static auto PHYPRBARTEXTSIZE      = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_text_size");
-    static auto PHYPRBARPADDING       = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_padding");
     static auto PHYPRBARBUTTONPADDING = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_button_padding");
-    auto* const HYPRBARGLOBALSTATE    = getOverviewHyprbarGlobalState();
 
-    const int previousBarHeight        = *PHYPRBARHEIGHT.ptr();
-    const int previousBarTextSize      = *PHYPRBARTEXTSIZE.ptr();
-    const int previousBarPadding       = *PHYPRBARPADDING.ptr();
-    const int previousBarButtonPadding = *PHYPRBARBUTTONPADDING.ptr();
+    auto* const HYPRBARGLOBALSTATE    = getOverviewHyprbarGlobalState();
+    const bool   PARTOFWINDOW         = decoration->getDecorationFlags() & DECORATION_PART_OF_MAIN_WINDOW;
+    const int   previousBarTextSize   = *PHYPRBARTEXTSIZE.ptr();
+    const int   previousButtonPadding = *PHYPRBARBUTTONPADDING.ptr();
     std::vector<float> previousButtonSizes;
     if (HYPRBARGLOBALSTATE) {
         previousButtonSizes.reserve(HYPRBARGLOBALSTATE->buttons.size());
         for (auto& button : HYPRBARGLOBALSTATE->buttons) {
             previousButtonSizes.push_back(button.size);
             button.size *= metrics.renderScale;
-            button.iconTex.reset();
         }
     }
+    *PHYPRBARTEXTSIZE.ptr()      = std::max(1, sc<int>(std::round(previousBarTextSize * metrics.renderScale)));
+    *PHYPRBARBUTTONPADDING.ptr() = std::max(0, sc<int>(std::round(previousButtonPadding * metrics.renderScale)));
 
     const Vector2D previousWindowPos       = window->m_realPosition->value();
     const Vector2D previousWindowSize      = window->m_realSize->value();
@@ -314,28 +329,33 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
     const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
     const auto     previousReplyData       = g_pDecorationPositioner->getDataFor(decoration, window);
     const auto     previousReply           = previousReplyData ? previousReplyData->lastReply : SDecorationPositioningReply{};
+    const auto     previousRounding        = window->m_ruleApplicator->rounding();
+    const auto     previousBorderSize      = window->m_ruleApplicator->borderSize();
+    const bool     previousBorderCacheDirty = window->m_borderSizeCacheDirty;
+    const int      previousCachedBorderSize = window->m_cachedBorderSize;
+
+    const auto scaledRounding   = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->m_ruleApplicator->rounding().valueOrDefault() * metrics.renderScale)));
+    const auto scaledBorderSize = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->getRealBorderSize() * metrics.renderScale)));
+    window->m_ruleApplicator->rounding().set(scaledRounding, Desktop::Types::PRIORITY_SET_PROP);
+    window->m_ruleApplicator->borderSize().set(scaledBorderSize, Desktop::Types::PRIORITY_SET_PROP);
+    window->m_borderSizeCacheDirty = true;
 
     window->m_realPosition->value() = monitor->m_position + windowBox.pos() / monitor->m_scale - window->m_floatingOffset;
     window->m_realSize->value()     = windowBox.size() / monitor->m_scale;
 
-    *PHYPRBARHEIGHT.ptr()        = std::max(1, sc<int>(std::round(previousBarHeight * metrics.renderScale)));
-    *PHYPRBARTEXTSIZE.ptr()      = std::max(1, sc<int>(std::round(previousBarTextSize * metrics.renderScale)));
-    *PHYPRBARPADDING.ptr()       = std::max(0, sc<int>(std::round(previousBarPadding * metrics.renderScale)));
-    *PHYPRBARBUTTONPADDING.ptr() = std::max(0, sc<int>(std::round(previousBarButtonPadding * metrics.renderScale)));
-
-    const auto REPLY = getOverviewTopStickyDecorationReply(decoration, window);
+    const auto REPLY = getOverviewTopStickyDecorationReply(decoration, window, metrics.renderScale);
     if (!REPLY) {
         window->m_realPosition->value() = previousWindowPos;
         window->m_realSize->value()     = previousWindowSize;
-        *PHYPRBARHEIGHT.ptr()           = previousBarHeight;
         *PHYPRBARTEXTSIZE.ptr()         = previousBarTextSize;
-        *PHYPRBARPADDING.ptr()          = previousBarPadding;
-        *PHYPRBARBUTTONPADDING.ptr()    = previousBarButtonPadding;
+        *PHYPRBARBUTTONPADDING.ptr()    = previousButtonPadding;
+        window->m_ruleApplicator->roundingOverride(previousRounding);
+        window->m_ruleApplicator->borderSizeOverride(previousBorderSize);
+        window->m_borderSizeCacheDirty = previousBorderCacheDirty;
+        window->m_cachedBorderSize     = previousCachedBorderSize;
         if (HYPRBARGLOBALSTATE) {
-            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i) {
+            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i)
                 HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
-                HYPRBARGLOBALSTATE->buttons[i].iconTex.reset();
-            }
         }
         return;
     }
@@ -346,11 +366,13 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
     if (previousReplyData)
         previousReplyData->lastReply = *REPLY;
     decoration->onPositioningReply(*REPLY);
-    decoration->draw(monitor, metrics.targetOpacity);
+
+    decoration->draw(monitor, PARTOFWINDOW ? 1.F : metrics.targetOpacity);
 
     state.queuedAny = true;
     state.restoreFns.emplace_back([window, decoration, WORKSPACE, OVERRIDEWORKSPACEOFFSET, previousWindowPos, previousWindowSize, previousWorkspaceOffset, previousReply,
-                                   previousReplyData, previousBarHeight, previousBarTextSize, previousBarPadding, previousBarButtonPadding, previousButtonSizes] {
+                                   previousReplyData, previousBarTextSize, previousButtonPadding, previousButtonSizes, previousRounding, previousBorderSize,
+                                   previousBorderCacheDirty, previousCachedBorderSize] {
         if (!window || !decoration)
             return;
 
@@ -363,19 +385,17 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
             previousReplyData->lastReply = previousReply;
         decoration->onPositioningReply(previousReply);
 
-        static auto PHYPRBARHEIGHT        = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_height");
         static auto PHYPRBARTEXTSIZE      = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_text_size");
-        static auto PHYPRBARPADDING       = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_padding");
         static auto PHYPRBARBUTTONPADDING = CConfigValue<Hyprlang::INT>("plugin:hyprbars:bar_button_padding");
-        *PHYPRBARHEIGHT.ptr()             = previousBarHeight;
         *PHYPRBARTEXTSIZE.ptr()           = previousBarTextSize;
-        *PHYPRBARPADDING.ptr()            = previousBarPadding;
-        *PHYPRBARBUTTONPADDING.ptr()      = previousBarButtonPadding;
+        *PHYPRBARBUTTONPADDING.ptr()      = previousButtonPadding;
+        window->m_ruleApplicator->roundingOverride(previousRounding);
+        window->m_ruleApplicator->borderSizeOverride(previousBorderSize);
+        window->m_borderSizeCacheDirty = previousBorderCacheDirty;
+        window->m_cachedBorderSize     = previousCachedBorderSize;
         if (auto* const HYPRBARGLOBALSTATE = getOverviewHyprbarGlobalState()) {
-            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i) {
+            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i)
                 HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
-                HYPRBARGLOBALSTATE->buttons[i].iconTex.reset();
-            }
         }
     });
 }
@@ -403,8 +423,9 @@ static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& wind
     if (rangePx <= 0)
         return;
 
-    CBox outerBorderBox = getOverviewOuterBorderBox(windowBox, metrics);
-    CBox shadowBox = outerBorderBox.copy().expand(rangePx).scaleFromCenter(shadowScale).translate(shadowOffset);
+    CBox shadowBaseBox = getOverviewOuterBorderBox(windowBox, metrics);
+    CBox cutoutBox     = getOverviewShadowCutoutBox(windowBox);
+    CBox shadowBox     = shadowBaseBox.copy().expand(rangePx).scaleFromCenter(shadowScale).translate(shadowOffset);
     shadowBox.round();
 
     if (shadowBox.width < 1 || shadowBox.height < 1)
@@ -419,7 +440,7 @@ static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& wind
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
         .monitor       = monitor,
         .fullBox       = shadowBox,
-        .cutoutBox     = outerBorderBox.copy().round(),
+        .cutoutBox     = cutoutBox.round(),
         .rounding      = metrics.outerRoundPx,
         .roundingPower = metrics.roundingPower,
         .range         = rangePx,
@@ -744,8 +765,17 @@ void renderOverviewWindow(const SRenderParams& params) {
 
     const bool                   fullscreen   = params.window->isFullscreen();
     const SOverviewWindowMetrics metrics      = getOverviewWindowMetrics(params.monitor, params.window, params.renderScale);
+
     if (!fullscreen)
         renderOverviewWindowShadow(params.monitor, params.window, params.windowBox, metrics, params.selected);
+
+    const auto underDecos =
+        renderOverviewCustomDecorations(params.monitor, params.window, params.workspaceBox ? *params.workspaceBox : CBox{}, params.windowBox, metrics, DECORATION_LAYER_UNDER);
+    if (underDecos.queuedAny) {
+        OverviewRender::flushPass(params.monitor);
+        for (auto it = underDecos.restoreFns.rbegin(); it != underDecos.restoreFns.rend(); ++it)
+            (*it)();
+    }
 
     const Vector2D previousWindowPos       = params.window->m_realPosition->value();
     const Vector2D previousWindowSize      = params.window->m_realSize->value();
@@ -769,6 +799,9 @@ void renderOverviewWindow(const SRenderParams& params) {
     });
 
     g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
+
+    renderOverviewCustomDecorations(params.monitor, params.window, params.workspaceBox ? *params.workspaceBox : CBox{}, params.windowBox, metrics, DECORATION_LAYER_OVER);
+    renderOverviewCustomDecorations(params.monitor, params.window, params.workspaceBox ? *params.workspaceBox : CBox{}, params.windowBox, metrics, DECORATION_LAYER_OVERLAY);
 
     if (!fullscreen)
         renderOverviewGroupTabIndicators(params.monitor, params.window, params.windowBox, metrics, metrics.targetOpacity);
