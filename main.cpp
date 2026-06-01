@@ -222,22 +222,26 @@ static void failNotif(const std::string& reason) {
     HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE, "[scrolloverview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
-// Helper function to find a function by name and ensure it contains a specific substring in its demangled name (to disambiguate overloads).
-static void* findFnOrThrow(const std::string& name, std::string_view mustContainDemangled) {
+// Helper function to find a function by name and ensure it contains one of the requested substrings in its demangled name (to disambiguate overloads).
+static void* findFnOrThrow(const std::string& name, std::initializer_list<std::string_view> demangledNeedles) {
     auto fns = HyprlandAPI::findFunctionsByName(SCROLLOVERVIEW_HANDLE, name);
     if (fns.empty()) {
         failNotif(std::format("no fns for hook {}", name));
         throw std::runtime_error(std::format("[scrolloverview] No fns for hook {}", name));
     }
 
-    if (mustContainDemangled.empty())
+    if (demangledNeedles.size() == 0 || (demangledNeedles.size() == 1 && demangledNeedles.begin()->empty()))
         return fns[0].address;
 
     std::vector<SFunctionMatch> matches;
     matches.reserve(fns.size());
     for (const auto& fn : fns) {
-        if (fn.demangled.find(mustContainDemangled) != std::string::npos)
-            matches.push_back(fn);
+        for (const auto& needle : demangledNeedles) {
+            if (needle.empty() || fn.demangled.find(needle) != std::string::npos) {
+                matches.push_back(fn);
+                break;
+            }
+        }
     }
 
     if (matches.empty()) {
@@ -339,37 +343,37 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pScrollRenderWorkspaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("renderWorkspace", "CHyprRenderer::renderWorkspace("),
+        findFnOrThrow("renderWorkspace", {"CHyprRenderer::renderWorkspace(", "IHyprRenderer::renderWorkspace("}),
         (void*)hkRenderWorkspace);
 
     g_pScrollScheduleFrameHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE, 
-        findFnOrThrow("scheduleFrameForMonitor", "CCompositor::scheduleFrameForMonitor("),
+        findFnOrThrow("scheduleFrameForMonitor", {"CCompositor::scheduleFrameForMonitor("}),
         (void*)hkScheduleFrameForMonitor);
 
     g_pScrollDamageSurfaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("damageSurface", "CHyprRenderer::damageSurface("),
+        findFnOrThrow("damageSurface", {"CHyprRenderer::damageSurface(", "IHyprRenderer::damageSurface("}),
         (void*)hkDamageSurface);
 
     g_pScrollSendFrameEventsHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("sendFrameEventsToWorkspace", "CHyprRenderer::sendFrameEventsToWorkspace("),
+        findFnOrThrow("sendFrameEventsToWorkspace", {"CHyprRenderer::sendFrameEventsToWorkspace(", "IHyprRenderer::sendFrameEventsToWorkspace("}),
         (void*)hkSendFrameEventsToWorkspace);
 
     g_pScrollSurfaceFrameHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE", ""),
+        findFnOrThrow("_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE", {""}),
         (void*)hkSurfaceFrame);
 
     g_pScrollAddDamageHookB = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("addDamageEPK15pixman_region32", "CMonitor::addDamage"),
+        findFnOrThrow("addDamageEPK15pixman_region32", {"CMonitor::addDamage"}),
         (void*)hkAddDamageB);
 
     g_pScrollAddDamageHookA = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", ""),
+        findFnOrThrow("_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", {""}),
         (void*)hkAddDamageA);
 
     static auto P = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
@@ -390,7 +394,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:enabled", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:range", Hyprlang::INT{-1});
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:render_power", Hyprlang::INT{-1});
-    HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:ignore_window", Hyprlang::INT{-1});
     HyprlandAPI::addConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:color", Hyprlang::INT{-1});
 
     HyprlandAPI::reloadConfig();
@@ -405,5 +408,5 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pScrollOverview.reset();
     disableScrollOverviewHooks();
 
-    g_pConfigManager->reload(); // we need to reload now to clear all the gestures
+    HyprlandAPI::reloadConfig(); // we need to reload now to clear all the gestures
 }

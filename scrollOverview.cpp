@@ -9,10 +9,13 @@
 #include <optional>
 #include <linux/input-event-codes.h>
 #define private public
+#define protected public
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/shared/animation/AnimationTree.hpp>
+#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/animation/AnimationManager.hpp>
 #include <hyprland/src/managers/animation/DesktopAnimationManager.hpp>
@@ -37,16 +40,19 @@
 #include <hyprland/src/helpers/math/Math.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/plugins/PluginSystem.hpp>
-#include <hyprland/src/config/ConfigDataValues.hpp>
 #include <hyprland/src/render/pass/BorderPassElement.hpp>
 #include <hyprland/src/render/pass/Pass.hpp>
+#include <hyprland/src/render/pass/ClearPassElement.hpp>
 #include <hyprland/src/render/pass/PreBlurElement.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
 #include <hyprland/src/render/pass/SurfacePassElement.hpp>
+#include <hyprland/src/render/pass/TexPassElement.hpp>
+#include <hyprland/src/render/types.hpp>
 #include <hyprland/src/render/decorations/CHyprGroupBarDecoration.hpp>
 #include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
+#undef protected
 #undef private
 #include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
@@ -54,10 +60,6 @@
 
 static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) {
     g_pScrollOverview->damage();
-}
-
-static uint32_t getOverviewFramebufferFormat(PHLMONITOR monitor) {
-    return DRM_FORMAT_ARGB8888;
 }
 
 static PHLWINDOW getOverviewFullscreenVisibilityWindow(const PHLWORKSPACE& workspace, const PHLWINDOW& fallback = {});
@@ -201,8 +203,7 @@ static bool windowHasOverviewAnimation(const PHLWINDOW& window) {
     if (!window)
         return false;
 
-    return window->m_realPosition->isBeingAnimated() || window->m_realSize->isBeingAnimated() || window->m_alpha->isBeingAnimated() ||
-        window->m_activeInactiveAlpha->isBeingAnimated() || window->m_movingFromWorkspaceAlpha->isBeingAnimated() || window->m_movingToWorkspaceAlpha->isBeingAnimated() ||
+    return window->m_realPosition->isBeingAnimated() || window->m_realSize->isBeingAnimated() || window->m_alpha.isBeingAnimated() ||
         window->m_borderFadeAnimationProgress->isBeingAnimated() || window->m_borderAngleAnimationProgress->isBeingAnimated() || window->m_dimPercent->isBeingAnimated() ||
         window->m_realShadowColor->isBeingAnimated();
 }
@@ -214,9 +215,17 @@ static bool layerHasOverviewAnimation(const PHLLS& layer) {
     return layer->m_realPosition->isBeingAnimated() || layer->m_realSize->isBeingAnimated() || layer->m_alpha->isBeingAnimated();
 }
 
-static CCssGapData getOverviewWindowHitboxGap() {
-    static auto PGAPSIN = CConfigValue<Hyprlang::CUSTOMTYPE>("general:gaps_in");
-    return *sc<CCssGapData*>((PGAPSIN.ptr())->getData());
+static Config::CCssGapData getOverviewWindowHitboxGap() {
+    static auto* const PGAPSIN = HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "general:gaps_in");
+    if (!PGAPSIN)
+        return {};
+
+    const auto CUSTOM = (Hyprlang::CUSTOMTYPE* const*)(PGAPSIN->getDataStaticPtr());
+    if (!CUSTOM || !*CUSTOM)
+        return {};
+
+    const auto* const GAPS = static_cast<Config::CCssGapData*>((*CUSTOM)->getData());
+    return GAPS ? *GAPS : Config::CCssGapData{};
 }
 
 static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float yoff) {
@@ -521,38 +530,71 @@ static float getOverviewConfiguredScale() {
     return std::clamp(configuredScale, 0.1F, 0.9F);
 }
 
+static Hyprlang::INT getIntConfigValueOr(const std::string& name, Hyprlang::INT fallback) {
+    const auto VALUE = HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, name);
+    if (!VALUE)
+        return fallback;
+
+    const auto DATA = reinterpret_cast<Hyprlang::INT* const*>(VALUE->getDataStaticPtr());
+    if (!DATA || !*DATA)
+        return fallback;
+
+    return **DATA;
+}
+
 struct SOverviewShadowConfig {
     bool       enabled     = false;
     int        range       = 0;
     int        renderPower = 1;
-    bool       ignoreWindow = true;
     CHyprColor color       = CHyprColor{0, 0, 0, 0};
 };
 
 static SOverviewShadowConfig getOverviewShadowConfig() {
-    static auto* const* PENABLED     = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:enabled")->getDataStaticPtr();
-    static auto* const* PRANGE       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:range")->getDataStaticPtr();
-    static auto* const* PRENDERPOWER = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:render_power")->getDataStaticPtr();
-    static auto* const* PIGNORE      = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:ignore_window")->getDataStaticPtr();
-    static auto* const* PCOLOR       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "plugin:scrolloverview:shadow:color")->getDataStaticPtr();
+    const auto enabled     = getIntConfigValueOr("plugin:scrolloverview:shadow:enabled", 0);
+    const auto range       = getIntConfigValueOr("plugin:scrolloverview:shadow:range", -1);
+    const auto renderPower = getIntConfigValueOr("plugin:scrolloverview:shadow:render_power", -1);
+    const auto color       = getIntConfigValueOr("plugin:scrolloverview:shadow:color", -1);
 
-    static auto* const* PGLOBALRANGE       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:range")->getDataStaticPtr();
-    static auto* const* PGLOBALRENDERPOWER = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:render_power")->getDataStaticPtr();
-    static auto* const* PGLOBALIGNORE      = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:ignore_window")->getDataStaticPtr();
-    static auto* const* PGLOBALCOLOR       = (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:color")->getDataStaticPtr();
-
-    const int range       = **PRANGE >= 0 ? **PRANGE : **PGLOBALRANGE;
-    const int renderPower = **PRENDERPOWER >= 0 ? **PRENDERPOWER : **PGLOBALRENDERPOWER;
-    const int ignore      = **PIGNORE >= 0 ? **PIGNORE : **PGLOBALIGNORE;
-    const auto color      = **PCOLOR >= 0 ? **PCOLOR : **PGLOBALCOLOR;
+    const auto globalRange       = getIntConfigValueOr("decoration:shadow:range", 0);
+    const auto globalRenderPower = getIntConfigValueOr("decoration:shadow:render_power", 1);
+    const auto globalColor       = getIntConfigValueOr("decoration:shadow:color", 0);
 
     return {
-        .enabled      = !!**PENABLED,
-        .range        = std::max(0, range),
-        .renderPower  = std::clamp(renderPower, 1, 4),
-        .ignoreWindow = !!ignore,
-        .color        = CHyprColor(color),
+        .enabled      = !!enabled,
+        .range        = sc<int>(std::max(sc<Hyprlang::INT>(0), range >= 0 ? range : globalRange)),
+        .renderPower  = sc<int>(std::clamp(renderPower >= 0 ? renderPower : globalRenderPower, sc<Hyprlang::INT>(1), sc<Hyprlang::INT>(4))),
+        .color        = CHyprColor(color >= 0 ? color : globalColor),
     };
+}
+
+static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F) {
+    if (!monitor)
+        return;
+
+    const auto SHADOW = getOverviewShadowConfig();
+    if (!SHADOW.enabled || SHADOW.range <= 0 || SHADOW.color.a == 0.F || alpha <= 0.F)
+        return;
+
+    const int RANGE = sc<int>(std::round(SHADOW.range * monitor->m_scale * overviewScale));
+    if (RANGE <= 0)
+        return;
+
+    auto baseBox = workspaceBox.copy().round();
+    if (baseBox.width < 1 || baseBox.height < 1)
+        return;
+
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
+        .monitor       = monitor,
+        .fullBox       = baseBox.copy().expand(RANGE).round(),
+        .cutoutBox     = baseBox,
+        .rounding      = 0,
+        .roundingPower = 2.F,
+        .range         = RANGE,
+        .renderPower   = SHADOW.renderPower,
+        .color         = SHADOW.color,
+        .alpha         = alpha,
+        .ignoreWindow  = cutoutCenter,
+    }));
 }
 
 static float getWorkspaceRenderedPitch(PHLMONITOR monitor, float scale) {
@@ -785,12 +827,15 @@ static void moveOverviewTargetNextToWindow(const SP<Layout::ITarget>& target, co
 }
 
 CScrollOverview::~CScrollOverview() {
-    g_pHyprRenderer->makeEGLCurrent();
+    if (const auto OPENGL = g_pHyprRenderer ? g_pHyprRenderer->glBackend().lock() : WP<Render::GL::CHyprOpenGLImpl>{})
+        OPENGL->makeEGLCurrent();
     if (realtimePreviewTimer) {
         wl_event_source_remove(realtimePreviewTimer);
         realtimePreviewTimer = nullptr;
     }
-    backdropBlurFB.release();
+    if (backdropBlurFB)
+        backdropBlurFB->release();
+    backdropBlurFB.reset();
     const auto MONITOR = pMonitor.lock();
     const auto WORKSPACE = MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{};
     emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(WORKSPACE, Desktop::focusState()->window()), false);
@@ -800,7 +845,8 @@ CScrollOverview::~CScrollOverview() {
     restoreForcedLayerVisibility();
     images.clear(); // otherwise we get a vram leak
     Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
-    g_pHyprOpenGL->markBlurDirtyForMonitor(pMonitor.lock());
+    if (const auto MONITOR = pMonitor.lock())
+        MONITOR->m_blurFBDirty = true;
 }
 
 CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn_), swipe(swipe_) {
@@ -811,7 +857,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     realtimePreviewTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, realtimePreviewTimerCallback, this);
     scheduleMinimumPreviewFrame();
 
-    const auto WINDOWSMOVECONFIG = g_pConfigManager->getAnimationPropertyConfig("windowsMove");
+    const auto WINDOWSMOVECONFIG = Config::animationTree()->getAnimationPropertyConfig("windowsMove");
     const auto WINDOWSMOVEVALUES = WINDOWSMOVECONFIG && WINDOWSMOVECONFIG->pValues ? WINDOWSMOVECONFIG->pValues.lock() : WINDOWSMOVECONFIG;
     if (!g_pAnimationManager->bezierExists(OVERVIEW_INSERT_FADE_BEZIER))
         g_pAnimationManager->addBezierWithName(OVERVIEW_INSERT_FADE_BEZIER, Vector2D{0.5, 0.0}, Vector2D{0.5, 0.0});
@@ -1165,9 +1211,9 @@ static void renderOverviewLayerLevel(PHLMONITOR monitor, uint32_t layer, const C
             continue;
 
         if (!pushedRenderHints) {
-            SRenderModifData modif;
-            modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_SCALE, renderScale);
-            modif.modifs.emplace_back(SRenderModifData::RMOD_TYPE_TRANSLATE, workspaceBox.pos());
+            Render::SRenderModifData modif;
+            modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, renderScale);
+            modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, workspaceBox.pos());
 
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
             pushedRenderHints = true;
@@ -1186,7 +1232,7 @@ static void renderOverviewLayerLevel(PHLMONITOR monitor, uint32_t layer, const C
     }
 
     if (pushedRenderHints)
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = SRenderModifData{}}));
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
 }
 
 void CScrollOverview::renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now, float alpha) {
@@ -1219,82 +1265,78 @@ void CScrollOverview::updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperM
         lastBackdropWallpaperMode = wallpaperMode;
     }
 
-    const auto FBFORMAT = getOverviewFramebufferFormat(monitor);
-    if (!backdropBlurFB.isAllocated() || backdropBlurFB.m_size != monitor->m_pixelSize || backdropBlurFB.m_drmFormat != FBFORMAT) {
-        backdropBlurFB.release();
-        backdropBlurFB.alloc(monitor->m_pixelSize.x, monitor->m_pixelSize.y, FBFORMAT);
+    const auto FBSIZE     = monitor->m_pixelSize;
+    const auto RENDERSIZE = monitor->m_transformedSize;
+    if (!backdropBlurFB)
+        backdropBlurFB = g_pHyprRenderer->createFB("scrolloverview_backdrop_blur");
+
+    if (!backdropBlurFB || !backdropBlurFB->isAllocated() || backdropBlurFB->m_size != FBSIZE || backdropBlurFB->m_drmFormat != DRM_FORMAT_ARGB8888) {
+        if (backdropBlurFB)
+            backdropBlurFB->release();
+        if (!backdropBlurFB || !backdropBlurFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), DRM_FORMAT_ARGB8888))
+            return;
         backdropBlurDirty = true;
     }
 
     if (!backdropBlurDirty)
         return;
 
-    auto* const SAVEDFB = g_pHyprOpenGL->m_renderData.currentFB;
-    backdropBlurFB.bind();
-    g_pHyprOpenGL->m_renderData.currentFB = &backdropBlurFB;
-    auto restoreFB = Hyprutils::Utils::CScopeGuard([SAVEDFB] {
-        if (SAVEDFB)
-            SAVEDFB->bind();
+    if (g_pHyprRenderer->m_renderData.currentFB)
+        backdropBlurFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
 
-        g_pHyprOpenGL->m_renderData.currentFB = SAVEDFB;
-    });
-    g_pHyprOpenGL->clear(CHyprColor{0.F, 0.F, 0.F, 1.F});
+    const CRegion fullDamage{CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y}};
 
-    renderGlobalWallpaper(monitor, now);
+    {
+        auto bindBackdrop = g_pHyprRenderer->bindTempFB(backdropBlurFB);
+        g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 1.F}}, fullDamage);
+        renderGlobalWallpaper(monitor, now);
+        OverviewRender::flushPass(monitor);
+    }
 
-    OverviewRender::flushPass(monitor);
-    OverviewRender::renderBlur(monitor, CBox{{}, monitor->m_size * monitor->m_scale}, 0, 2.F, 1.F, false);
+    auto blurDamage = fullDamage;
+    const auto BLURREDTEX = g_pHyprRenderer->blurFramebuffer(backdropBlurFB, 1.F, &blurDamage);
+    if (!BLURREDTEX || !BLURREDTEX->m_size.x || !BLURREDTEX->m_size.y)
+        return;
+
+    {
+        auto bindBackdrop = g_pHyprRenderer->bindTempFB(backdropBlurFB);
+        g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 0.F}}, fullDamage);
+
+        const auto SAVEDTRANSFORM = BLURREDTEX->m_transform;
+        BLURREDTEX->m_transform   = Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform));
+        auto restoreTransform     = Hyprutils::Utils::CScopeGuard([BLURREDTEX, SAVEDTRANSFORM] { BLURREDTEX->m_transform = SAVEDTRANSFORM; });
+
+        g_pHyprRenderer->pushMonitorTransformEnabled(true);
+        auto restoreMonitorTransform = Hyprutils::Utils::CScopeGuard([] { g_pHyprRenderer->popMonitorTransformEnabled(); });
+
+        g_pHyprRenderer->draw(
+            CTexPassElement::SRenderData{
+                .tex    = BLURREDTEX,
+                .box    = CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y},
+                .damage = fullDamage,
+            },
+            fullDamage);
+    }
 
     backdropBlurDirty = false;
 }
 
 void CScrollOverview::renderBackdropBlurCache(PHLMONITOR monitor) {
-    if (!monitor || !backdropBlurFB.isAllocated() || !backdropBlurFB.getTexture())
+    if (!monitor || !backdropBlurFB || !backdropBlurFB->isAllocated() || !backdropBlurFB->getTexture())
         return;
 
-    CRegion fullDamage{CBox{{}, monitor->m_transformedSize}};
-    const auto TEX = backdropBlurFB.getTexture();
-    const auto SAVEDTRANSFORM = TEX->m_transform;
-    TEX->m_transform = Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform));
-    auto restoreTransform = Hyprutils::Utils::CScopeGuard([TEX, SAVEDTRANSFORM] { TEX->m_transform = SAVEDTRANSFORM; });
+    const auto TEX = backdropBlurFB->getTexture();
+    const CRegion fullDamage{CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y}};
 
-    CHyprOpenGLImpl::STextureRenderData renderData;
-    renderData.damage   = &fullDamage;
-    renderData.a        = 1.F;
-    renderData.allowDim = false;
-
-    g_pHyprOpenGL->renderTexture(TEX, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y}, renderData);
-}
-
-static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F) {
-    if (!monitor)
-        return;
-
-    const auto SHADOW = getOverviewShadowConfig();
-    if (!SHADOW.enabled || SHADOW.range <= 0 || SHADOW.color.a == 0.F || alpha <= 0.F)
-        return;
-
-    const int RANGE = sc<int>(std::round(SHADOW.range * monitor->m_scale * overviewScale));
-    if (RANGE <= 0)
-        return;
-
-    const auto FULLBOX = workspaceBox.copy().expand(RANGE);
-    if (FULLBOX.width < 1 || FULLBOX.height < 1)
-        return;
-
-    COverviewShadowPassElement::SData data;
-    data.monitor       = monitor;
-    data.fullBox       = FULLBOX;
-    data.cutoutBox     = workspaceBox;
-    data.rounding      = 0;
-    data.roundingPower = 2.F;
-    data.range         = RANGE;
-    data.renderPower   = SHADOW.renderPower;
-    data.color         = SHADOW.color;
-    data.alpha         = std::clamp(alpha, 0.F, 1.F);
-    data.ignoreWindow  = cutoutCenter;
-    data.sharp         = false;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewShadowPassElement>(data));
+    g_pHyprRenderer->draw(
+        CTexPassElement::SRenderData{
+            .tex      = TEX,
+            .box      = CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y},
+            .a        = 1.F,
+            .damage   = fullDamage,
+            .flipEndFrame = true,
+        },
+        fullDamage);
 }
 
 static void focusOverviewFullscreenWindowIfActiveWorkspace(const PHLWINDOW& fullscreenWindow_, const PHLWORKSPACE& workspace, PHLMONITOR monitor) {
@@ -2423,6 +2465,9 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
 
     renderOverviewWorkspaceShadow(monitor, WORKSPACEBOX, renderScale, wallpaperMode == 0, WORKSPACEALPHA);
 
+    if (getOverviewBlur() && wallpaperMode != 1 && WORKSPACEALPHA > 0.001F)
+        OverviewRender::queueBlur(WORKSPACEBOX, 0, 2.F, WORKSPACEALPHA, false);
+
     if (wallpaperMode != 0 && WORKSPACEALPHA > 0.001F)
         renderWallpaperLayers(monitor, WORKSPACEBOX, renderScale, now, WORKSPACEALPHA);
 
@@ -3309,11 +3354,14 @@ void CScrollOverview::render() {
 
     if (getOverviewBlur() && WALLPAPERMODE != 1) {
         updateBackdropBlurCache(MONITOR, WALLPAPERMODE, NOW);
-        renderBackdropBlurCache(MONITOR);
+        if (backdropBlurFB && backdropBlurFB->isAllocated() && backdropBlurFB->getTexture())
+            renderBackdropBlurCache(MONITOR);
+        else
+            renderGlobalWallpaper(MONITOR, NOW);
     } else if (WALLPAPERMODE == 0 || WALLPAPERMODE == 2) {
         renderGlobalWallpaper(MONITOR, NOW);
     } else
-        g_pHyprOpenGL->clear(CHyprColor{0.F, 0.F, 0.F, 1.F});
+        g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 1.F}}, {});
 
     Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
 

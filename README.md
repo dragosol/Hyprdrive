@@ -64,7 +64,6 @@ Controls the shadow around each workspace card. `enabled` defaults to `false`; a
 | enabled | bool | draw a shadow around each workspace card | false |
 | range | int | shadow range in layout px | `decoration:shadow:range` |
 | render_power | int | shadow falloff power | `decoration:shadow:render_power` |
-| ignore_window | bool | draw only around the workspace card, not behind its rectangle | `decoration:shadow:ignore_window` |
 | color | color | shadow color | `decoration:shadow:color` |
 
 ### Keywords

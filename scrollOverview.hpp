@@ -10,6 +10,7 @@
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
+#include <hyprland/src/render/types.hpp>
 #include <chrono>
 #include <unordered_map>
 #include <vector>
@@ -110,7 +111,7 @@ class CScrollOverview : public IOverview {
     float  lastOverviewBlurScale    = 1.F;
     int    lastBackdropWallpaperMode = -1;
     Vector2D lastOverviewBlurViewOffset = Vector2D{};
-    CFramebuffer backdropBlurFB;
+    SP<Render::IFramebuffer> backdropBlurFB;
 
     struct SWorkspaceImage {
         PHLWORKSPACE              pWorkspace;
