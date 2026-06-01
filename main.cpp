@@ -222,8 +222,8 @@ static void failNotif(const std::string& reason) {
     HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE, "[scrolloverview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
-// Helper function to find a function by name and ensure it contains a specific substring in its demangled name (to disambiguate overloads).
-static void* findFnOrThrowAny(const std::string& name, std::initializer_list<std::string_view> demangledNeedles) {
+// Helper function to find a function by name and ensure it contains one of the requested substrings in its demangled name (to disambiguate overloads).
+static void* findFnOrThrow(const std::string& name, std::initializer_list<std::string_view> demangledNeedles) {
     auto fns = HyprlandAPI::findFunctionsByName(SCROLLOVERVIEW_HANDLE, name);
     if (fns.empty()) {
         failNotif(std::format("no fns for hook {}", name));
@@ -255,10 +255,6 @@ static void* findFnOrThrowAny(const std::string& name, std::initializer_list<std
     }
 
     return matches[0].address;
-}
-
-static void* findFnOrThrow(const std::string& name, std::string_view mustContainDemangled) {
-    return findFnOrThrowAny(name, {mustContainDemangled});
 }
 
 static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char* RHS) {
@@ -347,37 +343,37 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g_pScrollRenderWorkspaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrowAny("renderWorkspace", {"CHyprRenderer::renderWorkspace(", "IHyprRenderer::renderWorkspace("}),
+        findFnOrThrow("renderWorkspace", {"CHyprRenderer::renderWorkspace(", "IHyprRenderer::renderWorkspace("}),
         (void*)hkRenderWorkspace);
 
     g_pScrollScheduleFrameHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE, 
-        findFnOrThrow("scheduleFrameForMonitor", "CCompositor::scheduleFrameForMonitor("),
+        findFnOrThrow("scheduleFrameForMonitor", {"CCompositor::scheduleFrameForMonitor("}),
         (void*)hkScheduleFrameForMonitor);
 
     g_pScrollDamageSurfaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrowAny("damageSurface", {"CHyprRenderer::damageSurface(", "IHyprRenderer::damageSurface("}),
+        findFnOrThrow("damageSurface", {"CHyprRenderer::damageSurface(", "IHyprRenderer::damageSurface("}),
         (void*)hkDamageSurface);
 
     g_pScrollSendFrameEventsHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrowAny("sendFrameEventsToWorkspace", {"CHyprRenderer::sendFrameEventsToWorkspace(", "IHyprRenderer::sendFrameEventsToWorkspace("}),
+        findFnOrThrow("sendFrameEventsToWorkspace", {"CHyprRenderer::sendFrameEventsToWorkspace(", "IHyprRenderer::sendFrameEventsToWorkspace("}),
         (void*)hkSendFrameEventsToWorkspace);
 
     g_pScrollSurfaceFrameHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE", ""),
+        findFnOrThrow("_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE", {""}),
         (void*)hkSurfaceFrame);
 
     g_pScrollAddDamageHookB = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("addDamageEPK15pixman_region32", "CMonitor::addDamage"),
+        findFnOrThrow("addDamageEPK15pixman_region32", {"CMonitor::addDamage"}),
         (void*)hkAddDamageB);
 
     g_pScrollAddDamageHookA = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
-        findFnOrThrow("_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", ""),
+        findFnOrThrow("_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", {""}),
         (void*)hkAddDamageA);
 
     static auto P = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
