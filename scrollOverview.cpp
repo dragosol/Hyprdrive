@@ -697,6 +697,13 @@ static Layout::Tiled::CScrollingAlgorithm* overviewScrollingAlgorithmForTarget(c
     return dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(target->space()->algorithm()->m_tiled.get());
 }
 
+static bool isWorkspaceScrolling(const PHLWORKSPACE& workspace) {
+    if (!workspace || !workspace->m_space || !workspace->m_space->algorithm())
+        return false;
+
+    return dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(workspace->m_space->algorithm()->m_tiled.get()) != nullptr;
+}
+
 static bool moveOverviewScrollingTargetToHorizontalEdge(const SP<Layout::ITarget>& target, int side) {
     if (!target || side == 0)
         return false;
@@ -2239,15 +2246,22 @@ void CScrollOverview::forceWindowVisible(PHLWINDOW window) {
     if (!window)
         return;
 
+    constexpr auto FULLSCREENALPHA = Desktop::View::WINDOW_ALPHA_FULLSCREEN;
+
     for (auto& entry : forcedWindowVisibility) {
         if (entry.window == window) {
             window->m_hidden = false;
+            window->alpha(FULLSCREENALPHA)->setValueAndWarp(1.F);
             return;
         }
     }
 
-    forcedWindowVisibility.push_back({window, window->m_hidden});
+    auto& entry                  = forcedWindowVisibility.emplace_back();
+    entry.window                 = window;
+    entry.hidden                 = window->m_hidden;
+
     window->m_hidden = false;
+    window->alpha(FULLSCREENALPHA)->setValueAndWarp(1.F);
 }
 
 void CScrollOverview::forceLayersAboveFullscreen() {
@@ -2302,6 +2316,10 @@ void CScrollOverview::restoreForcedWindowVisibility() {
         const auto WINDOW = entry.window.lock();
         if (!WINDOW)
             continue;
+
+        constexpr auto FULLSCREENALPHA = Desktop::View::WINDOW_ALPHA_FULLSCREEN;
+        WINDOW->updateFullscreenInputState();
+        *WINDOW->alpha(FULLSCREENALPHA) = WINDOW->isBlockedByFullscreen() ? 0.F : 1.F;
 
         if (WINDOW->m_group) {
             if (std::ranges::find(groupsToRefresh, WINDOW->m_group) == groupsToRefresh.end())
@@ -2511,7 +2529,9 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     };
 
     const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
-    if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
+    const bool scrollingLayout   = isWorkspaceScrolling(workspace);
+    const bool hasFullscreenPath = shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace;
+    if (!scrollingLayout && hasFullscreenPath) {
         renderOverviewWindow(fullscreenWindow);
         OverviewRender::flushPass(monitor);
         for (const auto& windowRef : workspaceImage->windows) {
