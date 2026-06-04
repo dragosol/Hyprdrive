@@ -21,6 +21,7 @@
 #undef protected
 #undef private
 #include <hyprutils/utils/ScopeGuard.hpp>
+#include "Config.hpp"
 #include "IOverview.hpp"
 
 static CRegion roundedRectRegion(const CBox& box, int rounding, float roundingPower) {
@@ -145,24 +146,17 @@ std::vector<UP<IPassElement>> COverviewShadowPassElement::draw() {
     auto color = data.color;
     color.a *= std::clamp(data.alpha, 0.F, 1.F);
 
-    std::optional<Hyprlang::INT> previousRenderPower;
+    std::optional<int> previousRenderPower;
     if (data.renderPower > 0) {
-        if (const auto VALUE = HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:render_power")) {
-            if (const auto DATA = reinterpret_cast<Hyprlang::INT* const*>(VALUE->getDataStaticPtr()); DATA && *DATA) {
-                previousRenderPower = **DATA;
-                **DATA              = data.renderPower;
-            }
-        }
+        previousRenderPower = ScrollOverview::Config::getValue<int>("decoration:shadow:render_power");
+        ScrollOverview::Config::setValue("decoration:shadow:render_power", data.renderPower);
     }
 
     auto restoreRenderPower = Hyprutils::Utils::CScopeGuard([previousRenderPower] {
         if (!previousRenderPower)
             return;
 
-        if (const auto VALUE = HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, "decoration:shadow:render_power")) {
-            if (const auto DATA = reinterpret_cast<Hyprlang::INT* const*>(VALUE->getDataStaticPtr()); DATA && *DATA)
-                **DATA = *previousRenderPower;
-        }
+        ScrollOverview::Config::setValue("decoration:shadow:render_power", *previousRenderPower);
     });
 
     Render::GL::g_pHyprOpenGL->renderRoundedShadow(data.fullBox, data.rounding, data.roundingPower, data.range, color, 1.F);
