@@ -1001,6 +1001,12 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        const auto MODS = g_pInputManager->getModsFromAllKBs() &
+                          (HL_MODIFIER_SHIFT | HL_MODIFIER_META | HL_MODIFIER_CTRL | HL_MODIFIER_ALT);
+
+        if (MODS != 0)
+            return;
+
         info.cancelled = true;
         moveViewportWorkspace(e.delta > 0);
     };
