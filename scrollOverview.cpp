@@ -791,6 +791,7 @@ CScrollOverview::~CScrollOverview() {
     const auto MONITOR = pMonitor.lock();
     const auto WORKSPACE = MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{};
     emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(WORKSPACE, Desktop::focusState()->window()), false);
+    restoreWorkspaceAnimationOverrides();
     restoreInputConfigOverrides();
     restoreForcedSurfaceVisibility();
     restoreForcedWindowVisibility();
@@ -805,6 +806,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     const auto          PMONITOR = Desktop::focusState()->monitor();
     pMonitor                     = PMONITOR;
 
+    applyWorkspaceAnimationOverrides();
+    forceWorkspaceAlphaVisible();
     applyInputConfigOverrides();
     realtimePreviewTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, realtimePreviewTimerCallback, this);
     scheduleMinimumPreviewFrame();
@@ -2308,6 +2311,55 @@ void CScrollOverview::restoreForcedLayerVisibility() {
     forcedLayerVisibility.clear();
 }
 
+void CScrollOverview::applyWorkspaceAnimationOverrides() {
+    if (workspaceAnimationsOverridden)
+        return;
+
+    savedWorkspaceAnimationConfigs.clear();
+
+    for (const std::string name : {"workspaces", "workspacesIn", "workspacesOut"}) {
+        const auto CONFIG = Config::animationTree()->getAnimationPropertyConfig(name);
+        if (!CONFIG)
+            continue;
+
+        const auto VALUES = CONFIG->pValues ? CONFIG->pValues.lock() : CONFIG;
+        if (!VALUES)
+            continue;
+
+        auto& saved   = savedWorkspaceAnimationConfigs.emplace_back();
+        saved.name    = name;
+        saved.enabled = VALUES->internalEnabled != 0;
+        saved.speed   = VALUES->internalSpeed > 0.F ? VALUES->internalSpeed : 1.F;
+        saved.bezier  = !VALUES->internalBezier.empty() ? VALUES->internalBezier : "default";
+        saved.style   = VALUES->internalStyle;
+
+        Config::animationTree()->setConfigForNode(name, false, 1.F, "default", "");
+    }
+
+    workspaceAnimationsOverridden = true;
+}
+
+void CScrollOverview::restoreWorkspaceAnimationOverrides() {
+    if (!workspaceAnimationsOverridden)
+        return;
+
+    for (const auto& saved : savedWorkspaceAnimationConfigs)
+        Config::animationTree()->setConfigForNode(saved.name, saved.enabled, saved.speed, saved.bezier, saved.style);
+
+    savedWorkspaceAnimationConfigs.clear();
+    workspaceAnimationsOverridden = false;
+}
+
+void CScrollOverview::forceWorkspaceAlphaVisible() {
+    for (const auto& workspace : g_pCompositor->getWorkspaces()) {
+        if (!workspace || !workspace->m_alpha)
+            continue;
+
+        workspace->m_alpha->setValueAndWarp(1.F);
+        *workspace->m_alpha = 1.F;
+    }
+}
+
 void CScrollOverview::applyInputConfigOverrides() {
     if (inputConfigOverridden)
         return;
@@ -3133,6 +3185,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 void CScrollOverview::close() {
     closing = true;
     inputFramePending = false;
+    restoreWorkspaceAnimationOverrides();
 
     const auto SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
@@ -3399,8 +3452,11 @@ static Vector2D hyprlerp(const Vector2D& from, const Vector2D& to, const float p
 
 void CScrollOverview::setClosing(bool closing_) {
     closing = closing_;
-    if (closing)
+    if (closing) {
         inputFramePending = false;
+        restoreWorkspaceAnimationOverrides();
+    } else
+        applyWorkspaceAnimationOverrides();
 }
 
 void CScrollOverview::resetSwipe() {
