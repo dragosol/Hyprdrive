@@ -861,6 +861,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             return;
 
         info.cancelled = true;
+        requestInputFrame();
 
         if (dragPointerDown && dragPendingWindow) {
             const float DRAGTHRESHOLD = ScrollOverview::Config::getValue<int>("binds:drag_threshold") * (pMonitor ? pMonitor->m_scale : 1.F);
@@ -889,6 +890,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
         info.cancelled    = true;
         lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+        requestInputFrame();
     };
 
     auto onMouseButton = [this](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
@@ -2682,6 +2684,18 @@ void CScrollOverview::damage() {
     blockDamageReporting = false;
 }
 
+void CScrollOverview::requestInputFrame() {
+    if (closing)
+        return;
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return;
+
+    inputFramePending = true;
+    g_pCompositor->scheduleFrameForMonitor(MONITOR, Aquamarine::IOutput::AQ_SCHEDULE_CURSOR_MOVE);
+}
+
 void CScrollOverview::markBlurDirty() {
     overviewBlurDirty = true;
 }
@@ -2728,6 +2742,11 @@ bool CScrollOverview::shouldAllowRealtimePreviewFrame() const {
 }
 
 bool CScrollOverview::shouldAllowRealtimePreviewSchedule() {
+    if (inputFramePending) {
+        inputFramePending = false;
+        return true;
+    }
+
     if (closing)
         return true;
 
@@ -3107,6 +3126,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 
 void CScrollOverview::close() {
     closing = true;
+    inputFramePending = false;
 
     const auto SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
@@ -3373,6 +3393,8 @@ static Vector2D hyprlerp(const Vector2D& from, const Vector2D& to, const float p
 
 void CScrollOverview::setClosing(bool closing_) {
     closing = closing_;
+    if (closing)
+        inputFramePending = false;
 }
 
 void CScrollOverview::resetSwipe() {
