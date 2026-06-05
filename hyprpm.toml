@@ -4,7 +4,7 @@ authors = ["yayuuu"]
 commit_pins = [
     # Hyprland                                  hyprland-scroll-overview
     ["521ece463c4a9d3d128670688a34756805a4328f", "e35c31c73fe36af05e75b7ff530b5ede422f75a9"], # v0.54.3
-    ["af923e30d1d24f1f4a4f5cb8308065173c1d9539", "db88b10e06e6f12f63b7790d850bf7f5f06e6261"], # v0.55.0
+    ["af923e30d1d24f1f4a4f5cb8308065173c1d9539", "2c56da898f3b68ae7b19a9ff5981817751e13fa8"], # v0.55.0
 ]
 
 [scrolloverview]
