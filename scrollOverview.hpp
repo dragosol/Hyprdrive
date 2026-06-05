@@ -90,6 +90,9 @@ class CScrollOverview : public IOverview {
     void   restoreForcedSurfaceVisibility();
     void   restoreForcedWindowVisibility();
     void   restoreForcedLayerVisibility();
+    void   applyWorkspaceAnimationOverrides();
+    void   restoreWorkspaceAnimationOverrides();
+    void   forceWorkspaceAlphaVisible();
     void   emitFullscreenVisibilityState(PHLWINDOW window, bool hideFullscreen);
     void   applyInputConfigOverrides();
     void   restoreInputConfigOverrides();
@@ -184,6 +187,16 @@ class CScrollOverview : public IOverview {
         float    alpha           = 1.F;
     };
     std::vector<SForcedLayerVisibility> forcedLayerVisibility;
+
+    struct SWorkspaceAnimationConfig {
+        std::string name;
+        bool        enabled = true;
+        float       speed   = 1.F;
+        std::string bezier  = "default";
+        std::string style;
+    };
+    std::vector<SWorkspaceAnimationConfig> savedWorkspaceAnimationConfigs;
+    bool                                   workspaceAnimationsOverridden = false;
 
     PHLWORKSPACE                     startedOn;
 
