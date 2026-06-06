@@ -746,10 +746,20 @@ void renderOverviewWindow(const SRenderParams& params) {
     const auto     WORKSPACE               = params.window->m_workspace;
     const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !params.window->m_pinned;
     const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
+    const auto     previousRounding        = params.window->m_ruleApplicator->rounding();
+    const auto     previousBorderSize      = params.window->m_ruleApplicator->borderSize();
+    const bool     previousBorderCacheDirty = params.window->m_borderSizeCacheDirty;
+    const int      previousCachedBorderSize = params.window->m_cachedBorderSize;
+
+    const auto scaledRounding   = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(params.window->m_ruleApplicator->rounding().valueOrDefault() * params.renderScale)));
+    const auto scaledBorderSize = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(params.window->getRealBorderSize() * params.renderScale)));
 
     params.window->m_realPosition->value() = params.monitor->m_position + params.windowBox.pos() / params.monitor->m_scale - params.window->m_floatingOffset;
     params.window->m_realSize->value()     = params.windowBox.size() / params.monitor->m_scale;
     params.window->m_animatingIn           = true;
+    params.window->m_ruleApplicator->rounding().set(scaledRounding, Desktop::Types::PRIORITY_SET_PROP);
+    params.window->m_ruleApplicator->borderSize().set(scaledBorderSize, Desktop::Types::PRIORITY_SET_PROP);
+    params.window->m_borderSizeCacheDirty = true;
     if (OVERRIDEWORKSPACEOFFSET)
         WORKSPACE->m_renderOffset->value() = {};
 
@@ -757,6 +767,10 @@ void renderOverviewWindow(const SRenderParams& params) {
         params.window->m_realPosition->value() = previousWindowPos;
         params.window->m_realSize->value()     = previousWindowSize;
         params.window->m_animatingIn           = previousAnimatingIn;
+        params.window->m_ruleApplicator->roundingOverride(previousRounding);
+        params.window->m_ruleApplicator->borderSizeOverride(previousBorderSize);
+        params.window->m_borderSizeCacheDirty = previousBorderCacheDirty;
+        params.window->m_cachedBorderSize     = previousCachedBorderSize;
         if (OVERRIDEWORKSPACEOFFSET && WORKSPACE)
             WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
     });
