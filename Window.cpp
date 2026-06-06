@@ -118,6 +118,9 @@ static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITO
     if (!window || !monitor)
         return;
 
+    if (window->isFullscreen())
+        return;
+
     const int   rounding      = sc<int>(std::round(window->rounding() * monitor->m_scale * renderScale));
     const float roundingPower = window->roundingPower();
 

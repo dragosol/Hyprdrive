@@ -2546,20 +2546,18 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         return;
     }
 
-    const auto renderWindowsByState = [&](bool fullscreen, bool floating) {
+    const auto renderWindowsByState = [&](bool floating) {
         for (const auto& windowRef : workspaceImage->windows) {
             const auto window = getOverviewWindowToShow(windowRef.lock());
-            if (!window || window->isFullscreen() != fullscreen || window->m_isFloating != floating)
+            if (!window || window->m_isFloating != floating)
                 continue;
 
             renderOverviewWindow(window);
         }
     };
 
-    renderWindowsByState(false, false);
-    renderWindowsByState(false, true);
-    renderWindowsByState(true, false);
-    renderWindowsByState(true, true);
+    renderWindowsByState(false);
+    renderWindowsByState(true);
 }
 
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
@@ -2617,12 +2615,14 @@ bool CScrollOverview::hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t
             return overviewBoxIntersectsMonitor(windowBox, monitor);
         };
 
-        const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
-        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
-            if (isVisiblePrecomputedBlurWindow(fullscreenWindow))
-                return true;
+        if (!isWorkspaceScrolling(workspace)) {
+            const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
+            if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
+                if (isVisiblePrecomputedBlurWindow(fullscreenWindow))
+                    return true;
 
-            continue;
+                continue;
+            }
         }
 
         for (const auto& windowRef : workspaceImage->windows) {
@@ -2918,19 +2918,21 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
         if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, MONITOR))
             continue;
 
-        const auto workspace        = workspaceImage->pWorkspace;
-        const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
-        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
-            if (isVisibleAnimatedWindow(fullscreenWindow, WORKSPACEYOFFSET))
-                return false;
-
-            for (const auto& windowRef : workspaceImage->windows) {
-                const auto window = getOverviewWindowToShow(windowRef.lock());
-                if (window && window->m_isFloating && isVisibleAnimatedWindow(window, WORKSPACEYOFFSET))
+        const auto workspace = workspaceImage->pWorkspace;
+        if (!isWorkspaceScrolling(workspace)) {
+            const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
+            if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
+                if (isVisibleAnimatedWindow(fullscreenWindow, WORKSPACEYOFFSET))
                     return false;
-            }
 
-            continue;
+                for (const auto& windowRef : workspaceImage->windows) {
+                    const auto window = getOverviewWindowToShow(windowRef.lock());
+                    if (window && window->m_isFloating && isVisibleAnimatedWindow(window, WORKSPACEYOFFSET))
+                        return false;
+                }
+
+                continue;
+            }
         }
 
         for (const auto& windowRef : workspaceImage->windows) {
@@ -3007,16 +3009,18 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
         if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, MONITOR))
             continue;
 
-        const auto workspace        = workspaceImage->pWorkspace;
-        const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
-        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
-            frameWindow(fullscreenWindow, WORKSPACEYOFFSET);
-            for (const auto& windowRef : workspaceImage->windows) {
-                const auto window = getOverviewWindowToShow(windowRef.lock());
-                if (window && window->m_isFloating)
-                    frameWindow(window, WORKSPACEYOFFSET);
+        const auto workspace = workspaceImage->pWorkspace;
+        if (!isWorkspaceScrolling(workspace)) {
+            const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
+            if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspace) {
+                frameWindow(fullscreenWindow, WORKSPACEYOFFSET);
+                for (const auto& windowRef : workspaceImage->windows) {
+                    const auto window = getOverviewWindowToShow(windowRef.lock());
+                    if (window && window->m_isFloating)
+                        frameWindow(window, WORKSPACEYOFFSET);
+                }
+                continue;
             }
-            continue;
         }
 
         for (const auto& windowRef : workspaceImage->windows) {
@@ -3091,9 +3095,11 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
         if (!workspaceImage || workspaceImage->pWorkspace != window->m_workspace)
             continue;
 
-        const auto fullscreenWindow = getOverviewWindowToShow(workspaceImage->pWorkspace->getFullscreenWindow());
-        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspaceImage->pWorkspace && fullscreenWindow != window && !window->m_isFloating)
-            return false;
+        if (!isWorkspaceScrolling(workspaceImage->pWorkspace)) {
+            const auto fullscreenWindow = getOverviewWindowToShow(workspaceImage->pWorkspace->getFullscreenWindow());
+            if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspaceImage->pWorkspace && fullscreenWindow != window && !window->m_isFloating)
+                return false;
+        }
 
         const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(workspaceIdx, ACTIVEIDX, PITCH);
         const auto WINDOWBOX        = getOverviewWindowBox(window, MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
@@ -3178,9 +3184,11 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
         if (!workspaceImage || workspaceImage->pWorkspace != window->m_workspace)
             continue;
 
-        const auto fullscreenWindow = getOverviewWindowToShow(workspaceImage->pWorkspace->getFullscreenWindow());
-        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspaceImage->pWorkspace && fullscreenWindow != window && !window->m_isFloating)
-            return false;
+        if (!isWorkspaceScrolling(workspaceImage->pWorkspace)) {
+            const auto fullscreenWindow = getOverviewWindowToShow(workspaceImage->pWorkspace->getFullscreenWindow());
+            if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == workspaceImage->pWorkspace && fullscreenWindow != window && !window->m_isFloating)
+                return false;
+        }
 
         const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(workspaceIdx, ACTIVEIDX, PITCH);
         const auto WINDOWBOX        = getOverviewWindowBox(window, MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
