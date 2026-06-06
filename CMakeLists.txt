@@ -17,6 +17,7 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     libdrm
     libinput
     libudev
+    lua5.4
     pangocairo
     pixman-1
     wayland-server
