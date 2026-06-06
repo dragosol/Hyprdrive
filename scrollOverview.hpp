@@ -189,11 +189,8 @@ class CScrollOverview : public IOverview {
     std::vector<SForcedLayerVisibility> forcedLayerVisibility;
 
     struct SWorkspaceAnimationConfig {
-        std::string name;
-        bool        enabled = true;
-        float       speed   = 1.F;
-        std::string bezier  = "default";
-        std::string style;
+        std::string                                      name;
+        Hyprutils::Animation::SAnimationPropertyConfig   config;
     };
     std::vector<SWorkspaceAnimationConfig> savedWorkspaceAnimationConfigs;
     bool                                   workspaceAnimationsOverridden = false;

@@ -2322,19 +2322,13 @@ void CScrollOverview::applyWorkspaceAnimationOverrides() {
         if (!CONFIG)
             continue;
 
-        const auto VALUES = CONFIG->pValues ? CONFIG->pValues.lock() : CONFIG;
-        if (!VALUES)
-            continue;
-
         auto& saved   = savedWorkspaceAnimationConfigs.emplace_back();
         saved.name    = name;
-        saved.enabled = VALUES->internalEnabled != 0;
-        saved.speed   = VALUES->internalSpeed > 0.F ? VALUES->internalSpeed : 1.F;
-        saved.bezier  = !VALUES->internalBezier.empty() ? VALUES->internalBezier : "default";
-        saved.style   = VALUES->internalStyle;
-
-        Config::animationTree()->setConfigForNode(name, false, 1.F, "default", "");
+        saved.config  = *CONFIG;
     }
+
+    for (const auto& saved : savedWorkspaceAnimationConfigs)
+        Config::animationTree()->setConfigForNode(saved.name, false, 1.F, "default", "");
 
     workspaceAnimationsOverridden = true;
 }
@@ -2343,8 +2337,27 @@ void CScrollOverview::restoreWorkspaceAnimationOverrides() {
     if (!workspaceAnimationsOverridden)
         return;
 
-    for (const auto& saved : savedWorkspaceAnimationConfigs)
-        Config::animationTree()->setConfigForNode(saved.name, saved.enabled, saved.speed, saved.bezier, saved.style);
+    const auto propagateAnimationValues = [](const SP<Hyprutils::Animation::SAnimationPropertyConfig>& parent, auto&& self) -> void {
+        if (!parent)
+            return;
+
+        for (const auto& [name, animation] : Config::animationTree()->getAnimationConfig()) {
+            if (!animation || animation->overridden || animation->pParentAnimation != parent)
+                continue;
+
+            animation->pValues = parent->pValues;
+            self(animation, self);
+        }
+    };
+
+    for (const auto& saved : savedWorkspaceAnimationConfigs) {
+        const auto CONFIG = Config::animationTree()->getAnimationPropertyConfig(saved.name);
+        if (!CONFIG)
+            continue;
+
+        *CONFIG = saved.config;
+        propagateAnimationValues(CONFIG, propagateAnimationValues);
+    }
 
     savedWorkspaceAnimationConfigs.clear();
     workspaceAnimationsOverridden = false;
