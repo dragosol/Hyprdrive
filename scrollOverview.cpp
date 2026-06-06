@@ -3137,7 +3137,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 
     if (layerOwner) {
         if (layerOwner->m_monitor != MONITOR)
-            return false;
+            return true;
 
         if (layerOwner->m_layer > ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM)
             return false;
@@ -3154,7 +3154,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
     auto window = getOverviewWindowToShow(windowOwner);
     if (shouldShowPinnedFloatingOverviewWindow(window)) {
         if (window->m_monitor != MONITOR)
-            return false;
+            return true;
 
         if (!realtimePreviewFrameQueued && shouldAllowRealtimePreviewFrame())
             return true;
@@ -3163,7 +3163,10 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
         return false;
     }
 
-    if (!shouldShowOverviewWindow(window) || window->m_monitor != MONITOR || !window->m_workspace)
+    if (window && window->m_monitor != MONITOR)
+        return true;
+
+    if (!shouldShowOverviewWindow(window) || !window->m_workspace)
         return false;
 
     const auto ACTIVEIDX = activeWorkspaceIndex();
