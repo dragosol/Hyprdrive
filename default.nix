@@ -2,6 +2,7 @@
   lib,
   hyprland,
   hyprlandPlugins,
+  lua5_4,
 }:
 hyprlandPlugins.mkHyprlandPlugin {
   pluginName = "scrolloverview";
@@ -10,10 +11,12 @@ hyprlandPlugins.mkHyprlandPlugin {
 
   inherit (hyprland) nativeBuildInputs;
 
-  meta = with lib; {
+  buildInputs = [ lua5_4 ];
+
+  meta = {
     homepage = "https://github.com/hyprwm/hyprland-plugins/tree/main/scrolloverview";
     description = "Hyprland workspaces overview plugin";
-    license = licenses.bsd3;
-    platforms = platforms.linux;
+    license = lib.licenses.bsd3;
+    platforms = lib.platforms.linux;
   };
 }
