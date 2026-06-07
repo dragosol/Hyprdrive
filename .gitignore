@@ -1,1 +1,8 @@
 scrolloverview.so
+
+# Nix
+result/
+result
+result-*
+.envrc
+.direnv/
