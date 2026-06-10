@@ -130,10 +130,10 @@ static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITO
     auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
     for (size_t i = firstElement; i < passElements.size(); ++i) {
         const auto& passElement = passElements[i];
-        if (!passElement || !passElement->element)
+        if (!passElement.element)
             continue;
 
-        auto* surfacePassElement = dynamic_cast<CSurfacePassElement*>(passElement->element.get());
+        auto* surfacePassElement = dynamic_cast<CSurfacePassElement*>(passElement.element.get());
         if (!surfacePassElement || surfacePassElement->m_data.pWindow != window || surfacePassElement->m_data.popup)
             continue;
 
