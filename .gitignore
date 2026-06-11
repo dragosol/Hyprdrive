@@ -1,3 +1,5 @@
+build/
+.cache/
 scrolloverview.so
 
 # Nix
