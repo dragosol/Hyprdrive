@@ -145,7 +145,7 @@ static void hkSurfaceFrame(void* thisptr, const Time::steady_tp& now) {
 }
 
 static void hkAddDamageA(void* thisptr, const CBox& box) {
-    const auto PMONITOR = (Monitor::CMonitor*)thisptr;
+    const auto PMONITOR = (CMonitor*)thisptr;
 
     if (g_pScrollOverview && g_pScrollOverview->pMonitor == PMONITOR->m_self && renderingOverview && !damageFromSurface && g_pScrollOverview->shouldSuppressRenderDamage()) {
         return;
@@ -161,7 +161,7 @@ static void hkAddDamageA(void* thisptr, const CBox& box) {
 }
 
 static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
-    const auto PMONITOR = (Monitor::CMonitor*)thisptr;
+    const auto PMONITOR = (CMonitor*)thisptr;
 
     if (g_pScrollOverview && g_pScrollOverview->pMonitor == PMONITOR->m_self && renderingOverview && !damageFromSurface && g_pScrollOverview->shouldSuppressRenderDamage()) {
         return;
