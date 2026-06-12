@@ -38,7 +38,6 @@ void COverviewGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e)
 }
 
 void COverviewGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
-    g_pScrollOverview->setClosing(false);
     g_pScrollOverview->onSwipeEnd();
     g_pScrollOverview->resetSwipe();
 }

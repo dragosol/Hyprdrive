@@ -3207,9 +3207,7 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 }
 
 void CScrollOverview::close() {
-    closing = true;
-    inputFramePending = false;
-    restoreWorkspaceAnimationOverrides();
+    setClosing(true);
 
     const auto SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
@@ -3478,9 +3476,19 @@ void CScrollOverview::setClosing(bool closing_) {
     closing = closing_;
     if (closing) {
         inputFramePending = false;
+        releaseInputListeners();
         restoreWorkspaceAnimationOverrides();
     } else
         applyWorkspaceAnimationOverrides();
+}
+
+void CScrollOverview::releaseInputListeners() {
+    mouseMoveHook.reset();
+    touchMoveHook.reset();
+    mouseAxisHook.reset();
+    mouseButtonHook.reset();
+    touchDownHook.reset();
+    keyboardKeyHook.reset();
 }
 
 void CScrollOverview::resetSwipe() {

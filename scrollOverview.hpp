@@ -103,6 +103,7 @@ class CScrollOverview : public IOverview {
     void   scheduleMinimumPreviewFrame();
     void   schedulePreviewFrameAfter(std::chrono::milliseconds delay);
     void   scheduleRealtimePreviewFrame();
+    void   releaseInputListeners();
     void   requestInputFrame();
     static int realtimePreviewTimerCallback(void* data);
 
