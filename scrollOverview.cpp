@@ -2378,6 +2378,18 @@ void CScrollOverview::forceWorkspaceAlphaVisible() {
     }
 }
 
+void CScrollOverview::forceWorkspaceWindowsDecoRecalc(const PHLWORKSPACE& workspace) {
+    if (!workspace)
+        return;
+
+    const auto workspaceImage = std::ranges::find_if(images, [&workspace](const auto& image) { return image && image->pWorkspace == workspace; });
+    if (workspaceImage == images.end())
+        return;
+
+    for (const auto& windowRef : (*workspaceImage)->windows)
+        OverviewWindow::forceDecoRecalc(windowRef.lock());
+}
+
 void CScrollOverview::applyInputConfigOverrides() {
     if (inputConfigOverridden)
         return;
@@ -2959,14 +2971,14 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
 
 void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || closing)
+    if (!MONITOR)
         return;
 
     const auto ACTIVEIDX = activeWorkspaceIndex();
     const auto SCALE     = scale->value();
     const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE);
     const auto DRAGGED   = getOverviewWindowToShow(dragActiveWindow.lock());
-    const bool CANFRAMEWINDOWS = shouldAllowRealtimePreviewFrame();
+    const bool CANFRAMEWINDOWS = closing || shouldAllowRealtimePreviewFrame();
     bool       sentWindowFrame = false;
 
     const bool PREVSENDINGFRAMECALLBACKS = sendingOverviewFrameCallbacks;
@@ -3273,6 +3285,11 @@ void CScrollOverview::close() {
     emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(FINALWORKSPACE, FINALWINDOW), false);
 
     *scale = 1.F;
+
+    if (!ScrollOverview::Config::getValue<int>("animations:enabled")) {
+        forceWorkspaceWindowsDecoRecalc(FINALWORKSPACE ? FINALWORKSPACE : pMonitor->m_activeWorkspace);
+        damage();
+    }
 
     scale->setCallbackOnEnd(removeOverview);
 }

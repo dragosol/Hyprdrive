@@ -8,6 +8,7 @@ namespace OverviewWindow {
 bool shouldBlurBackground(const PHLWINDOW& window);
 bool shouldUsePrecomputedBlur(const PHLWINDOW& window);
 bool shouldUseBlurFramebuffer(const PHLWINDOW& window);
+void forceDecoRecalc(const PHLWINDOW& window);
 
 struct SRenderParams {
     PHLMONITOR            monitor;

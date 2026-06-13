@@ -109,7 +109,7 @@ static void hkScheduleFrameForMonitor(void* thisptr, PHLMONITOR monitor, Aquamar
 
 //
 static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
-    if (!g_pScrollOverview || renderingOverview || g_pScrollOverview->blockOverviewRendering || g_pScrollOverview->pMonitor != pMonitor)
+    if (!g_pScrollOverview || renderingOverview || g_pScrollOverview->pMonitor != pMonitor)
         ((origRenderWorkspace)(g_pScrollRenderWorkspaceHook->m_original))(thisptr, pMonitor, pWorkspace, now, geometry);
     else {
         const bool PREVRENDERINGOVERVIEW = renderingOverview;

@@ -29,7 +29,6 @@ class IOverview {
 
     virtual void  fullRender() = 0;
 
-    bool          blockOverviewRendering = false;
     bool          blockDamageReporting   = false;
 
     PHLMONITORREF pMonitor;

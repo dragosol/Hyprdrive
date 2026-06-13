@@ -93,6 +93,7 @@ class CScrollOverview : public IOverview {
     void   applyWorkspaceAnimationOverrides();
     void   restoreWorkspaceAnimationOverrides();
     void   forceWorkspaceAlphaVisible();
+    void   forceWorkspaceWindowsDecoRecalc(const PHLWORKSPACE& workspace);
     void   emitFullscreenVisibilityState(PHLWINDOW window, bool hideFullscreen);
     void   applyInputConfigOverrides();
     void   restoreInputConfigOverrides();

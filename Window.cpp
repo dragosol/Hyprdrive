@@ -725,6 +725,15 @@ bool shouldUseBlurFramebuffer(const PHLWINDOW& window) {
     return shouldUsePrecomputedBlur(window) || (shouldShowOverviewWindow(window) && shouldBlurBackground(window) && window->m_ruleApplicator->xray().valueOr(false));
 }
 
+void forceDecoRecalc(const PHLWINDOW& window) {
+    const auto WINDOW = getOverviewWindowToShow(window);
+    if (!validMapped(WINDOW))
+        return;
+
+    g_pDecorationPositioner->forceRecalcFor(WINDOW);
+    WINDOW->updateWindowDecos();
+}
+
 void renderOverviewWindow(const SRenderParams& params) {
     if (!params.window)
         return;
