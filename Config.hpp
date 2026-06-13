@@ -6,34 +6,14 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 
-#include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
 
-extern "C" {
-struct lua_State;
-}
-
-struct SScrollOverviewLuaConfig {
-    std::optional<int>     gestureDistance;
-    std::optional<float>   scale;
-    std::optional<int>     workspaceGap;
-    std::optional<int>     wallpaper;
-    std::optional<bool>    blur;
-    std::optional<bool>    shadowEnabled;
-    std::optional<int>     shadowRange;
-    std::optional<int>     shadowRenderPower;
-    std::optional<int64_t> shadowColor;
-};
-
 namespace ScrollOverview::Config {
 
 using TOverviewDispatcher = SDispatchResult (*)(std::string);
-
-const SScrollOverviewLuaConfig& lua();
 
 void registerLua(TOverviewDispatcher dispatcher);
 void registerLegacy();

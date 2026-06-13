@@ -50,22 +50,24 @@ plugin {
 
 ```lua
 -- .config/hypr/hyprland.lua
-if hl.plugin and hl.plugin.scrolloverview then
-    hl.plugin.scrolloverview.configure({
-        gesture_distance = 300, -- how far is the "max" for the gesture
-        scale = 0.5, -- preferred overview scale
-        workspace_gap = 100,
-        wallpaper = 0, -- 0: global only, 1: per-workspace only, 2: both
-        blur = false, -- blur only the main overview wallpaper
+hl.config({
+    plugin = {
+        scrolloverview = {
+            gesture_distance = 300, -- how far is the "max" for the gesture
+            scale = 0.5, -- preferred overview scale
+            workspace_gap = 100,
+            wallpaper = 0, -- 0: global only, 1: per-workspace only, 2: both
+            blur = false, -- blur only the main overview wallpaper
 
-        shadow = {
-            enabled = false,
-            range = 50,
-            render_power = 3,
-            color = 0xee1a1a1a,
+            shadow = {
+                enabled = false,
+                range = 50,
+                render_power = 3,
+                color = 0xee1a1a1a,
+            },
         },
-    })
-end
+    },
+})
 ```
 
 In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
@@ -118,11 +120,13 @@ bind = SUPER, g, scrolloverview:overview, toggle
 ```lua
 -- hyprland.lua
 hl.bind("SUPER + g", function()
-    if hl.plugin and hl.plugin.scrolloverview then
-        hl.plugin.scrolloverview.overview("toggle")
-    end
+    hl.plugin.scrolloverview.overview("toggle")
 end)
 ```
+
+`hl.plugin.scrolloverview.overview("toggle")` returns a dispatcher function
+accepted by `hl.dispatch()` and binds. When called from inside a Lua keybind
+callback, it dispatches immediately.
 
 Here are a list of options you can use:  
 | option | description |
