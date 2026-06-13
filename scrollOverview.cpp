@@ -904,7 +904,12 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             return;
 
         info.cancelled = true;
-
+        // Without releasing buttons, mouse-triggered overview consumes release
+        // events
+        // before they reach Hyprland's input manager, leaving it stuck thinking
+        // buttons are still pressed, which locks focus.
+        g_pInputManager->releaseAllMouseButtons();
+        
         if (event.button == BTN_RIGHT) {
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
