@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Config.hpp"
 #include "IOverview.hpp"
 
 class CMonitor;
@@ -69,10 +70,10 @@ class CScrollOverview : public IOverview {
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
     void   syncFocusedSelection();
-    void   updateWorkspaceVerticalOverflow();
+    void   updateWorkspaceOverflow();
     CBox   workspaceOverviewVisibleBox(size_t workspaceIdx, const CBox& workspaceBox, float renderScale, PHLMONITOR monitor) const;
-    float      workspaceOverviewYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
-    float      workspaceOverviewLogicalYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    float      workspaceOverviewOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    float      workspaceOverviewLogicalOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
@@ -125,8 +126,8 @@ class CScrollOverview : public IOverview {
     struct SWorkspaceImage {
         PHLWORKSPACE              pWorkspace;
         std::vector<PHLWINDOWREF> windows;
-        float                     verticalOverflowTop    = 0.F;
-        float                     verticalOverflowBottom = 0.F;
+        float                     overflowBefore = 0.F;
+        float                     overflowAfter  = 0.F;
     };
 
     struct SWorkspaceInsertTransition {
@@ -175,6 +176,7 @@ class CScrollOverview : public IOverview {
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
     SWorkspaceInsertTransition       workspaceInsertTransition;
     PHLWORKSPACEREF                  pendingRemovedWorkspace;
+    ScrollOverview::Config::ELayout  layout = ScrollOverview::Config::ELayout::VERTICAL;
 
     struct SForcedSurfaceVisibility {
         WP<CWLSurfaceResource> surface;

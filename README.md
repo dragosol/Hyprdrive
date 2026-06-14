@@ -33,6 +33,7 @@ plugin {
         gesture_distance = 300 # how far is the "max" for the gesture
         scale = 0.5 # preferred overview scale
         workspace_gap = 100
+        layout = vertical # vertical or horizontal
         wallpaper = 0 # 0: global only, 1: per-workspace only, 2: both
         blur = false # blur only the main overview wallpaper
 
@@ -56,6 +57,7 @@ hl.config({
             gesture_distance = 300, -- how far is the "max" for the gesture
             scale = 0.5, -- preferred overview scale
             workspace_gap = 100,
+            layout = "vertical", -- vertical or horizontal
             wallpaper = 0, -- 0: global only, 1: per-workspace only, 2: both
             blur = false, -- blur only the main overview wallpaper
 
@@ -80,6 +82,7 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 | gesture_distance | number | how far is the max for the gesture                                     | `200`   |
 | scale            | float  | overview scale, [0.1 - 0.9]                                            | `0.5`   |
 | workspace_gap    | number | gap between visible workspaces in the overview, in pixels              | `0`     |
+| layout           | string | workspace layout: `vertical` or `horizontal`                           | `vertical` |
 | wallpaper        | int    | wallpaper mode: `0` global only, `1` per-workspace only, `2` both      | `0`     |
 | blur             | bool   | blur the main overview wallpaper without blurring workspace wallpapers | `false` |
 
@@ -127,6 +130,19 @@ end)
 `hl.plugin.scrolloverview.overview("toggle")` returns a dispatcher function
 accepted by `hl.dispatch()` and binds. When called from inside a Lua keybind
 callback, it dispatches immediately.
+
+### Other Lua Examples
+
+Set layout per monitor before opening the overview:
+
+```lua
+hl.bind(mainMod .. " + Tab", function()
+    local monitor = hl.get_active_monitor()
+    local layout = monitor and monitor.name == "DP-1" and "vertical" or "horizontal"
+    hl.config({ plugin = { scrolloverview = { layout = layout } } })
+    hl.plugin.scrolloverview.overview("toggle")
+end)
+```
 
 Here are a list of options you can use:  
 | option | description |
