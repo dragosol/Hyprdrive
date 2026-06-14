@@ -212,6 +212,24 @@ static bool shouldOverviewShadowIncludeHyprbar(const PHLWINDOW& window, bool bor
     return ScrollOverview::Config::getValue<bool>("plugin:hyprbars:bar_part_of_window");
 }
 
+static void blockOverviewWindowBlurOptimization(const PHLWINDOW& window, size_t firstElement) {
+    if (!window)
+        return;
+
+    auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+    for (size_t i = firstElement; i < passElements.size(); ++i) {
+        const auto& passElement = passElements[i];
+        if (!passElement.element)
+            continue;
+
+        auto* surfacePassElement = dynamic_cast<CSurfacePassElement*>(passElement.element.get());
+        if (!surfacePassElement || surfacePassElement->m_data.pWindow != window)
+            continue;
+
+        surfacePassElement->m_data.blockBlurOptimization = true;
+    }
+}
+
 static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const PHLWINDOW& window, float renderScale) {
     SOverviewWindowMetrics metrics;
     metrics.renderScale   = renderScale;
@@ -717,12 +735,36 @@ bool shouldBlurBackground(const PHLWINDOW& window) {
     return window && g_pHyprRenderer && g_pHyprRenderer->shouldBlur(window);
 }
 
-bool shouldUsePrecomputedBlur(const PHLWINDOW& window) {
-    return ScrollOverview::Config::getValue<bool>("decoration:blur:new_optimizations") && shouldShowOverviewWindow(window) && !window->m_isFloating && shouldBlurBackground(window);
+static bool overviewBoxContains(const CBox& outer, const CBox& inner) {
+    constexpr float EPSILON = 0.5F;
+    return inner.x >= outer.x - EPSILON && inner.y >= outer.y - EPSILON && inner.x + inner.width <= outer.x + outer.width + EPSILON &&
+        inner.y + inner.height <= outer.y + outer.height + EPSILON;
 }
 
-bool shouldUseBlurFramebuffer(const PHLWINDOW& window) {
-    return shouldUsePrecomputedBlur(window) || (shouldShowOverviewWindow(window) && shouldBlurBackground(window) && window->m_ruleApplicator->xray().valueOr(false));
+static bool overviewWindowFitsWorkspaceBox(const CBox* workspaceBox, const CBox* windowBox) {
+    return !workspaceBox || !windowBox || overviewBoxContains(*workspaceBox, *windowBox);
+}
+
+static bool overviewWorkspaceBoxReadyForPrecomputedBlur(PHLMONITOR monitor, const CBox* workspaceBox) {
+    if (!monitor || !workspaceBox)
+        return true;
+
+    constexpr float EPSILON    = 0.5F;
+    const auto      RENDERSIZE = monitor->m_size * monitor->m_scale;
+
+    return workspaceBox->x >= -EPSILON && workspaceBox->y >= -EPSILON && workspaceBox->x + workspaceBox->width <= RENDERSIZE.x + EPSILON &&
+        workspaceBox->y + workspaceBox->height <= RENDERSIZE.y + EPSILON;
+}
+
+bool shouldUsePrecomputedBlur(const PHLWINDOW& window, PHLMONITOR monitor, const CBox* workspaceBox, const CBox* windowBox) {
+    return ScrollOverview::Config::getValue<bool>("decoration:blur:new_optimizations") && shouldShowOverviewWindow(window) && !window->m_isFloating && shouldBlurBackground(window) &&
+        overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox);
+}
+
+bool shouldUseBlurFramebuffer(const PHLWINDOW& window, PHLMONITOR monitor, const CBox* workspaceBox, const CBox* windowBox) {
+    return shouldUsePrecomputedBlur(window, monitor, workspaceBox, windowBox) ||
+        (shouldShowOverviewWindow(window) && shouldBlurBackground(window) && window->m_ruleApplicator->xray().valueOr(false) &&
+         overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox));
 }
 
 void forceDecoRecalc(const PHLWINDOW& window) {
@@ -774,7 +816,10 @@ void renderOverviewWindow(const SRenderParams& params) {
     });
 
     const size_t firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
+    const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox);
     g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
+    if (!usePrecomputedBlur)
+        blockOverviewWindowBlurOptimization(params.window, firstWindowPassElement);
     roundStandaloneWindowPassElements(params.window, params.monitor, params.renderScale, firstWindowPassElement);
 
     renderOverviewCustomDecorations(params.monitor, params.window, params.workspaceBox ? *params.workspaceBox : CBox{}, params.windowBox, metrics, DECORATION_LAYER_OVER);

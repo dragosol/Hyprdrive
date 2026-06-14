@@ -2644,7 +2644,7 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         if (!overviewBoxIntersectsMonitor(windowBox, monitor))
             return;
 
-        renderWindowLive(monitor, window, windowBox, renderScale, now, &WORKSPACEBOX, OverviewWindow::shouldUsePrecomputedBlur(window));
+        renderWindowLive(monitor, window, windowBox, renderScale, now, &WORKSPACEBOX);
     };
 
     const auto fullscreenWindow = getOverviewWindowToShow(workspace->getFullscreenWindow());
@@ -2779,8 +2779,7 @@ void CScrollOverview::renderPinnedFloatingWindows(PHLMONITOR monitor, float over
     }
 }
 
-void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox,
-                                       bool usePrecomputedBlur) {
+void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox) {
     if (!window)
         return;
 
@@ -2794,7 +2793,6 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         .renderScale        = renderScale,
         .now                = now,
         .workspaceBox       = workspaceBox,
-        .usePrecomputedBlur = usePrecomputedBlur,
         .selected           = closeOnWindow == window,
     });
 }
