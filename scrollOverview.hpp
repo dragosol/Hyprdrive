@@ -69,7 +69,10 @@ class CScrollOverview : public IOverview {
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
     void   syncFocusedSelection();
+    void   updateWorkspaceVerticalOverflow();
+    CBox   workspaceOverviewVisibleBox(size_t workspaceIdx, const CBox& workspaceBox, float renderScale, PHLMONITOR monitor) const;
     float      workspaceOverviewYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    float      workspaceOverviewLogicalYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
@@ -122,15 +125,17 @@ class CScrollOverview : public IOverview {
     struct SWorkspaceImage {
         PHLWORKSPACE              pWorkspace;
         std::vector<PHLWINDOWREF> windows;
+        float                     verticalOverflowTop    = 0.F;
+        float                     verticalOverflowBottom = 0.F;
     };
 
     struct SWorkspaceInsertTransition {
         bool                             active              = false;
         WORKSPACEID                      transitionWorkspaceID = WORKSPACE_INVALID;
         bool                             transitionFadeIn   = true;
-        std::unordered_map<WORKSPACEID, long> oldRelativeSlots;
-        std::unordered_map<WORKSPACEID, long> newRelativeSlots;
-        long                             transitionOldRelativeSlot = 0;
+        std::unordered_map<WORKSPACEID, float> oldRelativeOffsets;
+        std::unordered_map<WORKSPACEID, float> newRelativeOffsets;
+        float                            transitionOldRelativeOffset = 0.F;
     };
 
     Vector2D                         lastMousePosLocal = Vector2D{}; // monitor-local pixel space

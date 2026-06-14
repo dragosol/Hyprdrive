@@ -927,7 +927,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
                     return;
 
                 const auto WORKSPACEYOFFSET =
-                    (sc<long>(resizeWorkspace) - sc<long>(activeWorkspaceIndex())) * getWorkspaceRenderedPitch(MONITOR, scale->value());
+                    workspaceOverviewYOffset(resizeWorkspace, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value()));
                 const auto WINDOWBOX = getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), WORKSPACEYOFFSET);
 
                 resizePointerDown    = true;
@@ -1325,25 +1325,53 @@ size_t CScrollOverview::activeWorkspaceIndex() const {
 }
 
 float CScrollOverview::workspaceOverviewYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const {
-    const auto DEFAULTOFFSET = (sc<long>(workspaceIdx) - sc<long>(activeIdx)) * workspacePitch;
+    const auto MONITOR             = pMonitor.lock();
+    const auto MONITORSCALE        = MONITOR ? std::max(MONITOR->m_scale, 0.01F) : 1.F;
+    const auto RENDERSCALE         = MONITOR && MONITOR->m_size.y > 0 ?
+        std::max(0.01F, (workspacePitch / MONITORSCALE - sc<float>(ScrollOverview::Config::getWorkspaceGap())) / sc<float>(MONITOR->m_size.y)) :
+        std::max(scale->value(), 0.01F);
+    const auto LOGICALPITCH        = MONITOR ? getWorkspaceLogicalPitch(MONITOR, RENDERSCALE) : workspacePitch / std::max(RENDERSCALE * MONITORSCALE, 0.01F);
+    const auto RENDEREDLOGICALUNIT = RENDERSCALE * MONITORSCALE;
+    const auto DEFAULTOFFSET       = workspaceOverviewLogicalYOffset(workspaceIdx, activeIdx, LOGICALPITCH) * RENDEREDLOGICALUNIT;
 
     if (!workspaceInsertTransition.active || workspaceIdx >= images.size() || !images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
         return DEFAULTOFFSET;
 
     const auto WORKSPACEID = images[workspaceIdx]->pWorkspace->m_id;
-    const auto NEWIT       = workspaceInsertTransition.newRelativeSlots.find(WORKSPACEID);
-    if (NEWIT == workspaceInsertTransition.newRelativeSlots.end())
+    const auto NEWIT       = workspaceInsertTransition.newRelativeOffsets.find(WORKSPACEID);
+    if (NEWIT == workspaceInsertTransition.newRelativeOffsets.end())
         return DEFAULTOFFSET;
 
     const float T         = std::clamp(workspaceInsertProgress->value(), 0.F, 1.F);
-    const float NEWOFFSET = sc<float>(NEWIT->second) * workspacePitch;
+    const float NEWOFFSET = NEWIT->second * RENDEREDLOGICALUNIT;
 
-    if (const auto OLDIT = workspaceInsertTransition.oldRelativeSlots.find(WORKSPACEID); OLDIT != workspaceInsertTransition.oldRelativeSlots.end()) {
-        const float OLDOFFSET = sc<float>(OLDIT->second) * workspacePitch;
+    if (const auto OLDIT = workspaceInsertTransition.oldRelativeOffsets.find(WORKSPACEID); OLDIT != workspaceInsertTransition.oldRelativeOffsets.end()) {
+        const float OLDOFFSET = OLDIT->second * RENDEREDLOGICALUNIT;
         return OLDOFFSET + (NEWOFFSET - OLDOFFSET) * T;
     }
 
     return NEWOFFSET;
+}
+
+float CScrollOverview::workspaceOverviewLogicalYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const {
+    const auto EXTRAINTERVAL = [this](size_t workspaceIdx_) -> float {
+        if (workspaceIdx_ + 1 >= images.size() || !images[workspaceIdx_] || !images[workspaceIdx_ + 1])
+            return 0.F;
+
+        return images[workspaceIdx_]->verticalOverflowBottom + images[workspaceIdx_ + 1]->verticalOverflowTop;
+    };
+
+    float offset = 0.F;
+
+    if (workspaceIdx > activeIdx) {
+        for (size_t i = activeIdx; i < workspaceIdx; ++i)
+            offset += workspacePitch + EXTRAINTERVAL(i);
+    } else {
+        for (size_t i = workspaceIdx; i < activeIdx; ++i)
+            offset -= workspacePitch + EXTRAINTERVAL(i);
+    }
+
+    return offset;
 }
 
 float CScrollOverview::workspaceOverviewAlpha(size_t workspaceIdx) const {
@@ -1356,7 +1384,7 @@ float CScrollOverview::workspaceOverviewAlpha(size_t workspaceIdx) const {
     if (!workspaceInsertTransition.transitionFadeIn)
         return 1.F;
 
-    if (workspaceInsertTransition.oldRelativeSlots.contains(workspaceInsertTransition.transitionWorkspaceID))
+    if (workspaceInsertTransition.oldRelativeOffsets.contains(workspaceInsertTransition.transitionWorkspaceID))
         return 1.F;
 
     return std::clamp(workspaceInsertFadeProgress->value(), 0.F, 1.F);
@@ -1430,6 +1458,47 @@ void CScrollOverview::rememberSelection(PHLWINDOW window) {
     rememberedSelection[window->m_workspace->m_id] = window;
 }
 
+void CScrollOverview::updateWorkspaceVerticalOverflow() {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return;
+
+    for (const auto& img : images) {
+        if (!img)
+            continue;
+
+        img->verticalOverflowTop    = 0.F;
+        img->verticalOverflowBottom = 0.F;
+    }
+
+    for (const auto& img : images) {
+        if (!img || !img->pWorkspace)
+            continue;
+
+        for (const auto& windowRef : img->windows) {
+            const auto window = getOverviewWindowToShow(windowRef.lock());
+            if (!shouldShowOverviewWindow(window) || window->m_isFloating)
+                continue;
+
+            const auto pos  = window->m_realPosition->value() - MONITOR->m_position;
+            const auto size = window->m_realSize->value();
+
+            img->verticalOverflowTop    = std::max(img->verticalOverflowTop, std::max(0.F, sc<float>(-pos.y)));
+            img->verticalOverflowBottom = std::max(img->verticalOverflowBottom, std::max(0.F, sc<float>(pos.y + size.y - MONITOR->m_size.y)));
+        }
+    }
+}
+
+CBox CScrollOverview::workspaceOverviewVisibleBox(size_t workspaceIdx, const CBox& workspaceBox, float renderScale, PHLMONITOR monitor) const {
+    if (workspaceIdx >= images.size() || !images[workspaceIdx] || !monitor)
+        return workspaceBox;
+
+    auto box = workspaceBox;
+    box.y -= images[workspaceIdx]->verticalOverflowTop * renderScale * monitor->m_scale;
+    box.height += (images[workspaceIdx]->verticalOverflowTop + images[workspaceIdx]->verticalOverflowBottom) * renderScale * monitor->m_scale;
+    return box;
+}
+
 PHLWINDOW CScrollOverview::windowAtOverviewCursor(size_t* hoveredWorkspaceIdx) {
     size_t activeIdx = activeWorkspaceIndex();
     const auto MONITOR = pMonitor.lock();
@@ -1437,9 +1506,9 @@ PHLWINDOW CScrollOverview::windowAtOverviewCursor(size_t* hoveredWorkspaceIdx) {
         return nullptr;
 
     const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(MONITOR, scale->value());
-    float      yoff           = -(float)activeIdx * WORKSPACEPITCH;
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
+        const auto  yoff = workspaceOverviewYOffset(workspaceIdx, activeIdx, WORKSPACEPITCH);
 
         const auto selectWindow = [&](const PHLWINDOW& window) -> PHLWINDOW {
             if (hoveredWorkspaceIdx)
@@ -1467,7 +1536,6 @@ PHLWINDOW CScrollOverview::windowAtOverviewCursor(size_t* hoveredWorkspaceIdx) {
             if (texbox.containsPoint(lastMousePosLocal))
                 return selectWindow(fullscreenWindow);
 
-            yoff += WORKSPACEPITCH;
             continue;
         }
 
@@ -1483,8 +1551,6 @@ PHLWINDOW CScrollOverview::windowAtOverviewCursor(size_t* hoveredWorkspaceIdx) {
                     return selectWindow(window);
             }
         }
-
-        yoff += WORKSPACEPITCH;
     }
 
     return nullptr;
@@ -1649,8 +1715,7 @@ CBox CScrollOverview::resizedWindowBox() const {
 
     auto box = resizedOverviewBoxFromCorner(resizeOriginalBox, DELTA, resizeCorner, minSizePx, maxSizePx);
 
-    const auto WORKSPACEYOFFSET =
-        (sc<long>(resizeWorkspaceIdx) - sc<long>(activeWorkspaceIndex())) * getWorkspaceRenderedPitch(MONITOR, scale->value());
+    const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(resizeWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value()));
     const auto WORKSPACEBOX = getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), WORKSPACEYOFFSET);
     const auto BORDERMARGIN = WINDOW->getRealBorderSize() * MONITOR->m_scale * scale->value();
 
@@ -1699,8 +1764,7 @@ void CScrollOverview::beginWindowResize() {
         }
     }
 
-    const auto WORKSPACEYOFFSET =
-        (sc<long>(resizeWorkspaceIdx) - sc<long>(activeWorkspaceIndex())) * getWorkspaceRenderedPitch(MONITOR, scale->value());
+    const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(resizeWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value()));
     resizeOriginalBox   = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEYOFFSET);
     resizeActiveWindow  = WINDOW;
     resizeLastMouseLocal = lastMousePosLocal;
@@ -1784,8 +1848,9 @@ void CScrollOverview::endWindowDrag() {
 
     const auto MONITOR = pMonitor.lock();
     if (MONITOR) {
-        const auto WORKSPACEBOX = getOverviewWorkspaceBox(
-            MONITOR, scale->value(), viewOffset->value(), (sc<long>(dropWorkspaceIdx) - sc<long>(activeWorkspaceIndex())) * getWorkspaceRenderedPitch(MONITOR, scale->value()));
+        const auto WORKSPACEBOX =
+            getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(),
+                                    workspaceOverviewYOffset(dropWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value())));
 
         if (lastMousePosLocal.x < WORKSPACEBOX.x)
             horizontalDropSide = -1;
@@ -1794,7 +1859,7 @@ void CScrollOverview::endWindowDrag() {
     }
 
     if (!DROPANCHOR && horizontalDropSide == 0 && MONITOR && dropWorkspaceIdx < images.size() && images[dropWorkspaceIdx]) {
-        const auto WORKSPACE_YOFFSET = (sc<long>(dropWorkspaceIdx) - sc<long>(activeWorkspaceIndex())) * getWorkspaceRenderedPitch(MONITOR, scale->value());
+        const auto WORKSPACE_YOFFSET = workspaceOverviewYOffset(dropWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value()));
 
         float minWindowX = std::numeric_limits<float>::max();
         float maxWindowX = std::numeric_limits<float>::lowest();
@@ -2519,8 +2584,9 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
 
     const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(workspaceIdx, activeIdx, workspacePitch);
     const auto WORKSPACEBOX     = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEYOFFSET);
+    const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, renderScale, monitor);
 
-    if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, monitor))
+    if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor))
         return;
 
     const auto workspace         = workspaceImage->pWorkspace;
@@ -2619,7 +2685,8 @@ bool CScrollOverview::hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t
 
         const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(workspaceIdx, activeIdx, workspacePitch);
         const auto WORKSPACEBOX     = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEYOFFSET);
-        if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, monitor))
+        const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, renderScale, monitor);
+        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor))
             continue;
 
         const auto workspace = workspaceImage->pWorkspace;
@@ -2704,6 +2771,8 @@ void CScrollOverview::redrawAll(bool forcelowres) {
 
     for (const auto& img : images) {
         img->windows.clear();
+        img->verticalOverflowTop    = 0.F;
+        img->verticalOverflowBottom = 0.F;
     }
     pinnedFloatingWindows.clear();
 
@@ -2764,6 +2833,8 @@ void CScrollOverview::redrawAll(bool forcelowres) {
         addOverviewWindow(window);
         addPinnedFloatingWindow(window);
     }
+
+    updateWorkspaceVerticalOverflow();
 }
 
 void CScrollOverview::damage() {
@@ -2932,7 +3003,8 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
 
         const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(workspaceIdx, ACTIVEIDX, PITCH);
         const auto WORKSPACEBOX     = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
-        if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, MONITOR))
+        const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, SCALE, MONITOR);
+        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, MONITOR))
             continue;
 
         const auto workspace = workspaceImage->pWorkspace;
@@ -3023,7 +3095,8 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
 
         const auto WORKSPACEYOFFSET = workspaceOverviewYOffset(workspaceIdx, ACTIVEIDX, PITCH);
         const auto WORKSPACEBOX     = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), WORKSPACEYOFFSET);
-        if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, MONITOR))
+        const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, SCALE, MONITOR);
+        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, MONITOR))
             continue;
 
         const auto workspace = workspaceImage->pWorkspace;
@@ -3246,7 +3319,7 @@ void CScrollOverview::close() {
             if (!images[workspaceIdx] || images[workspaceIdx]->pWorkspace != SELECTEDWORKSPACE)
                 continue;
 
-            *viewOffset = Vector2D{0.F, (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * FINALPITCH};
+            *viewOffset = Vector2D{0.F, workspaceOverviewLogicalYOffset(workspaceIdx, ACTIVEIDX, FINALPITCH)};
             break;
         }
 
@@ -3270,7 +3343,7 @@ void CScrollOverview::close() {
             for (const auto& windowRef : wimg->windows) {
                 const auto window = getOverviewWindowToShow(windowRef.lock());
                 if (window == selectedWindow && window) {
-                    *viewOffset = Vector2D{0.F, (sc<long>(workspaceIdx) - sc<long>(ACTIVEIDX)) * FINALPITCH};
+                    *viewOffset = Vector2D{0.F, workspaceOverviewLogicalYOffset(workspaceIdx, ACTIVEIDX, FINALPITCH)};
                     found = true;
                     break;
                 }
@@ -3299,6 +3372,7 @@ void CScrollOverview::onPreRender() {
         pMonitor->m_solitaryClient.reset();
 
     forceLayersAboveFullscreen();
+    updateWorkspaceVerticalOverflow();
 
     if (closing)
         return;
@@ -3330,12 +3404,15 @@ void CScrollOverview::onWorkspaceChange() {
     const auto previousStartedOn = startedOn;
     std::vector<WORKSPACEID> previousWorkspaceIDs;
     previousWorkspaceIDs.reserve(images.size());
+    std::unordered_map<WORKSPACEID, float> previousWorkspaceOffsets;
+    const auto PREVIOUSLOGICALPITCH = getWorkspaceLogicalPitch(pMonitor.lock(), scale->value());
     for (size_t i = 0; i < images.size(); ++i) {
         const auto& image = images[i];
         if (!image || !image->pWorkspace)
             continue;
 
         previousWorkspaceIDs.push_back(image->pWorkspace->m_id);
+        previousWorkspaceOffsets.emplace(image->pWorkspace->m_id, workspaceOverviewLogicalYOffset(i, previousActiveIdx, PREVIOUSLOGICALPITCH));
     }
 
     const auto NEWWORKSPACE      = pMonitor->m_activeWorkspace;
@@ -3358,21 +3435,23 @@ void CScrollOverview::onWorkspaceChange() {
         workspaceInsertTransition.transitionWorkspaceID  = INSERTEDWORKSPACE ? NEWWORKSPACE->m_id : previousStartedOn->m_id;
         workspaceInsertTransition.transitionFadeIn       = INSERTEDWORKSPACE;
         workspaceInsertFadeProgress->setConfig(INSERTEDWORKSPACE ? workspaceInsertFadeConfig : workspaceRemoveFadeConfig);
-        workspaceInsertTransition.oldRelativeSlots.clear();
-        workspaceInsertTransition.newRelativeSlots.clear();
-        workspaceInsertTransition.transitionOldRelativeSlot = 0;
+        workspaceInsertTransition.oldRelativeOffsets.clear();
+        workspaceInsertTransition.newRelativeOffsets.clear();
+        workspaceInsertTransition.transitionOldRelativeOffset = 0.F;
 
         for (size_t i = 0; i < previousWorkspaceIDs.size(); ++i) {
-            workspaceInsertTransition.oldRelativeSlots.emplace(previousWorkspaceIDs[i], sc<long>(i) - sc<long>(previousActiveIdx));
+            const auto OFFSET = previousWorkspaceOffsets.contains(previousWorkspaceIDs[i]) ? previousWorkspaceOffsets.at(previousWorkspaceIDs[i]) : 0.F;
+            workspaceInsertTransition.oldRelativeOffsets.emplace(previousWorkspaceIDs[i], OFFSET);
             if (REMOVEDPREVIOUSWORKSPACE && previousWorkspaceIDs[i] == previousStartedOn->m_id)
-                workspaceInsertTransition.transitionOldRelativeSlot = sc<long>(i) - sc<long>(previousActiveIdx);
+                workspaceInsertTransition.transitionOldRelativeOffset = OFFSET;
         }
 
+        const auto NEWLOGICALPITCH = getWorkspaceLogicalPitch(pMonitor.lock(), scale->value());
         for (size_t i = 0; i < images.size(); ++i) {
             if (!images[i] || !images[i]->pWorkspace)
                 continue;
 
-            workspaceInsertTransition.newRelativeSlots.emplace(images[i]->pWorkspace->m_id, sc<long>(i) - sc<long>(viewportCurrentWorkspace));
+            workspaceInsertTransition.newRelativeOffsets.emplace(images[i]->pWorkspace->m_id, workspaceOverviewLogicalYOffset(i, viewportCurrentWorkspace, NEWLOGICALPITCH));
         }
 
         workspaceInsertProgress->setValueAndWarp(0.F);
@@ -3386,12 +3465,13 @@ void CScrollOverview::onWorkspaceChange() {
         workspaceInsertTransition.transitionWorkspaceID  = WORKSPACE_INVALID;
         workspaceInsertTransition.transitionFadeIn       = true;
         workspaceInsertFadeProgress->setConfig(workspaceInsertFadeConfig);
-        workspaceInsertTransition.oldRelativeSlots.clear();
-        workspaceInsertTransition.newRelativeSlots.clear();
-        workspaceInsertTransition.transitionOldRelativeSlot = 0;
+        workspaceInsertTransition.oldRelativeOffsets.clear();
+        workspaceInsertTransition.newRelativeOffsets.clear();
+        workspaceInsertTransition.transitionOldRelativeOffset = 0.F;
         workspaceInsertProgress->setValueAndWarp(1.F);
         workspaceInsertFadeProgress->setValueAndWarp(1.F);
-        viewOffset->setValueAndWarp(Vector2D{0.F, (sc<long>(previousActiveIdx) - sc<long>(viewportCurrentWorkspace)) * getWorkspaceLogicalPitch(pMonitor.lock(), scale->value())});
+        viewOffset->setValueAndWarp(
+            Vector2D{0.F, workspaceOverviewLogicalYOffset(previousActiveIdx, viewportCurrentWorkspace, getWorkspaceLogicalPitch(pMonitor.lock(), scale->value()))});
         *viewOffset = Vector2D{};
     }
 
@@ -3443,7 +3523,7 @@ void CScrollOverview::render() {
 
     if (workspaceInsertTransition.active && !workspaceInsertTransition.transitionFadeIn) {
         const auto GHOSTALPHA   = 1.F - std::clamp(workspaceInsertFadeProgress->value(), 0.F, 1.F);
-        const auto GHOSTYOFFSET = sc<float>(workspaceInsertTransition.transitionOldRelativeSlot) * PITCH;
+        const auto GHOSTYOFFSET = workspaceInsertTransition.transitionOldRelativeOffset * SCALE * MONITOR->m_scale;
         const auto GHOSTBOX     = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), GHOSTYOFFSET);
 
         if (GHOSTALPHA > 0.001F && overviewBoxIntersectsMonitor(GHOSTBOX, MONITOR)) {
