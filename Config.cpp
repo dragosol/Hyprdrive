@@ -5,6 +5,7 @@
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
+#include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 
 extern "C" {
@@ -156,6 +157,8 @@ void registerLegacy() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:workspace_gap", "gap between overview workspaces", 0, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CStringValue>("plugin:scrolloverview:layout", "overview layout", Hyprlang::STRING{"vertical"}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -178,6 +181,11 @@ float getScale() {
 
 int getWorkspaceGap() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:workspace_gap"));
+}
+
+ELayout getLayout() {
+    const auto LAYOUT = getValue<std::string>("plugin:scrolloverview:layout");
+    return LAYOUT == "horizontal" ? ELayout::HORIZONTAL : ELayout::VERTICAL;
 }
 
 int getWallpaperMode() {

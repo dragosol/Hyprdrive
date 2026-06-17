@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Config.hpp"
 #include "IOverview.hpp"
 
 class CMonitor;
@@ -60,8 +61,7 @@ class CScrollOverview : public IOverview {
     void   renderWorkspaceBackground(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
     void   renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
     bool   hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale) const;
-    void   renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox = nullptr,
-                             bool usePrecomputedBlur = false);
+    void   renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox = nullptr);
     void   renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now);
     void   renderPinnedFloatingWindows(PHLMONITOR monitor, float overviewScale, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
@@ -69,7 +69,10 @@ class CScrollOverview : public IOverview {
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
     void   syncFocusedSelection();
-    float      workspaceOverviewYOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    void   updateWorkspaceOverflow();
+    CBox   workspaceOverviewVisibleBox(size_t workspaceIdx, const CBox& workspaceBox, float renderScale, PHLMONITOR monitor) const;
+    float      workspaceOverviewOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    float      workspaceOverviewLogicalOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
@@ -122,15 +125,17 @@ class CScrollOverview : public IOverview {
     struct SWorkspaceImage {
         PHLWORKSPACE              pWorkspace;
         std::vector<PHLWINDOWREF> windows;
+        float                     overflowBefore = 0.F;
+        float                     overflowAfter  = 0.F;
     };
 
     struct SWorkspaceInsertTransition {
         bool                             active              = false;
         WORKSPACEID                      transitionWorkspaceID = WORKSPACE_INVALID;
         bool                             transitionFadeIn   = true;
-        std::unordered_map<WORKSPACEID, long> oldRelativeSlots;
-        std::unordered_map<WORKSPACEID, long> newRelativeSlots;
-        long                             transitionOldRelativeSlot = 0;
+        std::unordered_map<WORKSPACEID, float> oldRelativeOffsets;
+        std::unordered_map<WORKSPACEID, float> newRelativeOffsets;
+        float                            transitionOldRelativeOffset = 0.F;
     };
 
     Vector2D                         lastMousePosLocal = Vector2D{}; // monitor-local pixel space
@@ -170,6 +175,7 @@ class CScrollOverview : public IOverview {
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
     SWorkspaceInsertTransition       workspaceInsertTransition;
     PHLWORKSPACEREF                  pendingRemovedWorkspace;
+    ScrollOverview::Config::ELayout  layout = ScrollOverview::Config::ELayout::VERTICAL;
 
     struct SForcedSurfaceVisibility {
         WP<CWLSurfaceResource> surface;
