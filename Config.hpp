@@ -71,6 +71,7 @@ int          getGestureDistance();
 float        getScale();
 int          getWorkspaceGap();
 ELayout      getLayout();
+int          getScrollEventDelay();
 int          getWallpaperMode();
 bool         getBlur();
 ::Config::CCssGapData getCssGapData(const std::string& name);

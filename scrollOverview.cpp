@@ -1030,8 +1030,90 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (MODS != 0)
             return;
 
+        const bool HORIZONTAL       = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL;
+        const bool LAYOUTHORIZONTAL = layout == ScrollOverview::Config::ELayout::HORIZONTAL;
+        const bool WORKSPACEAXIS    = HORIZONTAL == LAYOUTHORIZONTAL; // scrolling along the workspace-stacking axis pages workspaces; the other axis drives the tape/selection
+
         info.cancelled = true;
-        moveViewportWorkspace(e.delta > 0);
+
+        // mouse wheel: discrete stepping, throttled by scroll_event_delay so one notch is one step
+        if (e.source == WL_POINTER_AXIS_SOURCE_WHEEL) {
+            if (e.delta == 0.0)
+                return;
+            scrollAccum        = 0.0;
+            workspaceFollowing = false;
+            tapeFollowing      = false;
+            if (!scrollStepAllowed(e.timeMs))
+                return;
+            if (WORKSPACEAXIS)
+                moveViewportWorkspace(e.delta > 0);
+            else
+                moveWindowSelection(e.delta > 0 ? "r" : "l");
+            return;
+        }
+
+        if (images.empty() || viewportCurrentWorkspace >= images.size())
+            return;
+
+        const auto MONITOR = pMonitor.lock();
+        if (!MONITOR)
+            return;
+
+        const float SCALE = std::max<float>(scale->value(), 0.01F);
+
+        // scroll across the workspace-stacking axis: drive the scrolling-layout tape 1:1, snapping to the nearest column on release
+        if (!WORKSPACEAXIS) {
+            const auto WORKSPACE = images[viewportCurrentWorkspace]->pWorkspace;
+            auto*      ALGO = (WORKSPACE && WORKSPACE->m_space && WORKSPACE->m_space->algorithm())
+                              ? dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(WORKSPACE->m_space->algorithm()->m_tiled.get())
+                              : nullptr;
+
+            // non-scrolling workspace: fall back to discrete focus stepping, throttled by scroll_event_delay
+            if (!ALGO) {
+                if (e.delta == 0.0 || !scrollStepAllowed(e.timeMs))
+                    return;
+                moveWindowSelection(e.delta > 0 ? "r" : "l");
+                return;
+            }
+
+            if (e.delta == 0.0) { // fingers lifted — snap the tape to the nearest column
+                if (tapeFollowing) {
+                    tapeFollowing = false;
+                    ALGO->snapToGrid();
+                    damage();
+                }
+                return;
+            }
+
+            tapeFollowing = true;
+            ALGO->moveTape(sc<float>(-1 * e.delta / SCALE)); // /scale keeps the columns tracking the finger 1:1 in the scaled overview
+            damage();
+            return;
+        }
+
+        // scroll along the workspace-stacking axis: 1:1 workspace follow, snapping to the nearest workspace on release
+        const float PITCH = getWorkspaceLogicalPitch(MONITOR, SCALE, layout); // logical px per workspace
+
+        if (e.delta == 0.0) { // fingers lifted — settle on the nearest workspace
+            finishWorkspaceScrollFollow(PITCH);
+            return;
+        }
+
+        workspaceFollowing = true;
+        scrollAccum += e.delta;
+
+        // finger travel (logical screen px) -> view offset (overview logical px); /SCALE keeps the content under the finger 1:1
+        double offset = scrollAccum / SCALE;
+
+        // clamp so the view can't be dragged past the first / last workspace
+        const double curIdx  = sc<double>(viewportCurrentWorkspace);
+        const double maxNext = (sc<double>(images.size()) - 1.0 - curIdx) * PITCH;
+        const double maxPrev = -curIdx * PITCH;
+        offset               = std::clamp(offset, maxPrev, maxNext);
+        scrollAccum          = offset * SCALE; // re-sync the accumulator to the clamped offset so it can't wind up past the ends
+
+        viewOffset->setValueAndWarp(axisOffsetVector(sc<float>(offset), layout)); // pan along the workspace-stacking axis
+        damage();
     };
 
     auto onWindowOpen = [this](PHLWINDOW) {
@@ -2082,6 +2164,49 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
         pMonitor->changeWorkspace(TARGETWORKSPACEIMAGE->pWorkspace, false, true, true);
 
     damage();
+}
+
+bool CScrollOverview::scrollStepAllowed(uint32_t timeMs) {
+    const uint32_t DELAY = sc<uint32_t>(ScrollOverview::Config::getScrollEventDelay());
+
+    // throttle discrete scroll steps so a single notch / a burst of high-res events only steps once
+    if (lastScrollStepTimeMs != 0 && timeMs >= lastScrollStepTimeMs && timeMs - lastScrollStepTimeMs < DELAY)
+        return false;
+
+    lastScrollStepTimeMs = timeMs;
+    return true;
+}
+
+void CScrollOverview::finishWorkspaceScrollFollow(float logicalPitch) {
+    if (!workspaceFollowing)
+        return;
+
+    workspaceFollowing = false;
+    scrollAccum        = 0.0;
+
+    const double OFFSET = axisValue(viewOffset->value(), layout); // offset along the workspace-stacking axis
+    const long   STEPS  = std::lround(OFFSET / logicalPitch); // +next / -previous
+
+    if (STEPS == 0) {
+        *viewOffset = Vector2D{}; // didn't drag far enough — snap back to the current workspace
+        return;
+    }
+
+    // commit the workspace change, but have onWorkspaceChange settle from the current drag position
+    // (the leftover sub-pitch remainder) instead of warping a full pitch — keeps the slide seamless
+    gestureSettleOffset  = OFFSET - sc<double>(STEPS) * logicalPitch;
+    gestureSettlePending = true;
+
+    const size_t BEFORE = viewportCurrentWorkspace;
+    const bool   NEXT   = STEPS > 0;
+    for (long i = 0; i < std::abs(STEPS); ++i)
+        moveViewportWorkspace(NEXT);
+
+    if (viewportCurrentWorkspace == BEFORE) {
+        // nothing actually moved (already at an edge) — no workspace change will fire, so settle here
+        gestureSettlePending = false;
+        *viewOffset          = Vector2D{};
+    }
 }
 
 void CScrollOverview::syncSelectionToViewport() {
@@ -3434,6 +3559,12 @@ void CScrollOverview::onWorkspaceChange() {
 
     const auto previousActiveIdx = activeWorkspaceIndex();
     const auto previousStartedOn = startedOn;
+
+    // consume any pending gesture-driven settle (set by finishWorkspaceScrollFollow)
+    const bool   GESTURESETTLE       = gestureSettlePending;
+    const double GESTURESETTLEOFFSET = gestureSettleOffset;
+    gestureSettlePending             = false;
+
     std::vector<WORKSPACEID> previousWorkspaceIDs;
     previousWorkspaceIDs.reserve(images.size());
     std::unordered_map<WORKSPACEID, float> previousWorkspaceOffsets;
@@ -3502,7 +3633,10 @@ void CScrollOverview::onWorkspaceChange() {
         workspaceInsertTransition.transitionOldRelativeOffset = 0.F;
         workspaceInsertProgress->setValueAndWarp(1.F);
         workspaceInsertFadeProgress->setValueAndWarp(1.F);
-        viewOffset->setValueAndWarp(
+        if (GESTURESETTLE) // a trackpad follow committed this change: settle from the drag position, not a full pitch
+            viewOffset->setValueAndWarp(axisOffsetVector(sc<float>(GESTURESETTLEOFFSET), layout));
+        else
+            viewOffset->setValueAndWarp(
             axisOffsetVector(workspaceOverviewLogicalOffset(previousActiveIdx, viewportCurrentWorkspace, getWorkspaceLogicalPitch(pMonitor.lock(), scale->value(), layout)), layout));
         *viewOffset = Vector2D{};
     }

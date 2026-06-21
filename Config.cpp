@@ -158,6 +158,10 @@ void registerLegacy() {
                                   makeShared<CIntValue>("plugin:scrolloverview:workspace_gap", "gap between overview workspaces", 0, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CStringValue>("plugin:scrolloverview:layout", "overview layout", Hyprlang::STRING{"vertical"}));
+    HyprlandAPI::addConfigValueV2(
+        SCROLLOVERVIEW_HANDLE,
+        makeShared<CIntValue>("plugin:scrolloverview:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200,
+                              SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
@@ -186,6 +190,10 @@ int getWorkspaceGap() {
 ELayout getLayout() {
     const auto LAYOUT = getValue<std::string>("plugin:scrolloverview:layout");
     return LAYOUT == "horizontal" ? ELayout::HORIZONTAL : ELayout::VERTICAL;
+}
+
+int getScrollEventDelay() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:scroll_event_delay"));
 }
 
 int getWallpaperMode() {
