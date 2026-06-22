@@ -65,6 +65,8 @@ class CScrollOverview : public IOverview {
     void   renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now);
     void   renderPinnedFloatingWindows(PHLMONITOR monitor, float overviewScale, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
+    void   trackpadSwipeLayout(const PHLWORKSPACE target, const double delta);
+    void   trackpadSwipeWorkspace(const double delta);
     void   finishWorkspaceScrollFollow(float logicalPitch);
     bool   scrollStepAllowed(uint32_t timeMs);
     bool   moveWindowSelection(const std::string& direction);
@@ -252,12 +254,13 @@ class CScrollOverview : public IOverview {
 
     bool                             swipe = false;
 
-    double                           scrollAccum  = 0.0; // accumulates continuous (trackpad) scroll deltas (screen px) during a 1:1 workspace follow drag
     uint32_t                         lastScrollStepTimeMs = 0;      // event time of the last discrete scroll step, for scroll_event_delay throttling
-    bool                             workspaceFollowing   = false; // a trackpad drag is panning between workspaces (between first delta and the lift/stop event)
-    bool                             tapeFollowing        = false; // a trackpad drag is driving the scrolling-layout tape
-    bool                             gestureSettlePending = false; // onWorkspaceChange should settle from gestureSettleOffset instead of a full-pitch warp
-    double                           gestureSettleOffset  = 0.0;   // viewOffset.y (logical px) to settle from when committing a gesture-driven workspace change
+
+    double                           trackpadScrollAccum          = 0.0;
+    bool                             trackpadWorkspaceFollowing   = false;
+    bool                             trackpadTapeFollowing        = false;
+    bool                             trackpadGestureSettlePending = false;
+    double                           trackpadGestureSettleOffset  = 0.0;
 
     friend class CScrollOverviewPassElement;
 };
