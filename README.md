@@ -80,6 +80,7 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 | property         | type   | description                                                            | default |
 | ---------------- | ------ | ---------------------------------------------------------------------- | ------- |
 | gesture_distance | number | how far is the max for the gesture                                     | `200`   |
+| scroll_event_delay | number | in ms, delay between scroll events (to prevent multiple activation)    | `200`   |
 | scale            | float  | overview scale, [0.1 - 0.9]                                            | `0.5`   |
 | workspace_gap    | number | gap between visible workspaces in the overview, in pixels              | `0`     |
 | layout           | string | overview layout: `vertical` or `horizontal`                           | `vertical` |
@@ -103,12 +104,6 @@ Controls the shadow around each workspace card. `enabled` defaults to `false`; a
 | range | int | shadow range in layout px | `decoration:shadow:range` |
 | render_power | int | shadow falloff power | `decoration:shadow:render_power` |
 | color | color | shadow color | `decoration:shadow:color` |
-
-### Keywords
-
-| name                   | description                                                             | arguments       |
-| ---------------------- | ----------------------------------------------------------------------- | --------------- |
-| scrolloverview-gesture | same as gesture, but for ScrollOverview gestures. Supports: `overview`. | Same as gesture |
 
 ### Binding
 
@@ -138,6 +133,42 @@ end)
 `hl.plugin.scrolloverview.overview("toggle")` returns a dispatcher function
 accepted by `hl.dispatch()` and binds. When called from inside a Lua keybind
 callback, it dispatches immediately.
+
+### Gesture
+
+The overview can be opened/closed with a trackpad swipe gesture. Configure it as follows.
+
+#### Hyprlang
+
+```ini
+# hyprland.conf
+scrolloverview-gesture = 3, up, overview        # 3-finger up swipe
+scrolloverview-gesture = 4, up, overview, mod:SUPER, scale:1.5
+scrolloverview-gesture = 3, up, unset           # remove a previously set gesture
+```
+
+| name                   | description                                                             | arguments       |
+| ---------------------- | ----------------------------------------------------------------------- | --------------- |
+| scrolloverview-gesture | same as gesture, but for ScrollOverview gestures. Supports: `overview`. | Same as gesture |
+
+#### Lua
+
+Call `hl.plugin.scrolloverview.gesture{ ... }` from your Lua config.
+
+```lua
+-- hyprland.lua
+hl.plugin.scrolloverview.gesture({ fingers = 3, direction = "vertical" })
+hl.plugin.scrolloverview.gesture({ fingers = 4, direction = "vertical", mod = "SUPER", scale = 1.5 })
+hl.plugin.scrolloverview.gesture({ fingers = 3, direction = "vertical", action = "unset" })
+```
+
+| field     | type   | description                                              | default    |
+| --------- | ------ | -------------------------------------------------------- | ---------- |
+| fingers   | number | finger count (2–9)                                       | required   |
+| direction | string | swipe direction (`up`, `down`, `left`, `right`, …)       | required   |
+| action    | string | `overview` to register, `unset` to remove                | `overview` |
+| mod       | string | modifier mask held during the gesture (e.g. `SUPER`)     | none       |
+| scale     | number | gesture delta scale, `[0.1 – 10]`                        | `1.0`      |
 
 ### Other Lua Examples
 

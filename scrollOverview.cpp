@@ -1149,11 +1149,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         // scroll across the workspace-stacking axis: drive the scrolling-layout tape 1:1, snapping to the nearest column on release
         if (ACTION != ScrollOverview::Config::EScrollAction::WORKSPACE) {
             const auto WORKSPACE = images[viewportCurrentWorkspace]->pWorkspace;
-            auto*      ALGO = (WORKSPACE && WORKSPACE->m_space && WORKSPACE->m_space->algorithm())
-                              ? dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(WORKSPACE->m_space->algorithm()->m_tiled.get())
-                              : nullptr;
+            const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACE);
 
-            // non-scrolling workspace?
             if (!ALGO) {
                 return;
             }
@@ -1168,7 +1165,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             }
 
             tapeFollowing = true;
-            ALGO->moveTape(sc<float>(-1 * e.delta / SCALE)); // /scale keeps the columns tracking the finger 1:1 in the scaled overview
+            ALGO->moveTape(sc<float>(-1 * e.delta / SCALE));
             damage();
             return;
         }
@@ -3790,6 +3787,10 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 }
 
 void CScrollOverview::close() {
+    if (closeApplied)
+        return;
+    closeApplied = true;
+
     setClosing(true);
 
     const auto SELECTEDWORKSPACE =
@@ -4116,7 +4117,7 @@ void CScrollOverview::onSwipeUpdate(double delta) {
 
     m_isSwiping = true;
 
-    const float PERC = closing ? std::clamp(delta / (double)DISTANCE, 0.0, 1.0) : 1.0 - std::clamp(delta / (double)DISTANCE, 0.0, 1.0);
+    const float PERC = closing ? 1.0 - std::clamp(delta / (double)DISTANCE, 0.0, 1.0) : std::clamp(delta / (double)DISTANCE, 0.0, 1.0);
 
     scale->setValueAndWarp(hyprlerp(1.F, ScrollOverview::Config::getScale(), PERC));
 }

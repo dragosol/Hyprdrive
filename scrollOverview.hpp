@@ -233,6 +233,7 @@ class CScrollOverview : public IOverview {
     wl_event_source*                 realtimePreviewTimer = nullptr;
 
     bool                             closing = false;
+    bool                             closeApplied = false; // close() has run its teardown; guards against double-invocation
 
     CHyprSignalListener             mouseMoveHook;
     CHyprSignalListener             mouseButtonHook;

@@ -258,6 +258,46 @@ static void* findFnOrThrow(const std::string& name, std::initializer_list<std::s
     return matches[0].address;
 }
 
+// shared core: register / unregister the overview trackpad gesture. used by both the hyprlang
+// keyword and the Lua `scrolloverview.gesture` function so both configure the same gesture system.
+static std::expected<void, std::string> applyOverviewGesture(size_t fingerCount, eTrackpadGestureDirection direction, const std::string& action, uint32_t modMask,
+                                                             float deltaScale) {
+    if (fingerCount <= 1 || fingerCount >= 10)
+        return std::unexpected(std::format("Invalid value {} for finger count", fingerCount));
+
+    if (direction == TRACKPAD_GESTURE_DIR_NONE)
+        return std::unexpected("Invalid direction");
+
+    if (action == "overview")
+        return g_pTrackpadGestures->addGesture(makeUnique<COverviewGesture>(), fingerCount, direction, modMask, deltaScale, false);
+
+    if (action == "unset")
+        return g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, false);
+
+    return std::unexpected(std::format("Invalid gesture: {}", action));
+}
+
+// Lua-facing registrar (scrolloverview.gesture). takes the direction/mods as strings and resolves
+// them the same way the keyword does, then defers to applyOverviewGesture.
+static SDispatchResult onRegisterOverviewGesture(size_t fingerCount, const std::string& directionStr, const std::string& action, const std::string& mods, float deltaScale) {
+    if (g_unloading)
+        return {};
+
+    const auto direction = g_pTrackpadGestures->dirForString(directionStr);
+    if (direction == TRACKPAD_GESTURE_DIR_NONE)
+        return {.success = false, .error = std::format("Invalid direction: {}", directionStr)};
+
+    uint32_t modMask = 0;
+    if (!mods.empty() && g_pKeybindManager)
+        modMask = g_pKeybindManager->stringToModMask(mods);
+
+    const auto res = applyOverviewGesture(fingerCount, direction, action, modMask, std::clamp(deltaScale, 0.1F, 10.F));
+    if (!res)
+        return {.success = false, .error = res.error()};
+
+    return {};
+}
+
 static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char* RHS) {
     Hyprlang::CParseResult result;
 
@@ -267,7 +307,6 @@ static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char
     CConstVarList             data(RHS);
 
     size_t                    fingerCount = 0;
-    eTrackpadGestureDirection direction   = TRACKPAD_GESTURE_DIR_NONE;
 
     try {
         fingerCount = std::stoul(std::string{data[0]});
@@ -276,12 +315,7 @@ static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char
         return result;
     }
 
-    if (fingerCount <= 1 || fingerCount >= 10) {
-        result.setError(std::format("Invalid value {} for finger count", data[0]).c_str());
-        return result;
-    }
-
-    direction = g_pTrackpadGestures->dirForString(data[1]);
+    const auto direction = g_pTrackpadGestures->dirForString(data[1]);
 
     if (direction == TRACKPAD_GESTURE_DIR_NONE) {
         result.setError(std::format("Invalid direction: {}", data[1]).c_str());
@@ -312,21 +346,10 @@ static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char
         break;
     }
 
-    std::expected<void, std::string> resultFromGesture;
+    const auto resultFromGesture = applyOverviewGesture(fingerCount, direction, std::string{data[startDataIdx]}, modMask, deltaScale);
 
-    if (data[startDataIdx] == "overview")
-        resultFromGesture = g_pTrackpadGestures->addGesture(makeUnique<COverviewGesture>(), fingerCount, direction, modMask, deltaScale, false);
-    else if (data[startDataIdx] == "unset")
-        resultFromGesture = g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, false);
-    else {
-        result.setError(std::format("Invalid gesture: {}", data[startDataIdx]).c_str());
-        return result;
-    }
-
-    if (!resultFromGesture) {
+    if (!resultFromGesture)
         result.setError(resultFromGesture.error().c_str());
-        return result;
-    }
 
     return result;
 }
@@ -385,7 +408,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     HyprlandAPI::addDispatcherV2(SCROLLOVERVIEW_HANDLE, "scrolloverview:overview", ::onOverviewDispatcher);
 
-    ScrollOverview::Config::registerLua(::onOverviewDispatcher);
+    ScrollOverview::Config::registerLua(::onOverviewDispatcher, ::onRegisterOverviewGesture);
 
     HyprlandAPI::addConfigKeyword(SCROLLOVERVIEW_HANDLE, "scrolloverview-gesture", ::overviewGestureKeyword, {});
 
@@ -403,5 +426,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pScrollOverview.reset();
     disableScrollOverviewHooks();
 
-    HyprlandAPI::reloadConfig(); // we need to reload now to clear all the gestures
+    if (g_pTrackpadGestures)
+        g_pTrackpadGestures->clearGestures();
+
+    HyprlandAPI::reloadConfig(); // re-adds built-in gestures cleared above
 }
