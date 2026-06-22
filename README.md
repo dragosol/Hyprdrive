@@ -86,6 +86,14 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 | wallpaper        | int    | wallpaper mode: `0` global only, `1` per-workspace only, `2` both      | `0`     |
 | blur             | bool   | blur the main overview wallpaper without blurring workspace wallpapers | `false` |
 
+#### Subcategory `input`
+
+| property | type | description | default |
+| --- | --- | --- | --- |
+| left_handed | int | swap left and right mouse button actions in overview: `0` disabled, `1` enabled | `input:left_handed` |
+| scrolling_mode | int | mouse wheel behavior: `0` layout-aware default, `1` inverted, `2` vertical scroll changes workspace and horizontal scroll changes columns, `3` vertical scroll changes columns and horizontal scroll changes workspace | `0` |
+| drag_mode | int | mouse drag behavior: `0` main button drags windows and middle button pans scrolling workspaces, `1` main button pans scrolling workspaces and middle button drags windows | `0` |
+
 #### Subcategory `shadow`
 
 Controls the shadow around each workspace card. `enabled` defaults to `false`; all other unset values fall back to `decoration:shadow:*`.

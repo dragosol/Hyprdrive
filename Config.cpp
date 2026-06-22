@@ -163,6 +163,24 @@ void registerLegacy() {
         makeShared<CIntValue>("plugin:scrolloverview:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200,
                               SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:left_handed", "overview left handed mouse buttons, 2 follows input:left_handed", 2,
+                                                        SIntValueOptions{.min = 0, .max = 2}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:scrolling_mode", "overview mouse wheel behavior", 0,
+                                                        SIntValueOptions{.min = 0, .max = 3}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:drag_mode", "overview mouse drag behavior", 0,
+                                                        SIntValueOptions{.min = 0, .max = 1}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:left_handed", "overview left handed mouse buttons, 2 follows input:left_handed", 2,
+                                                        SIntValueOptions{.min = 0, .max = 2}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:scrolling_mode", "overview mouse wheel behavior", 0,
+                                                        SIntValueOptions{.min = 0, .max = 3}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:drag_mode", "overview mouse drag behavior", 0,
+                                                        SIntValueOptions{.min = 0, .max = 1}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -190,6 +208,38 @@ int getWorkspaceGap() {
 ELayout getLayout() {
     const auto LAYOUT = getValue<std::string>("plugin:scrolloverview:layout");
     return LAYOUT == "horizontal" ? ELayout::HORIZONTAL : ELayout::VERTICAL;
+}
+
+bool getLeftHanded() {
+    const auto LEFT_HANDED = getValue<int>("plugin:scrolloverview:input:left_handed");
+    if (LEFT_HANDED <= 1)
+        return LEFT_HANDED != 0;
+
+    return getValue<bool>("input:left_handed");
+}
+
+int getDragMode() {
+    return std::clamp(getValue<int>("plugin:scrolloverview:input:drag_mode"), 0, 1);
+}
+
+static EScrollAction defaultVerticalScrollAction(ELayout layout) {
+    return layout == ELayout::HORIZONTAL ? EScrollAction::COLUMN : EScrollAction::WORKSPACE;
+}
+
+EScrollAction getVerticalScrollAction(ELayout layout) {
+    const auto MODE = std::clamp(getValue<int>("plugin:scrolloverview:input:scrolling_mode"), 0, 3);
+
+    switch (MODE) {
+        case 1: return defaultVerticalScrollAction(layout) == EScrollAction::WORKSPACE ? EScrollAction::COLUMN : EScrollAction::WORKSPACE;
+        case 2: return EScrollAction::WORKSPACE;
+        case 3: return EScrollAction::COLUMN;
+        case 0:
+        default: return defaultVerticalScrollAction(layout);
+    }
+}
+
+EScrollAction getHorizontalScrollAction(ELayout layout) {
+    return getVerticalScrollAction(layout) == EScrollAction::WORKSPACE ? EScrollAction::COLUMN : EScrollAction::WORKSPACE;
 }
 
 int getScrollEventDelay() {

@@ -20,6 +20,11 @@ enum class ELayout {
     HORIZONTAL,
 };
 
+enum class EScrollAction {
+    WORKSPACE,
+    COLUMN,
+};
+
 void registerLua(TOverviewDispatcher dispatcher);
 void registerLegacy();
 
@@ -67,13 +72,17 @@ void setValue(const std::string& name, const T& value) {
         *getValuePtr<TValue>(name) = value;
 }
 
-int          getGestureDistance();
-float        getScale();
-int          getWorkspaceGap();
-ELayout      getLayout();
+int           getGestureDistance();
+float         getScale();
+int           getWorkspaceGap();
+ELayout       getLayout();
 int          getScrollEventDelay();
-int          getWallpaperMode();
-bool         getBlur();
+bool          getLeftHanded();
+int           getDragMode();
+EScrollAction getVerticalScrollAction(ELayout layout);
+EScrollAction getHorizontalScrollAction(ELayout layout);
+int           getWallpaperMode();
+bool          getBlur();
 ::Config::CCssGapData getCssGapData(const std::string& name);
 int          getShadowEnabled();
 int          getShadowRange();
