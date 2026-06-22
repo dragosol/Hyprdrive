@@ -2470,6 +2470,7 @@ void CScrollOverview::trackpadSwipeLayout(const PHLWORKSPACE target, const doubl
         if (trackpadTapeFollowing) {
             trackpadTapeFollowing = false;
             ALGO->snapToGrid();
+            focusMostVisibleScrollingWindow(target);
             damage();
         }
         return;
