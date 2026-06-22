@@ -8,6 +8,16 @@ Small usability and compatibility improvements are fine, but larger feature
 ideas should be discussed first so the plugin does not drift too far from that
 scope.
 
+## Bug Reports and Fixes
+
+Bug fixes always take priority. I will not start working on new functionality
+while there are reported bugs that still need attention.
+
+If you find a bug, please try to narrow down which Hyprland config option causes
+or exposes it. This makes it much easier for me to reproduce the issue. Most
+bugs happen because I cannot test every possible Hyprland configuration after
+each change.
+
 ## Development Notes
 
 I have hardware to test whether the overview renders correctly in HDR, on

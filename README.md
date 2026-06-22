@@ -90,7 +90,7 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 
 | property | type | description | default |
 | --- | --- | --- | --- |
-| left_handed | int | swap left and right mouse button actions in overview: `0` disables, `1` enables, `2` follows Hyprland `input:left_handed` | `2` |
+| left_handed | int | swap left and right mouse button actions in overview: `0` disabled, `1` enabled | `input:left_handed` |
 | scrolling_mode | int | mouse wheel behavior: `0` layout-aware default, `1` inverted, `2` vertical scroll changes workspace and horizontal scroll changes columns, `3` vertical scroll changes columns and horizontal scroll changes workspace | `0` |
 | drag_mode | int | mouse drag behavior: `0` main button drags windows and middle button pans scrolling workspaces, `1` main button pans scrolling workspaces and middle button drags windows | `0` |
 
