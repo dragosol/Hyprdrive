@@ -261,7 +261,7 @@ static void* findFnOrThrow(const std::string& name, std::initializer_list<std::s
 // shared core: register / unregister the overview trackpad gesture. used by both the hyprlang
 // keyword and the Lua `scrolloverview.gesture` function so both configure the same gesture system.
 static std::expected<void, std::string> applyOverviewGesture(size_t fingerCount, eTrackpadGestureDirection direction, const std::string& action, uint32_t modMask,
-                                                             float deltaScale) {
+                                                             float deltaScale, bool disableInhibit) {
     if (fingerCount <= 1 || fingerCount >= 10)
         return std::unexpected(std::format("Invalid value {} for finger count", fingerCount));
 
@@ -269,17 +269,18 @@ static std::expected<void, std::string> applyOverviewGesture(size_t fingerCount,
         return std::unexpected("Invalid direction");
 
     if (action == "overview")
-        return g_pTrackpadGestures->addGesture(makeUnique<COverviewGesture>(), fingerCount, direction, modMask, deltaScale, false);
+        return g_pTrackpadGestures->addGesture(makeUnique<COverviewGesture>(), fingerCount, direction, modMask, deltaScale, disableInhibit);
 
     if (action == "unset")
-        return g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, false);
+        return g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, disableInhibit);
 
     return std::unexpected(std::format("Invalid gesture: {}", action));
 }
 
 // Lua-facing registrar (scrolloverview.gesture). takes the direction/mods as strings and resolves
 // them the same way the keyword does, then defers to applyOverviewGesture.
-static SDispatchResult onRegisterOverviewGesture(size_t fingerCount, const std::string& directionStr, const std::string& action, const std::string& mods, float deltaScale) {
+static SDispatchResult onRegisterOverviewGesture(size_t fingerCount, const std::string& directionStr, const std::string& action, const std::string& mods, float deltaScale,
+                                                 bool disableInhibit) {
     if (g_unloading)
         return {};
 
@@ -291,7 +292,7 @@ static SDispatchResult onRegisterOverviewGesture(size_t fingerCount, const std::
     if (!mods.empty() && g_pKeybindManager)
         modMask = g_pKeybindManager->stringToModMask(mods);
 
-    const auto res = applyOverviewGesture(fingerCount, direction, action, modMask, std::clamp(deltaScale, 0.1F, 10.F));
+    const auto res = applyOverviewGesture(fingerCount, direction, action, modMask, std::clamp(deltaScale, 0.1F, 10.F), disableInhibit);
     if (!res)
         return {.success = false, .error = res.error()};
 
@@ -322,9 +323,10 @@ static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char
         return result;
     }
 
-    int      startDataIdx = 2;
-    uint32_t modMask      = 0;
-    float    deltaScale   = 1.F;
+    int      startDataIdx   = 2;
+    uint32_t modMask        = 0;
+    float    deltaScale     = 1.F;
+    bool     disableInhibit = false;
 
     while (true) {
 
@@ -341,12 +343,16 @@ static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char
                 result.setError(std::format("Invalid delta scale: {}", std::string{data[startDataIdx].substr(6)}).c_str());
                 return result;
             }
+        } else if (data[startDataIdx] == "disable_inhibit") {
+            disableInhibit = true;
+            startDataIdx++;
+            continue;
         }
 
         break;
     }
 
-    const auto resultFromGesture = applyOverviewGesture(fingerCount, direction, std::string{data[startDataIdx]}, modMask, deltaScale);
+    const auto resultFromGesture = applyOverviewGesture(fingerCount, direction, std::string{data[startDataIdx]}, modMask, deltaScale, disableInhibit);
 
     if (!resultFromGesture)
         result.setError(resultFromGesture.error().c_str());

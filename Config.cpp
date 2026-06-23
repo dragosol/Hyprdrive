@@ -143,8 +143,8 @@ int gestureLua(lua_State* L) {
         return luaL_error(L, "gesture: expected a table, e.g. { fingers = 3, direction = \"up\" }");
 
     lua_getfield(L, 1, "fingers");
-    if (!lua_isnumber(L, -1))
-        return luaL_error(L, "gesture: 'fingers' (number) is required");
+    if (!lua_isinteger(L, -1))
+        return luaL_error(L, "gesture: 'fingers' (integer) is required");
     const size_t FINGERS = sc<size_t>(lua_tointeger(L, -1));
     lua_pop(L, 1);
 
@@ -171,7 +171,11 @@ int gestureLua(lua_State* L) {
     const float SCALE = lua_isnumber(L, -1) ? sc<float>(lua_tonumber(L, -1)) : 1.F;
     lua_pop(L, 1);
 
-    const auto result = g_gestureRegistrar(FINGERS, DIRECTION, ACTION, MODS, SCALE);
+    lua_getfield(L, 1, "disable_inhibit");
+    const bool DISABLE_INHIBIT = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    const auto result = g_gestureRegistrar(FINGERS, DIRECTION, ACTION, MODS, SCALE, DISABLE_INHIBIT);
     if (!result.success)
         return luaL_error(L, "gesture: %s", result.error.c_str());
 
@@ -206,15 +210,6 @@ void registerLegacy() {
                                   makeShared<CStringValue>("plugin:scrolloverview:layout", "overview layout", Hyprlang::STRING{"vertical"}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
-    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:input:left_handed", "overview left handed mouse buttons, 2 follows input:left_handed", 2,
-                                                        SIntValueOptions{.min = 0, .max = 2}));
-    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:input:scrolling_mode", "overview mouse wheel behavior", 0,
-                                                        SIntValueOptions{.min = 0, .max = 3}));
-    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:input:drag_mode", "overview mouse drag behavior", 0,
-                                                        SIntValueOptions{.min = 0, .max = 1}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:input:left_handed", "overview left handed mouse buttons, 2 follows input:left_handed", 2,
                                                         SIntValueOptions{.min = 0, .max = 2}));

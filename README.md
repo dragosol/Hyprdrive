@@ -144,6 +144,7 @@ The overview can be opened/closed with a trackpad swipe gesture. Configure it as
 # hyprland.conf
 scrolloverview-gesture = 3, up, overview        # 3-finger up swipe
 scrolloverview-gesture = 4, up, overview, mod:SUPER, scale:1.5
+scrolloverview-gesture = 4, up, overview, disable_inhibit   # fire even when an app inhibits gestures
 scrolloverview-gesture = 3, up, unset           # remove a previously set gesture
 ```
 
@@ -159,6 +160,7 @@ Call `hl.plugin.scrolloverview.gesture{ ... }` from your Lua config.
 -- hyprland.lua
 hl.plugin.scrolloverview.gesture({ fingers = 3, direction = "vertical" })
 hl.plugin.scrolloverview.gesture({ fingers = 4, direction = "vertical", mod = "SUPER", scale = 1.5 })
+hl.plugin.scrolloverview.gesture({ fingers = 4, direction = "vertical", disable_inhibit = true })
 hl.plugin.scrolloverview.gesture({ fingers = 3, direction = "vertical", action = "unset" })
 ```
 
@@ -169,6 +171,7 @@ hl.plugin.scrolloverview.gesture({ fingers = 3, direction = "vertical", action =
 | action    | string | `overview` to register, `unset` to remove                | `overview` |
 | mod       | string | modifier mask held during the gesture (e.g. `SUPER`)     | none       |
 | scale     | number | gesture delta scale, `[0.1 – 10]`                        | `1.0`      |
+| disable_inhibit | bool | fire the gesture even when an app inhibits gestures   | `false`    |
 
 ### Other Lua Examples
 
