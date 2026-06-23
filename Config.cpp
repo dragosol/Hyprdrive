@@ -209,7 +209,7 @@ void registerLegacy() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CStringValue>("plugin:scrolloverview:layout", "overview layout", Hyprlang::STRING{"vertical"}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:input:left_handed", "overview left handed mouse buttons, 2 follows input:left_handed", 2,
                                                         SIntValueOptions{.min = 0, .max = 2}));
@@ -282,7 +282,7 @@ EScrollAction getHorizontalScrollAction(ELayout layout) {
 }
 
 int getScrollEventDelay() {
-    return std::max<int>(0, getValue<int>("plugin:scrolloverview:scroll_event_delay"));
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:input:scroll_event_delay"));
 }
 
 int getWallpaperMode() {

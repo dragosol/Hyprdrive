@@ -80,7 +80,6 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 | property         | type   | description                                                            | default |
 | ---------------- | ------ | ---------------------------------------------------------------------- | ------- |
 | gesture_distance | number | how far is the max for the gesture                                     | `200`   |
-| scroll_event_delay | number | in ms, delay between scroll events (to prevent multiple activation)    | `200`   |
 | scale            | float  | overview scale, [0.1 - 0.9]                                            | `0.5`   |
 | workspace_gap    | number | gap between visible workspaces in the overview, in pixels              | `0`     |
 | layout           | string | overview layout: `vertical` or `horizontal`                           | `vertical` |
@@ -92,6 +91,7 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 | property | type | description | default |
 | --- | --- | --- | --- |
 | left_handed | int | swap left and right mouse button actions in overview: `0` disabled, `1` enabled | `input:left_handed` |
+| scroll_event_delay | number | in ms, delay between scroll events (to prevent multiple activation) | `200` |
 | scrolling_mode | int | mouse wheel behavior: `0` layout-aware default, `1` inverted, `2` vertical scroll changes workspace and horizontal scroll changes columns, `3` vertical scroll changes columns and horizontal scroll changes workspace | `0` |
 | drag_mode | int | mouse drag behavior: `0` main button drags windows and middle button pans scrolling workspaces, `1` main button pans scrolling workspaces and middle button drags windows | `0` |
 
