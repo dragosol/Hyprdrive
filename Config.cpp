@@ -16,6 +16,7 @@ extern "C" {
 namespace {
 
 ScrollOverview::Config::TOverviewDispatcher g_overviewDispatcher = nullptr;
+ScrollOverview::Config::TGestureRegistrar   g_gestureRegistrar   = nullptr;
 
 bool isOverviewArgValid(const std::string_view arg) {
     return arg == "toggle" || arg == "select" || arg == "on" || arg == "enable" || arg == "off" || arg == "disable";
@@ -134,17 +135,66 @@ int configureLua(lua_State* L) {
     return 0;
 }
 
+int gestureLua(lua_State* L) {
+    if (!g_gestureRegistrar)
+        return luaL_error(L, "gesture: registrar is not registered");
+
+    if (!lua_istable(L, 1))
+        return luaL_error(L, "gesture: expected a table, e.g. { fingers = 3, direction = \"up\" }");
+
+    lua_getfield(L, 1, "fingers");
+    if (!lua_isinteger(L, -1))
+        return luaL_error(L, "gesture: 'fingers' (integer) is required");
+    const size_t FINGERS = sc<size_t>(lua_tointeger(L, -1));
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "direction");
+    if (!lua_isstring(L, -1))
+        return luaL_error(L, "gesture: 'direction' (string) is required");
+    const std::string DIRECTION = lua_tostring(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "action");
+    const std::string ACTION = lua_isstring(L, -1) ? lua_tostring(L, -1) : "overview";
+    lua_pop(L, 1);
+
+    // accept either "mods" or "mod"
+    lua_getfield(L, 1, "mods");
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "mod");
+    }
+    const std::string MODS = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "scale");
+    const float SCALE = lua_isnumber(L, -1) ? sc<float>(lua_tonumber(L, -1)) : 1.F;
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "disable_inhibit");
+    const bool DISABLE_INHIBIT = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    const auto result = g_gestureRegistrar(FINGERS, DIRECTION, ACTION, MODS, SCALE, DISABLE_INHIBIT);
+    if (!result.success)
+        return luaL_error(L, "gesture: %s", result.error.c_str());
+
+    return 0;
+}
+
 }
 
 namespace ScrollOverview::Config {
 
-void registerLua(TOverviewDispatcher dispatcher) {
+void registerLua(TOverviewDispatcher dispatcher, TGestureRegistrar gestureRegistrar) {
     if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
         return;
 
     g_overviewDispatcher = dispatcher;
+    g_gestureRegistrar   = gestureRegistrar;
     HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "overview", ::overviewLua);
     HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "configure", ::configureLua);
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "gesture", ::gestureLua);
 }
 
 void registerLegacy() {
@@ -158,6 +208,8 @@ void registerLegacy() {
                                   makeShared<CIntValue>("plugin:scrolloverview:workspace_gap", "gap between overview workspaces", 0, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CStringValue>("plugin:scrolloverview:layout", "overview layout", Hyprlang::STRING{"vertical"}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:input:left_handed", "overview left handed mouse buttons, 2 follows input:left_handed", 2,
                                                         SIntValueOptions{.min = 0, .max = 2}));
@@ -227,6 +279,10 @@ EScrollAction getVerticalScrollAction(ELayout layout) {
 
 EScrollAction getHorizontalScrollAction(ELayout layout) {
     return getVerticalScrollAction(layout) == EScrollAction::WORKSPACE ? EScrollAction::COLUMN : EScrollAction::WORKSPACE;
+}
+
+int getScrollEventDelay() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:scroll_event_delay"));
 }
 
 int getWallpaperMode() {

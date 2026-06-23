@@ -65,6 +65,10 @@ class CScrollOverview : public IOverview {
     void   renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now);
     void   renderPinnedFloatingWindows(PHLMONITOR monitor, float overviewScale, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
+    void   trackpadSwipeLayout(const PHLWORKSPACE target, const double delta);
+    void   trackpadSwipeWorkspace(const double delta);
+    void   finishWorkspaceScrollFollow(float logicalPitch);
+    bool   scrollStepAllowed(uint32_t timeMs);
     bool   moveWindowSelection(const std::string& direction);
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
@@ -231,6 +235,7 @@ class CScrollOverview : public IOverview {
     wl_event_source*                 realtimePreviewTimer = nullptr;
 
     bool                             closing = false;
+    bool                             closeApplied = false; // close() has run its teardown; guards against double-invocation
 
     CHyprSignalListener             mouseMoveHook;
     CHyprSignalListener             mouseButtonHook;
@@ -248,6 +253,14 @@ class CScrollOverview : public IOverview {
     CHyprSignalListener             workspaceActiveHook;
 
     bool                             swipe = false;
+
+    uint32_t                         lastScrollStepTimeMs = 0;      // event time of the last discrete scroll step, for scroll_event_delay throttling
+
+    double                           trackpadScrollAccum          = 0.0;
+    bool                             trackpadWorkspaceFollowing   = false;
+    bool                             trackpadTapeFollowing        = false;
+    bool                             trackpadGestureSettlePending = false;
+    double                           trackpadGestureSettleOffset  = 0.0;
 
     friend class CScrollOverviewPassElement;
 };

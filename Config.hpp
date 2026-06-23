@@ -14,6 +14,8 @@
 namespace ScrollOverview::Config {
 
 using TOverviewDispatcher = SDispatchResult (*)(std::string);
+using TGestureRegistrar   = SDispatchResult (*)(size_t fingerCount, const std::string& direction, const std::string& action, const std::string& mods, float deltaScale,
+                                                bool disableInhibit);
 
 enum class ELayout {
     VERTICAL,
@@ -25,7 +27,7 @@ enum class EScrollAction {
     COLUMN,
 };
 
-void registerLua(TOverviewDispatcher dispatcher);
+void registerLua(TOverviewDispatcher dispatcher, TGestureRegistrar gestureRegistrar);
 void registerLegacy();
 
 template <typename T>
@@ -76,6 +78,7 @@ int           getGestureDistance();
 float         getScale();
 int           getWorkspaceGap();
 ELayout       getLayout();
+int          getScrollEventDelay();
 bool          getLeftHanded();
 int           getDragMode();
 EScrollAction getVerticalScrollAction(ELayout layout);

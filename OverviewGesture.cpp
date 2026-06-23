@@ -16,7 +16,7 @@ void COverviewGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
         if (!ensureScrollOverviewHooks())
             return;
 
-        g_pScrollOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
+        g_pScrollOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace, true);
     } else {
         g_pScrollOverview->selectHoveredWorkspace();
         g_pScrollOverview->setClosing(true);
@@ -24,6 +24,9 @@ void COverviewGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
 }
 
 void COverviewGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {
+    if (!g_pScrollOverview)
+        return;
+
     if (m_firstUpdate) {
         m_firstUpdate = false;
         return;
@@ -38,6 +41,10 @@ void COverviewGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e)
 }
 
 void COverviewGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
-    g_pScrollOverview->onSwipeEnd();
-    g_pScrollOverview->resetSwipe();
+    if (g_pScrollOverview)
+        g_pScrollOverview->onSwipeEnd();
+
+    //re-check since onSwipeEnd can call close and de-ref g_pScrollOverview
+    if (g_pScrollOverview)
+        g_pScrollOverview->resetSwipe();
 }

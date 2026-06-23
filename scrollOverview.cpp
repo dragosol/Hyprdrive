@@ -1115,13 +1115,36 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             return;
 
         info.cancelled = true;
+
         const auto ACTION = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL ? ScrollOverview::Config::getHorizontalScrollAction(layout) :
                                                                           ScrollOverview::Config::getVerticalScrollAction(layout);
 
+        // mouse wheel: discrete stepping, throttled by scroll_event_delay so one notch is one step
+        if (e.source == WL_POINTER_AXIS_SOURCE_WHEEL) {
+            if (e.delta == 0.0)
+                return;
+            trackpadScrollAccum        = 0.0;
+            trackpadWorkspaceFollowing = false;
+            trackpadTapeFollowing      = false;
+            if (!scrollStepAllowed(e.timeMs))
+                return;
+
+            if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE)
+                moveViewportWorkspace(e.delta > 0);
+            else
+                moveScrollingColumnSelection(e.delta > 0);
+
+            return;
+        }
+
+        if (images.empty() || viewportCurrentWorkspace >= images.size())
+            return;
+
+        // scroll workspace or layout with 1:1 animation (snaping on release)
         if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE)
-            moveViewportWorkspace(e.delta > 0);
+            trackpadSwipeWorkspace(e.delta);
         else
-            moveScrollingColumnSelection(e.delta > 0);
+            trackpadSwipeLayout(images[viewportCurrentWorkspace]->pWorkspace, e.delta);
     };
 
     auto onWindowOpen = [this](PHLWINDOW) {
@@ -2423,6 +2446,100 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
     damage();
 }
 
+bool CScrollOverview::scrollStepAllowed(uint32_t timeMs) {
+    const uint32_t DELAY = sc<uint32_t>(ScrollOverview::Config::getScrollEventDelay());
+
+    // throttle discrete scroll steps so a single notch / a burst of high-res events only steps once
+    if (lastScrollStepTimeMs != 0 && timeMs >= lastScrollStepTimeMs && timeMs - lastScrollStepTimeMs < DELAY)
+        return false;
+
+    lastScrollStepTimeMs = timeMs;
+    return true;
+}
+
+void CScrollOverview::trackpadSwipeLayout(const PHLWORKSPACE target, const double delta) {
+    const float SCALE = std::max<float>(scale->value(), 0.01F);
+    const auto ALGO = overviewScrollingAlgorithmForWorkspace(target);
+
+    if (!ALGO) {
+        return;
+    }
+
+    // fingers lifted — snap to the nearest column
+    if (delta == 0.0) {
+        if (trackpadTapeFollowing) {
+            trackpadTapeFollowing = false;
+            ALGO->snapToGrid();
+            focusMostVisibleScrollingWindow(target);
+            damage();
+        }
+        return;
+    }
+
+    trackpadTapeFollowing = true;
+    ALGO->moveTape(sc<float>(-1 * delta / SCALE));
+    damage();
+}
+
+void CScrollOverview::trackpadSwipeWorkspace(const double delta) {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return;
+
+    const float SCALE = std::max<float>(scale->value(), 0.01F);
+    const float PITCH = getWorkspaceLogicalPitch(MONITOR, SCALE, layout);
+
+    // fingers lifted — snap to the nearest workspace
+    if (delta == 0.0) {
+        finishWorkspaceScrollFollow(PITCH);
+        return;
+    }
+
+    trackpadWorkspaceFollowing  = true;
+    trackpadScrollAccum         += delta;
+
+    double offset = trackpadScrollAccum / SCALE;
+
+    // clamp so the view can't be dragged past the first / last workspace
+    const double curIdx  = sc<double>(viewportCurrentWorkspace);
+    const double maxNext = (sc<double>(images.size()) - 1.0 - curIdx) * PITCH;
+    const double maxPrev = -curIdx * PITCH;
+    offset               = std::clamp(offset, maxPrev, maxNext);
+    trackpadScrollAccum  = offset * SCALE;
+
+    viewOffset->setValueAndWarp(axisOffsetVector(sc<float>(offset), layout));
+    damage();
+}
+
+void CScrollOverview::finishWorkspaceScrollFollow(float logicalPitch) {
+    if (!trackpadWorkspaceFollowing)
+        return;
+
+    trackpadWorkspaceFollowing  = false;
+    trackpadScrollAccum         = 0.0;
+
+    const double OFFSET = axisValue(viewOffset->value(), layout);
+    const long   STEPS  = std::lround(OFFSET / logicalPitch);
+
+    if (STEPS == 0) {
+        *viewOffset = Vector2D{};
+        return;
+    }
+
+    trackpadGestureSettleOffset  = OFFSET - sc<double>(STEPS) * logicalPitch;
+    trackpadGestureSettlePending = true;
+
+    const size_t BEFORE = viewportCurrentWorkspace;
+    const bool   NEXT   = STEPS > 0;
+    for (long i = 0; i < std::abs(STEPS); ++i)
+        moveViewportWorkspace(NEXT);
+
+    if (viewportCurrentWorkspace == BEFORE) {
+        trackpadGestureSettlePending = false;
+        *viewOffset                  = Vector2D{};
+    }
+}
+
 void CScrollOverview::syncSelectionToViewport() {
     if (images.empty() || viewportCurrentWorkspace >= images.size()) {
         closeOnWindow.reset();
@@ -3673,6 +3790,10 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 }
 
 void CScrollOverview::close() {
+    if (closeApplied)
+        return;
+    closeApplied = true;
+
     setClosing(true);
 
     const auto SELECTEDWORKSPACE =
@@ -3778,6 +3899,12 @@ void CScrollOverview::onWorkspaceChange() {
 
     const auto previousActiveIdx = activeWorkspaceIndex();
     const auto previousStartedOn = startedOn;
+
+    // consume any pending gesture-driven settle (set by finishWorkspaceScrollFollow)
+    const bool   GESTURESETTLE       = trackpadGestureSettlePending;
+    const double GESTURESETTLEOFFSET = trackpadGestureSettleOffset;
+    trackpadGestureSettlePending     = false;
+
     std::vector<WORKSPACEID> previousWorkspaceIDs;
     previousWorkspaceIDs.reserve(images.size());
     std::unordered_map<WORKSPACEID, float> previousWorkspaceOffsets;
@@ -3848,7 +3975,10 @@ void CScrollOverview::onWorkspaceChange() {
         workspaceInsertTransition.transitionOldRelativeOffset = 0.F;
         workspaceInsertProgress->setValueAndWarp(1.F);
         workspaceInsertFadeProgress->setValueAndWarp(1.F);
-        viewOffset->setValueAndWarp(
+        if (GESTURESETTLE) // a trackpad follow committed this change: settle from the drag position, not a full pitch
+            viewOffset->setValueAndWarp(axisOffsetVector(sc<float>(GESTURESETTLEOFFSET), layout));
+        else
+            viewOffset->setValueAndWarp(
             axisOffsetVector(workspaceOverviewLogicalOffset(previousActiveIdx, viewportCurrentWorkspace, getWorkspaceLogicalPitch(pMonitor.lock(), scale->value(), layout)), layout));
         *viewOffset = Vector2D{};
     }
@@ -3990,7 +4120,7 @@ void CScrollOverview::onSwipeUpdate(double delta) {
 
     m_isSwiping = true;
 
-    const float PERC = closing ? std::clamp(delta / (double)DISTANCE, 0.0, 1.0) : 1.0 - std::clamp(delta / (double)DISTANCE, 0.0, 1.0);
+    const float PERC = closing ? 1.0 - std::clamp(delta / (double)DISTANCE, 0.0, 1.0) : std::clamp(delta / (double)DISTANCE, 0.0, 1.0);
 
     scale->setValueAndWarp(hyprlerp(1.F, ScrollOverview::Config::getScale(), PERC));
 }
