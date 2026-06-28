@@ -94,6 +94,7 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 | scroll_event_delay | number | in ms, delay between scroll events (to prevent multiple activation) | `200` |
 | scrolling_mode | int | mouse wheel behavior: `0` layout-aware default, `1` inverted, `2` vertical scroll changes workspace and horizontal scroll changes columns, `3` vertical scroll changes columns and horizontal scroll changes workspace | `0` |
 | drag_mode | int | mouse drag behavior: `0` main button drags windows and middle button pans scrolling workspaces, `1` main button pans scrolling workspaces and middle button drags windows | `0` |
+| drag_threshold | int | movement threshold in pixels before a mouse press becomes drag/pan/resize instead of click; `0` disables the threshold | `binds:drag_threshold` |
 
 #### Subcategory `shadow`
 

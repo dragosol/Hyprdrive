@@ -20,7 +20,6 @@
 #include "IOverview.hpp"
 
 class CMonitor;
-struct SKeybind;
 struct wl_event_source;
 
 class CScrollOverview : public IOverview {
@@ -128,7 +127,7 @@ class CScrollOverview : public IOverview {
     void   releaseInputListeners();
     void   activateSubmapIfConfigured();
     void   restoreSubmapIfActive();
-    bool   dispatchSubmapMouseClick(uint32_t button, const SP<SKeybind>& keybind = {});
+    bool   dispatchSubmapMouseClick(uint32_t button);
     void   requestInputFrame();
     static int realtimePreviewTimerCallback(void* data);
 
@@ -196,7 +195,6 @@ class CScrollOverview : public IOverview {
     bool                             usesSubmapKeybinds = false;
     bool                             submapActive = false;
     uint32_t                         submapMouseClickButton = 0;
-    SP<SKeybind>                     submapMouseClickKeybind;
     std::string                      previousSubmapName;
     int                              previousNoWarps = 0;
     int                              previousWarpOnChangeWorkspace = 0;

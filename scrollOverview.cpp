@@ -96,29 +96,6 @@ static bool hasOverviewSubmap() {
     return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) { return keybind && keybind->submap.name == OVERVIEW_SUBMAP; });
 }
 
-static SP<SKeybind> findOverviewSubmapMouseClick(uint32_t button) {
-    if (!g_pKeybindManager || !g_pInputManager)
-        return {};
-
-    const auto KEYNAME = "mouse:" + std::to_string(button);
-    const auto MODS    = g_pInputManager->getModsFromAllKBs();
-
-    for (const auto& keybind : g_pKeybindManager->m_keybinds) {
-        if (!keybind || !keybind->enabled || keybind->shadowed || keybind->key != KEYNAME)
-            continue;
-
-        if (keybind->submap.name != OVERVIEW_SUBMAP)
-            continue;
-
-        if (keybind->modmask != MODS && !keybind->ignoreMods)
-            continue;
-
-        return keybind;
-    }
-
-    return {};
-}
-
 static bool isTopLayerFocused(PHLMONITOR monitor) {
     const auto FOCUSEDSURFACE = g_pSeatManager->m_state.keyboardFocus.lock();
 
@@ -929,12 +906,18 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
+        const bool     LEFT_HANDED           = ScrollOverview::Config::getLeftHanded();
+        const uint32_t MAIN_BUTTON           = LEFT_HANDED ? BTN_RIGHT : BTN_LEFT;
+        const bool     INVERT_DRAG_MODE      = ScrollOverview::Config::getDragMode() == 1;
+        const uint32_t SECONDARY_DRAG_BUTTON = BTN_MIDDLE;
+        const float    DRAGTHRESHOLD         = ScrollOverview::Config::getDragThreshold() * (pMonitor ? pMonitor->m_scale : 1.F);
+        const float    DRAGTHRESHOLDSQ       = std::pow(DRAGTHRESHOLD, 2);
+
         lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
         if (!dragPendingPrimary && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
-            submapMouseClickKeybind.reset();
             return;
         }
 
@@ -942,19 +925,13 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         requestInputFrame();
 
         if (submapMouseClickPending) {
-            const bool     LEFT_HANDED          = ScrollOverview::Config::getLeftHanded();
-            const uint32_t MAIN_BUTTON          = LEFT_HANDED ? BTN_RIGHT : BTN_LEFT;
-            const bool     INVERT_DRAG_MODE     = ScrollOverview::Config::getDragMode() == 1;
-            const uint32_t SECONDARY_DRAG_BUTTON = BTN_MIDDLE;
-            const float    DRAGTHRESHOLD        = ScrollOverview::Config::getValue<int>("binds:drag_threshold") * (pMonitor ? pMonitor->m_scale : 1.F);
-            const bool     DRAGTHRESHOLDREACHED = dragStartMouseLocal.distanceSq(lastMousePosLocal) > std::pow(DRAGTHRESHOLD, 2);
+            const bool DRAGTHRESHOLDREACHED = dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ;
 
             if (submapMouseClickButton == MAIN_BUTTON && !dragActiveWindow && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
                 submapMouseClickPending = false;
                 submapMouseClickButton  = 0;
-                submapMouseClickKeybind.reset();
 
-                if (ScrollOverview::Config::getDragMode() == 0)
+                if (!INVERT_DRAG_MODE)
                     beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
                 else if (const auto WORKSPACE = workspaceAtOverviewPoint(dragStartMouseLocal); isWorkspaceScrolling(WORKSPACE)) {
                     beginScrollingPan(WORKSPACE);
@@ -965,17 +942,24 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
             if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && !INVERT_DRAG_MODE && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
                 if (const auto WORKSPACE = workspaceAtOverviewPoint(dragStartMouseLocal); isWorkspaceScrolling(WORKSPACE)) {
+                    submapMouseClickPending = false;
+                    submapMouseClickButton  = 0;
                     beginScrollingPan(WORKSPACE);
                     scrollingPanLastMouseLocal = dragStartMouseLocal;
                     updateScrollingPan();
                 }
             }
+
+            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && INVERT_DRAG_MODE && !dragActiveWindow && DRAGTHRESHOLDREACHED) {
+                submapMouseClickPending = false;
+                submapMouseClickButton  = 0;
+                beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
+            }
         }
 
         if (dragPendingPrimary) {
-            const float DRAGTHRESHOLD = ScrollOverview::Config::getValue<int>("binds:drag_threshold") * (pMonitor ? pMonitor->m_scale : 1.F);
-            if (!dragActiveWindow && !scrollingPanPointerDown && dragStartMouseLocal.distanceSq(lastMousePosLocal) > std::pow(DRAGTHRESHOLD, 2)) {
-                if (ScrollOverview::Config::getDragMode() == 0) {
+            if (!dragActiveWindow && !scrollingPanPointerDown && dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ) {
+                if (!INVERT_DRAG_MODE) {
                     beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
                 } else if (const auto WORKSPACE = workspaceAtOverviewPoint(dragStartMouseLocal); isWorkspaceScrolling(WORKSPACE)) {
                     beginScrollingPan(WORKSPACE);
@@ -989,8 +973,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         }
 
         if (resizePointerDown && resizePendingWindow) {
-            const float DRAGTHRESHOLD = ScrollOverview::Config::getValue<int>("binds:drag_threshold") * (pMonitor ? pMonitor->m_scale : 1.F);
-            if (!resizeActiveWindow && resizeStartMouseLocal.distanceSq(lastMousePosLocal) > std::pow(DRAGTHRESHOLD, 2))
+            if (!resizeActiveWindow && resizeStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
                 beginWindowResize();
 
             if (resizeActiveWindow)
@@ -1019,7 +1002,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (!dragPendingPrimary && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
-            submapMouseClickKeybind.reset();
             return;
         }
 
@@ -1041,20 +1023,32 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         const auto     clearSubmapMouseClickPending = [&]() {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
-            submapMouseClickKeybind.reset();
+        };
+        const auto     beginSubmapMouseClickPending = [&](uint32_t button) {
+            if (!submapActive)
+                return false;
+
+            submapMouseClickPending = true;
+            submapMouseClickButton  = button;
+            dragStartMouseLocal     = lastMousePosLocal;
+            return true;
+        };
+        const auto     shouldRunDefaultClickAction = [&](uint32_t button) {
+            if (submapMouseClickPending && submapMouseClickButton == button) {
+                clearSubmapMouseClickPending();
+                dispatchSubmapMouseClick(button);
+                return false;
+            }
+
+            return !submapActive;
         };
 
         if (event.button == MAIN_BUTTON) {
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                if (const auto KEYBIND = findOverviewSubmapMouseClick(event.button); submapActive && KEYBIND) {
-                    submapMouseClickPending = true;
-                    submapMouseClickButton  = event.button;
-                    submapMouseClickKeybind = KEYBIND;
-                    dragStartMouseLocal     = lastMousePosLocal;
+                if (beginSubmapMouseClickPending(event.button))
                     return;
-                }
 
                 dragPendingPrimary  = true;
                 dragStartMouseLocal = lastMousePosLocal;
@@ -1065,16 +1059,9 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             if (scrollingPanPointerDown)
                 endScrollingPan();
 
-            const bool  WASPENDINGCLICK         = submapMouseClickPending && submapMouseClickButton == event.button;
-            const auto   PENDINGKEYBIND          = submapMouseClickKeybind;
             const float CLICK_MAX_DRAG_DISTANCE = 10.F * (pMonitor ? pMonitor->m_scale : 1.F);
             const auto   performClickAction      = [&]() {
-                if (WASPENDINGCLICK) {
-                    dispatchSubmapMouseClick(event.button, PENDINGKEYBIND);
-                    return;
-                }
-
-                if (dispatchSubmapMouseClick(event.button))
+                if (!shouldRunDefaultClickAction(event.button))
                     return;
 
                 selectWindowAtOverviewCursor();
@@ -1090,10 +1077,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
                     dragOriginalFloatSize = Vector2D{};
                     dragGrabOffsetLocal   = Vector2D{};
                     dragOriginalBox       = CBox{};
-                    clearSubmapMouseClickPending();
 
                     if (!WASPANNING)
                         performClickAction();
+                    else
+                        clearSubmapMouseClickPending();
 
                     return;
                 }
@@ -1104,10 +1092,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             }
 
             clearDragPending();
-            clearSubmapMouseClickPending();
 
             if (!WASPANNING)
                 performClickAction();
+            else
+                clearSubmapMouseClickPending();
             return;
         }
 
@@ -1115,13 +1104,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                if (const auto KEYBIND = findOverviewSubmapMouseClick(event.button); submapActive && KEYBIND) {
-                    submapMouseClickPending = true;
-                    submapMouseClickButton  = event.button;
-                    submapMouseClickKeybind = KEYBIND;
-                    dragStartMouseLocal     = lastMousePosLocal;
+                if (beginSubmapMouseClickPending(event.button))
                     return;
-                }
 
                 size_t workspaceIdx = 0;
                 const auto WORKSPACE = workspaceAtOverviewCursor(&workspaceIdx);
@@ -1136,16 +1120,13 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
             if (submapMouseClickPending && submapMouseClickButton == event.button) {
                 const bool WASPANNING = scrollingPanPointerDown;
-                const auto KEYBIND    = submapMouseClickKeybind;
                 if (scrollingPanPointerDown)
                     endScrollingPan();
 
-                submapMouseClickPending = false;
-                submapMouseClickButton  = 0;
-                submapMouseClickKeybind.reset();
-
                 if (!WASPANNING)
-                    dispatchSubmapMouseClick(event.button, KEYBIND);
+                    shouldRunDefaultClickAction(event.button);
+                else
+                    clearSubmapMouseClickPending();
 
                 return;
             }
@@ -1159,11 +1140,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                if (const auto KEYBIND = findOverviewSubmapMouseClick(event.button); submapActive && KEYBIND) {
-                    submapMouseClickPending = true;
-                    submapMouseClickButton  = event.button;
-                    submapMouseClickKeybind = KEYBIND;
-                }
+                beginSubmapMouseClickPending(event.button);
 
                 size_t resizeWorkspace = 0;
                 const auto window      = windowAtOverviewCursor(&resizeWorkspace);
@@ -1195,18 +1172,10 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
                 return;
             }
 
-            const bool WASPENDINGCLICK = submapMouseClickPending && submapMouseClickButton == event.button;
-            const auto PENDINGKEYBIND  = submapMouseClickKeybind;
             resizePointerDown = false;
             resizePendingWindow.reset();
 
-            if (WASPENDINGCLICK) {
-                clearSubmapMouseClickPending();
-                dispatchSubmapMouseClick(event.button, PENDINGKEYBIND);
-                return;
-            }
-
-            clearSubmapMouseClickPending();
+            shouldRunDefaultClickAction(event.button);
             return;
         }
 
@@ -1216,6 +1185,9 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
         if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+            if (beginSubmapMouseClickPending(event.button))
+                return;
+
             dragStartMouseLocal = lastMousePosLocal;
             beginWindowDrag(windowAtOverviewCursor());
             return;
@@ -1232,7 +1204,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             dragGrabOffsetLocal   = Vector2D{};
             dragOriginalBox       = CBox{};
 
-            if (dispatchSubmapMouseClick(event.button))
+            if (!shouldRunDefaultClickAction(event.button))
                 return;
 
             selectWindowAtOverviewCursor();
@@ -1247,7 +1219,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
         clearDragPending();
 
-        if (dispatchSubmapMouseClick(event.button))
+        if (!shouldRunDefaultClickAction(event.button))
             return;
 
         selectWindowAtOverviewCursor();
@@ -4385,7 +4357,6 @@ void CScrollOverview::releaseInputListeners() {
     clearDragPending();
     submapMouseClickPending = false;
     submapMouseClickButton  = 0;
-    submapMouseClickKeybind.reset();
 
     mouseMoveHook.reset();
     touchMoveHook.reset();
@@ -4430,28 +4401,35 @@ void CScrollOverview::restoreSubmapIfActive() {
     submapActive = false;
 }
 
-bool CScrollOverview::dispatchSubmapMouseClick(uint32_t button, const SP<SKeybind>& keybind) {
-    if (!submapActive || !g_pKeybindManager)
+bool CScrollOverview::dispatchSubmapMouseClick(uint32_t button) {
+    if (!submapActive || !g_pKeybindManager || !g_pInputManager)
         return false;
 
-    const auto KEYBIND = keybind ? keybind : findOverviewSubmapMouseClick(button);
-    if (!KEYBIND)
+    const auto KEYNAME = "mouse:" + std::to_string(button);
+    const auto MODS    = g_pInputManager->getModsFromAllKBs();
+
+    const auto KEYBIND = std::ranges::find_if(g_pKeybindManager->m_keybinds, [&](const auto& keybind) {
+        return keybind && keybind->enabled && !keybind->shadowed && keybind->key == KEYNAME && keybind->submap.name == OVERVIEW_SUBMAP &&
+            (keybind->modmask == MODS || keybind->ignoreMods);
+    });
+
+    if (KEYBIND == g_pKeybindManager->m_keybinds.end())
         return false;
 
-    const auto DISPATCHERNAME = KEYBIND->mouse ? "mouse" : KEYBIND->handler;
+    const auto DISPATCHERNAME = (*KEYBIND)->mouse ? "mouse" : (*KEYBIND)->handler;
     const auto DISPATCHER     = g_pKeybindManager->m_dispatchers.find(DISPATCHERNAME);
     if (DISPATCHER == g_pKeybindManager->m_dispatchers.end())
         return false;
 
     const auto PREVIOUSKEYBIND = g_pKeybindManager->m_currentKeybind;
-    g_pKeybindManager->m_currentKeybind = KEYBIND;
+    g_pKeybindManager->m_currentKeybind = *KEYBIND;
     auto restoreKeybind = Hyprutils::Utils::CScopeGuard([PREVIOUSKEYBIND] { g_pKeybindManager->m_currentKeybind = PREVIOUSKEYBIND; });
 
     const int PREVIOUSPASSPRESSED = Config::Actions::state()->m_passPressed;
     Config::Actions::state()->m_passPressed = 0;
     auto restorePassPressed = Hyprutils::Utils::CScopeGuard([PREVIOUSPASSPRESSED] { Config::Actions::state()->m_passPressed = PREVIOUSPASSPRESSED; });
 
-    DISPATCHER->second(KEYBIND->mouse ? "0" + KEYBIND->arg : KEYBIND->arg);
+    DISPATCHER->second((*KEYBIND)->mouse ? "0" + (*KEYBIND)->arg : (*KEYBIND)->arg);
     return true;
 }
 

@@ -79,17 +79,18 @@ int           getGestureDistance();
 float         getScale();
 int           getWorkspaceGap();
 ELayout       getLayout();
-int          getScrollEventDelay();
+int           getScrollEventDelay();
 bool          getLeftHanded();
 int           getDragMode();
+int           getDragThreshold();
 EScrollAction getVerticalScrollAction(ELayout layout);
 EScrollAction getHorizontalScrollAction(ELayout layout);
 int           getWallpaperMode();
 bool          getBlur();
 ::Config::CCssGapData getCssGapData(const std::string& name);
-int          getShadowEnabled();
-int          getShadowRange();
-int          getShadowRenderPower();
-int64_t      getShadowColor();
+int           getShadowEnabled();
+int           getShadowRange();
+int           getShadowRenderPower();
+int64_t       getShadowColor();
 
 }
