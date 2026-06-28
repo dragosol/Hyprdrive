@@ -182,7 +182,7 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
 
     if (arg == "select") {
         if (g_pScrollOverview)
-            g_pScrollOverview->close();
+            g_pScrollOverview->selectHoveredWorkspace();
         return {};
     }
     if (arg == "toggle") {

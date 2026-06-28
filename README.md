@@ -150,7 +150,7 @@ submap = scrolloverview
     bind = , down,   scrolloverview:navigate, down
     bind = , return, scrolloverview:overview, select
     bind = , escape, scrolloverview:overview, off
-    bind = , mouse:272, scrolloverview:window, select # selects only; see Lua example below to also close
+    bind = , mouse:272, scrolloverview:overview, select # selects the workspace under the cursor, multiple actions are not possible with Hyprlang
     bind = , mouse:274, scrolloverview:window, close
 submap = reset
 
@@ -170,6 +170,8 @@ hl.define_submap("scrolloverview", function()
     hl.bind("return", hl.plugin.scrolloverview.overview("select"))
     hl.bind("escape", hl.plugin.scrolloverview.overview("off"))
     hl.bind("mouse:272", function()
+        -- Select the clicked window, or just the workspace if no window was clicked, then close the overview. This is the default behaviour if submap is not defined.
+        hl.plugin.scrolloverview.overview("select")
         hl.plugin.scrolloverview.window("select")
         hl.plugin.scrolloverview.overview("off")
     end, { mouse = true })
@@ -242,12 +244,12 @@ from Lua as `hl.plugin.scrolloverview.<dispatcher>(...)`.
 
 #### `scrolloverview:overview`
 
-Controls the overview visibility.
+Controls the overview.
 
 | option | description |
 | --- | --- |
 | `toggle` | show the overview if hidden, hide it if visible |
-| `select` | accept the currently selected workspace and close the overview |
+| `select` | select the workspace under the cursor |
 | `off` | hide the overview |
 | `disable` | same as `off` |
 | `on` | show the overview |

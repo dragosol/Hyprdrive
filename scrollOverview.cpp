@@ -1042,6 +1042,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
             return !submapActive;
         };
+        const auto     performClickAction = [&](uint32_t button) {
+            if (!shouldRunDefaultClickAction(button))
+                return;
+
+            selectHoveredWorkspace();
+            selectWindowAtOverviewCursor(true);
+            close();
+        };
 
         if (event.button == MAIN_BUTTON) {
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
@@ -1060,13 +1068,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
                 endScrollingPan();
 
             const float CLICK_MAX_DRAG_DISTANCE = 10.F * (pMonitor ? pMonitor->m_scale : 1.F);
-            const auto   performClickAction      = [&]() {
-                if (!shouldRunDefaultClickAction(event.button))
-                    return;
-
-                selectWindowAtOverviewCursor();
-                close();
-            };
 
             if (dragActiveWindow) {
                 if (dragStartMouseLocal.distanceSq(lastMousePosLocal) < CLICK_MAX_DRAG_DISTANCE * CLICK_MAX_DRAG_DISTANCE) {
@@ -1079,7 +1080,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
                     dragOriginalBox       = CBox{};
 
                     if (!WASPANNING)
-                        performClickAction();
+                        performClickAction(event.button);
                     else
                         clearSubmapMouseClickPending();
 
@@ -1094,7 +1095,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             clearDragPending();
 
             if (!WASPANNING)
-                performClickAction();
+                performClickAction(event.button);
             else
                 clearSubmapMouseClickPending();
             return;
@@ -1204,11 +1205,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
             dragGrabOffsetLocal   = Vector2D{};
             dragOriginalBox       = CBox{};
 
-            if (!shouldRunDefaultClickAction(event.button))
-                return;
-
-            selectWindowAtOverviewCursor();
-            close();
+            performClickAction(event.button);
             return;
         }
 
@@ -1219,12 +1216,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
 
         clearDragPending();
 
-        if (!shouldRunDefaultClickAction(event.button))
-            return;
-
-        selectWindowAtOverviewCursor();
-
-        close();
+        performClickAction(event.button);
     };
 
     auto onCursorSelect = [this](auto, Event::SCallbackInfo& info) {
@@ -1949,35 +1941,21 @@ bool CScrollOverview::selectWindowAtOverviewCursor(bool syncFocus) {
 void CScrollOverview::selectHoveredWorkspace() {
     lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
-    size_t    workspaceIdx = 0;
-    PHLWINDOW window       = windowAtOverviewCursor(&workspaceIdx);
-
-    if (window) {
-        selectOverviewWindow(window, workspaceIdx);
+    size_t     workspaceIdx = viewportCurrentWorkspace;
+    const auto WORKSPACE    = workspaceAtOverviewCursor(&workspaceIdx);
+    if (!WORKSPACE)
         return;
+
+    closeOnWindow.reset();
+    viewportCurrentWorkspace = workspaceIdx;
+
+    if (pMonitor && pMonitor->m_activeWorkspace != WORKSPACE) {
+        if (focusSyncedFromWorkspaceID == WORKSPACE_INVALID)
+            focusSyncedFromWorkspaceID = pMonitor->m_activeWorkspace ? pMonitor->m_activeWorkspace->m_id : WORKSPACE_INVALID;
+        pMonitor->changeWorkspace(WORKSPACE, false, true, true);
     }
 
-    const auto MONITOR = pMonitor.lock();
-    if (!MONITOR)
-        return;
-
-    const auto ACTIVEIDX = activeWorkspaceIndex();
-    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, scale->value(), layout);
-
-    for (size_t i = 0; i < images.size(); ++i) {
-        const auto& wimg = images[i];
-        if (!wimg || !wimg->pWorkspace)
-            continue;
-
-        const auto offset = workspaceOverviewOffset(i, ACTIVEIDX, PITCH);
-        const auto box  = getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), offset, layout);
-        if (!box.containsPoint(lastMousePosLocal))
-            continue;
-
-        closeOnWindow.reset();
-        viewportCurrentWorkspace = i;
-        return;
-    }
+    damage();
 }
 
 bool CScrollOverview::windowDispatcherAction(const std::string& action) {
@@ -1996,9 +1974,8 @@ bool CScrollOverview::windowDispatcherAction(const std::string& action) {
     if (!WINDOW)
         return false;
 
-    if (action == "select") {
+    if (action == "select")
         return selectOverviewWindow(WINDOW, workspaceIdx, true);
-    }
 
     if (action == "close") {
         WINDOW->sendClose();
@@ -2795,7 +2772,7 @@ void CScrollOverview::syncFocusedSelection() {
 
     Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
 
-    if (window->m_workspace != PREVIOUSWORKSPACE)
+    if (window->m_workspace != PREVIOUSWORKSPACE && focusSyncedFromWorkspaceID == WORKSPACE_INVALID)
         focusSyncedFromWorkspaceID = PREVIOUSWORKSPACE ? PREVIOUSWORKSPACE->m_id : WORKSPACE_INVALID;
 }
 
