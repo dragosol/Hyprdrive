@@ -65,7 +65,7 @@ bool ensureScrollOverviewHooks() {
 
     if (!success) {
         disableScrollOverviewHooks();
-        failNotif("Failed enabling overview hooks");
+        failNotif("Failed enabling overview hooks (is other overview plugin enabled?)");
         return false;
     }
 
@@ -181,10 +181,8 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
         return {.success = false, .error = "already swiping"};
 
     if (arg == "select") {
-        if (g_pScrollOverview) {
-            g_pScrollOverview->selectHoveredWorkspace();
+        if (g_pScrollOverview)
             g_pScrollOverview->close();
-        }
         return {};
     }
     if (arg == "toggle") {
@@ -192,7 +190,7 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
             g_pScrollOverview->close();
         else {
             if (!ensureScrollOverviewHooks())
-                return {.success = false, .error = "failed enabling overview hooks"};
+                return {.success = false, .error = "failed enabling overview hooks (is other overview plugin enabled?)"};
 
             renderingOverview = true;
             g_pScrollOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
@@ -211,11 +209,33 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
         return {};
 
     if (!ensureScrollOverviewHooks())
-        return {.success = false, .error = "failed enabling overview hooks"};
+        return {.success = false, .error = "failed enabling overview hooks (is other overview plugin enabled?)"};
 
     renderingOverview = true;
     g_pScrollOverview = makeShared<CScrollOverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
     renderingOverview = false;
+    return {};
+}
+
+static SDispatchResult onNavigateDispatcher(std::string arg) {
+    if (!g_pScrollOverview)
+        return {};
+
+    if (arg != "left" && arg != "right" && arg != "up" && arg != "down")
+        return {.success = false, .error = "invalid arg. expected left|right|up|down"};
+
+    g_pScrollOverview->moveSelection(arg);
+    return {};
+}
+
+static SDispatchResult onWindowDispatcher(std::string arg) {
+    if (!g_pScrollOverview)
+        return {};
+
+    if (arg != "select" && arg != "close")
+        return {.success = false, .error = "invalid arg. expected select|close"};
+
+    g_pScrollOverview->windowDispatcherAction(arg);
     return {};
 }
 
@@ -412,15 +432,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_pScrollOverview->onPreRender();
     });
 
-    HyprlandAPI::addDispatcherV2(SCROLLOVERVIEW_HANDLE, "scrolloverview:overview", ::onOverviewDispatcher);
-
-    ScrollOverview::Config::registerLua(::onOverviewDispatcher, ::onRegisterOverviewGesture);
-
-    HyprlandAPI::addConfigKeyword(SCROLLOVERVIEW_HANDLE, "scrolloverview-gesture", ::overviewGestureKeyword, {});
-
-    ScrollOverview::Config::registerLegacy();
-
-    HyprlandAPI::reloadConfig();
+    ScrollOverview::Config::registerDispatcher("overview", ::onOverviewDispatcher);
+    ScrollOverview::Config::registerDispatcher("navigate", ::onNavigateDispatcher);
+    ScrollOverview::Config::registerDispatcher("window", ::onWindowDispatcher);
+    ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
+    ScrollOverview::Config::registerConfig();
 
     return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", "1.0"};
 }

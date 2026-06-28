@@ -2,6 +2,8 @@
 #include <hyprland/src/helpers/memory/Memory.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 
+#include <string>
+
 class CWLSurfaceResource;
 
 class IOverview {
@@ -26,6 +28,8 @@ class IOverview {
 
     virtual void  close()                  = 0;
     virtual void  selectHoveredWorkspace() = 0;
+    virtual bool  moveSelection(const std::string& direction) = 0;
+    virtual bool  windowDispatcherAction(const std::string& action) = 0;
 
     virtual void  fullRender() = 0;
 

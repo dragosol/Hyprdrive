@@ -15,11 +15,21 @@ extern "C" {
 
 namespace {
 
-ScrollOverview::Config::TOverviewDispatcher g_overviewDispatcher = nullptr;
-ScrollOverview::Config::TGestureRegistrar   g_gestureRegistrar   = nullptr;
+ScrollOverview::Config::TDispatcher       g_overviewDispatcher = nullptr;
+ScrollOverview::Config::TDispatcher       g_navigateDispatcher = nullptr;
+ScrollOverview::Config::TDispatcher       g_windowDispatcher   = nullptr;
+ScrollOverview::Config::TGestureRegistrar g_gestureRegistrar   = nullptr;
 
 bool isOverviewArgValid(const std::string_view arg) {
     return arg == "toggle" || arg == "select" || arg == "on" || arg == "enable" || arg == "off" || arg == "disable";
+}
+
+bool isNavigateArgValid(const std::string_view arg) {
+    return arg == "left" || arg == "right" || arg == "up" || arg == "down";
+}
+
+bool isWindowArgValid(const std::string_view arg) {
+    return arg == "select" || arg == "close";
 }
 
 int dispatchOverviewLua(lua_State* L, const char* arg) {
@@ -29,6 +39,28 @@ int dispatchOverviewLua(lua_State* L, const char* arg) {
     const auto result = g_overviewDispatcher(arg);
     if (!result.success)
         return luaL_error(L, "overview: %s", result.error.c_str());
+
+    return 0;
+}
+
+int dispatchNavigateLua(lua_State* L, const char* arg) {
+    if (!g_navigateDispatcher)
+        return luaL_error(L, "navigate: dispatcher is not registered");
+
+    const auto result = g_navigateDispatcher(arg);
+    if (!result.success)
+        return luaL_error(L, "navigate: %s", result.error.c_str());
+
+    return 0;
+}
+
+int dispatchWindowLua(lua_State* L, const char* arg) {
+    if (!g_windowDispatcher)
+        return luaL_error(L, "window: dispatcher is not registered");
+
+    const auto result = g_windowDispatcher(arg);
+    if (!result.success)
+        return luaL_error(L, "window: %s", result.error.c_str());
 
     return 0;
 }
@@ -55,6 +87,30 @@ int overviewDispatchOffLua(lua_State* L) {
 
 int overviewDispatchDisableLua(lua_State* L) {
     return dispatchOverviewLua(L, "disable");
+}
+
+int navigateDispatchLeftLua(lua_State* L) {
+    return dispatchNavigateLua(L, "left");
+}
+
+int navigateDispatchRightLua(lua_State* L) {
+    return dispatchNavigateLua(L, "right");
+}
+
+int navigateDispatchUpLua(lua_State* L) {
+    return dispatchNavigateLua(L, "up");
+}
+
+int navigateDispatchDownLua(lua_State* L) {
+    return dispatchNavigateLua(L, "down");
+}
+
+int windowDispatchSelectLua(lua_State* L) {
+    return dispatchWindowLua(L, "select");
+}
+
+int windowDispatchCloseLua(lua_State* L) {
+    return dispatchWindowLua(L, "close");
 }
 
 int overviewLua(lua_State* L) {
@@ -98,6 +154,74 @@ int overviewLua(lua_State* L) {
         lua_pushcfunction(L, overviewDispatchDisableLua);
     else
         return luaL_error(L, "overview: invalid argument '%s'", arg);
+
+    return 1;
+}
+
+int navigateLua(lua_State* L) {
+    if (lua_gettop(L) < 1 || lua_isnoneornil(L, 1))
+        return luaL_error(L, "navigate: expected a string argument");
+
+    if (!lua_isstring(L, 1))
+        return luaL_error(L, "navigate: expected a string argument");
+
+    const char* arg = lua_tostring(L, 1);
+    if (!isNavigateArgValid(arg))
+        return luaL_error(L, "navigate: invalid argument '%s'", arg);
+
+    if (g_pKeybindManager && g_pKeybindManager->m_currentKeybind && g_pKeybindManager->m_currentKeybind->handler == "__lua") {
+        if (!g_navigateDispatcher)
+            return luaL_error(L, "navigate: dispatcher is not registered");
+
+        const auto result = g_navigateDispatcher(arg);
+        if (!result.success)
+            return luaL_error(L, "navigate: %s", result.error.c_str());
+
+        return 0;
+    }
+
+    if (std::string_view{arg} == "left")
+        lua_pushcfunction(L, navigateDispatchLeftLua);
+    else if (std::string_view{arg} == "right")
+        lua_pushcfunction(L, navigateDispatchRightLua);
+    else if (std::string_view{arg} == "up")
+        lua_pushcfunction(L, navigateDispatchUpLua);
+    else if (std::string_view{arg} == "down")
+        lua_pushcfunction(L, navigateDispatchDownLua);
+    else
+        return luaL_error(L, "navigate: invalid argument '%s'", arg);
+
+    return 1;
+}
+
+int windowLua(lua_State* L) {
+    if (lua_gettop(L) < 1 || lua_isnoneornil(L, 1))
+        return luaL_error(L, "window: expected a string argument");
+
+    if (!lua_isstring(L, 1))
+        return luaL_error(L, "window: expected a string argument");
+
+    const char* arg = lua_tostring(L, 1);
+    if (!isWindowArgValid(arg))
+        return luaL_error(L, "window: invalid argument '%s'", arg);
+
+    if (g_pKeybindManager && g_pKeybindManager->m_currentKeybind && g_pKeybindManager->m_currentKeybind->handler == "__lua") {
+        if (!g_windowDispatcher)
+            return luaL_error(L, "window: dispatcher is not registered");
+
+        const auto result = g_windowDispatcher(arg);
+        if (!result.success)
+            return luaL_error(L, "window: %s", result.error.c_str());
+
+        return 0;
+    }
+
+    if (std::string_view{arg} == "select")
+        lua_pushcfunction(L, windowDispatchSelectLua);
+    else if (std::string_view{arg} == "close")
+        lua_pushcfunction(L, windowDispatchCloseLua);
+    else
+        return luaL_error(L, "window: invalid argument '%s'", arg);
 
     return 1;
 }
@@ -182,22 +306,59 @@ int gestureLua(lua_State* L) {
     return 0;
 }
 
+struct SDispatcherLuaRegistration {
+    std::string_view                    name;
+    ScrollOverview::Config::TDispatcher* dispatcher;
+    lua_CFunction                       luaFunction;
+};
+
+SDispatcherLuaRegistration* findDispatcherLuaRegistration(const std::string_view name) {
+    static SDispatcherLuaRegistration registrations[] = {
+        {"overview", &g_overviewDispatcher, ::overviewLua},
+        {"navigate", &g_navigateDispatcher, ::navigateLua},
+        {"window",   &g_windowDispatcher,   ::windowLua},
+    };
+
+    const auto MATCH = std::ranges::find_if(registrations, [name](const auto& registration) { return registration.name == name; });
+    return MATCH == std::end(registrations) ? nullptr : &*MATCH;
+}
+
 }
 
 namespace ScrollOverview::Config {
 
-void registerLua(TOverviewDispatcher dispatcher, TGestureRegistrar gestureRegistrar) {
+void registerDispatcher(const std::string& name, TDispatcher dispatcher) {
+    HyprlandAPI::addDispatcherV2(SCROLLOVERVIEW_HANDLE, "scrolloverview:" + name, dispatcher);
+
     if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
         return;
 
-    g_overviewDispatcher = dispatcher;
-    g_gestureRegistrar   = gestureRegistrar;
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "overview", ::overviewLua);
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "configure", ::configureLua);
+    const auto LUA_REGISTRATION = findDispatcherLuaRegistration(name);
+    if (!LUA_REGISTRATION)
+        return;
+
+    *LUA_REGISTRATION->dispatcher = dispatcher;
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", std::string{LUA_REGISTRATION->name}, LUA_REGISTRATION->luaFunction);
+}
+
+void registerGesture(TGestureRegistrar gestureRegistrar, TGestureKeyword gestureKeyword) {
+    HyprlandAPI::addConfigKeyword(SCROLLOVERVIEW_HANDLE, "scrolloverview-gesture", gestureKeyword, {});
+
+    if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
+        return;
+
+    g_gestureRegistrar = gestureRegistrar;
     HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "gesture", ::gestureLua);
 }
 
-void registerLegacy() {
+static void registerLuaConfig() {
+    if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
+        return;
+
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "configure", ::configureLua);
+}
+
+static void registerLegacy() {
     using namespace ::Config::Values;
 
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -230,6 +391,12 @@ void registerLegacy() {
                                   makeShared<CIntValue>("plugin:scrolloverview:shadow:render_power", "workspace card shadow render power", -1));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:shadow:color", "workspace card shadow color", -1));
+}
+
+void registerConfig() {
+    registerLuaConfig();
+    registerLegacy();
+    HyprlandAPI::reloadConfig();
 }
 
 int getGestureDistance() {
