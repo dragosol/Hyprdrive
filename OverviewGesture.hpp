@@ -5,11 +5,11 @@
 class COverviewGesture : public ITrackpadGesture {
   public:
     COverviewGesture()              = default;
-    virtual ~COverviewGesture()     = default;
+    ~COverviewGesture() override = default;
 
-    virtual void begin(const ITrackpadGesture::STrackpadGestureBegin& e);
-    virtual void update(const ITrackpadGesture::STrackpadGestureUpdate& e);
-    virtual void end(const ITrackpadGesture::STrackpadGestureEnd& e);
+    void begin(const ITrackpadGesture::STrackpadGestureBegin& e) override;
+    void update(const ITrackpadGesture::STrackpadGestureUpdate& e) override;
+    void end(const ITrackpadGesture::STrackpadGestureEnd& e) override;
 
   private:
     float m_lastDelta   = 0.F;

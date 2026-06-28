@@ -669,14 +669,14 @@ static Layout::Tiled::CScrollingAlgorithm* overviewScrollingAlgorithmForTarget(c
     if (!target || !target->space() || !target->space()->algorithm())
         return nullptr;
 
-    return dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(target->space()->algorithm()->m_tiled.get());
+    return dc<Layout::Tiled::CScrollingAlgorithm*>(target->space()->algorithm()->m_tiled.get());
 }
 
 static Layout::Tiled::CScrollingAlgorithm* overviewScrollingAlgorithmForWorkspace(const PHLWORKSPACE& workspace) {
     if (!workspace || !workspace->m_space || !workspace->m_space->algorithm())
         return nullptr;
 
-    return dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(workspace->m_space->algorithm()->m_tiled.get());
+    return dc<Layout::Tiled::CScrollingAlgorithm*>(workspace->m_space->algorithm()->m_tiled.get());
 }
 
 static bool isWorkspaceScrolling(const PHLWORKSPACE& workspace) {
@@ -4120,7 +4120,7 @@ void CScrollOverview::onSwipeUpdate(double delta) {
 
     m_isSwiping = true;
 
-    const float PERC = closing ? 1.0 - std::clamp(delta / (double)DISTANCE, 0.0, 1.0) : std::clamp(delta / (double)DISTANCE, 0.0, 1.0);
+    const float PERC = closing ? 1.0 - std::clamp(delta / sc<double>(DISTANCE), 0.0, 1.0) : std::clamp(delta / sc<double>(DISTANCE), 0.0, 1.0);
 
     scale->setValueAndWarp(hyprlerp(1.F, ScrollOverview::Config::getScale(), PERC));
 }

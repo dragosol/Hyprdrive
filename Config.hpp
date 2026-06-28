@@ -6,7 +6,6 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 
-#include <memory>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -32,11 +31,11 @@ void registerLegacy();
 
 template <typename T>
 CConfigValue<T>& valueRef(const std::string& name) {
-    static std::unordered_map<std::string, std::unique_ptr<CConfigValue<T>>> values;
+    static std::unordered_map<std::string, UP<CConfigValue<T>>> values;
 
     const auto [it, inserted] = values.try_emplace(name);
     if (inserted)
-        it->second = std::make_unique<CConfigValue<T>>(name);
+        it->second = makeUnique<CConfigValue<T>>(name);
 
     return *it->second;
 }

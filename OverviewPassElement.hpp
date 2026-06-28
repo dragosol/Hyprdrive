@@ -5,18 +5,18 @@
 class CScrollOverviewPassElement : public IPassElement {
   public:
     CScrollOverviewPassElement();
-    virtual ~CScrollOverviewPassElement() = default;
+    ~CScrollOverviewPassElement() override = default;
 
-    virtual std::vector<UP<IPassElement>> draw();
-    virtual ePassElementType              type() {
+    std::vector<UP<IPassElement>> draw() override;
+    ePassElementType              type() override {
         return EK_CUSTOM;
     }
-    virtual bool                needsLiveBlur();
-    virtual bool                needsPrecomputeBlur();
-    virtual std::optional<CBox> boundingBox();
-    virtual CRegion             opaqueRegion();
+    bool                          needsLiveBlur() override;
+    bool                          needsPrecomputeBlur() override;
+    std::optional<CBox>           boundingBox() override;
+    CRegion                       opaqueRegion() override;
 
-    virtual const char*         passName() {
+    const char*                   passName() override {
         return "CScrollOverviewPassElement";
     }
 };
@@ -37,18 +37,18 @@ class COverviewShadowPassElement : public IPassElement {
     };
 
     COverviewShadowPassElement(const SData& data_);
-    virtual ~COverviewShadowPassElement() = default;
+    ~COverviewShadowPassElement() override = default;
 
-    virtual std::vector<UP<IPassElement>> draw();
-    virtual ePassElementType              type() {
+    std::vector<UP<IPassElement>> draw() override;
+    ePassElementType              type() override {
         return EK_CUSTOM;
     }
-    virtual bool                needsLiveBlur();
-    virtual bool                needsPrecomputeBlur();
-    virtual std::optional<CBox> boundingBox();
-    virtual CRegion             opaqueRegion();
+    bool                          needsLiveBlur() override;
+    bool                          needsPrecomputeBlur() override;
+    std::optional<CBox>           boundingBox() override;
+    CRegion                       opaqueRegion() override;
 
-    virtual const char*         passName() {
+    const char*                   passName() override {
         return "COverviewShadowPassElement";
     }
 

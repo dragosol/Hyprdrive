@@ -298,11 +298,11 @@ bool getBlur() {
     if (!VALUE)
         return {};
 
-    const auto CUSTOM = (Hyprlang::CUSTOMTYPE* const*)(VALUE->getDataStaticPtr());
+    const auto CUSTOM = rc<Hyprlang::CUSTOMTYPE* const*>(VALUE->getDataStaticPtr());
     if (!CUSTOM || !*CUSTOM)
         return {};
 
-    const auto* const GAPS = static_cast<::Config::CCssGapData*>((*CUSTOM)->getData());
+    const auto* const GAPS = sc<::Config::CCssGapData*>((*CUSTOM)->getData());
     return GAPS ? *GAPS : ::Config::CCssGapData{};
 }
 

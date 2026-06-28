@@ -104,13 +104,13 @@ static void hkScheduleFrameForMonitor(void* thisptr, PHLMONITOR monitor, Aquamar
             return;
     }
 
-    ((origScheduleFrameForMonitor)g_pScrollScheduleFrameHook->m_original)(thisptr, monitor, reason);
+    rc<origScheduleFrameForMonitor>(g_pScrollScheduleFrameHook->m_original)(thisptr, monitor, reason);
 }
 
 //
 static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
     if (!g_pScrollOverview || renderingOverview || g_pScrollOverview->pMonitor != pMonitor)
-        ((origRenderWorkspace)(g_pScrollRenderWorkspaceHook->m_original))(thisptr, pMonitor, pWorkspace, now, geometry);
+        rc<origRenderWorkspace>(g_pScrollRenderWorkspaceHook->m_original)(thisptr, pMonitor, pWorkspace, now, geometry);
     else {
         const bool PREVRENDERINGOVERVIEW = renderingOverview;
         renderingOverview                = true;
@@ -123,7 +123,7 @@ static void hkDamageSurface(void* thisptr, SP<CWLSurfaceResource> surface, doubl
     if (!g_pScrollOverview || g_pScrollOverview->blockDamageReporting || g_pScrollOverview->shouldHandleSurfaceDamage(surface)) {
         const bool PREVDAMAGEFROMSURFACE = damageFromSurface;
         damageFromSurface                = !!g_pScrollOverview;
-        ((origDamageSurface)g_pScrollDamageSurfaceHook->m_original)(thisptr, surface, x, y, scale);
+        rc<origDamageSurface>(g_pScrollDamageSurfaceHook->m_original)(thisptr, surface, x, y, scale);
         damageFromSurface = PREVDAMAGEFROMSURFACE;
     }
 }
@@ -132,7 +132,7 @@ static void hkSendFrameEventsToWorkspace(void* thisptr, PHLMONITOR monitor, PHLW
     if (g_pScrollOverview && g_pScrollOverview->pMonitor == monitor)
         return;
 
-    ((origSendFrameEventsToWorkspace)g_pScrollSendFrameEventsHook->m_original)(thisptr, monitor, workspace, now);
+    rc<origSendFrameEventsToWorkspace>(g_pScrollSendFrameEventsHook->m_original)(thisptr, monitor, workspace, now);
 }
 
 static void hkSurfaceFrame(void* thisptr, const Time::steady_tp& now) {
@@ -141,39 +141,39 @@ static void hkSurfaceFrame(void* thisptr, const Time::steady_tp& now) {
     if (g_pScrollOverview && !g_pScrollOverview->shouldAllowSurfaceFrame(SURFACE, now))
         return;
 
-    ((origSurfaceFrame)g_pScrollSurfaceFrameHook->m_original)(thisptr, now);
+    rc<origSurfaceFrame>(g_pScrollSurfaceFrameHook->m_original)(thisptr, now);
 }
 
 static void hkAddDamageA(void* thisptr, const CBox& box) {
-    const auto PMONITOR = (CMonitor*)thisptr;
+    const auto PMONITOR = sc<CMonitor*>(thisptr);
 
     if (g_pScrollOverview && g_pScrollOverview->pMonitor == PMONITOR->m_self && renderingOverview && !damageFromSurface && g_pScrollOverview->shouldSuppressRenderDamage()) {
         return;
     }
 
     if (!g_pScrollOverview || g_pScrollOverview->pMonitor != PMONITOR->m_self || g_pScrollOverview->blockDamageReporting || damageFromSurface) {
-        ((origAddDamageA)g_pScrollAddDamageHookA->m_original)(thisptr, box);
+        rc<origAddDamageA>(g_pScrollAddDamageHookA->m_original)(thisptr, box);
         return;
     }
 
     g_pScrollOverview->onDamageReported();
-    ((origAddDamageA)g_pScrollAddDamageHookA->m_original)(thisptr, box);
+    rc<origAddDamageA>(g_pScrollAddDamageHookA->m_original)(thisptr, box);
 }
 
 static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
-    const auto PMONITOR = (CMonitor*)thisptr;
+    const auto PMONITOR = sc<CMonitor*>(thisptr);
 
     if (g_pScrollOverview && g_pScrollOverview->pMonitor == PMONITOR->m_self && renderingOverview && !damageFromSurface && g_pScrollOverview->shouldSuppressRenderDamage()) {
         return;
     }
 
     if (!g_pScrollOverview || g_pScrollOverview->pMonitor != PMONITOR->m_self || g_pScrollOverview->blockDamageReporting || damageFromSurface) {
-        ((origAddDamageB)g_pScrollAddDamageHookB->m_original)(thisptr, rg);
+        rc<origAddDamageB>(g_pScrollAddDamageHookB->m_original)(thisptr, rg);
         return;
     }
 
     g_pScrollOverview->onDamageReported();
-    ((origAddDamageB)g_pScrollAddDamageHookB->m_original)(thisptr, rg);
+    rc<origAddDamageB>(g_pScrollAddDamageHookB->m_original)(thisptr, rg);
 }
 
 static SDispatchResult onOverviewDispatcher(std::string arg) {
@@ -374,37 +374,37 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pScrollRenderWorkspaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("renderWorkspace", {"CHyprRenderer::renderWorkspace(", "IHyprRenderer::renderWorkspace("}),
-        (void*)hkRenderWorkspace);
+        rc<void*>(hkRenderWorkspace));
 
     g_pScrollScheduleFrameHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE, 
         findFnOrThrow("scheduleFrameForMonitor", {"CCompositor::scheduleFrameForMonitor("}),
-        (void*)hkScheduleFrameForMonitor);
+        rc<void*>(hkScheduleFrameForMonitor));
 
     g_pScrollDamageSurfaceHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("damageSurface", {"CHyprRenderer::damageSurface(", "IHyprRenderer::damageSurface("}),
-        (void*)hkDamageSurface);
+        rc<void*>(hkDamageSurface));
 
     g_pScrollSendFrameEventsHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("sendFrameEventsToWorkspace", {"CHyprRenderer::sendFrameEventsToWorkspace(", "IHyprRenderer::sendFrameEventsToWorkspace("}),
-        (void*)hkSendFrameEventsToWorkspace);
+        rc<void*>(hkSendFrameEventsToWorkspace));
 
     g_pScrollSurfaceFrameHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE", {""}),
-        (void*)hkSurfaceFrame);
+        rc<void*>(hkSurfaceFrame));
 
     g_pScrollAddDamageHookB = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("addDamageEPK15pixman_region32", {"CMonitor::addDamage"}),
-        (void*)hkAddDamageB);
+        rc<void*>(hkAddDamageB));
 
     g_pScrollAddDamageHookA = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", {""}),
-        (void*)hkAddDamageA);
+        rc<void*>(hkAddDamageA));
 
     static auto P = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
         if (!g_pScrollOverview || g_pScrollOverview->pMonitor != monitor)

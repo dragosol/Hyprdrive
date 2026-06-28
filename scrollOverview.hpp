@@ -24,30 +24,30 @@ struct wl_event_source;
 class CScrollOverview : public IOverview {
   public:
     CScrollOverview(PHLWORKSPACE startedOn_, bool swipe = false);
-    virtual ~CScrollOverview();
+    ~CScrollOverview() override;
 
-    virtual void render();
-    virtual void damage();
+    void         render() override;
+    void         damage() override;
     void         markBlurDirty();
     void         markBackdropBlurDirty();
-    virtual void onDamageReported();
-    virtual bool shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface);
-    virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now);
-    virtual bool shouldAllowRealtimePreviewSchedule();
-    virtual bool shouldSuppressRenderDamage() const;
-    virtual void onPreRender();
+    void         onDamageReported() override;
+    bool         shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) override;
+    bool         shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) override;
+    bool         shouldAllowRealtimePreviewSchedule() override;
+    bool         shouldSuppressRenderDamage() const override;
+    void         onPreRender() override;
 
-    virtual void setClosing(bool closing);
+    void         setClosing(bool closing) override;
 
-    virtual void resetSwipe();
-    virtual void onSwipeUpdate(double delta);
-    virtual void onSwipeEnd();
+    void         resetSwipe() override;
+    void         onSwipeUpdate(double delta) override;
+    void         onSwipeEnd() override;
 
     // close without a selection
-    virtual void close();
-    virtual void selectHoveredWorkspace();
+    void         close() override;
+    void         selectHoveredWorkspace() override;
 
-    virtual void fullRender();
+    void         fullRender() override;
 
   private:
     void   rebuildWorkspaceImages();
