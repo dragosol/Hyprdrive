@@ -18,7 +18,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Andrew-Chen-Wang/github-wiki-action@b7e552d7cb0fa7f83e459012ffc6840fd87bcb83
-        with:
-          path: docs/wiki/
+      - name: Publish docs/wiki to GitHub Wiki
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
 
+          tmpdir="$(mktemp -d)"
+          cp -a docs/wiki/. "$tmpdir/"
+
+          git -C "$tmpdir" init
+          git -C "$tmpdir" config user.name "github-actions[bot]"
+          git -C "$tmpdir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$tmpdir" add .
+          git -C "$tmpdir" commit -m "Update wiki"
+          git -C "$tmpdir" branch -M master
+          git -C "$tmpdir" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+          git -C "$tmpdir" push --force origin master
