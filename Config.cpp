@@ -8,6 +8,8 @@
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 
+#include <regex>
+
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
@@ -15,213 +17,128 @@ extern "C" {
 
 namespace {
 
-ScrollOverview::Config::TDispatcher       g_overviewDispatcher = nullptr;
-ScrollOverview::Config::TDispatcher       g_navigateDispatcher = nullptr;
-ScrollOverview::Config::TDispatcher       g_windowDispatcher   = nullptr;
 ScrollOverview::Config::TGestureRegistrar g_gestureRegistrar   = nullptr;
 
-bool isOverviewArgValid(const std::string_view arg) {
-    return arg == "toggle" || arg == "select" || arg == "on" || arg == "enable" || arg == "off" || arg == "disable";
+int dispatcherLua(lua_State* L, std::string_view name);
+
+using TArgValidator = bool (*)(std::string_view);
+
+struct SDispatcherRegistration {
+    std::string_view                    name;
+    std::regex                          argPattern;
+    std::string_view                    defaultArg;
+    std::string_view                    typeArgError;
+    std::string_view                    invalidArgError;
+    TArgValidator                       argValidator = nullptr;
+    ScrollOverview::Config::TDispatcher dispatcher   = nullptr;
+    lua_CFunction                       luaFunction  = nullptr;
+
+    bool isArgValid(const std::string_view arg) const {
+        if (argValidator)
+            return argValidator(arg);
+
+        return std::regex_match(arg.begin(), arg.end(), argPattern);
+    }
+};
+
+SDispatcherRegistration* findDispatcherRegistration(const std::string_view name) {
+    static SDispatcherRegistration registrations[] = {
+        {
+            .name            = "overview",
+            .argPattern      = std::regex{"^(toggle|select|on|enable|off|disable)$"},
+            .defaultArg      = "toggle",
+            .typeArgError    = "expected an optional string argument; did you forget quotes around it?",
+            .invalidArgError = "expected one of: toggle, select, on, enable, off, disable",
+            .luaFunction     = [](lua_State* L) { return dispatcherLua(L, "overview"); },
+        },
+        {
+            .name            = "navigate",
+            .argPattern      = std::regex{"^(left|right|up|down)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected one of: left, right, up, down",
+            .luaFunction     = [](lua_State* L) { return dispatcherLua(L, "navigate"); },
+        },
+        {
+            .name            = "window",
+            .argPattern      = std::regex{"^(select|close)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected one of: select, close",
+            .luaFunction     = [](lua_State* L) { return dispatcherLua(L, "window"); },
+        },
+    };
+
+    const auto MATCH = std::ranges::find_if(registrations, [name](const auto& registration) { return registration.name == name; });
+    return MATCH == std::end(registrations) ? nullptr : &*MATCH;
 }
 
-bool isNavigateArgValid(const std::string_view arg) {
-    return arg == "left" || arg == "right" || arg == "up" || arg == "down";
-}
+int dispatchLua(lua_State* L, const SDispatcherRegistration& registration, const char* arg) {
+    if (!registration.dispatcher)
+        return luaL_error(L, "%s: dispatcher is not registered", registration.name.data());
 
-bool isWindowArgValid(const std::string_view arg) {
-    return arg == "select" || arg == "close";
-}
-
-int dispatchOverviewLua(lua_State* L, const char* arg) {
-    if (!g_overviewDispatcher)
-        return luaL_error(L, "overview: dispatcher is not registered");
-
-    const auto result = g_overviewDispatcher(arg);
+    const auto result = registration.dispatcher(arg);
     if (!result.success)
-        return luaL_error(L, "overview: %s", result.error.c_str());
+        return luaL_error(L, "%s: %s", registration.name.data(), result.error.c_str());
 
     return 0;
 }
 
-int dispatchNavigateLua(lua_State* L, const char* arg) {
-    if (!g_navigateDispatcher)
-        return luaL_error(L, "navigate: dispatcher is not registered");
+void pushDispatcherAction(lua_State* L, const char* name, const char* arg) {
+    const std::string CODE = "return function() return hl.plugin.scrolloverview._dispatch(\"" + std::string{name} + "\", \"" + std::string{arg} + "\") end";
 
-    const auto result = g_navigateDispatcher(arg);
-    if (!result.success)
-        return luaL_error(L, "navigate: %s", result.error.c_str());
+    if (luaL_loadstring(L, CODE.c_str()) != LUA_OK)
+        lua_error(L);
 
-    return 0;
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK)
+        lua_error(L);
 }
 
-int dispatchWindowLua(lua_State* L, const char* arg) {
-    if (!g_windowDispatcher)
-        return luaL_error(L, "window: dispatcher is not registered");
+int dispatchInternalLua(lua_State* L) {
+    if (lua_gettop(L) < 2 || lua_isnoneornil(L, 1) || lua_isnoneornil(L, 2))
+        return luaL_error(L, "_dispatch: expected dispatcher name and argument");
 
-    const auto result = g_windowDispatcher(arg);
-    if (!result.success)
-        return luaL_error(L, "window: %s", result.error.c_str());
+    if (!lua_isstring(L, 1) || !lua_isstring(L, 2))
+        return luaL_error(L, "_dispatch: expected string arguments");
 
-    return 0;
+    const char* name = lua_tostring(L, 1);
+    const char* arg  = lua_tostring(L, 2);
+    const auto  REGISTRATION = findDispatcherRegistration(name);
+
+    if (!REGISTRATION)
+        return luaL_error(L, "_dispatch: unknown dispatcher '%s'", name);
+    if (!REGISTRATION->isArgValid(arg))
+        return luaL_error(L, "%s: invalid argument '%s', %s", name, arg, REGISTRATION->invalidArgError.data());
+
+    return dispatchLua(L, *REGISTRATION, arg);
 }
 
-int overviewDispatchToggleLua(lua_State* L) {
-    return dispatchOverviewLua(L, "toggle");
-}
+int dispatcherLua(lua_State* L, std::string_view name) {
+    const auto REGISTRATION = findDispatcherRegistration(name);
+    if (!REGISTRATION)
+        return luaL_error(L, "%s: dispatcher metadata is not registered", name.data());
 
-int overviewDispatchSelectLua(lua_State* L) {
-    return dispatchOverviewLua(L, "select");
-}
+    const char* arg = REGISTRATION->defaultArg.empty() ? nullptr : REGISTRATION->defaultArg.data();
 
-int overviewDispatchOnLua(lua_State* L) {
-    return dispatchOverviewLua(L, "on");
-}
-
-int overviewDispatchEnableLua(lua_State* L) {
-    return dispatchOverviewLua(L, "enable");
-}
-
-int overviewDispatchOffLua(lua_State* L) {
-    return dispatchOverviewLua(L, "off");
-}
-
-int overviewDispatchDisableLua(lua_State* L) {
-    return dispatchOverviewLua(L, "disable");
-}
-
-int navigateDispatchLeftLua(lua_State* L) {
-    return dispatchNavigateLua(L, "left");
-}
-
-int navigateDispatchRightLua(lua_State* L) {
-    return dispatchNavigateLua(L, "right");
-}
-
-int navigateDispatchUpLua(lua_State* L) {
-    return dispatchNavigateLua(L, "up");
-}
-
-int navigateDispatchDownLua(lua_State* L) {
-    return dispatchNavigateLua(L, "down");
-}
-
-int windowDispatchSelectLua(lua_State* L) {
-    return dispatchWindowLua(L, "select");
-}
-
-int windowDispatchCloseLua(lua_State* L) {
-    return dispatchWindowLua(L, "close");
-}
-
-int overviewLua(lua_State* L) {
-    const char* arg = "toggle";
+    if (!arg && (lua_gettop(L) < 1 || lua_isnoneornil(L, 1)))
+        return luaL_error(L, "%s: %s", REGISTRATION->name.data(), REGISTRATION->typeArgError.data());
 
     if (lua_gettop(L) >= 1) {
         if (lua_isnoneornil(L, 1))
-            return luaL_error(L, "overview: expected a string argument; did you forget quotes around it?");
+            return luaL_error(L, "%s: %s", REGISTRATION->name.data(), REGISTRATION->typeArgError.data());
 
         if (!lua_isstring(L, 1))
-            return luaL_error(L, "overview: expected an optional string argument");
+            return luaL_error(L, "%s: %s", REGISTRATION->name.data(), REGISTRATION->typeArgError.data());
 
         arg = lua_tostring(L, 1);
     }
 
-    if (!isOverviewArgValid(arg))
-        return luaL_error(L, "overview: invalid argument '%s'", arg);
+    if (!REGISTRATION->isArgValid(arg))
+        return luaL_error(L, "%s: invalid argument '%s', %s", REGISTRATION->name.data(), arg, REGISTRATION->invalidArgError.data());
 
     if (g_pKeybindManager && g_pKeybindManager->m_currentKeybind && g_pKeybindManager->m_currentKeybind->handler == "__lua") {
-        if (!g_overviewDispatcher)
-            return luaL_error(L, "overview: dispatcher is not registered");
-
-        const auto result = g_overviewDispatcher(arg);
-        if (!result.success)
-            return luaL_error(L, "overview: %s", result.error.c_str());
-
-        return 0;
+        return dispatchLua(L, *REGISTRATION, arg);
     }
 
-    if (std::string_view{arg} == "toggle")
-        lua_pushcfunction(L, overviewDispatchToggleLua);
-    else if (std::string_view{arg} == "select")
-        lua_pushcfunction(L, overviewDispatchSelectLua);
-    else if (std::string_view{arg} == "on")
-        lua_pushcfunction(L, overviewDispatchOnLua);
-    else if (std::string_view{arg} == "enable")
-        lua_pushcfunction(L, overviewDispatchEnableLua);
-    else if (std::string_view{arg} == "off")
-        lua_pushcfunction(L, overviewDispatchOffLua);
-    else if (std::string_view{arg} == "disable")
-        lua_pushcfunction(L, overviewDispatchDisableLua);
-    else
-        return luaL_error(L, "overview: invalid argument '%s'", arg);
-
-    return 1;
-}
-
-int navigateLua(lua_State* L) {
-    if (lua_gettop(L) < 1 || lua_isnoneornil(L, 1))
-        return luaL_error(L, "navigate: expected a string argument");
-
-    if (!lua_isstring(L, 1))
-        return luaL_error(L, "navigate: expected a string argument");
-
-    const char* arg = lua_tostring(L, 1);
-    if (!isNavigateArgValid(arg))
-        return luaL_error(L, "navigate: invalid argument '%s'", arg);
-
-    if (g_pKeybindManager && g_pKeybindManager->m_currentKeybind && g_pKeybindManager->m_currentKeybind->handler == "__lua") {
-        if (!g_navigateDispatcher)
-            return luaL_error(L, "navigate: dispatcher is not registered");
-
-        const auto result = g_navigateDispatcher(arg);
-        if (!result.success)
-            return luaL_error(L, "navigate: %s", result.error.c_str());
-
-        return 0;
-    }
-
-    if (std::string_view{arg} == "left")
-        lua_pushcfunction(L, navigateDispatchLeftLua);
-    else if (std::string_view{arg} == "right")
-        lua_pushcfunction(L, navigateDispatchRightLua);
-    else if (std::string_view{arg} == "up")
-        lua_pushcfunction(L, navigateDispatchUpLua);
-    else if (std::string_view{arg} == "down")
-        lua_pushcfunction(L, navigateDispatchDownLua);
-    else
-        return luaL_error(L, "navigate: invalid argument '%s'", arg);
-
-    return 1;
-}
-
-int windowLua(lua_State* L) {
-    if (lua_gettop(L) < 1 || lua_isnoneornil(L, 1))
-        return luaL_error(L, "window: expected a string argument");
-
-    if (!lua_isstring(L, 1))
-        return luaL_error(L, "window: expected a string argument");
-
-    const char* arg = lua_tostring(L, 1);
-    if (!isWindowArgValid(arg))
-        return luaL_error(L, "window: invalid argument '%s'", arg);
-
-    if (g_pKeybindManager && g_pKeybindManager->m_currentKeybind && g_pKeybindManager->m_currentKeybind->handler == "__lua") {
-        if (!g_windowDispatcher)
-            return luaL_error(L, "window: dispatcher is not registered");
-
-        const auto result = g_windowDispatcher(arg);
-        if (!result.success)
-            return luaL_error(L, "window: %s", result.error.c_str());
-
-        return 0;
-    }
-
-    if (std::string_view{arg} == "select")
-        lua_pushcfunction(L, windowDispatchSelectLua);
-    else if (std::string_view{arg} == "close")
-        lua_pushcfunction(L, windowDispatchCloseLua);
-    else
-        return luaL_error(L, "window: invalid argument '%s'", arg);
+    pushDispatcherAction(L, REGISTRATION->name.data(), arg);
 
     return 1;
 }
@@ -306,23 +223,6 @@ int gestureLua(lua_State* L) {
     return 0;
 }
 
-struct SDispatcherLuaRegistration {
-    std::string_view                    name;
-    ScrollOverview::Config::TDispatcher* dispatcher;
-    lua_CFunction                       luaFunction;
-};
-
-SDispatcherLuaRegistration* findDispatcherLuaRegistration(const std::string_view name) {
-    static SDispatcherLuaRegistration registrations[] = {
-        {"overview", &g_overviewDispatcher, ::overviewLua},
-        {"navigate", &g_navigateDispatcher, ::navigateLua},
-        {"window",   &g_windowDispatcher,   ::windowLua},
-    };
-
-    const auto MATCH = std::ranges::find_if(registrations, [name](const auto& registration) { return registration.name == name; });
-    return MATCH == std::end(registrations) ? nullptr : &*MATCH;
-}
-
 }
 
 namespace ScrollOverview::Config {
@@ -333,12 +233,12 @@ void registerDispatcher(const std::string& name, TDispatcher dispatcher) {
     if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
         return;
 
-    const auto LUA_REGISTRATION = findDispatcherLuaRegistration(name);
-    if (!LUA_REGISTRATION)
+    const auto REGISTRATION = findDispatcherRegistration(name);
+    if (!REGISTRATION)
         return;
 
-    *LUA_REGISTRATION->dispatcher = dispatcher;
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", std::string{LUA_REGISTRATION->name}, LUA_REGISTRATION->luaFunction);
+    REGISTRATION->dispatcher = dispatcher;
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", std::string{REGISTRATION->name}, REGISTRATION->luaFunction);
 }
 
 void registerGesture(TGestureRegistrar gestureRegistrar, TGestureKeyword gestureKeyword) {
@@ -355,6 +255,7 @@ static void registerLuaConfig() {
     if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
         return;
 
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "_dispatch", ::dispatchInternalLua);
     HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "configure", ::configureLua);
 }
 
