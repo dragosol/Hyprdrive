@@ -282,8 +282,8 @@ static void registerLegacy() {
                                   makeShared<CIntValue>("plugin:scrolloverview:input:drag_mode", "overview mouse drag behavior", 0,
                                                         SIntValueOptions{.min = 0, .max = 1}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:input:drag_threshold", "overview drag threshold", -1,
-                                                        SIntValueOptions{.min = -1}));
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:drag_threshold", "overview drag threshold", 10,
+                                                        SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
@@ -333,11 +333,7 @@ int getDragMode() {
 }
 
 int getDragThreshold() {
-    const auto THRESHOLD = getValue<int>("plugin:scrolloverview:input:drag_threshold");
-    if (THRESHOLD >= 0)
-        return THRESHOLD;
-
-    return std::max<int>(0, getValue<int>("binds:drag_threshold"));
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:input:drag_threshold"));
 }
 
 static EScrollAction defaultVerticalScrollAction(ELayout layout) {
