@@ -8,6 +8,8 @@
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 
+#include <regex>
+
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
@@ -15,89 +17,128 @@ extern "C" {
 
 namespace {
 
-ScrollOverview::Config::TOverviewDispatcher g_overviewDispatcher = nullptr;
-ScrollOverview::Config::TGestureRegistrar   g_gestureRegistrar   = nullptr;
+ScrollOverview::Config::TGestureRegistrar g_gestureRegistrar   = nullptr;
 
-bool isOverviewArgValid(const std::string_view arg) {
-    return arg == "toggle" || arg == "select" || arg == "on" || arg == "enable" || arg == "off" || arg == "disable";
+int dispatcherLua(lua_State* L, std::string_view name);
+
+using TArgValidator = bool (*)(std::string_view);
+
+struct SDispatcherRegistration {
+    std::string_view                    name;
+    std::regex                          argPattern;
+    std::string_view                    defaultArg;
+    std::string_view                    typeArgError;
+    std::string_view                    invalidArgError;
+    TArgValidator                       argValidator = nullptr;
+    ScrollOverview::Config::TDispatcher dispatcher   = nullptr;
+    lua_CFunction                       luaFunction  = nullptr;
+
+    bool isArgValid(const std::string_view arg) const {
+        if (argValidator)
+            return argValidator(arg);
+
+        return std::regex_match(arg.begin(), arg.end(), argPattern);
+    }
+};
+
+SDispatcherRegistration* findDispatcherRegistration(const std::string_view name) {
+    static SDispatcherRegistration registrations[] = {
+        {
+            .name            = "overview",
+            .argPattern      = std::regex{"^(toggle|select|on|enable|off|disable)$"},
+            .defaultArg      = "toggle",
+            .typeArgError    = "expected an optional string argument; did you forget quotes around it?",
+            .invalidArgError = "expected one of: toggle, select, on, enable, off, disable",
+            .luaFunction     = [](lua_State* L) { return dispatcherLua(L, "overview"); },
+        },
+        {
+            .name            = "navigate",
+            .argPattern      = std::regex{"^(left|right|up|down)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected one of: left, right, up, down",
+            .luaFunction     = [](lua_State* L) { return dispatcherLua(L, "navigate"); },
+        },
+        {
+            .name            = "window",
+            .argPattern      = std::regex{"^(select|close)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected one of: select, close",
+            .luaFunction     = [](lua_State* L) { return dispatcherLua(L, "window"); },
+        },
+    };
+
+    const auto MATCH = std::ranges::find_if(registrations, [name](const auto& registration) { return registration.name == name; });
+    return MATCH == std::end(registrations) ? nullptr : &*MATCH;
 }
 
-int dispatchOverviewLua(lua_State* L, const char* arg) {
-    if (!g_overviewDispatcher)
-        return luaL_error(L, "overview: dispatcher is not registered");
+int dispatchLua(lua_State* L, const SDispatcherRegistration& registration, const char* arg) {
+    if (!registration.dispatcher)
+        return luaL_error(L, "%s: dispatcher is not registered", registration.name.data());
 
-    const auto result = g_overviewDispatcher(arg);
+    const auto result = registration.dispatcher(arg);
     if (!result.success)
-        return luaL_error(L, "overview: %s", result.error.c_str());
+        return luaL_error(L, "%s: %s", registration.name.data(), result.error.c_str());
 
     return 0;
 }
 
-int overviewDispatchToggleLua(lua_State* L) {
-    return dispatchOverviewLua(L, "toggle");
+void pushDispatcherAction(lua_State* L, const char* name, const char* arg) {
+    const std::string CODE = "return function() return hl.plugin.scrolloverview._dispatch(\"" + std::string{name} + "\", \"" + std::string{arg} + "\") end";
+
+    if (luaL_loadstring(L, CODE.c_str()) != LUA_OK)
+        lua_error(L);
+
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK)
+        lua_error(L);
 }
 
-int overviewDispatchSelectLua(lua_State* L) {
-    return dispatchOverviewLua(L, "select");
+int dispatchInternalLua(lua_State* L) {
+    if (lua_gettop(L) < 2 || lua_isnoneornil(L, 1) || lua_isnoneornil(L, 2))
+        return luaL_error(L, "_dispatch: expected dispatcher name and argument");
+
+    if (!lua_isstring(L, 1) || !lua_isstring(L, 2))
+        return luaL_error(L, "_dispatch: expected string arguments");
+
+    const char* name = lua_tostring(L, 1);
+    const char* arg  = lua_tostring(L, 2);
+    const auto  REGISTRATION = findDispatcherRegistration(name);
+
+    if (!REGISTRATION)
+        return luaL_error(L, "_dispatch: unknown dispatcher '%s'", name);
+    if (!REGISTRATION->isArgValid(arg))
+        return luaL_error(L, "%s: invalid argument '%s', %s", name, arg, REGISTRATION->invalidArgError.data());
+
+    return dispatchLua(L, *REGISTRATION, arg);
 }
 
-int overviewDispatchOnLua(lua_State* L) {
-    return dispatchOverviewLua(L, "on");
-}
+int dispatcherLua(lua_State* L, std::string_view name) {
+    const auto REGISTRATION = findDispatcherRegistration(name);
+    if (!REGISTRATION)
+        return luaL_error(L, "%s: dispatcher metadata is not registered", name.data());
 
-int overviewDispatchEnableLua(lua_State* L) {
-    return dispatchOverviewLua(L, "enable");
-}
+    const char* arg = REGISTRATION->defaultArg.empty() ? nullptr : REGISTRATION->defaultArg.data();
 
-int overviewDispatchOffLua(lua_State* L) {
-    return dispatchOverviewLua(L, "off");
-}
-
-int overviewDispatchDisableLua(lua_State* L) {
-    return dispatchOverviewLua(L, "disable");
-}
-
-int overviewLua(lua_State* L) {
-    const char* arg = "toggle";
+    if (!arg && (lua_gettop(L) < 1 || lua_isnoneornil(L, 1)))
+        return luaL_error(L, "%s: %s", REGISTRATION->name.data(), REGISTRATION->typeArgError.data());
 
     if (lua_gettop(L) >= 1) {
         if (lua_isnoneornil(L, 1))
-            return luaL_error(L, "overview: expected a string argument; did you forget quotes around it?");
+            return luaL_error(L, "%s: %s", REGISTRATION->name.data(), REGISTRATION->typeArgError.data());
 
         if (!lua_isstring(L, 1))
-            return luaL_error(L, "overview: expected an optional string argument");
+            return luaL_error(L, "%s: %s", REGISTRATION->name.data(), REGISTRATION->typeArgError.data());
 
         arg = lua_tostring(L, 1);
     }
 
-    if (!isOverviewArgValid(arg))
-        return luaL_error(L, "overview: invalid argument '%s'", arg);
+    if (!REGISTRATION->isArgValid(arg))
+        return luaL_error(L, "%s: invalid argument '%s', %s", REGISTRATION->name.data(), arg, REGISTRATION->invalidArgError.data());
 
     if (g_pKeybindManager && g_pKeybindManager->m_currentKeybind && g_pKeybindManager->m_currentKeybind->handler == "__lua") {
-        if (!g_overviewDispatcher)
-            return luaL_error(L, "overview: dispatcher is not registered");
-
-        const auto result = g_overviewDispatcher(arg);
-        if (!result.success)
-            return luaL_error(L, "overview: %s", result.error.c_str());
-
-        return 0;
+        return dispatchLua(L, *REGISTRATION, arg);
     }
 
-    if (std::string_view{arg} == "toggle")
-        lua_pushcfunction(L, overviewDispatchToggleLua);
-    else if (std::string_view{arg} == "select")
-        lua_pushcfunction(L, overviewDispatchSelectLua);
-    else if (std::string_view{arg} == "on")
-        lua_pushcfunction(L, overviewDispatchOnLua);
-    else if (std::string_view{arg} == "enable")
-        lua_pushcfunction(L, overviewDispatchEnableLua);
-    else if (std::string_view{arg} == "off")
-        lua_pushcfunction(L, overviewDispatchOffLua);
-    else if (std::string_view{arg} == "disable")
-        lua_pushcfunction(L, overviewDispatchDisableLua);
-    else
-        return luaL_error(L, "overview: invalid argument '%s'", arg);
+    pushDispatcherAction(L, REGISTRATION->name.data(), arg);
 
     return 1;
 }
@@ -186,18 +227,39 @@ int gestureLua(lua_State* L) {
 
 namespace ScrollOverview::Config {
 
-void registerLua(TOverviewDispatcher dispatcher, TGestureRegistrar gestureRegistrar) {
+void registerDispatcher(const std::string& name, TDispatcher dispatcher) {
+    HyprlandAPI::addDispatcherV2(SCROLLOVERVIEW_HANDLE, "scrolloverview:" + name, dispatcher);
+
     if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
         return;
 
-    g_overviewDispatcher = dispatcher;
-    g_gestureRegistrar   = gestureRegistrar;
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "overview", ::overviewLua);
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "configure", ::configureLua);
+    const auto REGISTRATION = findDispatcherRegistration(name);
+    if (!REGISTRATION)
+        return;
+
+    REGISTRATION->dispatcher = dispatcher;
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", std::string{REGISTRATION->name}, REGISTRATION->luaFunction);
+}
+
+void registerGesture(TGestureRegistrar gestureRegistrar, TGestureKeyword gestureKeyword) {
+    HyprlandAPI::addConfigKeyword(SCROLLOVERVIEW_HANDLE, "scrolloverview-gesture", gestureKeyword, {});
+
+    if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
+        return;
+
+    g_gestureRegistrar = gestureRegistrar;
     HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "gesture", ::gestureLua);
 }
 
-void registerLegacy() {
+static void registerLuaConfig() {
+    if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
+        return;
+
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "_dispatch", ::dispatchInternalLua);
+    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "configure", ::configureLua);
+}
+
+static void registerLegacy() {
     using namespace ::Config::Values;
 
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -220,6 +282,9 @@ void registerLegacy() {
                                   makeShared<CIntValue>("plugin:scrolloverview:input:drag_mode", "overview mouse drag behavior", 0,
                                                         SIntValueOptions{.min = 0, .max = 1}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:input:drag_threshold", "overview drag threshold", 10,
+                                                        SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -230,6 +295,12 @@ void registerLegacy() {
                                   makeShared<CIntValue>("plugin:scrolloverview:shadow:render_power", "workspace card shadow render power", -1));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:shadow:color", "workspace card shadow color", -1));
+}
+
+void registerConfig() {
+    registerLuaConfig();
+    registerLegacy();
+    HyprlandAPI::reloadConfig();
 }
 
 int getGestureDistance() {
@@ -259,6 +330,10 @@ bool getLeftHanded() {
 
 int getDragMode() {
     return std::clamp(getValue<int>("plugin:scrolloverview:input:drag_mode"), 0, 1);
+}
+
+int getDragThreshold() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:input:drag_threshold"));
 }
 
 static EScrollAction defaultVerticalScrollAction(ELayout layout) {

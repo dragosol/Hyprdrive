@@ -94,6 +94,7 @@ In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
 | scroll_event_delay | number | in ms, delay between scroll events (to prevent multiple activation) | `200` |
 | scrolling_mode | int | mouse wheel behavior: `0` layout-aware default, `1` inverted, `2` vertical scroll changes workspace and horizontal scroll changes columns, `3` vertical scroll changes columns and horizontal scroll changes workspace | `0` |
 | drag_mode | int | mouse drag behavior: `0` main button drags windows and middle button pans scrolling workspaces, `1` main button pans scrolling workspaces and middle button drags windows | `0` |
+| drag_threshold | int | movement threshold in pixels before a mouse press becomes drag/pan/resize instead of click; `0` disables the threshold | `10` |
 
 #### Subcategory `shadow`
 
@@ -133,6 +134,56 @@ end)
 `hl.plugin.scrolloverview.overview("toggle")` returns a dispatcher function
 accepted by `hl.dispatch()` and binds. When called from inside a Lua keybind
 callback, it dispatches immediately.
+
+#### Submap
+
+Defining a `scrolloverview` submap replaces the built-in keyboard navigation in
+the overview. While the submap is active, normal Hyprland keybinds outside that
+submap are not handled unless they use Hyprland's `submap_universal` flag. This method allows greater configuration of the keybinds, for example it is possible to close the window under the mouse cursor with a click.
+
+```ini
+# hyprland.conf
+submap = scrolloverview
+    bind = , left,   scrolloverview:navigate, left
+    bind = , right,  scrolloverview:navigate, right
+    bind = , up,     scrolloverview:navigate, up
+    bind = , down,   scrolloverview:navigate, down
+    bind = , return, scrolloverview:overview, select
+    bind = , escape, scrolloverview:overview, off
+    bind = , mouse:272, scrolloverview:overview, select # selects the workspace under the cursor, multiple actions are not possible with Hyprlang
+    bind = , mouse:274, scrolloverview:window, close
+submap = reset
+
+# Example Hyprland bind that keeps working inside the submap:
+bind = ALT, 1, workspace, 1, submap_universal
+bind = ALT, 2, workspace, 2, submap_universal
+bind = ALT, 3, workspace, 3, submap_universal
+```
+
+```lua
+-- hyprland.lua
+hl.define_submap("scrolloverview", function()
+    hl.bind("left",   hl.plugin.scrolloverview.navigate("left"))
+    hl.bind("right",  hl.plugin.scrolloverview.navigate("right"))
+    hl.bind("up",     hl.plugin.scrolloverview.navigate("up"))
+    hl.bind("down",   hl.plugin.scrolloverview.navigate("down"))
+    hl.bind("return", hl.plugin.scrolloverview.overview("select"))
+    hl.bind("escape", hl.plugin.scrolloverview.overview("off"))
+    hl.bind("mouse:272", function()
+        -- Select the clicked window, or just the workspace if no window was clicked, then close the overview. This is the default behaviour if submap is not defined.
+        hl.plugin.scrolloverview.overview("select")
+        hl.plugin.scrolloverview.window("select")
+        hl.plugin.scrolloverview.overview("off")
+    end, { mouse = true })
+    hl.bind("mouse:274", hl.plugin.scrolloverview.window("close"), { mouse = true })
+end)
+
+-- Example Hyprland bind that keeps working inside the submap:
+for i = 1, 10 do
+    local key = i % 10
+    hl.bind("ALT + " .. key, hl.dsp.focus({ workspace = i }), { submap_universal = true })
+end
+```
 
 ### Gesture
 
@@ -186,15 +237,46 @@ hl.bind(mainMod .. " + Tab", function()
 end)
 ```
 
-Here are a list of options you can use:  
+### Dispatchers
+
+Dispatchers can be used from Hyprland binds as `scrolloverview:<dispatcher>` or
+from Lua as `hl.plugin.scrolloverview.<dispatcher>(...)`.
+
+#### `scrolloverview:overview`
+
+Controls the overview.
+
 | option | description |
 | --- | --- |
-toggle | displays if hidden, hide if displayed
-select | selects the hovered desktop
-off | hides the overview
-disable | same as `off`
-on | displays the overview
-enable | same as `on`
+| `toggle` | show the overview if hidden, hide it if visible |
+| `select` | select the workspace under the cursor |
+| `off` | hide the overview |
+| `disable` | same as `off` |
+| `on` | show the overview |
+| `enable` | same as `on` |
+
+#### `scrolloverview:navigate`
+
+Moves the overview selection/focus between windows in the current workspace. If
+there are no more windows in that direction, it selects the next workspace when
+the direction matches the configured overview layout.
+
+| option | description |
+| --- | --- |
+| `left` | move selection left |
+| `right` | move selection right |
+| `up` | move selection up |
+| `down` | move selection down |
+
+#### `scrolloverview:window`
+
+Acts on an overview window. Mouse binds use the window under the cursor;
+keyboard binds use the currently selected window.
+
+| option | description |
+| --- | --- |
+| `select` | focus/select the window under the mouse cursor |
+| `close` | close the window under the mouse cursor |
 
 ### Supported plugins
 

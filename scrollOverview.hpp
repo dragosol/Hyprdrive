@@ -12,6 +12,7 @@
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/types.hpp>
 #include <chrono>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -46,6 +47,8 @@ class CScrollOverview : public IOverview {
     // close without a selection
     void         close() override;
     void         selectHoveredWorkspace() override;
+    bool         moveSelection(const std::string& direction) override;
+    bool         windowDispatcherAction(const std::string& action) override;
 
     void         fullRender() override;
 
@@ -69,7 +72,8 @@ class CScrollOverview : public IOverview {
     void   trackpadSwipeWorkspace(const double delta);
     void   finishWorkspaceScrollFollow(float logicalPitch);
     bool   scrollStepAllowed(uint32_t timeMs);
-    bool   moveWindowSelection(const std::string& direction);
+    bool   selectOverviewWindow(PHLWINDOW window, size_t workspaceIdx, bool syncFocus = false);
+    bool   selectWindowAtOverviewCursor(bool syncFocus = false);
     void   rememberSelection(PHLWINDOW window);
     void   syncSelectionToViewport();
     void   syncFocusedSelection();
@@ -121,6 +125,9 @@ class CScrollOverview : public IOverview {
     void   schedulePreviewFrameAfter(std::chrono::milliseconds delay);
     void   scheduleRealtimePreviewFrame();
     void   releaseInputListeners();
+    void   activateSubmapIfConfigured();
+    void   restoreSubmapIfActive();
+    bool   dispatchSubmapMouseClick(uint32_t button);
     void   requestInputFrame();
     static int realtimePreviewTimerCallback(void* data);
 
@@ -171,11 +178,13 @@ class CScrollOverview : public IOverview {
     Vector2D                         scrollingPanLastMouseLocal = Vector2D{};
     CBox                             dragOriginalBox        = CBox{};
     CBox                             resizeOriginalBox      = CBox{};
+    WORKSPACEID                      focusSyncedFromWorkspaceID = WORKSPACE_INVALID;
     size_t                           resizeWorkspaceIdx     = 0;
     Layout::eRectCorner              resizeCorner           = Layout::CORNER_NONE;
     bool                             dragPendingPrimary    = false;
     bool                             resizePointerDown     = false;
     bool                             scrollingPanPointerDown = false;
+    bool                             submapMouseClickPending = false;
     bool                             dragStartedTiled      = false;
     bool                             emittingFullscreenVisibilityState = false;
     bool                             inputConfigOverridden = false;
@@ -183,6 +192,10 @@ class CScrollOverview : public IOverview {
     bool                             realtimePreviewFrameQueued = false;
     bool                             inputFramePending = false;
     bool                             sendingOverviewFrameCallbacks = false;
+    bool                             usesSubmapKeybinds = false;
+    bool                             submapActive = false;
+    uint32_t                         submapMouseClickButton = 0;
+    std::string                      previousSubmapName;
     int                              previousNoWarps = 0;
     int                              previousWarpOnChangeWorkspace = 0;
     int                              previousWarpOnToggleSpecial = 0;

@@ -12,7 +12,8 @@
 
 namespace ScrollOverview::Config {
 
-using TOverviewDispatcher = SDispatchResult (*)(std::string);
+using TDispatcher       = SDispatchResult (*)(std::string);
+using TGestureKeyword   = Hyprlang::CParseResult (*)(const char* LHS, const char* RHS);
 using TGestureRegistrar   = SDispatchResult (*)(size_t fingerCount, const std::string& direction, const std::string& action, const std::string& mods, float deltaScale,
                                                 bool disableInhibit);
 
@@ -26,8 +27,9 @@ enum class EScrollAction {
     COLUMN,
 };
 
-void registerLua(TOverviewDispatcher dispatcher, TGestureRegistrar gestureRegistrar);
-void registerLegacy();
+void registerDispatcher(const std::string& name, TDispatcher dispatcher);
+void registerGesture(TGestureRegistrar gestureRegistrar, TGestureKeyword gestureKeyword);
+void registerConfig();
 
 template <typename T>
 CConfigValue<T>& valueRef(const std::string& name) {
@@ -77,17 +79,18 @@ int           getGestureDistance();
 float         getScale();
 int           getWorkspaceGap();
 ELayout       getLayout();
-int          getScrollEventDelay();
+int           getScrollEventDelay();
 bool          getLeftHanded();
 int           getDragMode();
+int           getDragThreshold();
 EScrollAction getVerticalScrollAction(ELayout layout);
 EScrollAction getHorizontalScrollAction(ELayout layout);
 int           getWallpaperMode();
 bool          getBlur();
 ::Config::CCssGapData getCssGapData(const std::string& name);
-int          getShadowEnabled();
-int          getShadowRange();
-int          getShadowRenderPower();
-int64_t      getShadowColor();
+int           getShadowEnabled();
+int           getShadowRange();
+int           getShadowRenderPower();
+int64_t       getShadowColor();
 
 }
