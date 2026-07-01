@@ -1919,6 +1919,17 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewCursor(size_t* hoveredWorkspace
     return workspaceAtOverviewPoint(lastMousePosLocal, hoveredWorkspaceIdx);
 }
 
+static void syncWorkspaceGeometry(const PHLWORKSPACE& workspace) {
+    if (!workspace || !workspace->m_space)
+        return;
+
+    for (const auto& targetRef : workspace->m_space->targets()) {
+        const auto TARGET = targetRef.lock();
+        if (TARGET)
+            TARGET->warpPositionSize();
+    }
+}
+
 bool CScrollOverview::selectOverviewWindow(PHLWINDOW window, size_t workspaceIdx, bool syncFocus) {
     if (!window)
         return false;
@@ -2141,7 +2152,7 @@ void CScrollOverview::updateWindowResize() {
 
         if (std::abs(DELTAGLOBAL.x) > 0.01F || std::abs(DELTAGLOBAL.y) > 0.01F) {
             g_layoutManager->resizeTarget(DELTAGLOBAL, TARGET, resizeCorner);
-            TARGET->warpPositionSize();
+            syncWorkspaceGeometry(TARGET->workspace());
             resizeLastMouseLocal = lastMousePosLocal;
         }
     }
