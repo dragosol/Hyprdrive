@@ -857,6 +857,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     applyWorkspaceAnimationOverrides();
     forceWorkspaceAlphaVisible();
     applyInputConfigOverrides();
+    g_pInputManager->unconstrainMouse();
     realtimePreviewTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, realtimePreviewTimerCallback, this);
     scheduleMinimumPreviewFrame();
 
@@ -1303,6 +1304,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     auto onWindowActive = [this](PHLWINDOW window, Desktop::eFocusReason) {
         if (closing)
             return;
+
+        g_pInputManager->unconstrainMouse();
 
         const auto overviewWindow = getOverviewWindowToShow(window);
         const auto fullscreenWindow = overviewWindow && overviewWindow->m_workspace ? getOverviewWindowToShow(overviewWindow->m_workspace->getFullscreenWindow()) : PHLWINDOW{};
