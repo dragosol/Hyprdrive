@@ -622,34 +622,8 @@ static bool overviewBoxesEqual(const CBox& a, const CBox& b) {
     return std::abs(a.x - b.x) < 0.5 && std::abs(a.y - b.y) < 0.5 && std::abs(a.width - b.width) < 0.5 && std::abs(a.height - b.height) < 0.5;
 }
 
-static bool moveOverviewScrollingTargetToHorizontalEdge(const SP<Layout::ITarget>& target, int side);
+static bool moveOverviewScrollingTargetToWorkspaceEdge(const SP<Layout::ITarget>& target, int side);
 static bool moveOverviewScrollingTargetNextToWindow(const SP<Layout::ITarget>& target, const PHLWINDOW& anchor, const std::string& direction);
-
-static void moveOverviewTargetToHorizontalEdge(const SP<Layout::ITarget>& target, int side) {
-    if (!target || side == 0 || !target->space())
-        return;
-
-    if (moveOverviewScrollingTargetToHorizontalEdge(target, side))
-        return;
-
-    const auto PREVFALLBACK = ScrollOverview::Config::getValue<int>("binds:window_direction_monitor_fallback");
-    ScrollOverview::Config::setValue("binds:window_direction_monitor_fallback", 0);
-    auto restoreFallback   = Hyprutils::Utils::CScopeGuard([PREVFALLBACK] {
-        ScrollOverview::Config::setValue("binds:window_direction_monitor_fallback", PREVFALLBACK);
-    });
-
-    const std::string DIRECTION = side < 0 ? "l" : "r";
-
-    for (size_t i = 0; i < 64; ++i) {
-        const auto WORKSPACE = target->workspace();
-        const auto BEFORE    = target->position();
-
-        g_layoutManager->moveInDirection(target, DIRECTION, true);
-
-        if (target->workspace() != WORKSPACE || overviewBoxesEqual(BEFORE, target->position()))
-            break;
-    }
-}
 
 static double overviewTargetDirectionDelta(const SP<Layout::ITarget>& target, const PHLWINDOW& anchor, const std::string& direction) {
     if (!target || !anchor || !anchor->layoutTarget())
@@ -697,7 +671,7 @@ static double clampOverviewScrollingOffset(Layout::Tiled::CScrollingAlgorithm* a
     return std::clamp(offset, 0.0, MAXOFFSET);
 }
 
-static bool moveOverviewScrollingTargetToHorizontalEdge(const SP<Layout::ITarget>& target, int side) {
+static bool moveOverviewScrollingTargetToWorkspaceEdge(const SP<Layout::ITarget>& target, int side) {
     if (!target || side == 0)
         return false;
 
@@ -713,10 +687,11 @@ static bool moveOverviewScrollingTargetToHorizontalEdge(const SP<Layout::ITarget
     if (!SRC_COL)
         return false;
 
+    const auto SRC_COL_WIDTH = SRC_COL->getColumnWidth();
     SRC_COL->remove(target);
 
     const int64_t INSERT_AFTER = side < 0 ? -1 : sc<int64_t>(ALGO->m_scrollingData->columns.size()) - 1;
-    const auto    NEW_COL      = ALGO->m_scrollingData->add(INSERT_AFTER);
+    const auto    NEW_COL      = ALGO->m_scrollingData->add(INSERT_AFTER, SRC_COL_WIDTH);
     NEW_COL->add(TDATA);
     ALGO->m_scrollingData->centerOrFitCol(NEW_COL);
     ALGO->m_scrollingData->recalculate();
@@ -744,6 +719,7 @@ static bool moveOverviewScrollingTargetNextToWindow(const SP<Layout::ITarget>& t
         return false;
 
     if (direction == "l" || direction == "r") {
+        const auto SRC_COL_WIDTH = SRC_COL->getColumnWidth();
         SRC_COL->remove(target);
 
         const auto ANCHOR_COL_IDX = ALGO->m_scrollingData->idx(ANCHOR_COL);
@@ -751,7 +727,7 @@ static bool moveOverviewScrollingTargetNextToWindow(const SP<Layout::ITarget>& t
             return false;
 
         const int64_t INSERT_AFTER = direction == "l" ? ANCHOR_COL_IDX - 1 : ANCHOR_COL_IDX;
-        const auto    NEW_COL      = ALGO->m_scrollingData->add(INSERT_AFTER);
+        const auto    NEW_COL      = ALGO->m_scrollingData->add(INSERT_AFTER, SRC_COL_WIDTH);
         NEW_COL->add(TDATA);
         ALGO->m_scrollingData->centerOrFitCol(NEW_COL);
         ALGO->m_scrollingData->recalculate();
@@ -1915,6 +1891,35 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewPoint(const Vector2D& point, si
     return nullptr;
 }
 
+PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return nullptr;
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& wimg = images[workspaceIdx];
+        if (!wimg || !wimg->pWorkspace)
+            continue;
+
+        const auto WORKSPACEBOX = getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(),
+                                                          workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout)),
+                                                          layout);
+        const auto VISIBLEBOX   = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, scale->value(), MONITOR);
+        const bool ONLAYOUTAXIS = layout == ScrollOverview::Config::ELayout::HORIZONTAL ?
+            point.x >= VISIBLEBOX.x && point.x <= VISIBLEBOX.x + VISIBLEBOX.width :
+            point.y >= VISIBLEBOX.y && point.y <= VISIBLEBOX.y + VISIBLEBOX.height;
+
+        if (VISIBLEBOX.containsPoint(point) || (ONLAYOUTAXIS && isWorkspaceScrolling(wimg->pWorkspace))) {
+            if (hoveredWorkspaceIdx)
+                *hoveredWorkspaceIdx = workspaceIdx;
+
+            return wimg->pWorkspace;
+        }
+    }
+
+    return nullptr;
+}
+
 PHLWORKSPACE CScrollOverview::workspaceAtOverviewCursor(size_t* hoveredWorkspaceIdx) const {
     return workspaceAtOverviewPoint(lastMousePosLocal, hoveredWorkspaceIdx);
 }
@@ -2384,14 +2389,19 @@ void CScrollOverview::endWindowDrag() {
 
     const bool          RETILEONEND      = dragStartedTiled && TARGET && SPACE && ALGO;
     size_t              dropWorkspaceIdx = 0;
-    const auto          DROPWORKSPACE    = workspaceAtOverviewCursor(&dropWorkspaceIdx);
+    const auto          DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx);
     const auto          SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
+    const auto          DROPSCROLLINGALGO  = overviewScrollingAlgorithmForWorkspace(DROPWORKSPACE);
+    const bool          DROPSCROLLINGLAYOUT = DROPSCROLLINGALGO != nullptr;
+    const bool          DROPSCROLLINGPRIMARYHORIZONTAL =
+        DROPSCROLLINGALGO && DROPSCROLLINGALGO->m_scrollingData && DROPSCROLLINGALGO->m_scrollingData->controller &&
+        DROPSCROLLINGALGO->m_scrollingData->controller->isPrimaryHorizontal();
     const bool          DROPONSELECTEDWORKSPACE = DROPWORKSPACE && DROPWORKSPACE == SELECTEDWORKSPACE;
     const auto          ORIGINALWORKSPACE = dragOriginalWorkspace.lock();
     const bool          MOVEWORKSPACE    = DROPWORKSPACE && DROPWORKSPACE != ORIGINALWORKSPACE;
     const auto          DRAGBOX          = DROPWORKSPACE ? draggedWindowBox(dropWorkspaceIdx) : CBox{};
-    int                 horizontalDropSide = 0;
+    int                 dropSide         = 0;
     CBox                dropAnchorOverviewBox;
     const auto          DROPANCHOR = DROPWORKSPACE ? windowAtOverviewCursorOnWorkspace(dropWorkspaceIdx, WINDOW, &dropAnchorOverviewBox) : PHLWINDOW{};
     std::string         dropDirection;
@@ -2413,19 +2423,33 @@ void CScrollOverview::endWindowDrag() {
     const bool RESTORESOURCEFULLSCREENFOCUS = WINDOW && WINDOW->m_isFloating && MOVEWORKSPACE && shouldShowOverviewWindow(SOURCEFULLSCREENWINDOW) &&
         SOURCEFULLSCREENWINDOW != WINDOW && SOURCEFULLSCREENWINDOW->m_workspace == ORIGINALWORKSPACE && SOURCEFULLSCREENWINDOW->isFullscreen();
 
+    const bool DROPSIDEHORIZONTAL = layout != ScrollOverview::Config::ELayout::HORIZONTAL || DROPSCROLLINGPRIMARYHORIZONTAL;
+
     const auto MONITOR = pMonitor.lock();
+    bool       dropWorkspaceFullyVisible = false;
     if (MONITOR) {
         const auto WORKSPACEBOX =
             getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(),
                                     workspaceOverviewOffset(dropWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout)), layout);
+        const CBox VIEWPORT = {{}, MONITOR->m_size * MONITOR->m_scale};
 
-        if (lastMousePosLocal.x < WORKSPACEBOX.x)
-            horizontalDropSide = -1;
-        else if (lastMousePosLocal.x > WORKSPACEBOX.x + WORKSPACEBOX.width)
-            horizontalDropSide = 1;
+        dropWorkspaceFullyVisible = WORKSPACEBOX.x >= VIEWPORT.x && WORKSPACEBOX.y >= VIEWPORT.y &&
+            WORKSPACEBOX.x + WORKSPACEBOX.width <= VIEWPORT.x + VIEWPORT.width && WORKSPACEBOX.y + WORKSPACEBOX.height <= VIEWPORT.y + VIEWPORT.height;
+
+        if (DROPSIDEHORIZONTAL) {
+            if (lastMousePosLocal.x < WORKSPACEBOX.x)
+                dropSide = -1;
+            else if (lastMousePosLocal.x > WORKSPACEBOX.x + WORKSPACEBOX.width)
+                dropSide = 1;
+        } else {
+            if (lastMousePosLocal.y < WORKSPACEBOX.y)
+                dropSide = -1;
+            else if (lastMousePosLocal.y > WORKSPACEBOX.y + WORKSPACEBOX.height)
+                dropSide = 1;
+        }
     }
 
-    if (!DROPANCHOR && horizontalDropSide == 0 && MONITOR && dropWorkspaceIdx < images.size() && images[dropWorkspaceIdx]) {
+    if (!DROPANCHOR && dropSide == 0 && DROPSIDEHORIZONTAL && MONITOR && dropWorkspaceIdx < images.size() && images[dropWorkspaceIdx]) {
         const auto WORKSPACE_OFFSET = workspaceOverviewOffset(dropWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
 
         float minWindowX = std::numeric_limits<float>::max();
@@ -2445,15 +2469,13 @@ void CScrollOverview::endWindowDrag() {
 
         if (foundWindow) {
             if (lastMousePosLocal.x < minWindowX)
-                horizontalDropSide = -1;
+                dropSide = -1;
             else if (lastMousePosLocal.x > maxWindowX)
-                horizontalDropSide = 1;
+                dropSide = 1;
         }
     }
 
-    const bool SCROLLINGLAYOUT = overviewScrollingAlgorithmForTarget(TARGET) != nullptr;
-
-    if (DROPANCHOR && SCROLLINGLAYOUT) {
+    if (DROPANCHOR && DROPSCROLLINGLAYOUT) {
         const auto LOCAL_X = lastMousePosLocal.x - dropAnchorOverviewBox.x;
         const auto LOCAL_Y = lastMousePosLocal.y - dropAnchorOverviewBox.y;
 
@@ -2469,18 +2491,28 @@ void CScrollOverview::endWindowDrag() {
     if (RETILEONEND && MOVEWORKSPACE) {
         g_pCompositor->moveWindowToWorkspaceSafe(WINDOW, DROPWORKSPACE);
         movedToWorkspace = true;
+
+        if (DROPSCROLLINGLAYOUT) {
+            if (!dropWorkspaceFullyVisible)
+                moveOverviewScrollingTargetToWorkspaceEdge(TARGET, 1);
+            else if (DROPANCHOR && !dropDirection.empty())
+                moveOverviewTargetNextToWindow(TARGET, DROPANCHOR, dropDirection);
+            else
+                moveOverviewScrollingTargetToWorkspaceEdge(TARGET, dropSide);
+        }
+
         TARGET->rememberFloatingSize(dragOriginalFloatSize);
     } else if (RETILEONEND) {
         TARGET->damageEntire();
 
-        if (DROPANCHOR && !SCROLLINGLAYOUT && DROPANCHOR->layoutTarget()) {
+        if (DROPANCHOR && !DROPSCROLLINGLAYOUT && DROPANCHOR->layoutTarget()) {
             DROPANCHOR->layoutTarget()->damageEntire();
             g_layoutManager->switchTargets(TARGET, DROPANCHOR->layoutTarget(), true);
             DROPANCHOR->layoutTarget()->damageEntire();
         } else if (DROPANCHOR && !dropDirection.empty())
             moveOverviewTargetNextToWindow(TARGET, DROPANCHOR, dropDirection);
-        else
-            moveOverviewTargetToHorizontalEdge(TARGET, horizontalDropSide);
+        else if (DROPSCROLLINGLAYOUT)
+            moveOverviewScrollingTargetToWorkspaceEdge(TARGET, dropSide);
 
         TARGET->rememberFloatingSize(dragOriginalFloatSize);
         TARGET->warpPositionSize();
