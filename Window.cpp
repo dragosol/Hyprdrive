@@ -756,8 +756,8 @@ static bool overviewWorkspaceBoxReadyForPrecomputedBlur(PHLMONITOR monitor, cons
         workspaceBox->y + workspaceBox->height <= RENDERSIZE.y + EPSILON;
 }
 
-bool shouldUsePrecomputedBlur(const PHLWINDOW& window, PHLMONITOR monitor, const CBox* workspaceBox, const CBox* windowBox) {
-    return ScrollOverview::Config::getValue<bool>("decoration:blur:new_optimizations") && shouldShowOverviewWindow(window) && !window->m_isFloating && shouldBlurBackground(window) &&
+bool shouldUsePrecomputedBlur(const PHLWINDOW& window, PHLMONITOR monitor, const CBox* workspaceBox, const CBox* windowBox, bool dragged) {
+    return !dragged && ScrollOverview::Config::getValue<bool>("decoration:blur:new_optimizations") && shouldShowOverviewWindow(window) && !window->m_isFloating && shouldBlurBackground(window) &&
         overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox);
 }
 
@@ -816,7 +816,7 @@ void renderOverviewWindow(const SRenderParams& params) {
     });
 
     const size_t firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
-    const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox);
+    const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
     g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
     if (!usePrecomputedBlur)
         blockOverviewWindowBlurOptimization(params.window, firstWindowPassElement);

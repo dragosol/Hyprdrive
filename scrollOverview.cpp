@@ -3353,7 +3353,7 @@ void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, 
     if (!overviewBoxIntersectsMonitor(windowBox, monitor))
         return;
 
-    renderWindowLive(monitor, WINDOW, windowBox, renderScale, now);
+    renderWindowLive(monitor, WINDOW, windowBox, renderScale, now, nullptr, true);
 }
 
 bool CScrollOverview::hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale) const {
@@ -3429,7 +3429,8 @@ void CScrollOverview::renderPinnedFloatingWindows(PHLMONITOR monitor, float over
     }
 }
 
-void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox) {
+void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox,
+                                       bool dragged) {
     if (!window)
         return;
 
@@ -3437,13 +3438,14 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
     forceWindowSurfaceVisibility(window);
 
     OverviewWindow::renderOverviewWindow({
-        .monitor            = monitor,
-        .window             = window,
-        .windowBox          = windowBox,
-        .renderScale        = renderScale,
-        .now                = now,
-        .workspaceBox       = workspaceBox,
-        .selected           = closeOnWindow == window,
+        .monitor              = monitor,
+        .window               = window,
+        .windowBox            = windowBox,
+        .renderScale          = renderScale,
+        .now                  = now,
+        .workspaceBox         = workspaceBox,
+        .selected             = closeOnWindow == window,
+        .dragged              = dragged,
     });
 }
 
