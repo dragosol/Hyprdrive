@@ -135,7 +135,6 @@ class CScrollOverview : public IOverview {
 
     size_t viewportCurrentWorkspace = 0;
     bool   rebuildPending           = false;
-    bool   workspaceSyncPending     = false;
     bool   overviewBlurDirty        = true;
     bool   backdropBlurDirty        = true;
     bool   overviewBlurStateValid   = false;
@@ -265,7 +264,6 @@ class CScrollOverview : public IOverview {
     CHyprSignalListener             keyboardKeyHook;
     CHyprSignalListener             workspaceCreatedHook;
     CHyprSignalListener             workspaceRemovedHook;
-    CHyprSignalListener             workspaceActiveHook;
 
     bool                             swipe = false;
 

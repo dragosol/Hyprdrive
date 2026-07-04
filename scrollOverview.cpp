@@ -1326,14 +1326,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         damage();
     };
 
-    auto onWorkspaceActive = [this](PHLWORKSPACE workspace) {
-        if (closing || !workspace || workspace->m_monitor != pMonitor)
-            return;
-
-        workspaceSyncPending = true;
-        damage();
-    };
-
     auto onKeyboardKey = [this](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
         if (closing || event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
             return;
@@ -1388,7 +1380,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
     windowFullscreenHook = Event::bus()->m_events.window.fullscreen.listen(onWindowFullscreen);
     workspaceCreatedHook = Event::bus()->m_events.workspace.created.listen(onWorkspaceLifecycle);
     workspaceRemovedHook = Event::bus()->m_events.workspace.removed.listen(onWorkspaceLifecycle);
-    workspaceActiveHook  = Event::bus()->m_events.workspace.active.listen(onWorkspaceActive);
     activateSubmapIfConfigured();
     if (!usesSubmapKeybinds)
         keyboardKeyHook = Event::bus()->m_events.input.keyboard.key.listen(onKeyboardKey);
@@ -4154,9 +4145,8 @@ void CScrollOverview::onPreRender() {
     if (closing)
         return;
 
-    if (workspaceSyncPending || (pMonitor && pMonitor->m_activeWorkspace && pMonitor->m_activeWorkspace != startedOn)) {
-        workspaceSyncPending = false;
-        rebuildPending       = false;
+    if (pMonitor && pMonitor->m_activeWorkspace && pMonitor->m_activeWorkspace != startedOn) {
+        rebuildPending = false;
         markBlurDirty();
         onWorkspaceChange();
         focusSyncedFromWorkspaceID = WORKSPACE_INVALID;
