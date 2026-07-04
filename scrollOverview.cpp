@@ -1261,12 +1261,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_) : started
         if (closing)
             return;
 
-        const auto MODS = g_pInputManager->getModsFromAllKBs() &
-                          (HL_MODIFIER_SHIFT | HL_MODIFIER_META | HL_MODIFIER_CTRL | HL_MODIFIER_ALT);
-
-        if (MODS != 0)
-            return;
-
         info.cancelled = true;
 
         const auto ACTION = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL ? ScrollOverview::Config::getHorizontalScrollAction(layout) :
@@ -2965,7 +2959,7 @@ void CScrollOverview::trackpadSwipeLayout(const PHLWORKSPACE target, const doubl
     }
 
     trackpadTapeFollowing = true;
-    ALGO->moveTape(sc<float>(-1 * delta / SCALE));
+    ALGO->moveTape(sc<float>(-1 * delta * ScrollOverview::Config::getTouchpadScrollFactor() / SCALE));
     damage();
 }
 
@@ -2974,52 +2968,94 @@ void CScrollOverview::trackpadSwipeWorkspace(const double delta) {
     if (!MONITOR)
         return;
 
-    const float SCALE = std::max<float>(scale->value(), 0.01F);
-    const float PITCH = getWorkspaceLogicalPitch(MONITOR, SCALE, layout);
-
     // fingers lifted — snap to the nearest workspace
     if (delta == 0.0) {
-        finishWorkspaceScrollFollow(PITCH);
+        finishWorkspaceScrollFollow();
         return;
     }
 
+    const float SCALE = std::max<float>(scale->value(), 0.01F);
+
     trackpadWorkspaceFollowing  = true;
-    trackpadScrollAccum         += delta;
+    trackpadScrollAccum         += delta * ScrollOverview::Config::getTouchpadScrollFactor();
 
-    double offset = trackpadScrollAccum / SCALE;
-
-    // clamp so the view can't be dragged past the first / last workspace
-    const double curIdx  = sc<double>(viewportCurrentWorkspace);
-    const double maxNext = (sc<double>(images.size()) - 1.0 - curIdx) * PITCH;
-    const double maxPrev = -curIdx * PITCH;
-    offset               = std::clamp(offset, maxPrev, maxNext);
-    trackpadScrollAccum  = offset * SCALE;
-
-    viewOffset->setValueAndWarp(axisOffsetVector(sc<float>(offset), layout));
+    viewOffset->setValueAndWarp(axisOffsetVector(sc<float>(trackpadWorkspaceScrollOffset(MONITOR, SCALE)), layout));
     damage();
 }
 
-void CScrollOverview::finishWorkspaceScrollFollow(float logicalPitch) {
+double CScrollOverview::trackpadWorkspaceScrollOffset(PHLMONITOR monitor, float renderScale) {
+    const float RENDEREDLOGICALUNIT = renderScale * std::max<float>(monitor->m_scale, 0.01F);
+    const float LOGICALPITCH        = getWorkspaceLogicalPitch(monitor, renderScale, layout);
+
+    double offset    = trackpadScrollAccum / RENDEREDLOGICALUNIT;
+    double minOffset = 0.0;
+    double maxOffset = 0.0;
+
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (!images[i] || !images[i]->pWorkspace)
+            continue;
+
+        const double WORKSPACEOFFSET = workspaceOverviewLogicalOffset(i, viewportCurrentWorkspace, LOGICALPITCH);
+        minOffset                    = std::min(minOffset, WORKSPACEOFFSET);
+        maxOffset                    = std::max(maxOffset, WORKSPACEOFFSET);
+    }
+
+    offset              = std::clamp(offset, minOffset, maxOffset);
+    trackpadScrollAccum = offset * RENDEREDLOGICALUNIT;
+
+    return offset;
+}
+
+void CScrollOverview::finishWorkspaceScrollFollow() {
     if (!trackpadWorkspaceFollowing)
         return;
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR) {
+        trackpadWorkspaceFollowing = false;
+        trackpadScrollAccum        = 0.0;
+        return;
+    }
 
     trackpadWorkspaceFollowing  = false;
     trackpadScrollAccum         = 0.0;
 
-    const double OFFSET = axisValue(viewOffset->value(), layout);
-    const long   STEPS  = std::lround(OFFSET / logicalPitch);
+    const float  SCALE          = std::max<float>(scale->value(), 0.01F);
+    const float  LOGICALPITCH   = getWorkspaceLogicalPitch(MONITOR, SCALE, layout);
+    const float  RENDEREDPITCH  = getWorkspaceRenderedPitch(MONITOR, SCALE, layout);
+    const size_t ACTIVEIDX      = activeWorkspaceIndex();
+    const double VIEWPORTCENTER = axisSize(MONITOR->m_size * MONITOR->m_scale, layout) / 2.0;
 
-    if (STEPS == 0) {
+    size_t targetIdx    = viewportCurrentWorkspace;
+    double bestDistance = std::numeric_limits<double>::max();
+
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (!images[i] || !images[i]->pWorkspace)
+            continue;
+
+        const auto   WORKSPACEBOX = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), workspaceOverviewOffset(i, ACTIVEIDX, RENDEREDPITCH), layout);
+        const double DISTANCE     = std::abs(axisValue(WORKSPACEBOX.middle(), layout) - VIEWPORTCENTER);
+        if (DISTANCE < bestDistance) {
+            bestDistance = DISTANCE;
+            targetIdx    = i;
+        }
+    }
+
+    if (targetIdx == viewportCurrentWorkspace) {
         *viewOffset = Vector2D{};
         return;
     }
 
-    trackpadGestureSettleOffset  = OFFSET - sc<double>(STEPS) * logicalPitch;
+    const double OFFSET       = axisValue(viewOffset->value(), layout);
+    const double TARGETOFFSET = workspaceOverviewLogicalOffset(targetIdx, viewportCurrentWorkspace, LOGICALPITCH);
+
+    trackpadGestureSettleOffset  = OFFSET - TARGETOFFSET;
     trackpadGestureSettlePending = true;
 
     const size_t BEFORE = viewportCurrentWorkspace;
-    const bool   NEXT   = STEPS > 0;
-    for (long i = 0; i < std::abs(STEPS); ++i)
+    const bool   NEXT   = targetIdx > viewportCurrentWorkspace;
+    const size_t STEPS  = sc<size_t>(std::abs(sc<long>(targetIdx) - sc<long>(viewportCurrentWorkspace)));
+    for (size_t i = 0; i < STEPS; ++i)
         moveViewportWorkspace(NEXT);
 
     if (viewportCurrentWorkspace == BEFORE) {
