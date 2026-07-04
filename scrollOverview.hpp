@@ -108,6 +108,7 @@ class CScrollOverview : public IOverview {
     void      endScrollingPan();
     void      focusMostVisibleScrollingWindow(const PHLWORKSPACE& workspace);
     bool      moveScrollingColumnSelection(bool next);
+    bool      moveScrollingStackSelection(bool next);
     void   forceSurfaceVisibility(SP<CWLSurfaceResource> surface);
     void   forceWindowSurfaceVisibility(PHLWINDOW window);
     void   forceWindowVisible(PHLWINDOW window);

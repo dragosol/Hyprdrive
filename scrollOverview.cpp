@@ -768,7 +768,11 @@ static bool moveOverviewScrollingTargetNextToWindow(const SP<Layout::ITarget>& t
     if (!SRC_COL || !ANCHOR_COL)
         return false;
 
-    if (direction == "l" || direction == "r") {
+    const bool PRIMARYHORIZONTAL = ALGO->m_scrollingData->controller && ALGO->m_scrollingData->controller->isPrimaryHorizontal();
+    const bool MOVINGCOLUMN      = PRIMARYHORIZONTAL ? direction == "l" || direction == "r" : direction == "u" || direction == "d";
+    const bool STACKINGCOLUMN    = PRIMARYHORIZONTAL ? direction == "u" || direction == "d" : direction == "l" || direction == "r";
+
+    if (MOVINGCOLUMN) {
         const auto SRC_COL_WIDTH = SRC_COL->getColumnWidth();
         SRC_COL->remove(target);
 
@@ -776,7 +780,8 @@ static bool moveOverviewScrollingTargetNextToWindow(const SP<Layout::ITarget>& t
         if (ANCHOR_COL_IDX < 0)
             return false;
 
-        const int64_t INSERT_AFTER = direction == "l" ? ANCHOR_COL_IDX - 1 : ANCHOR_COL_IDX;
+        const bool    INSERT_BEFORE = direction == "l" || direction == "u";
+        const int64_t INSERT_AFTER  = INSERT_BEFORE ? ANCHOR_COL_IDX - 1 : ANCHOR_COL_IDX;
         const auto    NEW_COL      = ALGO->m_scrollingData->add(INSERT_AFTER, SRC_COL_WIDTH);
         NEW_COL->add(TDATA);
         ALGO->m_scrollingData->centerOrFitCol(NEW_COL);
@@ -786,13 +791,14 @@ static bool moveOverviewScrollingTargetNextToWindow(const SP<Layout::ITarget>& t
         return true;
     }
 
-    if (direction != "u" && direction != "d")
+    if (!STACKINGCOLUMN)
         return false;
 
     SRC_COL->remove(target);
 
-    const auto ANCHOR_IDX = ANCHOR_COL->idx(anchor->layoutTarget());
-    const int  INSERT_AFTER = direction == "u" ? sc<int>(ANCHOR_IDX) - 1 : sc<int>(ANCHOR_IDX);
+    const auto ANCHOR_IDX    = ANCHOR_COL->idx(anchor->layoutTarget());
+    const bool INSERT_BEFORE = direction == "l" || direction == "u";
+    const int  INSERT_AFTER  = INSERT_BEFORE ? sc<int>(ANCHOR_IDX) - 1 : sc<int>(ANCHOR_IDX);
     ANCHOR_COL->add(TDATA, INSERT_AFTER);
     ALGO->m_scrollingData->centerOrFitCol(ANCHOR_COL);
     ALGO->m_scrollingData->recalculate();
@@ -1768,6 +1774,9 @@ void CScrollOverview::updateWorkspaceOverflow() {
 
             const auto POS  = window->m_realPosition->value() - MONITOR->m_position;
             const auto SIZE = window->m_realSize->value();
+            // Windows hidden under a fullscreen window can get sentinel geometry like -2x-2.
+            if (SIZE.x <= 0 || SIZE.y <= 0)
+                continue;
 
             img->overflowLeft   = std::max(img->overflowLeft, std::max(0.F, sc<float>(-POS.x)));
             img->overflowRight  = std::max(img->overflowRight, std::max(0.F, sc<float>(POS.x + SIZE.x - MONITOR->m_size.x)));
@@ -1815,7 +1824,7 @@ PHLWINDOW CScrollOverview::windowAtOverviewPoint(const Vector2D& point, size_t* 
 
         const auto fullscreenWindow = wimg->pWorkspace ? getOverviewWindowToShow(wimg->pWorkspace->getFullscreenWindow()) : PHLWINDOW{};
 
-        if (shouldShowOverviewWindow(fullscreenWindow)) {
+        if (!isWorkspaceScrolling(wimg->pWorkspace) && shouldShowOverviewWindow(fullscreenWindow)) {
             for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
                 const auto window = getOverviewWindowToShow(it->lock());
                 if (!shouldShowOverviewWindow(window) || !window->m_isFloating)
@@ -2592,15 +2601,16 @@ bool CScrollOverview::moveScrollingColumnSelection(bool next) {
             columns.emplace_back(column);
     }
 
-    std::ranges::sort(columns, [](const auto& a, const auto& b) {
-        const auto getColumnX = [](const auto& column) {
+    const bool PRIMARYHORIZONTAL = ALGO->m_scrollingData->controller && ALGO->m_scrollingData->controller->isPrimaryHorizontal();
+    std::ranges::sort(columns, [PRIMARYHORIZONTAL](const auto& a, const auto& b) {
+        const auto getColumnPosition = [PRIMARYHORIZONTAL](const auto& column) {
             if (!column || column->targetDatas.empty() || !column->targetDatas[0])
                 return std::numeric_limits<double>::max();
 
-            return column->targetDatas[0]->layoutBox.x;
+            return PRIMARYHORIZONTAL ? column->targetDatas[0]->layoutBox.x : column->targetDatas[0]->layoutBox.y;
         };
 
-        return getColumnX(a) < getColumnX(b);
+        return getColumnPosition(a) < getColumnPosition(b);
     });
 
     const auto CURRENTIT = std::ranges::find(columns, CURRENTCOL);
@@ -2626,6 +2636,53 @@ bool CScrollOverview::moveScrollingColumnSelection(bool next) {
     damage();
 
     return true;
+}
+
+bool CScrollOverview::moveScrollingStackSelection(bool next) {
+    if (images.empty() || viewportCurrentWorkspace >= images.size())
+        return false;
+
+    const auto& WORKSPACEIMAGE = images[viewportCurrentWorkspace];
+    if (!WORKSPACEIMAGE || !WORKSPACEIMAGE->pWorkspace)
+        return false;
+
+    const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACEIMAGE->pWorkspace);
+    if (!ALGO || !ALGO->m_scrollingData || ALGO->m_scrollingData->columns.empty())
+        return false;
+
+    if (!closeOnWindow || closeOnWindow->m_workspace != WORKSPACEIMAGE->pWorkspace || !shouldShowOverviewWindow(closeOnWindow.lock()) || closeOnWindow->m_isFloating)
+        syncSelectionToViewport();
+
+    const auto CURRENT = getOverviewWindowToShow(closeOnWindow.lock());
+    if (!CURRENT || !CURRENT->layoutTarget())
+        return false;
+
+    const auto CURRENTDATA = ALGO->dataFor(CURRENT->layoutTarget());
+    const auto CURRENTCOL  = CURRENTDATA ? CURRENTDATA->column.lock() : nullptr;
+    if (!CURRENTCOL)
+        return false;
+
+    const auto CURRENTIDX = CURRENTCOL->idx(CURRENT->layoutTarget());
+    const auto TARGETIDX  = CURRENTIDX + (next ? 1 : -1);
+    if (TARGETIDX < 0 || TARGETIDX >= sc<int>(CURRENTCOL->targetDatas.size()))
+        return false;
+
+    const auto TARGETDATA = CURRENTCOL->targetDatas[TARGETIDX];
+    if (!TARGETDATA || !TARGETDATA->target)
+        return false;
+
+    for (const auto& windowRef : WORKSPACEIMAGE->windows) {
+        const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
+        if (shouldShowOverviewWindow(WINDOW) && !WINDOW->m_isFloating && WINDOW->layoutTarget() == TARGETDATA->target && WINDOW->m_workspace == WORKSPACEIMAGE->pWorkspace) {
+            closeOnWindow = WINDOW;
+            rememberSelection(WINDOW);
+            syncFocusedSelection();
+            damage();
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void CScrollOverview::endWindowDrag() {
@@ -2704,6 +2761,16 @@ void CScrollOverview::endWindowDrag() {
 
     const auto DROPANCHOR = dropAnchor.window;
     dropDirection         = dropAnchor.direction;
+    const bool DROPPINGONSCROLLINGCROSSAXIS =
+        DROPSCROLLINGPRIMARYHORIZONTAL ? dropDirection == "u" || dropDirection == "d" : dropDirection == "l" || dropDirection == "r";
+
+    if (DROPSCROLLINGLAYOUT && DROPANCHOR && DROPPINGONSCROLLINGCROSSAXIS && DROPANCHOR->isFullscreen()) {
+        g_pCompositor->setWindowFullscreenInternal(DROPANCHOR, FSMODE_NONE);
+        if (const auto ANCHORDATA = DROPSCROLLINGALGO->dataFor(DROPANCHOR->layoutTarget()); ANCHORDATA) {
+            if (const auto ANCHORCOL = ANCHORDATA->column.lock())
+                ANCHORCOL->setColumnWidth(1.F);
+        }
+    }
 
     if (RETILEONEND && MOVEWORKSPACE) {
         g_pCompositor->moveWindowToWorkspaceSafe(WINDOW, DROPWORKSPACE);
@@ -3076,6 +3143,23 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
 
     if (!shouldMoveWorkspace)
         closeOnWindow = CURRENT;
+
+    if (!shouldMoveWorkspace) {
+        const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACEIMAGE->pWorkspace);
+        if (ALGO && ALGO->m_scrollingData && ALGO->m_scrollingData->controller) {
+            const bool PRIMARYHORIZONTAL = ALGO->m_scrollingData->controller->isPrimaryHorizontal();
+            const bool MOVINGPRIMARY     = PRIMARYHORIZONTAL ? MOVINGLEFT || MOVINGRIGHT : MOVINGUP || MOVINGDOWN;
+            const bool MOVINGSTACK       = PRIMARYHORIZONTAL ? MOVINGUP || MOVINGDOWN : MOVINGLEFT || MOVINGRIGHT;
+            const bool NEXT              = MOVINGRIGHT || MOVINGDOWN;
+
+            if (MOVINGPRIMARY || MOVINGSTACK) {
+                if (MOVINGPRIMARY ? moveScrollingColumnSelection(NEXT) : moveScrollingStackSelection(NEXT))
+                    return true;
+
+                shouldMoveWorkspace = true;
+            }
+        }
+    }
 
     const auto CURRENTCENTER = shouldMoveWorkspace ? Vector2D{} : CURRENT->middle();
 
