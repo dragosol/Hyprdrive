@@ -94,16 +94,12 @@ static CBox clipScrollingIndicatorBox(CBox box, const CDropIndicator::SRenderPar
     if (!scrollingAlgorithmForWorkspace(params.workspace))
         return box;
 
-    const bool OVERVIEWLAYOUTHORIZONTAL = params.layout == ScrollOverview::Config::ELayout::HORIZONTAL;
-    const bool PRIMARYHORIZONTAL        = scrollingPrimaryHorizontal(params.workspace);
+    const bool PRIMARYHORIZONTAL = scrollingPrimaryHorizontal(params.workspace);
 
-    if (PRIMARYHORIZONTAL && !OVERVIEWLAYOUTHORIZONTAL)
+    if (PRIMARYHORIZONTAL)
         return box.intersection({{box.x, params.workspaceUsableBox.y}, {box.width, params.workspaceUsableBox.height}});
 
-    if (!PRIMARYHORIZONTAL && OVERVIEWLAYOUTHORIZONTAL)
-        return box.intersection({{params.workspaceUsableBox.x, box.y}, {params.workspaceUsableBox.width, box.height}});
-
-    return box;
+    return box.intersection({{params.workspaceUsableBox.x, box.y}, {params.workspaceUsableBox.width, box.height}});
 }
 
 static int indicatorRounding(const CDropIndicator::SRenderParams& params) {

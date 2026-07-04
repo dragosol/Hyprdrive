@@ -245,6 +245,13 @@ static CBox getOverviewGlobalBox(CBox globalBox, PHLMONITOR monitor, float scale
 
 static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
                                  bool round = true) {
+    if (!window)
+        return {};
+
+    const auto TARGET = window->layoutTarget();
+    if (window->m_group && TARGET)
+        return getOverviewGlobalBox(TARGET->position(), monitor, scale, viewOffset, offset, layout, round);
+
     return getOverviewGlobalBox({window->m_realPosition->value(), window->m_realSize->value()}, monitor, scale, viewOffset, offset, layout, round);
 }
 
@@ -2045,10 +2052,37 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewPoint(const Vector2D& point, si
     return nullptr;
 }
 
-PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
+PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx, const PHLWINDOW& ignoredWindow) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return nullptr;
+
+    const auto ACTIVEIDX       = activeWorkspaceIndex();
+    const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(MONITOR, scale->value(), layout);
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& wimg = images[workspaceIdx];
+        if (!wimg || !wimg->pWorkspace)
+            continue;
+
+        const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, WORKSPACEPITCH);
+        for (const bool floating : {true, false}) {
+            for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
+                const auto WINDOW = getOverviewWindowToShow(it->lock());
+                if (!shouldShowOverviewWindow(WINDOW) || WINDOW == ignoredWindow || WINDOW->m_isFloating != floating)
+                    continue;
+
+                const auto WINDOWBOX = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
+                if (!WINDOWBOX.containsPoint(point))
+                    continue;
+
+                if (hoveredWorkspaceIdx)
+                    *hoveredWorkspaceIdx = workspaceIdx;
+
+                return wimg->pWorkspace;
+            }
+        }
+    }
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
@@ -2056,8 +2090,7 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
             continue;
 
         const auto WORKSPACEBOX = getOverviewWorkspaceUsableBox(wimg->pWorkspace, MONITOR, scale->value(), viewOffset->value(),
-                                                                workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout)),
-                                                                layout);
+                                                                workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, WORKSPACEPITCH), layout);
         const bool ONLAYOUTAXIS = layout == ScrollOverview::Config::ELayout::HORIZONTAL ?
             point.x >= WORKSPACEBOX.x && point.x <= WORKSPACEBOX.x + WORKSPACEBOX.width :
             point.y >= WORKSPACEBOX.y && point.y <= WORKSPACEBOX.y + WORKSPACEBOX.height;
@@ -2273,7 +2306,7 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window) {
     dragOriginalTapeTranslation  = Vector2D{};
     dragOriginalWorkspace         = WINDOW->m_workspace;
     dragOriginalBox               = TARGET->position();
-    dragOriginalVisualBox         = {WINDOW->m_realPosition->value(), WINDOW->m_realSize->value()};
+    dragOriginalVisualBox         = WINDOW->m_group ? TARGET->position() : CBox{WINDOW->m_realPosition->value(), WINDOW->m_realSize->value()};
     dragOriginalOverviewBox       = CBox{};
     dragOriginalOverviewHitbox    = CBox{};
     dragActiveWindow              = WINDOW;
@@ -2595,7 +2628,7 @@ void CScrollOverview::endWindowDrag() {
 
     const bool          RETILEONEND      = dragStartedTiled && TARGET && SPACE && ALGO;
     size_t              dropWorkspaceIdx = 0;
-    const auto          DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx);
+    const auto          DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx, WINDOW);
     const auto          DROPSCROLLINGALGO  = overviewScrollingAlgorithmForWorkspace(DROPWORKSPACE);
     const bool          DROPSCROLLINGLAYOUT = DROPSCROLLINGALGO != nullptr;
     const bool          DROPSCROLLINGPRIMARYHORIZONTAL =
@@ -3524,7 +3557,7 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
             return;
 
         size_t     dropWorkspaceIdx = 0;
-        const auto DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx);
+        const auto DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx, DRAGGED);
         if (DROPWORKSPACE != workspace || dropWorkspaceIdx != workspaceIdx)
             return;
 
