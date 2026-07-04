@@ -14,7 +14,7 @@
 
 namespace {
 
-static constexpr float INDICATOR_SIZE_PX = 150.F;
+static constexpr float INDICATOR_BASE_SIZE_PX = 200.F;
 static constexpr float INDICATOR_ALPHA   = 0.3F;
 
 static CHyprColor indicatorColor() {
@@ -55,7 +55,7 @@ static CBox scrollingIndicatorBox(const CDropIndicator::SRenderParams& params) {
     const bool  HORIZONTALSIDE = isHorizontalSide(params.anchor.direction);
     const bool  PRIMARYHORIZONTAL = scrollingPrimaryHorizontal(params.workspace);
     const float MONITOR_SCALE = std::max<float>(params.monitor ? params.monitor->m_scale : 1.F, 0.01F);
-    const float SIZE = INDICATOR_SIZE_PX * MONITOR_SCALE;
+    const float SIZE = INDICATOR_BASE_SIZE_PX * std::max(params.renderScale, 0.01F) * MONITOR_SCALE;
     const auto& EDGEBOX = params.anchor.logicalBox.empty() ? params.anchor.box : params.anchor.logicalBox;
     CBox        box;
 
