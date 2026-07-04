@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "Config.hpp"
+#include "DropIndicator.hpp"
 #include "IOverview.hpp"
 
 class CMonitor;
@@ -87,11 +88,13 @@ class CScrollOverview : public IOverview {
     PHLWINDOW windowAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
+    CDropIndicator::SDropAnchor dropAnchorAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr);
     PHLWORKSPACE workspaceAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWORKSPACE workspaceAtOverviewDropPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWORKSPACE workspaceAtOverviewCursor(size_t* workspaceIdx = nullptr) const;
     Vector2D  overviewPointToGlobal(size_t workspaceIdx, const Vector2D& pointLocal) const;
     CBox      draggedWindowBox(size_t workspaceIdx) const;
+    void      refreshDragOriginalOverviewBoxes();
     void      clearDragPending();
     void      beginWindowDrag(PHLWINDOW window);
     void      updateWindowDrag();
@@ -122,6 +125,7 @@ class CScrollOverview : public IOverview {
     size_t activeWorkspaceIndex() const;
     void   sendOverviewFrameCallbacks(const Time::steady_tp& now);
     bool   isVisibleRealtimePreviewWindow(const PHLWINDOW& window) const;
+    bool   hasRunningWorkspaceAnimation() const;
     bool   shouldAllowRealtimePreviewFrame() const;
     void   scheduleMinimumPreviewFrame();
     void   schedulePreviewFrameAfter(std::chrono::milliseconds delay);
@@ -174,11 +178,15 @@ class CScrollOverview : public IOverview {
     Vector2D                         dragStartMouseLocal   = Vector2D{};
     Vector2D                         dragGrabOffsetLocal   = Vector2D{};
     Vector2D                         dragOriginalFloatSize = Vector2D{};
+    Vector2D                         dragOriginalTapeTranslation = Vector2D{};
     Vector2D                         resizeStartMouseLocal = Vector2D{};
     Vector2D                         resizeLastMouseLocal  = Vector2D{};
     Vector2D                         scrollingPanLastMouseLocal = Vector2D{};
-    CBox                             dragOriginalBox        = CBox{};
-    CBox                             resizeOriginalBox      = CBox{};
+    CBox                             dragOriginalBox            = CBox{};
+    CBox                             dragOriginalVisualBox      = CBox{};
+    CBox                             dragOriginalOverviewBox    = CBox{};
+    CBox                             dragOriginalOverviewHitbox = CBox{};
+    CBox                             resizeOriginalBox          = CBox{};
     WORKSPACEID                      focusSyncedFromWorkspaceID = WORKSPACE_INVALID;
     size_t                           resizeWorkspaceIdx     = 0;
     Layout::eRectCorner              resizeCorner           = Layout::CORNER_NONE;

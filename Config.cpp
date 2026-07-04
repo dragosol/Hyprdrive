@@ -369,16 +369,15 @@ bool getBlur() {
 }
 
 ::Config::CCssGapData getCssGapData(const std::string& name) {
-    const auto VALUE = HyprlandAPI::getConfigValue(SCROLLOVERVIEW_HANDLE, name);
-    if (!VALUE)
+    auto& VALUE = valueRef<::Config::IComplexConfigValue>(name);
+    if (!VALUE.good())
         return {};
 
-    const auto CUSTOM = rc<Hyprlang::CUSTOMTYPE* const*>(VALUE->getDataStaticPtr());
-    if (!CUSTOM || !*CUSTOM)
+    auto* const GAPS = dc<::Config::CCssGapData*>(VALUE.ptr());
+    if (!GAPS)
         return {};
 
-    const auto* const GAPS = sc<::Config::CCssGapData*>((*CUSTOM)->getData());
-    return GAPS ? *GAPS : ::Config::CCssGapData{};
+    return *GAPS;
 }
 
 int getShadowEnabled() {
