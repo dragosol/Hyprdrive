@@ -19,8 +19,9 @@ class CDropIndicator {
         PHLWORKSPACE workspace;
         CBox         workspaceUsableBox;
         SDropAnchor  anchor;
-        float        renderScale = 1.F;
+        float        renderScale           = 1.F;
         bool         workspaceFullyVisible = false;
+        bool         floating              = false;
         ScrollOverview::Config::ELayout layout = ScrollOverview::Config::ELayout::VERTICAL;
     };
 

@@ -122,7 +122,7 @@ void CDropIndicator::renderDropIndicator(const SRenderParams& params) {
     if (!params.monitor || !params.workspace)
         return;
 
-    if (params.workspaceFullyVisible && !params.anchor.window)
+    if (!params.anchor.window && params.floating && params.workspaceFullyVisible)
         return;
 
     if (params.anchor.window && !params.anchor.direction.empty() && !isHorizontalSide(params.anchor.direction) && !isVerticalSide(params.anchor.direction))

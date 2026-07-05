@@ -3717,13 +3717,14 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         const auto WORKSPACEBOX = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
 
         CDropIndicator::renderDropIndicator({
-            .monitor                    = monitor,
-            .workspace                  = workspace,
-            .workspaceUsableBox         = getOverviewWorkspaceUsableBox(workspace, monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout),
-            .anchor                     = ANCHOR,
-            .renderScale                = renderScale,
-            .workspaceFullyVisible      = overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, monitor),
-            .layout                     = layout,
+            .monitor               = monitor,
+            .workspace             = workspace,
+            .workspaceUsableBox    = getOverviewWorkspaceUsableBox(workspace, monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout),
+            .anchor                = ANCHOR,
+            .renderScale           = renderScale,
+            .workspaceFullyVisible = overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, monitor),
+            .floating              = DRAGGED->m_isFloating,
+            .layout                = layout,
         });
     };
 
