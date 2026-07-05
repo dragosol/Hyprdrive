@@ -4731,11 +4731,13 @@ void CScrollOverview::render() {
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
     renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
 
-    for (auto const& ls : MONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
-        if (!Desktop::View::validMapped(ls.lock()))
-            continue;
+    for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
+        for (auto const& ls : MONITOR->m_layerSurfaceLayers[LAYER]) {
+            if (!Desktop::View::validMapped(ls.lock()))
+                continue;
 
-        g_pHyprRenderer->renderLayer(ls.lock(), MONITOR, NOW);
+            g_pHyprRenderer->renderLayer(ls.lock(), MONITOR, NOW);
+        }
     }
 
     sendOverviewFrameCallbacks(NOW);
