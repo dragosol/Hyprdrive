@@ -1969,6 +1969,65 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
         return result;
     }
 
+    const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACE);
+    const bool PRIMARYHORIZONTAL = ALGO && ALGO->m_scrollingData && ALGO->m_scrollingData->controller && ALGO->m_scrollingData->controller->isPrimaryHorizontal();
+    const auto pointsToOriginalStackSlot = [&](const PHLWINDOW& anchor, const std::string& direction) {
+        if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller || !ignoredWindow || dragOriginalOverviewBox.empty() || WORKSPACE != dragOriginalWorkspace.lock() ||
+            !anchor || !anchor->layoutTarget() || !ignoredWindow->layoutTarget())
+            return false;
+
+        const auto ANCHORDATA  = ALGO->dataFor(anchor->layoutTarget());
+        const auto ORIGINALDATA = ALGO->dataFor(ignoredWindow->layoutTarget());
+        const auto ANCHORCOL   = ANCHORDATA ? ANCHORDATA->column.lock() : nullptr;
+        const auto ORIGINALCOL = ORIGINALDATA ? ORIGINALDATA->column.lock() : nullptr;
+        if (!ANCHORCOL || ANCHORCOL != ORIGINALCOL)
+            return false;
+
+        const auto ANCHORIDX   = ANCHORCOL->idx(anchor->layoutTarget());
+        const auto ORIGINALIDX = ORIGINALCOL->idx(ignoredWindow->layoutTarget());
+        if (ANCHORIDX == ORIGINALIDX)
+            return false;
+
+        const bool ANCHORPREVIOUS = ANCHORIDX < ORIGINALIDX;
+        if ((ANCHORPREVIOUS && ANCHORIDX + 1 != ORIGINALIDX) || (!ANCHORPREVIOUS && ORIGINALIDX + 1 != ANCHORIDX))
+            return false;
+
+        if (PRIMARYHORIZONTAL)
+            return (ANCHORPREVIOUS && direction == "d") || (!ANCHORPREVIOUS && direction == "u");
+
+        return (ANCHORPREVIOUS && direction == "r") || (!ANCHORPREVIOUS && direction == "l");
+    };
+    const auto pointsToOriginalColumnSlot = [&](const PHLWINDOW& anchor, const std::string& direction) {
+        if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller || !ignoredWindow || dragOriginalOverviewBox.empty() || WORKSPACE != dragOriginalWorkspace.lock() ||
+            !anchor || !anchor->layoutTarget() || !ignoredWindow->layoutTarget())
+            return false;
+
+        const auto ANCHORDATA   = ALGO->dataFor(anchor->layoutTarget());
+        const auto ORIGINALDATA = ALGO->dataFor(ignoredWindow->layoutTarget());
+        const auto ANCHORCOL    = ANCHORDATA ? ANCHORDATA->column.lock() : nullptr;
+        const auto ORIGINALCOL  = ORIGINALDATA ? ORIGINALDATA->column.lock() : nullptr;
+        if (!ANCHORCOL || !ORIGINALCOL || ORIGINALCOL->targetDatas.size() != 1)
+            return false;
+
+        const auto ANCHORCOLIDX   = ALGO->m_scrollingData->idx(ANCHORCOL);
+        const auto ORIGINALCOLIDX = ALGO->m_scrollingData->idx(ORIGINALCOL);
+        if (ANCHORCOLIDX < 0 || ORIGINALCOLIDX < 0 || ANCHORCOLIDX == ORIGINALCOLIDX)
+            return false;
+
+        const bool ANCHORPREVIOUS = ANCHORCOLIDX < ORIGINALCOLIDX;
+        if ((ANCHORPREVIOUS && ANCHORCOLIDX + 1 != ORIGINALCOLIDX) || (!ANCHORPREVIOUS && ORIGINALCOLIDX + 1 != ANCHORCOLIDX))
+            return false;
+
+        if (PRIMARYHORIZONTAL)
+            return (ANCHORPREVIOUS && direction == "r") || (!ANCHORPREVIOUS && direction == "l");
+
+        return (ANCHORPREVIOUS && direction == "d") || (!ANCHORPREVIOUS && direction == "u");
+    };
+    const auto normalizeOriginalSlotAnchor = [&]() {
+        if (pointsToOriginalStackSlot(result.window, result.direction) || pointsToOriginalColumnSlot(result.window, result.direction))
+            setAnchor(result, ignoredWindow, dragOriginalOverviewBox);
+    };
+
     float bestDistanceSq = std::numeric_limits<float>::max();
     for (auto it = IMAGE->windows.rbegin(); it != IMAGE->windows.rend(); ++it) {
         const auto WINDOW = getOverviewWindowToShow(it->lock());
@@ -1989,14 +2048,13 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
         bestDistanceSq = distanceSq;
     }
 
-    if (result.window)
+    if (result.window) {
+        normalizeOriginalSlotAnchor();
         return result;
+    }
 
-    const auto ALGO      = overviewScrollingAlgorithmForWorkspace(WORKSPACE);
     if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller)
         return result;
-
-    const bool PRIMARYHORIZONTAL = ALGO->m_scrollingData->controller->isPrimaryHorizontal();
 
     const auto POINTER   = PRIMARYHORIZONTAL ? sc<float>(lastMousePosLocal.x) : sc<float>(lastMousePosLocal.y);
     float      firstEdge = std::numeric_limits<float>::max();
@@ -2038,8 +2096,10 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
         }
     }
 
-    if (result.window)
+    if (result.window) {
         result.direction = PRIMARYHORIZONTAL ? (FIND_FIRST ? "l" : "r") : (FIND_FIRST ? "u" : "d");
+        normalizeOriginalSlotAnchor();
+    }
 
     return result;
 }
@@ -2069,7 +2129,7 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewPoint(const Vector2D& point, si
     return nullptr;
 }
 
-PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx, const PHLWINDOW& ignoredWindow) const {
+PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx, const PHLWINDOW& draggedWindow) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return nullptr;
@@ -2086,7 +2146,7 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
         for (const bool floating : {true, false}) {
             for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
                 const auto WINDOW = getOverviewWindowToShow(it->lock());
-                if (!shouldShowOverviewWindow(WINDOW) || WINDOW == ignoredWindow || WINDOW->m_isFloating != floating)
+                if (!shouldShowOverviewWindow(WINDOW) || WINDOW == draggedWindow || WINDOW->m_isFloating != floating)
                     continue;
 
                 const auto WINDOWBOX = getOverviewDragWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
