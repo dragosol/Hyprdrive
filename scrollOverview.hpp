@@ -72,7 +72,8 @@ class CScrollOverview : public IOverview {
     void   moveViewportWorkspace(bool up);
     void   trackpadSwipeLayout(const PHLWORKSPACE target, const double delta);
     void   trackpadSwipeWorkspace(const double delta);
-    void   finishWorkspaceScrollFollow(float logicalPitch);
+    void   finishWorkspaceScrollFollow();
+    double trackpadWorkspaceScrollOffset(PHLMONITOR monitor, float renderScale);
     bool   scrollStepAllowed(uint32_t timeMs);
     bool   selectOverviewWindow(PHLWINDOW window, size_t workspaceIdx, bool syncFocus = false);
     bool   selectWindowAtOverviewCursor(bool syncFocus = false);

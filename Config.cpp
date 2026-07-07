@@ -273,6 +273,9 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:input:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:input:touchpad_scroll_factor", "overview touchpad scroll factor", 1.F,
+                                                          SFloatValueOptions{.min = 0.F}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:input:left_handed", "overview left handed mouse buttons, 2 follows input:left_handed", 2,
                                                         SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -334,6 +337,13 @@ int getDragMode() {
 
 int getDragThreshold() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:input:drag_threshold"));
+}
+
+float getTouchpadScrollFactor() {
+    static constexpr float OVERVIEWTOUCHPADSCROLLFACTOR = 1.5F;
+
+    return OVERVIEWTOUCHPADSCROLLFACTOR * std::max<float>(0.F, getValue<float>("input:touchpad:scroll_factor")) *
+        std::max<float>(0.F, getValue<float>("plugin:scrolloverview:input:touchpad_scroll_factor"));
 }
 
 static EScrollAction defaultVerticalScrollAction(ELayout layout) {
