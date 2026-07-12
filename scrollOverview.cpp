@@ -1509,13 +1509,14 @@ void CScrollOverview::updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperM
 
     const auto FBSIZE     = monitor->m_pixelSize;
     const auto RENDERSIZE = monitor->m_transformedSize;
+    const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
     if (!backdropBlurFB)
         backdropBlurFB = g_pHyprRenderer->createFB("scrolloverview_backdrop_blur");
 
-    if (!backdropBlurFB || !backdropBlurFB->isAllocated() || backdropBlurFB->m_size != FBSIZE || backdropBlurFB->m_drmFormat != DRM_FORMAT_ARGB8888) {
+    if (!backdropBlurFB || !backdropBlurFB->isAllocated() || backdropBlurFB->m_size != FBSIZE || backdropBlurFB->m_drmFormat != FBFORMAT) {
         if (backdropBlurFB)
             backdropBlurFB->release();
-        if (!backdropBlurFB || !backdropBlurFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), DRM_FORMAT_ARGB8888))
+        if (!backdropBlurFB || !backdropBlurFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), FBFORMAT))
             return;
         backdropBlurDirty = true;
     }
