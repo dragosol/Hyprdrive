@@ -4800,7 +4800,6 @@ void CScrollOverview::setClosing(bool closing_) {
         clearDragPending();
         restoreSubmapIfActive();
         releaseInputListeners();
-        restoreWorkspaceAnimationOverrides();
     } else
         applyWorkspaceAnimationOverrides();
 }
