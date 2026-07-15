@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <helpers/Color.hpp>
 #include <limits>
 #include <memory>
 #include <optional>

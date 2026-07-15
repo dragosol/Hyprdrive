@@ -1,11 +1,14 @@
 #include "Config.hpp"
 
 #include <algorithm>
+#include <config/shared/complex/ComplexDataType.hpp>
+#include <config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/config/values/types/StringValue.hpp>
+#include <hyprland/src/config/values/types/GradientValue.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 
 #include <regex>
@@ -297,7 +300,7 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:shadow:render_power", "workspace card shadow render power", -1));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CColorValue>("plugin:scrolloverview:shadow:color", "workspace card shadow color", -1));
+                                  makeShared<CGradientValue>("plugin:scrolloverview:shadow:color", "workspace card shadow color", -1));
 }
 
 void registerConfig() {
@@ -402,8 +405,8 @@ int getShadowRenderPower() {
     return getValue<int>("plugin:scrolloverview:shadow:render_power");
 }
 
-int64_t getShadowColor() {
-    return getValue<int64_t>("plugin:scrolloverview:shadow:color");
+::Config::CGradientValueData getShadowColor() {
+    return getValue<::Config::CGradientValueData>("plugin:scrolloverview:shadow:color");
 }
 
 }
