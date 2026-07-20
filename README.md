@@ -72,7 +72,7 @@ hl.config({
 })
 ```
 
-In Lua, `shadow.color` must be an integer color value. The Hyprlang-only
+In Lua, `shadow.color` must be an integer color value or a gradient (refer to the Hyprland's docs for the specific format). The Hyprlang-only
 `rgba(...)` syntax is not accepted there.
 
 ### Properties
@@ -105,7 +105,7 @@ Controls the shadow around each workspace card. `enabled` defaults to `false`; a
 | enabled | bool | draw a shadow around each workspace card | false |
 | range | int | shadow range in layout px | `decoration:shadow:range` |
 | render_power | int | shadow falloff power | `decoration:shadow:render_power` |
-| color | color | shadow color | `decoration:shadow:color` |
+| color | color or gradient | shadow color or gradient | `decoration:shadow:color` |
 
 ### Binding
 

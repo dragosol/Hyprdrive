@@ -6,6 +6,7 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -99,6 +100,6 @@ bool          getBlur();
 int          getShadowEnabled();
 int          getShadowRange();
 int          getShadowRenderPower();
-::Config::CGradientValueData getShadowColor();
+std::optional<::Config::CGradientValueData> getShadowColor();
 
 }

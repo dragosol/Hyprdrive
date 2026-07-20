@@ -425,13 +425,9 @@ static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& wind
     if (shadowBox.width < 1 || shadowBox.height < 1)
         return;
 
-	const auto& colors = window->m_realShadowColor.m_colors;
-	if (colors.empty())
-		return;
-
-    const auto shadowColor = colors[0];
-	if (shadowColor.a == 0.F)
-		return;
+    const auto& shadowColor = window->m_realShadowColor;
+    if (std::ranges::none_of(shadowColor.m_colors, [](const CHyprColor& color) { return color.a > 0.F; }))
+        return;
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
         .monitor       = monitor,

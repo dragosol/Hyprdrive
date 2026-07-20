@@ -563,7 +563,7 @@ struct SOverviewShadowConfig {
     bool       enabled     = false;
     int        range       = 0;
     int        renderPower = 1;
-    CHyprColor color       = CHyprColor{0, 0, 0, 0};
+    Config::CGradientValueData color;
 };
 
 static SOverviewShadowConfig getOverviewShadowConfig() {
@@ -576,11 +576,17 @@ static SOverviewShadowConfig getOverviewShadowConfig() {
     const auto globalRenderPower = ScrollOverview::Config::getValue<int>("decoration:shadow:render_power");
     const auto globalColor       = ScrollOverview::Config::getValue<::Config::CGradientValueData>("decoration:shadow:color");
 
+    Config::CGradientValueData shadowColor;
+    if (color && !color->m_colors.empty())
+        shadowColor = *color;
+    else if (!globalColor.m_colors.empty())
+        shadowColor = globalColor;
+
     return {
         .enabled      = !!enabled,
         .range        = std::max(0, range >= 0 ? range : globalRange),
         .renderPower  = std::clamp(renderPower >= 0 ? renderPower : globalRenderPower, 1, 4),
-        .color        = CHyprColor(color.m_colors.empty() ? color.m_colors[0] : globalColor.m_colors.empty() ? globalColor.m_colors[0] : CHyprColor{}),
+        .color        = shadowColor,
     };
 }
 
@@ -589,7 +595,8 @@ static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& worksp
         return;
 
     const auto SHADOW = getOverviewShadowConfig();
-    if (!SHADOW.enabled || SHADOW.range <= 0 || SHADOW.color.a == 0.F || alpha <= 0.F)
+    const bool HASVISIBLECOLOR = std::ranges::any_of(SHADOW.color.m_colors, [](const CHyprColor& color) { return color.a > 0.F; });
+    if (!SHADOW.enabled || SHADOW.range <= 0 || !HASVISIBLECOLOR || alpha <= 0.F)
         return;
 
     const int RANGE = sc<int>(std::round(SHADOW.range * monitor->m_scale * overviewScale));
@@ -861,7 +868,7 @@ static void moveOverviewTargetNextToWindow(const SP<Layout::ITarget>& target, co
 
 CScrollOverview::~CScrollOverview() {
     restoreSubmapIfActive();
-    if (const auto OPENGL = g_pHyprRenderer ? g_pHyprRenderer->glBackend().lock() : WP<Render::GL::CHyprOpenGLImpl>{})
+    if (const auto OPENGL = g_pHyprRenderer ? g_pHyprRenderer->glBackend() : WP<Render::GL::CHyprOpenGLImpl>{})
         OPENGL->makeEGLCurrent();
     if (realtimePreviewTimer) {
         wl_event_source_remove(realtimePreviewTimer);

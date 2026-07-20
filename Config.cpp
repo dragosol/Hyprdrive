@@ -405,8 +405,13 @@ int getShadowRenderPower() {
     return getValue<int>("plugin:scrolloverview:shadow:render_power");
 }
 
-::Config::CGradientValueData getShadowColor() {
-    return getValue<::Config::CGradientValueData>("plugin:scrolloverview:shadow:color");
+std::optional<::Config::CGradientValueData> getShadowColor() {
+    constexpr auto NAME = "plugin:scrolloverview:shadow:color";
+
+    if (!::Config::mgr()->getConfigValue(NAME).setByUser)
+        return std::nullopt;
+
+    return getValue<::Config::CGradientValueData>(NAME);
 }
 
 }
