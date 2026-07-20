@@ -6,6 +6,7 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -45,6 +46,13 @@ CConfigValue<T>& valueRef(const std::string& name) {
 template <typename T>
 T getValue(const std::string& name) {
     using TValue = std::decay_t<T>;
+
+	if constexpr (std::is_same_v<TValue, ::Config::CGradientValueData>) {
+        auto& ref = valueRef<::Config::IComplexConfigValue>(name);
+        if (!ref.good())
+            return {};
+        return *sc<::Config::CGradientValueData*>(ref.ptr());
+    }
 
     if constexpr (std::is_same_v<TValue, bool>)
         return *valueRef<Hyprlang::INT>(name) != 0;
@@ -89,9 +97,9 @@ EScrollAction getHorizontalScrollAction(ELayout layout);
 int           getWallpaperMode();
 bool          getBlur();
 ::Config::CCssGapData getCssGapData(const std::string& name);
-int           getShadowEnabled();
-int           getShadowRange();
-int           getShadowRenderPower();
-int64_t       getShadowColor();
+int          getShadowEnabled();
+int          getShadowRange();
+int          getShadowRenderPower();
+std::optional<::Config::CGradientValueData> getShadowColor();
 
 }

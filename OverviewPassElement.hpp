@@ -1,5 +1,6 @@
 #pragma once
 #include "globals.hpp"
+#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 
 class CScrollOverviewPassElement : public IPassElement {
@@ -31,7 +32,7 @@ class COverviewShadowPassElement : public IPassElement {
         float         roundingPower = 2.F;
         int           range         = 0;
         int           renderPower   = 0;
-        CHyprColor    color;
+        Config::CGradientValueData color;
         float         alpha        = 1.F;
         bool          ignoreWindow = true;
     };

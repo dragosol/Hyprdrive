@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <helpers/Color.hpp>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -124,7 +125,8 @@ COverviewShadowPassElement::COverviewShadowPassElement(const SData& data_) : dat
 
 std::vector<UP<IPassElement>> COverviewShadowPassElement::draw() {
     const auto MONITOR = data.monitor.lock();
-    if (!MONITOR || data.fullBox.width < 1 || data.fullBox.height < 1 || data.range <= 0 || data.color.a == 0.F || data.alpha <= 0.F)
+    const bool HASVISIBLECOLOR = std::ranges::any_of(data.color.m_colors, [](const CHyprColor& color) { return color.a > 0.F; });
+    if (!MONITOR || data.fullBox.width < 1 || data.fullBox.height < 1 || data.range <= 0 || !HASVISIBLECOLOR || data.alpha <= 0.F)
         return {};
 
     CRegion shadowDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.fullBox);
@@ -143,9 +145,6 @@ std::vector<UP<IPassElement>> COverviewShadowPassElement::draw() {
         g_pHyprRenderer->m_renderData.currentWindow = SAVEDCURRENTWINDOW;
     });
 
-    auto color = data.color;
-    color.a *= std::clamp(data.alpha, 0.F, 1.F);
-
     std::optional<int> previousRenderPower;
     if (data.renderPower > 0) {
         previousRenderPower = ScrollOverview::Config::getValue<int>("decoration:shadow:render_power");
@@ -159,7 +158,7 @@ std::vector<UP<IPassElement>> COverviewShadowPassElement::draw() {
         ScrollOverview::Config::setValue("decoration:shadow:render_power", *previousRenderPower);
     });
 
-    Render::GL::g_pHyprOpenGL->renderRoundedShadow(data.fullBox, data.rounding, data.roundingPower, data.range, color, 1.F);
+    Render::GL::g_pHyprOpenGL->renderRoundedShadow(data.fullBox, data.rounding, data.roundingPower, data.range, data.color, std::clamp(data.alpha, 0.F, 1.F));
 
     return {};
 }
