@@ -3624,6 +3624,9 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
     if (emittingFullscreenVisibilityState)
         return;
 
+    emittingFullscreenVisibilityState = true;
+    auto resetEmittingFullscreenVisibilityState = Hyprutils::Utils::CScopeGuard([this] { emittingFullscreenVisibilityState = false; });
+
     window = getOverviewWindowToShow(window);
 
     if (!validMapped(window) || !window->m_workspace || window->m_monitor != pMonitor) {
@@ -3633,9 +3636,7 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
     }
 
     if (!hideFullscreen || !Fullscreen::controller()->isFullscreen(window)) {
-        emittingFullscreenVisibilityState = true;
         Event::bus()->m_events.window.fullscreen.emit(window);
-        emittingFullscreenVisibilityState = false;
 
         if (g_pEventManager)
             g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = Fullscreen::controller()->isFullscreen(window) ? "1" : "0"});
@@ -3647,9 +3648,7 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
 
     Fullscreen::controller()->setFullscreenMode(window, Fullscreen::FSMODE_NONE, Fullscreen::FSMODE_NONE);
 
-    emittingFullscreenVisibilityState = true;
     Event::bus()->m_events.window.fullscreen.emit(window);
-    emittingFullscreenVisibilityState = false;
 
     if (g_pEventManager)
         g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});
