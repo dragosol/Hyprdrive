@@ -438,7 +438,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
 
-    return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", "1.0"};
+    return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", "1.1"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
