@@ -12,6 +12,10 @@ https://github.com/user-attachments/assets/7ab51651-7901-44d4-b906-357f4c2869c1
    ```bash
    hyprpm add https://github.com/yayuuu/hyprland-scroll-overview.git
    ```
+   If you use a Git build of Hyprland, add the plugin from the `new-release` branch instead:
+   ```bash
+   hyprpm add https://github.com/yayuuu/hyprland-scroll-overview origin/new-release
+   ```
 2. Build and fetch dependencies:
    ```bash
    hyprpm update
