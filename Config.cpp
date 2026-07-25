@@ -48,10 +48,10 @@ SDispatcher* findDispatcher(const std::string_view name) {
     static SDispatcher registrations[] = {
         {
             .name            = "overview",
-            .argPattern      = std::regex{"^(toggle|select|on|enable|off|disable)$"},
+            .argPattern      = std::regex{R"(^(select|(toggle|on|open|enable|off|close|disable)([ \t]+(all|[^ \t"\\]+))?)$)"},
             .defaultArg      = "toggle",
             .typeArgError    = "expected an optional string argument; did you forget quotes around it?",
-            .invalidArgError = "expected one of: toggle, select, on, enable, off, disable",
+            .invalidArgError = "expected select or toggle/open/close [monitor|all] (aliases: on, enable, off, disable)",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "overview"); },
         },
         {

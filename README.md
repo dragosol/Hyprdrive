@@ -253,12 +253,19 @@ Controls the overview.
 
 | option | description |
 | --- | --- |
-| `toggle` | show the overview if hidden, hide it if visible |
+| `toggle [monitor\|all]` | toggle the active monitor, a named monitor, or every monitor |
 | `select` | select the workspace under the cursor |
-| `off` | hide the overview |
+| `close [monitor\|all]` | close every overview by default, or only the named monitor |
+| `off [monitor\|all]` | same as `close` |
 | `disable` | same as `off` |
-| `on` | show the overview |
+| `open [monitor\|all]` | open on the active monitor, a named monitor, or every monitor |
+| `on [monitor\|all]` | same as `open` |
 | `enable` | same as `on` |
+
+For example, `toggle DP-1` targets only `DP-1`, while `toggle all` opens all
+missing overviews or closes them when they are all already open. A bare
+`toggle` still targets only the active monitor, and a bare `close` closes all
+open overviews.
 
 #### `scrolloverview:navigate`
 
