@@ -93,7 +93,8 @@ CScrollOverviewPassElement::CScrollOverviewPassElement() {
 }
 
 std::vector<UP<IPassElement>> CScrollOverviewPassElement::draw() {
-    g_pScrollOverview->fullRender();
+    if (const auto overview = activeScrollOverview())
+        overview->fullRender();
     return {};
 }
 
@@ -106,17 +107,19 @@ bool CScrollOverviewPassElement::needsPrecomputeBlur() {
 }
 
 std::optional<CBox> CScrollOverviewPassElement::boundingBox() {
-    if (!g_pScrollOverview->pMonitor)
+    const auto overview = activeScrollOverview();
+    if (!overview || !overview->pMonitor)
         return std::nullopt;
 
-    return CBox{{}, g_pScrollOverview->pMonitor->m_size};
+    return CBox{{}, overview->pMonitor->m_size};
 }
 
 CRegion CScrollOverviewPassElement::opaqueRegion() {
-    if (!g_pScrollOverview->pMonitor)
+    const auto overview = activeScrollOverview();
+    if (!overview || !overview->pMonitor)
         return CRegion{};
 
-    return CBox{{}, g_pScrollOverview->pMonitor->m_size};
+    return CBox{{}, overview->pMonitor->m_size};
 }
 
 COverviewShadowPassElement::COverviewShadowPassElement(const SData& data_) : data(data_) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hyprland/src/managers/input/trackpad/gestures/ITrackpadGesture.hpp>
+#include "IOverview.hpp"
 
 class COverviewGesture : public ITrackpadGesture {
   public:
@@ -14,4 +15,5 @@ class COverviewGesture : public ITrackpadGesture {
   private:
     float m_lastDelta   = 0.F;
     bool  m_firstUpdate = false;
+    WP<IOverview> m_overview;
 };
