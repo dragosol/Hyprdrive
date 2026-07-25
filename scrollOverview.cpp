@@ -961,6 +961,12 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
 
     auto onMouseMove = [this](Vector2D, Event::SCallbackInfo& info) {
         const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
+        if (INPUTOVERVIEW) {
+            const auto INPUTMONITOR = INPUTOVERVIEW->pMonitor.lock();
+            if (INPUTMONITOR && INPUTMONITOR != Desktop::focusState()->monitor())
+                Desktop::focusState()->rawMonitorFocus(INPUTMONITOR);
+        }
+
         if (closing || (g_pointerGrabOverview && g_pointerGrabOverview != this) || (!g_pointerGrabOverview && INPUTOVERVIEW.get() != this))
             return;
 
@@ -3323,6 +3329,9 @@ void CScrollOverview::syncFocusedSelection() {
         return;
 
     closeOnWindow = window;
+
+    if (activeScrollOverview().get() != this)
+        return;
 
     if (Desktop::focusState()->window() == window && window->m_workspace == pMonitor->m_activeWorkspace)
         return;
