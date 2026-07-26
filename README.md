@@ -132,7 +132,7 @@ bind = SUPER, g, scrolloverview:overview, toggle
 ```lua
 -- hyprland.lua
 hl.bind("SUPER + g", function()
-    hl.plugin.scrolloverview.overview("toggle")
+    hl.plugin.scrolloverview.overview("toggle all")
 end)
 ```
 
