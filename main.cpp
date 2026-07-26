@@ -20,6 +20,7 @@ using namespace Hyprutils::String;
 
 #include "globals.hpp"
 #include "Config.hpp"
+#include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
 #include "OverviewGesture.hpp"
 
@@ -513,7 +514,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
 
-    return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", "1.1"};
+    return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", SCROLLOVERVIEW_VERSION};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

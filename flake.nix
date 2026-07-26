@@ -30,7 +30,7 @@
             in {
                 packages.scrolloverview = pkgs.stdenv.mkDerivation {
                     pname = "hyprland-scroll-overview";
-                    version = "0.1";
+                    version = self.shortRev or self.dirtyShortRev or "unknown";
                     src = ./.;
 
                     inherit (hl) buildInputs;
@@ -47,6 +47,7 @@
 
                     buildPhase = ''
                         runHook preBuild
+                        export SCROLLOVERVIEW_BUILD_VERSION="${self.shortRev or self.dirtyShortRev or "unknown"}"
                         make all
                         runHook postBuild
                     '';

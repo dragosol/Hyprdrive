@@ -21,9 +21,22 @@ add_project_arguments(
 globber = run_command('find', '.', '-name', '*.cpp', check: true)
 src = globber.stdout().strip().split('\n')
 
+version_header = custom_target(
+  'plugin-version',
+  output: 'PluginVersion.hpp',
+  command: [
+    find_program('sh'),
+    files('scripts/generate-plugin-version.sh'),
+    '@OUTPUT@',
+    meson.project_source_root(),
+  ],
+  build_always_stale: true,
+)
+
 hyprland = dependency('hyprland')
 
-shared_module(meson.project_name(), src,
+shared_module(meson.project_name(), src + [version_header],
+  include_directories: include_directories('.'),
   dependencies: [
     dependency('hyprland'),
     dependency('pixman-1'),

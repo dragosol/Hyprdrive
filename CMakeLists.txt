@@ -11,6 +11,17 @@ file(GLOB_RECURSE SRC "*.cpp")
 
 add_library(scrolloverview SHARED ${SRC})
 
+set(VERSION_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(VERSION_HEADER "${VERSION_HEADER_DIR}/PluginVersion.hpp")
+add_custom_target(scrolloverview-version ALL
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${VERSION_HEADER_DIR}"
+    COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate-plugin-version.sh" "${VERSION_HEADER}" "${CMAKE_CURRENT_SOURCE_DIR}"
+    BYPRODUCTS "${VERSION_HEADER}"
+    VERBATIM
+)
+add_dependencies(scrolloverview scrolloverview-version)
+target_include_directories(scrolloverview PRIVATE "${VERSION_HEADER_DIR}")
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     hyprland
