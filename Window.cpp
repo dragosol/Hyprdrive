@@ -77,6 +77,19 @@ struct SOverviewWindowMetrics {
     bool  borderIncludesHyprbar   = false;
 };
 
+// SurfacePassElement only scales subsurface textures while the window size is
+// marked as animated. Overview temporarily changes the current window size
+// without starting a real animation, so expose that single bit for the duration
+// of the synchronous overview render and restore it immediately afterwards.
+struct COverviewAnimatedVariableAccess : Hyprutils::Animation::CBaseAnimatedVariable {
+    static void setBeingAnimated(Hyprutils::Animation::CBaseAnimatedVariable* variable, bool animated) {
+        if (!variable)
+            return;
+
+        rc<COverviewAnimatedVariableAccess*>(variable)->m_bIsBeingAnimated = animated;
+    }
+};
+
 static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     if (!window)
         return nullptr;
@@ -228,6 +241,34 @@ static void blockOverviewWindowBlurOptimization(const PHLWINDOW& window, size_t 
             continue;
 
         surfacePassElement->m_data.blockBlurOptimization = true;
+    }
+}
+
+static void scaleOverviewSubsurfaceOffsets(const PHLWINDOW& window, const Vector2D& targetSize, size_t firstElement) {
+    if (!window)
+        return;
+
+    const auto REPORTEDSIZE = window->getReportedSize();
+    if (REPORTEDSIZE.x <= 0 || REPORTEDSIZE.y <= 0)
+        return;
+
+    const Vector2D SUBSURFACESCALE = targetSize / REPORTEDSIZE;
+    auto&          passElements    = g_pHyprRenderer->m_renderPass.m_passElements;
+
+    for (size_t i = firstElement; i < passElements.size(); ++i) {
+        const auto& passElement = passElements[i];
+        if (!passElement.element)
+            continue;
+
+        auto* surfacePassElement = dc<CSurfacePassElement*>(passElement.element.get());
+        if (!surfacePassElement || surfacePassElement->m_data.pWindow != window || surfacePassElement->m_data.mainSurface || surfacePassElement->m_data.popup)
+            continue;
+
+        // Hyprland scales the subsurface texture during a resize, but its
+        // cumulative position remains in the client's reported coordinate
+        // space. Apply the same scale to the position so embedded dmabuf
+        // surfaces (OBS preview, OrcaSlicer viewport, etc.) stay attached.
+        surfacePassElement->m_data.localPos *= SUBSURFACESCALE;
     }
 }
 
@@ -798,20 +839,23 @@ void renderOverviewWindow(const SRenderParams& params) {
     const Vector2D previousWindowPos       = params.window->m_realPosition->value();
     const Vector2D previousWindowSize      = params.window->m_realSize->value();
     const bool     previousAnimatingIn     = params.window->m_animatingIn;
+    const bool     previousSizeAnimating   = params.window->sizeAnimation()->isBeingAnimated();
     const auto     WORKSPACE               = params.window->m_workspace;
     const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !params.window->m_pinned;
     const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
 
     params.window->positionAnimation()->value() = params.monitor->m_position + params.windowBox.pos() / params.monitor->m_scale - params.window->m_floatingOffset;
     params.window->sizeAnimation()->value()     = params.windowBox.size() / params.monitor->m_scale;
-    params.window->m_animatingIn           = true;
+    params.window->m_animatingIn                 = true;
+    COverviewAnimatedVariableAccess::setBeingAnimated(params.window->sizeAnimation().get(), true);
     if (OVERRIDEWORKSPACEOFFSET)
         WORKSPACE->m_renderOffset->value() = {};
 
     auto restoreWindowGeometry = Hyprutils::Utils::CScopeGuard([&] {
         params.window->positionAnimation()->value() = previousWindowPos;
         params.window->sizeAnimation()->value()     = previousWindowSize;
-        params.window->m_animatingIn           = previousAnimatingIn;
+        params.window->m_animatingIn                 = previousAnimatingIn;
+        COverviewAnimatedVariableAccess::setBeingAnimated(params.window->sizeAnimation().get(), previousSizeAnimating);
         if (OVERRIDEWORKSPACEOFFSET && WORKSPACE)
             WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
     });
@@ -819,6 +863,7 @@ void renderOverviewWindow(const SRenderParams& params) {
     const size_t firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
     const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
     g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
+    scaleOverviewSubsurfaceOffsets(params.window, params.window->sizeAnimation()->value(), firstWindowPassElement);
     if (!usePrecomputedBlur)
         blockOverviewWindowBlurOptimization(params.window, firstWindowPassElement);
     roundStandaloneWindowPassElements(params.window, params.monitor, params.renderScale, firstWindowPassElement);
