@@ -21,7 +21,7 @@
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/animation/AnimationManager.hpp>
-#include <hyprland/src/ipc/s2/S2.hpp>
+#include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
@@ -3808,14 +3808,14 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
     window = getOverviewWindowToShow(window);
 
     if (!validMapped(window) || !window->m_workspace || window->m_monitor != pMonitor) {
-        IPC::Socket2::sock()->postEvent(IPC::Socket2::SEvent{.event = "fullscreen", .data = "0"});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});
         return;
     }
 
     if (!hideFullscreen || !Fullscreen::controller()->isFullscreen(window)) {
         Event::bus()->m_events.window.fullscreen.emit(window);
 
-        IPC::Socket2::sock()->postEvent(IPC::Socket2::SEvent{.event = "fullscreen", .data = Fullscreen::controller()->isFullscreen(window) ? "1" : "0"});
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = Fullscreen::controller()->isFullscreen(window) ? "1" : "0"});
 
         return;
     }
@@ -3826,7 +3826,7 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
 
     Event::bus()->m_events.window.fullscreen.emit(window);
 
-    IPC::Socket2::sock()->postEvent(IPC::Socket2::SEvent{.event = "fullscreen", .data = "0"});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});
 
     Fullscreen::controller()->setFullscreenMode(window, SAVEDMODES.internal, SAVEDMODES.client);
 }
@@ -5092,8 +5092,10 @@ bool CScrollOverview::dispatchSubmapMouseClick(uint32_t button) {
     Config::Actions::state()->m_passPressed = 0;
     auto restorePassPressed = Hyprutils::Utils::CScopeGuard([PREVIOUSPASSPRESSED] { Config::Actions::state()->m_passPressed = PREVIOUSPASSPRESSED; });
 
-    const auto RESULT = MGR->callLuaFnBind(*INDEX);
-    return RESULT.success;
+    // ponytail: 0.56.1 has void callLuaFn(int); callLuaFnBind + .success is 0.57+.
+    // No success signal available here, so assume dispatched.
+    MGR->callLuaFn(*INDEX);
+    return true;
 }
 
 void CScrollOverview::resetSwipe() {
