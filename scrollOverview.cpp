@@ -2437,6 +2437,8 @@ void CScrollOverview::syncSelectionToViewport() {
     }
 
     closeOnWindow.reset();
+    if (activeScrollOverview().get() == this)
+        Desktop::focusState()->fullWindowFocus(nullptr, Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
 }
 
 void CScrollOverview::syncFocusedSelection() {
