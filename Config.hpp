@@ -96,6 +96,8 @@ EScrollAction getVerticalScrollAction(ELayout layout);
 EScrollAction getHorizontalScrollAction(ELayout layout);
 int           getWallpaperMode();
 bool          getBlur();
+bool          getMissionControl();
+int           getMissionControlGap();
 ::Config::CCssGapData getCssGapData(const std::string& name);
 int          getShadowEnabled();
 int          getShadowRange();

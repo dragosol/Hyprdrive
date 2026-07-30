@@ -231,6 +231,153 @@ static bool layerHasOverviewAnimation(const PHLLS& layer) {
     return layer->positionAnimation()->isBeingAnimated() || layer->sizeAnimation()->isBeingAnimated() || layer->m_alpha.isBeingAnimated();
 }
 
+// Mission-control grid, OVERVIEW_CPP_SPEC §5 B1. The focused workspace lays its
+// windows out as a grid instead of at their real desktop positions. Implemented
+// by swapping the source geometry inside getOverviewWindowBox, so rendering,
+// hit-testing and drag all derive from the same box and cannot disagree.
+static std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace) {
+    std::vector<PHLWINDOW> windows;
+    if (!workspace)
+        return windows;
+
+    for (const auto& window : Desktop::windowState()->windows()) {
+        if (getOverviewWindowToShow(window) != window || !shouldShowOverviewWindow(window))
+            continue;
+
+        if (window->m_workspace != workspace)
+            continue;
+
+        windows.emplace_back(window);
+    }
+
+    return windows;
+}
+
+static Vector2D overviewGridWindowSize(const PHLWINDOW& window) {
+    return window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT).size();
+}
+
+// ponytail: recomputed per window per frame, O(windows^2) on the focused
+// workspace. Fine at desktop counts; memoise per frame if it ever shows up.
+static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor, const PHLWINDOW& target, CBox& out) {
+    const auto WINDOWS = overviewGridWindows(workspace);
+    const auto TARGETIT = std::ranges::find(WINDOWS, target);
+    if (TARGETIT == WINDOWS.end())
+        return false;
+
+    CBox usable = {monitor->m_position, monitor->m_size};
+    if (workspace->m_space) {
+        if (const auto WORKAREA = workspace->m_space->workArea(); WORKAREA.w > 1 && WORKAREA.h > 1)
+            usable = WORKAREA;
+    }
+
+    const size_t COUNT = WINDOWS.size();
+    const float  GAP   = sc<float>(ScrollOverview::Config::getMissionControlGap());
+
+    usable.x += GAP;
+    usable.y += GAP;
+    usable.w -= 2.0 * GAP;
+    usable.h -= 2.0 * GAP;
+    if (usable.w <= 1 || usable.h <= 1)
+        return false;
+
+    // Pick the row count that lets every window share the largest common scale.
+    // Capped at 1.0 so a lone window keeps its real size instead of ballooning.
+    size_t bestRows  = 0;
+    float  bestScale = 0.F;
+    for (size_t rows = 1; rows <= COUNT; ++rows) {
+        const size_t COLS  = (COUNT + rows - 1) / rows;
+        const float  CELLW = (sc<float>(usable.w) - GAP * sc<float>(COLS - 1)) / sc<float>(COLS);
+        const float  CELLH = (sc<float>(usable.h) - GAP * sc<float>(rows - 1)) / sc<float>(rows);
+        if (CELLW <= 1.F || CELLH <= 1.F)
+            continue;
+
+        float rowScale = 1.F;
+        for (const auto& window : WINDOWS) {
+            const auto SIZE = overviewGridWindowSize(window);
+            if (SIZE.x <= 1 || SIZE.y <= 1)
+                continue;
+
+            rowScale = std::min({rowScale, CELLW / sc<float>(SIZE.x), CELLH / sc<float>(SIZE.y)});
+        }
+
+        if (rowScale > bestScale) {
+            bestScale = rowScale;
+            bestRows  = rows;
+        }
+    }
+
+    if (bestRows == 0 || bestScale <= 0.F)
+        return false;
+
+    // Spread the windows over the rows as evenly as possible, earlier rows take
+    // the remainder.
+    const size_t BASE  = COUNT / bestRows;
+    const size_t EXTRA = COUNT % bestRows;
+    const size_t INDEX = sc<size_t>(std::distance(WINDOWS.begin(), TARGETIT));
+
+    size_t row       = 0;
+    size_t rowFirst  = 0;
+    size_t rowCount  = 0;
+    for (; row < bestRows; ++row) {
+        rowCount = BASE + (row < EXTRA ? 1 : 0);
+        if (INDEX < rowFirst + rowCount)
+            break;
+
+        rowFirst += rowCount;
+    }
+
+    if (row >= bestRows)
+        return false;
+
+    float rowWidth = GAP * sc<float>(rowCount - 1);
+    for (size_t i = 0; i < rowCount; ++i)
+        rowWidth += sc<float>(overviewGridWindowSize(WINDOWS[rowFirst + i]).x) * bestScale;
+
+    float x = sc<float>(usable.x) + (sc<float>(usable.w) - rowWidth) / 2.F;
+    for (size_t i = rowFirst; i < INDEX; ++i)
+        x += sc<float>(overviewGridWindowSize(WINDOWS[i]).x) * bestScale + GAP;
+
+    const auto  SIZE   = overviewGridWindowSize(target);
+    const float WIDTH  = sc<float>(SIZE.x) * bestScale;
+    const float HEIGHT = sc<float>(SIZE.y) * bestScale;
+    const float CELLH  = (sc<float>(usable.h) - GAP * sc<float>(bestRows - 1)) / sc<float>(bestRows);
+    const float Y      = sc<float>(usable.y) + sc<float>(row) * (CELLH + GAP) + (CELLH - HEIGHT) / 2.F;
+
+    out = CBox{x, Y, WIDTH, HEIGHT};
+    return true;
+}
+
+static bool overviewGridSlot(const PHLWINDOW& window, PHLMONITOR monitor, CBox& out) {
+    if (!ScrollOverview::Config::getMissionControl() || !monitor)
+        return false;
+
+    const auto WORKSPACE = window->m_workspace;
+    if (!WORKSPACE || WORKSPACE != monitor->m_activeWorkspace)
+        return false;
+
+    return overviewGridLayout(WORKSPACE, monitor, window, out);
+}
+
+// 0 while the overview is closed, 1 once it is fully open, so windows travel
+// between their real rect and their grid slot instead of snapping.
+static float overviewGridProgress(float scale) {
+    const float TARGET = ScrollOverview::Config::getScale();
+    if (std::abs(1.F - TARGET) < 0.001F)
+        return 1.F;
+
+    return std::clamp((1.F - scale) / (1.F - TARGET), 0.F, 1.F);
+}
+
+static CBox overviewGridLerpBox(const CBox& from, const CBox& to, float t) {
+    return CBox{
+        from.x + (to.x - from.x) * t,
+        from.y + (to.y - from.y) * t,
+        from.w + (to.w - from.w) * t,
+        from.h + (to.h - from.h) * t,
+    };
+}
+
 static Vector2D axisOffsetVector(float offset, ScrollOverview::Config::ELayout layout);
 
 static CBox getOverviewBox(CBox box, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
@@ -256,7 +403,12 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
     if (!window)
         return {};
 
-    return getOverviewGlobalBox(window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT), monitor, scale, viewOffset, offset, layout, round);
+    auto geometry = window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+
+    if (CBox slot; overviewGridSlot(window, monitor, slot))
+        geometry = overviewGridLerpBox(geometry, slot, overviewGridProgress(scale));
+
+    return getOverviewGlobalBox(geometry, monitor, scale, viewOffset, offset, layout, round);
 }
 
 static CBox getOverviewDragWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,

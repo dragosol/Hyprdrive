@@ -294,6 +294,10 @@ static void registerConfigValues() {
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:mission_control", "lay the focused workspace out as a mission-control grid", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:mission_control_gap", "gap between mission-control grid tiles", 40, SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:shadow:enabled", "draw a shadow around each workspace card", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:shadow:range", "workspace card shadow range", -1));
@@ -379,6 +383,14 @@ int getWallpaperMode() {
 
 bool getBlur() {
     return getValue<bool>("plugin:scrolloverview:blur");
+}
+
+bool getMissionControl() {
+    return getValue<bool>("plugin:scrolloverview:mission_control");
+}
+
+int getMissionControlGap() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:mission_control_gap"));
 }
 
 ::Config::CCssGapData getCssGapData(const std::string& name) {
