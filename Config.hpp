@@ -98,6 +98,8 @@ int           getWallpaperMode();
 bool          getBlur();
 bool          getMissionControl();
 int           getMissionControlGap();
+bool          getTapSuper();
+int           getTapSuperTimeoutMs();
 ::Config::CCssGapData getCssGapData(const std::string& name);
 int          getShadowEnabled();
 int          getShadowRange();

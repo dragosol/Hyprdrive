@@ -292,6 +292,77 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
     return {};
 }
 
+// Tap-SUPER toggles the overview.
+//
+// This cannot live in a Lua bind: measured on 0.56.1, every bind form on
+// SUPER_L fires identically whether SUPER was tapped alone or held as a
+// modifier for another key, so a bind would open the overview on every
+// SUPER+<key> shortcut. The tap/hold distinction only exists at the raw key
+// event level.
+// ponytail: raw evdev keycodes; a remapped SUPER will not be recognised.
+static constexpr uint32_t EVDEV_KEY_LEFTMETA  = 125;
+static constexpr uint32_t EVDEV_KEY_RIGHTMETA = 126;
+
+// Only a real key cancels the tap. Modifier and lock keycodes must be ignored:
+// this compositor emits a synthetic CAPSLOCK (58) press/release pair around
+// every key event, which would otherwise cancel every tap before it completed.
+static bool isModifierKeycode(uint32_t keycode) {
+    switch (keycode) {
+        case 29:  // LEFTCTRL
+        case 42:  // LEFTSHIFT
+        case 54:  // RIGHTSHIFT
+        case 56:  // LEFTALT
+        case 58:  // CAPSLOCK
+        case 69:  // NUMLOCK
+        case 70:  // SCROLLLOCK
+        case 97:  // RIGHTCTRL
+        case 100: // RIGHTALT
+        case EVDEV_KEY_LEFTMETA:
+        case EVDEV_KEY_RIGHTMETA: return true;
+        default: return false;
+    }
+}
+
+static CHyprSignalListener g_pTapSuperKeyHook;
+static CHyprSignalListener g_pTapSuperButtonHook;
+static bool                g_tapSuperCandidate = false;
+static uint32_t            g_tapSuperPressedAt = 0;
+
+static void                registerTapSuper() {
+    g_pTapSuperKeyHook = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
+        const bool PRESSED = event.state == WL_KEYBOARD_KEY_STATE_PRESSED;
+        const bool ISSUPER = event.keycode == EVDEV_KEY_LEFTMETA || event.keycode == EVDEV_KEY_RIGHTMETA;
+
+        if (!ISSUPER) {
+            if (PRESSED && !isModifierKeycode(event.keycode))
+                g_tapSuperCandidate = false; // SUPER is being held as a modifier
+            return;
+        }
+
+        if (PRESSED) {
+            g_tapSuperCandidate = true;
+            g_tapSuperPressedAt = event.timeMs;
+            return;
+        }
+
+        if (!g_tapSuperCandidate)
+            return;
+        g_tapSuperCandidate = false;
+
+        if (!ScrollOverview::Config::getTapSuper())
+            return;
+
+        const auto TIMEOUT = ScrollOverview::Config::getTapSuperTimeoutMs();
+        if (TIMEOUT > 0 && event.timeMs - g_tapSuperPressedAt > static_cast<uint32_t>(TIMEOUT))
+            return;
+
+        onOverviewDispatcher("toggle all");
+    });
+
+    // SUPER+click/drag (move or resize a window) must not count as a tap.
+    g_pTapSuperButtonHook = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) { g_tapSuperCandidate = false; });
+}
+
 static SDispatchResult onNavigateDispatcher(std::string arg) {
     const auto OVERVIEW = activeScrollOverview();
     if (!OVERVIEW)
@@ -513,12 +584,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("window", ::onWindowDispatcher);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
+    registerTapSuper();
 
     return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", SCROLLOVERVIEW_VERSION};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("CScrollOverviewPassElement");
+
+    g_pTapSuperKeyHook.reset();
+    g_pTapSuperButtonHook.reset();
 
     g_unloading = true;
     clearScrollOverviews();
