@@ -386,15 +386,28 @@ static bool isSearchKey(uint32_t keycode) {
     if (!activeScrollOverview())
         return false;
 
-    if (keycode == EVDEV_KEY_BACKSPACE || keycode == EVDEV_KEY_ESC)
+    // X5: ESC is always ours while the overview is open -- it either clears the
+    // query or exits -- so it must never fall through to the window underneath.
+    if (keycode == EVDEV_KEY_ESC)
+        return true;
+
+    if (keycode == EVDEV_KEY_BACKSPACE)
         return !g_overviewSearch.empty();
 
     return searchCharFor(keycode) != 0;
 }
 
 static void applySearchKey(uint32_t keycode) {
-    if (keycode == EVDEV_KEY_ESC)
+    // X5, GNOME-style: the first ESC drops the filter, the next one leaves.
+    if (keycode == EVDEV_KEY_ESC) {
+        if (g_overviewSearch.empty()) {
+            for (const auto& overview : scrollOverviews())
+                if (overview)
+                    overview->close();
+            return;
+        }
         g_overviewSearch.clear();
+    }
     else if (keycode == EVDEV_KEY_BACKSPACE)
         g_overviewSearch.pop_back();
     else if (const char C = searchCharFor(keycode); C != 0)
