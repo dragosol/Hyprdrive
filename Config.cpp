@@ -298,6 +298,8 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:mission_control_gap", "gap between mission-control grid tiles", 40, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:mission_control_reflow_ms", "ms for a grid tile to travel to a new slot", 300, SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:tap_super", "tapping SUPER alone toggles the overview", true));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:tap_super_timeout_ms", "longest press-to-release still counted as a SUPER tap (0 = no limit)",
@@ -396,6 +398,10 @@ bool getMissionControl() {
 
 int getMissionControlGap() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:mission_control_gap"));
+}
+
+int getMissionControlReflowMs() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:mission_control_reflow_ms"));
 }
 
 bool getTapSuper() {

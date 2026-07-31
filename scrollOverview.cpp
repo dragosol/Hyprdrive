@@ -7,6 +7,7 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <unordered_map>
 #include <linux/input-event-codes.h>
 #include <state/WorkspaceState.hpp>
 #define private public
@@ -378,6 +379,70 @@ static CBox overviewGridLerpBox(const CBox& from, const CBox& to, float t) {
     };
 }
 
+// The grid is recomputed from the live window list every frame, so a window
+// joining or leaving the focused workspace would teleport every other tile
+// straight to its new slot. Each window keeps its own reflow clock: when its
+// target slot changes it travels there over mission_control_reflow_ms.
+// OVERVIEW_CPP_SPEC B4 + user requirement U4.
+struct SGridReflow {
+    PHLWINDOWREF    window;
+    CBox            from;
+    CBox            to;
+    Time::steady_tp start;
+};
+
+static std::unordered_map<Desktop::View::CWindow*, SGridReflow> g_gridReflows;
+static bool                                      g_gridReflowActive = false;
+
+// Ease-out cubic: same shape as the open/close animation measured under A2-A4.
+static float gridReflowEase(float t) {
+    const float INV = 1.F - std::clamp(t, 0.F, 1.F);
+    return 1.F - INV * INV * INV;
+}
+
+static bool gridBoxesDiffer(const CBox& a, const CBox& b) {
+    return std::abs(a.x - b.x) > 0.5 || std::abs(a.y - b.y) > 0.5 || std::abs(a.w - b.w) > 0.5 || std::abs(a.h - b.h) > 0.5;
+}
+
+// Called from getOverviewWindowBox, i.e. many times per window per frame from
+// render, hit-test and drag alike. Restarting only when the *target* moves keeps
+// it idempotent within a frame, so those call sites cannot disagree.
+static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot) {
+    const int DURATION = ScrollOverview::Config::getMissionControlReflowMs();
+    if (DURATION <= 0)
+        return slot;
+
+    const auto NOW = Time::steadyNow();
+
+    if (g_gridReflows.size() > 64)
+        std::erase_if(g_gridReflows, [](const auto& entry) { return !entry.second.window.lock(); });
+
+    auto& entry = g_gridReflows[window.get()];
+
+    // Also catches a recycled address handing a new window a dead window's slot.
+    if (entry.window.lock() != window) {
+        entry = SGridReflow{window, slot, slot, NOW};
+        return slot;
+    }
+
+    const float ELAPSED = std::chrono::duration<float, std::milli>(NOW - entry.start).count();
+    const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
+    const CBox  CURRENT = overviewGridLerpBox(entry.from, entry.to, T);
+
+    if (gridBoxesDiffer(slot, entry.to)) {
+        entry.from  = CURRENT; // retarget from where the tile actually is
+        entry.to    = slot;
+        entry.start = NOW;
+        g_gridReflowActive = true;
+        return CURRENT;
+    }
+
+    if (T < 1.F)
+        g_gridReflowActive = true;
+
+    return CURRENT;
+}
+
 static Vector2D axisOffsetVector(float offset, ScrollOverview::Config::ELayout layout);
 
 static CBox getOverviewBox(CBox box, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
@@ -406,7 +471,7 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
     auto geometry = window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
     if (CBox slot; overviewGridSlot(window, monitor, slot))
-        geometry = overviewGridLerpBox(geometry, slot, overviewGridProgress(scale));
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, slot), overviewGridProgress(scale));
 
     return getOverviewGlobalBox(geometry, monitor, scale, viewOffset, offset, layout, round);
 }
@@ -4940,6 +5005,18 @@ void CScrollOverview::close() {
 void CScrollOverview::onPreRender() {
     if (pMonitor)
         pMonitor->m_solitaryClient.reset();
+
+    // A grid reflow runs on a wall clock, not a Hyprland animation variable, so
+    // nothing else asks for the next frame. Damaging here rather than at the end
+    // of render() is what the animation manager does, and is the difference
+    // between the reflow rendering at 60fps and at 20fps. The flag is re-set
+    // while this frame evaluates its boxes, so the chain stops on its own.
+    if (g_gridReflowActive) {
+        g_gridReflowActive = false;
+        damage();
+        if (pMonitor)
+            pMonitor->scheduleFrame(Aquamarine::IOutput::AQ_SCHEDULE_ANIMATION_DAMAGE);
+    }
 
     forceLayersAboveFullscreen();
     updateWorkspaceOverflow();
