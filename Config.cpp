@@ -291,6 +291,13 @@ static void registerConfigValues() {
                                   makeShared<CIntValue>("plugin:scrolloverview:input:drag_threshold", "overview drag threshold", 10,
                                                         SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:drag_mini_scale",
+                                                          "size of the drag proxy while it hovers another workspace, as a fraction of its tile size", 0.45F,
+                                                          SFloatValueOptions{.min = 0.05F, .max = 1.F}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:drag_mini_ms", "ms for the drag proxy to shrink to, or grow back from, mini scale", 150,
+                                                        SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -402,6 +409,14 @@ int getMissionControlGap() {
 
 int getMissionControlReflowMs() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:mission_control_reflow_ms"));
+}
+
+float getDragMiniScale() {
+    return std::clamp(getValue<float>("plugin:scrolloverview:drag_mini_scale"), 0.05F, 1.F);
+}
+
+int getDragMiniMs() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:drag_mini_ms"));
 }
 
 bool getTapSuper() {

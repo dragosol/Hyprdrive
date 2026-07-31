@@ -2611,6 +2611,24 @@ CBox CScrollOverview::draggedWindowBoxFor(PHLWINDOW window, size_t workspaceIdx,
     return box;
 }
 
+// D'1/D'2: the drag proxy is main-tile sized over its own workspace and shrinks
+// to mini scale while it hovers a foreign one, so a drop target reads as a target
+// before the button comes up. Wall clock like the grid reflow, so a motionless
+// cursor still finishes the shrink.
+float CScrollOverview::dragMiniProgress() const {
+    const int   DURATION = ScrollOverview::Config::getDragMiniMs();
+    const float TARGET   = dragMiniOver ? 1.F : 0.F;
+    if (DURATION <= 0)
+        return TARGET;
+
+    const float ELAPSED = std::chrono::duration<float, std::milli>(Time::steadyNow() - dragMiniChangedAt).count();
+    const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
+    if (T < 1.F)
+        g_gridReflowActive = true; // rides the overview's existing next-frame request
+
+    return dragMiniFrom + (TARGET - dragMiniFrom) * T;
+}
+
 CBox CScrollOverview::draggedWindowGlobalBox() const {
     const auto WINDOW  = getOverviewWindowToShow(dragActiveWindow.lock());
     const auto MONITOR = pMonitor.lock();
@@ -2625,7 +2643,8 @@ CBox CScrollOverview::draggedWindowGlobalBox() const {
         workspaceOverviewOffset(WORKSPACEIDX, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
     const auto SOURCEBOX =
         getOverviewDragWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, false);
-    const auto GLOBALSIZE = SOURCEBOX.size() * (1.F / std::max(MONITOR->m_scale, 0.01F));
+    const float MINI       = 1.F - dragMiniProgress() * (1.F - ScrollOverview::Config::getDragMiniScale());
+    const auto  GLOBALSIZE = SOURCEBOX.size() * (1.F / std::max(MONITOR->m_scale, 0.01F)) * MINI;
     const auto CURSOR     = g_pInputManager->getMouseCoordsInternal();
 
     return {
@@ -2744,6 +2763,10 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window) {
         dragGrabRatio       = Vector2D{0.5, 0.5};
     }
 
+    dragMiniOver      = false;
+    dragMiniFrom      = 0.F;
+    dragMiniChangedAt = Time::steadyNow();
+
     updateWindowDrag();
 }
 
@@ -2775,6 +2798,14 @@ void CScrollOverview::beginWindowResize() {
 void CScrollOverview::updateWindowDrag() {
     if (!dragActiveWindow)
         return;
+
+    size_t     dropWorkspaceIdx = 0;
+    const auto DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx, getOverviewWindowToShow(dragActiveWindow.lock()));
+    if (const bool OVERFOREIGN = DROPWORKSPACE && DROPWORKSPACE != dragOriginalWorkspace.lock(); OVERFOREIGN != dragMiniOver) {
+        dragMiniFrom      = dragMiniProgress(); // from where it actually is, not from the end
+        dragMiniOver      = OVERFOREIGN;
+        dragMiniChangedAt = Time::steadyNow();
+    }
 
     for (const auto& overview : scrollOverviews()) {
         if (!overview)
