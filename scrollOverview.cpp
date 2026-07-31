@@ -4407,6 +4407,60 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     }
 }
 
+// OVERVIEW_CPP_SPEC §5 F1. The typed query, as a HUD pill. F2 already filters
+// correctly; what was missing was any way to see what you typed, or to tell an
+// empty query apart from one that matches nothing.
+// ponytail: fixed bottom-centre anchor and fixed 22px type, no config keys.
+// Add them if the pill ever needs to live somewhere else.
+void CScrollOverview::renderSearch(PHLMONITOR monitor) {
+    if (!monitor || g_overviewSearch.empty())
+        return;
+
+    // Counted across every workspace, not just the focused one: the strip shows
+    // matching minis from elsewhere, so "no matches" has to agree with that.
+    size_t matches = 0;
+    for (const auto& wimg : images) {
+        if (wimg && wimg->pWorkspace)
+            matches += overviewGridWindows(wimg->pWorkspace).size();
+    }
+
+    const bool        EMPTYRESULT = matches == 0;
+    const std::string LABEL       = EMPTYRESULT ? g_overviewSearch + "    no matches" : g_overviewSearch;
+
+    const float SCALE  = std::max<float>(monitor->m_scale, 0.01F);
+    const int   FONTPX = std::max(1, sc<int>(std::round(22.F * SCALE)));
+    const float PADX   = std::round(28.F * SCALE);
+    const float PADY   = std::round(14.F * SCALE);
+
+    const CHyprColor FG  = EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F};
+    const auto       TEX = g_pHyprRenderer->renderText(LABEL, FG, FONTPX, false, "", sc<int>(std::round(monitor->m_size.x * SCALE / 2.F)));
+    if (!TEX || !TEX->ok())
+        return;
+
+    CBox pill;
+    pill.width  = sc<float>(TEX->m_size.x) + PADX * 2.F;
+    pill.height = sc<float>(TEX->m_size.y) + PADY * 2.F;
+    pill.x      = std::round((sc<float>(monitor->m_size.x) * SCALE - pill.width) / 2.F);
+    pill.y      = std::round(sc<float>(monitor->m_size.y) * SCALE * 0.94F - pill.height);
+    pill.round();
+
+    CRectPassElement::SRectData bg;
+    bg.box           = pill;
+    bg.color         = CHyprColor{0.F, 0.F, 0.F, 0.60F};
+    bg.round         = sc<int>(std::round(pill.height / 2.F));
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+
+    CBox textBox = {pill.x + PADX, pill.y + PADY, sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
+    textBox.round();
+
+    CTexPassElement::SRenderData data;
+    data.tex = TEX;
+    data.box = textBox;
+    data.a   = 1.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+}
+
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
     auto*      dragOwner = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
     const auto WINDOW    = getOverviewWindowToShow(dragOwner->dragActiveWindow.lock());
@@ -5432,6 +5486,7 @@ void CScrollOverview::render() {
     renderStrip(MONITOR, SCALE, NOW);
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
     renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
+    renderSearch(MONITOR);
 
     for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
         for (auto const& ls : MONITOR->m_layerSurfaceLayers[LAYER]) {
