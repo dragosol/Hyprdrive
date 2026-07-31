@@ -1391,6 +1391,17 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             if (!shouldRunDefaultClickAction(button))
                 return;
 
+            // E6: the strip band floats above the main tiles, so it has to be
+            // tested before them, exactly as the drop path does. Focusing a
+            // desktop from the strip KEEPS the overview open (GNOME thumbnail
+            // row); clicking a window tile still closes it.
+            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+            size_t stripIdx   = viewportCurrentWorkspace;
+            if (const auto STRIPWORKSPACE = workspaceAtStripPoint(lastMousePosLocal, &stripIdx); STRIPWORKSPACE) {
+                focusOverviewWorkspace(STRIPWORKSPACE, stripIdx);
+                return;
+            }
+
             selectHoveredWorkspace();
             selectWindowAtOverviewCursor(true);
             close();
@@ -2570,24 +2581,27 @@ bool CScrollOverview::selectWindowAtOverviewCursor(bool syncFocus) {
     return selectOverviewWindow(window, workspaceIdx, syncFocus);
 }
 
-void CScrollOverview::selectHoveredWorkspace() {
-    lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-
-    size_t     workspaceIdx = viewportCurrentWorkspace;
-    const auto WORKSPACE    = workspaceAtOverviewCursor(&workspaceIdx);
-    if (!WORKSPACE)
+void CScrollOverview::focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx) {
+    if (!workspace)
         return;
 
     closeOnWindow.reset();
     viewportCurrentWorkspace = workspaceIdx;
 
-    if (pMonitor && pMonitor->m_activeWorkspace != WORKSPACE) {
+    if (pMonitor && pMonitor->m_activeWorkspace != workspace) {
         if (focusSyncedFromWorkspaceID == WORKSPACE_INVALID)
             focusSyncedFromWorkspaceID = pMonitor->m_activeWorkspace ? pMonitor->m_activeWorkspace->m_id : WORKSPACE_INVALID;
-        pMonitor->changeWorkspace(WORKSPACE, false, true, true);
+        pMonitor->changeWorkspace(workspace, false, true, true);
     }
 
     damage();
+}
+
+void CScrollOverview::selectHoveredWorkspace() {
+    lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+    size_t     workspaceIdx = viewportCurrentWorkspace;
+    focusOverviewWorkspace(workspaceAtOverviewCursor(&workspaceIdx), workspaceIdx);
 }
 
 bool CScrollOverview::windowDispatcherAction(const std::string& action) {

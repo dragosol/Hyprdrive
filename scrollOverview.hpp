@@ -73,6 +73,7 @@ class CScrollOverview : public IOverview {
     CBox         stripCellLogicalBox(size_t workspaceIdx) const;
     CBox         stripCellBox(size_t workspaceIdx, PHLMONITOR monitor, float renderScale) const;
     PHLWORKSPACE workspaceAtStripPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx = nullptr) const;
+    void         focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx);
     void         renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now);
     void         renderSearch(PHLMONITOR monitor);
     void   moveViewportWorkspace(bool up);
