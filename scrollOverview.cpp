@@ -1449,13 +1449,18 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 return;
 
             // E6: the strip band floats above the main tiles, so it has to be
-            // tested before them, exactly as the drop path does. Focusing a
-            // desktop from the strip KEEPS the overview open (GNOME thumbnail
-            // row); clicking a window tile still closes it.
+            // tested before them, exactly as the drop path does.
+            //
+            // E8-b: clicking a desktop -- on the strip or adjacent on screen --
+            // switches to it AND exits. This used to keep the overview open for
+            // strip clicks, which spec 13.1 now calls a defect rather than a
+            // design choice. focusOverviewWorkspace changes the workspace, so the
+            // viewport slide starts before the close animation takes over.
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
             size_t stripIdx   = viewportCurrentWorkspace;
             if (const auto STRIPWORKSPACE = workspaceAtStripPoint(lastMousePosLocal, &stripIdx); STRIPWORKSPACE) {
                 focusOverviewWorkspace(STRIPWORKSPACE, stripIdx);
+                close();
                 return;
             }
 
