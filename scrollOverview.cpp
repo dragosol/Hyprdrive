@@ -1203,6 +1203,7 @@ CScrollOverview::~CScrollOverview() {
     restoreForcedWindowVisibility();
     restoreForcedLayerVisibility();
     images.clear(); // otherwise we get a vram leak
+    trailingWorkspace.reset();
     if (scrollOverviews().empty())
         Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
     if (const auto MONITOR = pMonitor.lock())
@@ -2044,7 +2045,44 @@ float CScrollOverview::workspaceOverviewAlpha(size_t workspaceIdx) const {
     return std::clamp(workspaceInsertFadeProgress->value(), 0.F, 1.F);
 }
 
+// ponytail: E2 keeps the GNOME invariant "the highest-id workspace is empty" by
+// creating the real workspace, not a phantom strip card. The strong ref below is
+// the only thing keeping it alive -- Hyprland reaps empty workspaces the moment
+// nothing owns them -- so closing the overview cleans it up for free.
+void CScrollOverview::ensureTrailingWorkspace() {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || closing)
+        return;
+
+    WORKSPACEID  maxID = 0;
+    PHLWORKSPACE last;
+    for (const auto& w : State::workspaceState()->workspaces()) {
+        const auto WORKSPACE = w.lock();
+        if (!valid(WORKSPACE) || WORKSPACE->m_monitor != MONITOR || WORKSPACE->m_isSpecialWorkspace)
+            continue;
+
+        if (!last || WORKSPACE->m_id > maxID) {
+            maxID = WORKSPACE->m_id;
+            last  = WORKSPACE;
+        }
+    }
+
+    if (!last)
+        return;
+
+    if (last->getWindowCount() == 0) {
+        // Something is already trailing-empty. If it is not ours, stop paying for
+        // ours: two trailing empties is not the GNOME behaviour.
+        if (trailingWorkspace != last)
+            trailingWorkspace.reset();
+        return;
+    }
+
+    trailingWorkspace = State::workspaceState()->create(maxID + 1, MONITOR->m_id, std::to_string(maxID + 1));
+}
+
 void CScrollOverview::rebuildWorkspaceImages() {
+    ensureTrailingWorkspace();
     const auto selectedWorkspace = closeOnWindow ? closeOnWindow->m_workspace : startedOn;
     const auto selectedWindow    = closeOnWindow;
     const auto viewportWorkspace = viewportCurrentWorkspace < images.size() ? images[viewportCurrentWorkspace]->pWorkspace : startedOn;
