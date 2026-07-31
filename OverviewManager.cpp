@@ -4,9 +4,21 @@
 
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 
 static std::vector<SP<IOverview>> g_scrollOverviews;
+
+// Tells the shell (quickshell ii) to reveal bar + dock while the overview is up.
+// ponytail: one bool over the existing event socket, no new IPC channel.
+static void emitOverviewState() {
+    static bool lastOpen = false;
+    const bool  OPEN     = !g_scrollOverviews.empty();
+    if (OPEN == lastOpen || !g_pEventManager)
+        return;
+    lastOpen = OPEN;
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = "scrolloverview", .data = OPEN ? "1" : "0"});
+}
 
 const std::vector<SP<IOverview>>& scrollOverviews() {
     return g_scrollOverviews;
@@ -53,6 +65,7 @@ void registerScrollOverview(const SP<IOverview>& overview) {
 
     g_scrollOverviews.emplace_back(overview);
     g_pScrollOverview = overview;
+    emitOverviewState();
 }
 
 void unregisterScrollOverview(IOverview* overview) {
@@ -61,11 +74,13 @@ void unregisterScrollOverview(IOverview* overview) {
 
     std::erase_if(g_scrollOverviews, [overview](const auto& candidate) { return candidate.get() == overview; });
     g_pScrollOverview = activeScrollOverview();
+    emitOverviewState();
 }
 
 void clearScrollOverviews() {
     auto overviews = std::move(g_scrollOverviews);
     g_scrollOverviews.clear();
     g_pScrollOverview.reset();
+    emitOverviewState();
     overviews.clear();
 }
