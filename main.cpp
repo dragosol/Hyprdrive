@@ -2,6 +2,8 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -12,6 +14,9 @@
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
+#include <hyprland/src/devices/IKeyboard.hpp>
+#include <xkbcommon/xkbcommon.h>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
 
@@ -239,6 +244,7 @@ static bool openOverview(PHLMONITOR monitor) {
 }
 
 static SDispatchResult onOverviewDispatcher(std::string arg) {
+    g_overviewSearch.clear(); // every open starts unfiltered
     const auto [ACTION, TARGET] = splitOverviewArg(arg);
     const auto ACTIVE           = activeScrollOverview();
 
@@ -323,6 +329,82 @@ static bool isModifierKeycode(uint32_t keycode) {
     }
 }
 
+static constexpr uint32_t EVDEV_KEY_ESC       = 1;
+static constexpr uint32_t EVDEV_KEY_BACKSPACE = 14;
+
+static xkb_state* activeXkbState() {
+    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+    return KEEB ? KEEB->m_xkbState : nullptr;
+}
+
+// SUPER, CTRL and ALT must keep their chords working while the overview is
+// open, so a key pressed with one of them held is never search input.
+//
+// Tracked from the raw key stream rather than read from xkb: xkb was measured
+// reporting logo=0 for the Z press of a SUPER+Z chord in this VM (see
+// share/f_guard_fix.py). Shift is deliberately absent -- it types.
+static bool isGuardModifierKeycode(uint32_t keycode) {
+    switch (keycode) {
+        case 29:  // LEFTCTRL
+        case 56:  // LEFTALT
+        case 97:  // RIGHTCTRL
+        case 100: // RIGHTALT
+        case EVDEV_KEY_LEFTMETA:
+        case EVDEV_KEY_RIGHTMETA: return true;
+        default: return false;
+    }
+}
+
+static int g_heldGuardModifiers = 0;
+
+// The character this keycode would type, or 0 if it types nothing. Returns 0
+// whenever a guard modifier is held so SUPER+Q stays a keybind instead of
+// becoming the letter q.
+static char searchCharFor(uint32_t keycode) {
+    if (g_heldGuardModifiers > 0)
+        return 0;
+
+    const auto STATE = activeXkbState();
+    if (!STATE)
+        return 0;
+
+    char buf[8] = {};
+    // ponytail: ASCII only. Anything wider is an input-method problem, not a
+    // filter problem; revisit if the rice ever needs non-Latin search.
+    if (xkb_state_key_get_utf8(STATE, keycode + 8, buf, sizeof(buf)) != 1)
+        return 0;
+
+    return buf[0] >= 0x20 && buf[0] < 0x7F ? buf[0] : 0;
+}
+
+// OVERVIEW_CPP_SPEC §5 F5. The overview is not a wayland client and takes no
+// keyboard focus, so the query is assembled from the raw key stream and those
+// events are cancelled to keep them out of the focused window underneath.
+// Decided from keycode and modifier state alone so a press and its release
+// always agree, and no half-consumed key leaks a stray release downstream.
+static bool isSearchKey(uint32_t keycode) {
+    if (!activeScrollOverview())
+        return false;
+
+    if (keycode == EVDEV_KEY_BACKSPACE || keycode == EVDEV_KEY_ESC)
+        return !g_overviewSearch.empty();
+
+    return searchCharFor(keycode) != 0;
+}
+
+static void applySearchKey(uint32_t keycode) {
+    if (keycode == EVDEV_KEY_ESC)
+        g_overviewSearch.clear();
+    else if (keycode == EVDEV_KEY_BACKSPACE)
+        g_overviewSearch.pop_back();
+    else if (const char C = searchCharFor(keycode); C != 0)
+        g_overviewSearch.push_back(C);
+
+    for (const auto& overview : scrollOverviews())
+        if (overview)
+            overview->damage();
+}
+
 static CHyprSignalListener g_pTapSuperKeyHook;
 static CHyprSignalListener g_pTapSuperButtonHook;
 static bool                g_tapSuperCandidate = false;
@@ -332,6 +414,20 @@ static void                registerTapSuper() {
     g_pTapSuperKeyHook = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
         const bool PRESSED = event.state == WL_KEYBOARD_KEY_STATE_PRESSED;
         const bool ISSUPER = event.keycode == EVDEV_KEY_LEFTMETA || event.keycode == EVDEV_KEY_RIGHTMETA;
+
+        if (isGuardModifierKeycode(event.keycode)) {
+            // Clamped, not just decremented: a modifier released while its
+            // press went to someone else would otherwise strand the count
+            // negative and disable search for the rest of the session.
+            g_heldGuardModifiers = std::max(0, g_heldGuardModifiers + (PRESSED ? 1 : -1));
+        }
+
+        if (!ISSUPER && isSearchKey(event.keycode)) {
+            info.cancelled = true;
+            if (PRESSED)
+                applySearchKey(event.keycode);
+            return;
+        }
 
         if (!ISSUPER) {
             if (PRESSED && !isModifierKeycode(event.keycode))

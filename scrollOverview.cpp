@@ -161,6 +161,25 @@ static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     return window;
 }
 
+// OVERVIEW_CPP_SPEC §5 F2. Case-insensitive substring over title and class.
+static bool overviewSearchMatches(const PHLWINDOW& window) {
+    if (g_overviewSearch.empty())
+        return true;
+
+    const auto LOWER = [](std::string s) {
+        std::ranges::transform(s, s.begin(), [](unsigned char c) { return std::tolower(c); });
+        return s;
+    };
+
+    const auto NEEDLE = LOWER(g_overviewSearch);
+    return LOWER(window->m_title).contains(NEEDLE) || LOWER(window->m_class).contains(NEEDLE);
+}
+
+// The search filter hangs off this gate rather than off the grid builder: every
+// overview path (render, hit-test, drag, grid) already consults it, so they
+// cannot disagree about which windows exist. Dropping a window from the gate
+// removes it from the grid too, and the survivors re-lay-out through the U4
+// reflow animation at no extra cost.
 static bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     const auto WINDOW = getOverviewWindowToShow(window);
 
@@ -168,6 +187,9 @@ static bool shouldShowOverviewWindow(const PHLWINDOW& window) {
         return false;
 
     if (WINDOW->m_pinned && WINDOW->m_isFloating)
+        return false;
+
+    if (!overviewSearchMatches(WINDOW))
         return false;
 
     return true;
