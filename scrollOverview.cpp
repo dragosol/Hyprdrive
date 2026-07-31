@@ -276,6 +276,40 @@ static std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace)
     return windows;
 }
 
+// OVERVIEW_CPP_SPEC §5 B2. With a query typed, matches from every workspace join
+// the ACTIVE workspace's grid. A promoted window keeps living in its own
+// workspace's window list and is still drawn in that workspace's pass; what
+// changes is that its box comes from the active grid and is placed at the active
+// card's offset. Done here rather than by shuffling windows between the
+// per-workspace loops so the B1 invariant holds: render, hit-test and drag all
+// still read the same getOverviewWindowBox and cannot disagree.
+static bool overviewGridPromoted(const PHLWINDOW& window, PHLMONITOR monitor) {
+    if (g_overviewSearch.empty() || !ScrollOverview::Config::getMissionControl() || !window || !monitor)
+        return false;
+
+    if (window->m_monitor != monitor)
+        return false;
+
+    const auto WORKSPACE = window->m_workspace;
+    return WORKSPACE && WORKSPACE != monitor->m_activeWorkspace && shouldShowOverviewWindow(window);
+}
+
+// Membership of the MAIN grid. Identical to overviewGridWindows for an empty
+// query. The strip deliberately keeps the workspace-scoped list: its minis and
+// its "no matches" count both need the per-cell answer.
+static std::vector<PHLWINDOW> overviewMainGridWindows(const PHLWORKSPACE& workspace, PHLMONITOR monitor) {
+    auto windows = overviewGridWindows(workspace);
+    if (g_overviewSearch.empty() || !monitor)
+        return windows;
+
+    for (const auto& window : Desktop::windowState()->windows()) {
+        if (getOverviewWindowToShow(window) == window && overviewGridPromoted(window, monitor))
+            windows.emplace_back(window);
+    }
+
+    return windows;
+}
+
 static Vector2D overviewGridWindowSize(const PHLWINDOW& window) {
     return window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT).size();
 }
@@ -297,7 +331,7 @@ static float overviewStripLogicalHeight(PHLMONITOR monitor) {
 // ponytail: recomputed per window per frame, O(windows^2) on the focused
 // workspace. Fine at desktop counts; memoise per frame if it ever shows up.
 static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor, const PHLWINDOW& target, CBox& out) {
-    const auto WINDOWS = overviewGridWindows(workspace);
+    const auto WINDOWS = overviewMainGridWindows(workspace, monitor);
     const auto TARGETIT = std::ranges::find(WINDOWS, target);
     if (TARGETIT == WINDOWS.end())
         return false;
@@ -398,10 +432,14 @@ static bool overviewGridSlot(const PHLWINDOW& window, PHLMONITOR monitor, CBox& 
         return false;
 
     const auto WORKSPACE = window->m_workspace;
-    if (!WORKSPACE || WORKSPACE != monitor->m_activeWorkspace)
+    if (!WORKSPACE)
         return false;
 
-    return overviewGridLayout(WORKSPACE, monitor, window, out);
+    // A promoted window is laid out in the ACTIVE workspace's grid, not its own.
+    if (WORKSPACE != monitor->m_activeWorkspace && !overviewGridPromoted(window, monitor))
+        return false;
+
+    return overviewGridLayout(monitor->m_activeWorkspace, monitor, window, out);
 }
 
 // 0 while the overview is closed, 1 once it is fully open, so windows travel
@@ -514,8 +552,14 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
 
     auto geometry = window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
-    if (CBox slot; overviewGridSlot(window, monitor, slot))
+    if (CBox slot; overviewGridSlot(window, monitor, slot)) {
         geometry = overviewGridLerpBox(geometry, gridReflowBox(window, slot), overviewGridProgress(scale));
+
+        // The active card sits at offset 0. A promoted tile must ignore the
+        // caller's per-workspace offset or it lands off-screen beside it.
+        if (overviewGridPromoted(window, monitor))
+            offset = 0.F;
+    }
 
     return getOverviewGlobalBox(geometry, monitor, scale, viewOffset, offset, layout, round);
 }
@@ -4195,8 +4239,17 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch);
     const auto WORKSPACEBOX     = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
     const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, renderScale, monitor);
+    const bool WORKSPACEVISIBLE = overviewBoxIntersectsMonitor(VISIBLEBOX, monitor);
 
-    if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor))
+    // B2: a promoted tile is drawn here, in its own workspace's pass — that is
+    // where the m_visible / m_forceRendering override below lives — but at the
+    // active card's offset. So an off-screen workspace still has to be walked.
+    const auto ACTIVECARDBOX = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), 0.F, layout);
+    const bool HASPROMOTED   = !WORKSPACEVISIBLE && std::ranges::any_of(workspaceImage->windows, [&](const auto& ref) {
+        return overviewGridPromoted(getOverviewWindowToShow(ref.lock()), monitor);
+    });
+
+    if (!WORKSPACEVISIBLE && !HASPROMOTED)
         return;
 
     const auto workspace         = workspaceImage->pWorkspace;
@@ -4216,11 +4269,15 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         if (dragActiveWindow && window == getOverviewWindowToShow(dragActiveWindow.lock()))
             return;
 
+        const bool PROMOTED = overviewGridPromoted(window, monitor);
+        if (!WORKSPACEVISIBLE && !PROMOTED)
+            return;
+
         const auto windowBox = getOverviewWindowBox(window, monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
         if (!overviewBoxIntersectsMonitor(windowBox, monitor))
             return;
 
-        renderWindowLive(monitor, window, windowBox, renderScale, now, &WORKSPACEBOX);
+        renderWindowLive(monitor, window, windowBox, renderScale, now, PROMOTED ? &ACTIVECARDBOX : &WORKSPACEBOX);
     };
 
     const auto fullscreenWindow = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(workspace));
@@ -4268,7 +4325,8 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
 
             renderOverviewWindow(window);
         }
-        renderDropIndicator();
+        if (WORKSPACEVISIBLE)
+            renderDropIndicator();
         return;
     }
 
@@ -4284,7 +4342,8 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
 
     renderWindowsByState(false);
     renderWindowsByState(true);
-    renderDropIndicator();
+    if (WORKSPACEVISIBLE)
+        renderDropIndicator();
 }
 
 CBox CScrollOverview::stripCellLogicalBox(size_t workspaceIdx) const {
@@ -4508,7 +4567,9 @@ bool CScrollOverview::hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t
         const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch);
         const auto WORKSPACEBOX     = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
         const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, renderScale, monitor);
-        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor))
+        // B2: with a query typed, an off-screen workspace can still own a
+        // promoted tile drawn on the active card, so it must not be culled here.
+        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor) && g_overviewSearch.empty())
             continue;
 
         const auto workspace = workspaceImage->pWorkspace;
