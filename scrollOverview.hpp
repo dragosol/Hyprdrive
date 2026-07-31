@@ -73,6 +73,8 @@ class CScrollOverview : public IOverview {
     CBox         stripCellLogicalBox(size_t workspaceIdx) const;
     CBox         stripCellBox(size_t workspaceIdx, PHLMONITOR monitor, float renderScale) const;
     PHLWORKSPACE workspaceAtStripPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx = nullptr) const;
+    CBox         stripMiniBox(const CBox& cell, PHLWINDOW window, PHLMONITOR monitor) const;
+    PHLWINDOW    windowAtStripPoint(const Vector2D& point, CBox* miniBox = nullptr) const;
     void         focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx);
     void         renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now);
     void         renderSearch(PHLMONITOR monitor);
@@ -108,7 +110,7 @@ class CScrollOverview : public IOverview {
     CBox      draggedWindowGlobalBox() const;
     void      refreshDragOriginalOverviewBoxes();
     void      clearDragPending();
-    void      beginWindowDrag(PHLWINDOW window);
+    void      beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOrigin = nullptr);
     void      updateWindowDrag();
     void      endWindowDrag();
     float     dragMiniProgress() const;

@@ -1312,6 +1312,18 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         info.cancelled = true;
         requestInputFrame();
 
+        // D6: a drag that STARTS on a strip mini picks up that window, not
+        // whatever main tile the band happens to float over. Same ordering as
+        // the drop path and E6's click path.
+        const auto beginDragAtStart = [this]() {
+            CBox       mini;
+            const auto STRIPWINDOW = windowAtStripPoint(dragStartMouseLocal, &mini);
+            if (STRIPWINDOW)
+                beginWindowDrag(STRIPWINDOW, &mini);
+            else
+                beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
+        };
+
         if (submapMouseClickPending) {
             const bool DRAGTHRESHOLDREACHED = dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ;
 
@@ -1320,7 +1332,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 submapMouseClickButton  = 0;
 
                 if (!INVERT_DRAG_MODE)
-                    beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
+                    beginDragAtStart();
                 else
                     beginScrollingPanAtPoint(dragStartMouseLocal);
             }
@@ -1335,14 +1347,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && INVERT_DRAG_MODE && !dragActiveWindow && DRAGTHRESHOLDREACHED) {
                 submapMouseClickPending = false;
                 submapMouseClickButton  = 0;
-                beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
+                beginDragAtStart();
             }
         }
 
         if (dragPendingPrimary) {
             if (!dragActiveWindow && !scrollingPanPointerDown && dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ) {
                 if (!INVERT_DRAG_MODE) {
-                    beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
+                    beginDragAtStart();
                 } else
                     beginScrollingPanAtPoint(dragStartMouseLocal);
             }
@@ -2825,7 +2837,7 @@ CBox CScrollOverview::resizedWindowBox() const {
     return clampResizedOverviewBoxToWorkspace(box, WORKSPACEBOX, resizeCorner, BORDERMARGIN);
 }
 
-void CScrollOverview::beginWindowDrag(PHLWINDOW window) {
+void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOrigin) {
     const auto WINDOW = getOverviewWindowToShow(window);
     if (!shouldShowOverviewWindow(WINDOW) || !WINDOW->layoutTarget())
         return;
@@ -2836,8 +2848,11 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window) {
     size_t workspaceIdx = viewportCurrentWorkspace;
     for (size_t i = 0; i < images.size(); ++i) {
         if (images[i]->pWorkspace == WINDOW->m_workspace) {
-            viewportCurrentWorkspace = i;
-            workspaceIdx              = i;
+            // D6: a strip grab must NOT drag the main view onto the mini's
+            // workspace — the whole point is to pull the window out of there.
+            if (!stripMiniOrigin)
+                viewportCurrentWorkspace = i;
+            workspaceIdx = i;
             break;
         }
     }
@@ -2856,7 +2871,11 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window) {
     const auto MONITOR = pMonitor.lock();
     if (MONITOR && workspaceIdx < images.size()) {
         const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
-        const auto WINDOWBOX       = getOverviewDragWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
+        // D1 stays cursor-anchored for a strip grab too: the ratio has to come
+        // from the mini the cursor actually pressed, not from the tile the
+        // window would occupy in a card that may be off-screen.
+        const auto WINDOWBOX       = stripMiniOrigin ? *stripMiniOrigin :
+                                                       getOverviewDragWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
         dragGrabOffsetLocal        = dragStartMouseLocal - WINDOWBOX.pos();
         dragGrabRatio              = Vector2D{
             WINDOWBOX.width > 0.0 ? dragGrabOffsetLocal.x / WINDOWBOX.width : 0.5,
@@ -2870,8 +2889,10 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window) {
         dragGrabRatio       = Vector2D{0.5, 0.5};
     }
 
-    dragMiniOver      = false;
-    dragMiniFrom      = 0.F;
+    // A strip grab is already at mini scale, so it starts there and grows on the
+    // way into the main area instead of popping to full size for one frame.
+    dragMiniOver      = stripMiniOrigin != nullptr;
+    dragMiniFrom      = dragMiniOver ? 1.F : 0.F;
     dragMiniChangedAt = Time::steadyNow();
 
     updateWindowDrag();
@@ -2908,7 +2929,14 @@ void CScrollOverview::updateWindowDrag() {
 
     size_t     dropWorkspaceIdx = 0;
     const auto DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx, getOverviewWindowToShow(dragActiveWindow.lock()));
-    if (const bool OVERFOREIGN = DROPWORKSPACE && DROPWORKSPACE != dragOriginalWorkspace.lock(); OVERFOREIGN != dragMiniOver) {
+
+    // D'1/D'2: mini scale means "over a strip cell or a foreign card", i.e.
+    // anywhere that is not the main area. Keyed off the VIEWPORT workspace, not
+    // the drag's origin — for a D6 strip grab the origin is foreign by
+    // definition, and keying off it would keep the proxy shrunk all the way
+    // into the main area. Identical for a main-grid grab, where the two agree.
+    const auto VIEWPORTWORKSPACE = viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
+    if (const bool OVERFOREIGN = DROPWORKSPACE && DROPWORKSPACE != VIEWPORTWORKSPACE; OVERFOREIGN != dragMiniOver) {
         dragMiniFrom      = dragMiniProgress(); // from where it actually is, not from the end
         dragMiniOver      = OVERFOREIGN;
         dragMiniChangedAt = Time::steadyNow();
@@ -4413,6 +4441,61 @@ PHLWORKSPACE CScrollOverview::workspaceAtStripPoint(const Vector2D& point, size_
     return nullptr;
 }
 
+// Minis map the window's REAL desktop rect into the cell, not its grid slot: a
+// thumbnail of the desktop, not a second copy of the grid. Shared by the render
+// and the D6 hit-test so the two can never disagree about where a mini is.
+CBox CScrollOverview::stripMiniBox(const CBox& cell, PHLWINDOW window, PHLMONITOR monitor) const {
+    if (!window || !monitor || cell.width <= 0)
+        return {};
+
+    const float SCALEX = sc<float>(cell.width) / std::max(1.F, sc<float>(monitor->m_size.x));
+    const float SCALEY = sc<float>(cell.height) / std::max(1.F, sc<float>(monitor->m_size.y));
+    const auto  GEOM   = window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+
+    return CBox{
+        sc<float>(cell.x) + (sc<float>(GEOM.x) - sc<float>(monitor->m_position.x)) * SCALEX,
+        sc<float>(cell.y) + (sc<float>(GEOM.y) - sc<float>(monitor->m_position.y)) * SCALEY,
+        sc<float>(GEOM.w) * SCALEX,
+        sc<float>(GEOM.h) * SCALEY,
+    };
+}
+
+// D6: which window mini is under the cursor, topmost first.
+PHLWINDOW CScrollOverview::windowAtStripPoint(const Vector2D& point, CBox* miniBox) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || overviewStripLogicalHeight(MONITOR) <= 0.F)
+        return nullptr;
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& wimg = images[workspaceIdx];
+        if (!wimg || !wimg->pWorkspace)
+            continue;
+
+        const auto CELL = stripCellBox(workspaceIdx, MONITOR, scale->value());
+        if (CELL.width <= 1 || !CELL.containsPoint(point))
+            continue;
+
+        for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
+            const auto WINDOW = getOverviewWindowToShow(it->lock());
+            if (!shouldShowOverviewWindow(WINDOW))
+                continue;
+
+            const auto MINI = stripMiniBox(CELL, WINDOW, MONITOR);
+            if (MINI.width < 2 || MINI.height < 2 || !MINI.containsPoint(point))
+                continue;
+
+            if (miniBox)
+                *miniBox = MINI;
+
+            return WINDOW;
+        }
+
+        return nullptr;
+    }
+
+    return nullptr;
+}
+
 void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now) {
     if (!monitor || overviewStripLogicalHeight(monitor) <= 0.F)
         return;
@@ -4444,10 +4527,6 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         backdrop.roundingPower = 2.F;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(backdrop));
 
-        // Minis map the window's REAL desktop rect into the cell, not its grid
-        // slot: a thumbnail of the desktop, not a second copy of the grid.
-        const float MINISCALEX = sc<float>(CELL.width) / std::max(1.F, sc<float>(monitor->m_size.x));
-        const float MINISCALEY = sc<float>(CELL.height) / std::max(1.F, sc<float>(monitor->m_size.y));
         const float MINIRENDERSCALE = renderScale * sc<float>(CELL.width) / std::max(1.F, sc<float>(monitor->m_size.x) * monitor->m_scale);
 
         for (const auto& windowRef : wimg->windows) {
@@ -4455,13 +4534,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             if (!shouldShowOverviewWindow(WINDOW) || WINDOW == DRAGGED)
                 continue;
 
-            const auto GEOM = WINDOW->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-            const CBox MINI = {
-                sc<float>(CELL.x) + (sc<float>(GEOM.x) - sc<float>(monitor->m_position.x)) * MINISCALEX,
-                sc<float>(CELL.y) + (sc<float>(GEOM.y) - sc<float>(monitor->m_position.y)) * MINISCALEY,
-                sc<float>(GEOM.w) * MINISCALEX,
-                sc<float>(GEOM.h) * MINISCALEY,
-            };
+            const auto MINI = stripMiniBox(CELL, WINDOW, monitor);
 
             if (MINI.width < 2 || MINI.height < 2 || MINI.intersection(CELL).empty())
                 continue;
