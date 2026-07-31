@@ -859,6 +859,13 @@ void renderOverviewWindow(const SRenderParams& params) {
             WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
     });
 
+    // ponytail: blur radius is applied in screen space, so a shrunk tile keeps the
+    // full desktop radius and reads ~1/renderScale too soft. Scale it for this pass.
+    const auto u3PrevBlurSize = ScrollOverview::Config::getValue<int>("decoration:blur:size");
+    const auto u3BlurSize     = std::max(1, sc<int>(std::round(u3PrevBlurSize * params.renderScale)));
+    ScrollOverview::Config::setValue("decoration:blur:size", u3BlurSize);
+    auto restoreBlurSize = Hyprutils::Utils::CScopeGuard([&] { ScrollOverview::Config::setValue("decoration:blur:size", u3PrevBlurSize); });
+
     const size_t firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
     const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
     g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
