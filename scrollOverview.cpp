@@ -471,7 +471,13 @@ struct SGridReflow {
     CBox            from;
     CBox            to;
     Time::steady_tp start;
+    Time::steady_tp lastTouched;
 };
+
+// A tile whose entry has gone untouched for longer than this was not drawn in
+// the grid last frame, so it is ENTERING rather than reflowing. A few frames is
+// plenty; it only has to outlast one missed render.
+static constexpr float GRID_REENTRY_MS = 100.F;
 
 static std::unordered_map<Desktop::View::CWindow*, SGridReflow> g_gridReflows;
 static bool                                      g_gridReflowActive = false;
@@ -489,7 +495,7 @@ static bool gridBoxesDiffer(const CBox& a, const CBox& b) {
 // Called from getOverviewWindowBox, i.e. many times per window per frame from
 // render, hit-test and drag alike. Restarting only when the *target* moves keeps
 // it idempotent within a frame, so those call sites cannot disagree.
-static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot) {
+static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom = nullptr) {
     const int DURATION = ScrollOverview::Config::getMissionControlReflowMs();
     if (DURATION <= 0)
         return slot;
@@ -501,11 +507,28 @@ static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot) {
 
     auto& entry = g_gridReflows[window.get()];
 
-    // Also catches a recycled address handing a new window a dead window's slot.
-    if (entry.window.lock() != window) {
-        entry = SGridReflow{window, slot, slot, NOW};
-        return slot;
+    // OVERVIEW_CPP_SPEC F3-b-i. A tile that was not in the grid last frame is
+    // ENTERING now -- first appearance, or a search promoting it off another
+    // desktop. Seeding from `slot` makes from == to and draws it straight at its
+    // destination, which is exactly the "matches just spawn in" defect. Seed it
+    // where it really sits and the ease below carries it in.
+    //
+    // Untouched-for-a-while stands in for "was not in the grid", so searching the
+    // same window a second time re-enters properly instead of reusing its stale
+    // settled entry. KNOWN == false also catches a recycled address handing a new
+    // window a dead one's entry.
+    const bool KNOWN      = entry.window.lock() == window;
+    const bool REENTERING = KNOWN && std::chrono::duration<float, std::milli>(NOW - entry.lastTouched).count() > GRID_REENTRY_MS;
+
+    if (!KNOWN || REENTERING) {
+        const CBox START = enterFrom ? *enterFrom : slot;
+        entry            = SGridReflow{window, START, slot, NOW, NOW};
+        if (gridBoxesDiffer(START, slot))
+            g_gridReflowActive = true;
+        return START;
     }
+
+    entry.lastTouched = NOW;
 
     const float ELAPSED = std::chrono::duration<float, std::milli>(NOW - entry.start).count();
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
@@ -553,11 +576,27 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
     auto geometry = window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
     if (CBox slot; overviewGridSlot(window, monitor, slot)) {
-        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, slot), overviewGridProgress(scale));
+        const bool PROMOTED = overviewGridPromoted(window, monitor);
+
+        // F3-b-i: a promoted tile enters from the place it occupies on its own
+        // desktop -- which is exactly the per-workspace offset suppressed below,
+        // so it carries the direction that desktop lies in for free. That offset
+        // is in RENDERED px while `slot` is logical, hence the divide.
+        CBox        enterFrom;
+        const CBox* enterPtr = nullptr;
+        if (PROMOTED && std::abs(offset) > 0.01F) {
+            if (const float UNIT = scale * std::max(monitor->m_scale, 0.01F); UNIT > 0.01F) {
+                enterFrom = slot;
+                enterFrom.translate(axisOffsetVector(offset / UNIT, layout));
+                enterPtr = &enterFrom;
+            }
+        }
+
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, slot, enterPtr), overviewGridProgress(scale));
 
         // The active card sits at offset 0. A promoted tile must ignore the
         // caller's per-workspace offset or it lands off-screen beside it.
-        if (overviewGridPromoted(window, monitor))
+        if (PROMOTED)
             offset = 0.F;
     }
 
