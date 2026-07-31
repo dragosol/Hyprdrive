@@ -3290,6 +3290,24 @@ void CScrollOverview::endWindowDrag() {
     std::string         dropDirection;
 
     if (!DROPWORKSPACE) {
+        // OVERVIEW_CPP_SPEC D5. Nothing below this runs, so the window keeps its
+        // workspace, position and size — the drop is correctly a no-op. Without
+        // the seed below the tile still teleports home in one frame (measured:
+        // 326 px in 1 frame at 60fps), which reads as a glitch rather than a
+        // rejected drop. U4's reflow already eases a tile from wherever it is to
+        // its slot, so hand it the proxy's box and it carries the return.
+        if (const auto MON = pMonitor.lock(); WINDOW && MON) {
+            if (CBox slot; overviewGridSlot(WINDOW, MON, slot)) {
+                const auto  WSIDX    = dragWorkspaceIndex(WINDOW);
+                const auto  FLOATBOX = draggedWindowBox(WSIDX);
+                const float SCALEDIV = std::max(scale->value(), 0.01F) * std::max(MON->m_scale, 0.01F);
+
+                g_gridReflows[WINDOW.get()] =
+                    SGridReflow{WINDOW, CBox{overviewPointToGlobal(WSIDX, FLOATBOX.pos()), FLOATBOX.size() * (1.F / SCALEDIV)}, slot, Time::steadyNow()};
+                g_gridReflowActive = true;
+            }
+        }
+
         clearDragPending();
         damage();
         if (dropOverview && dropOverview != this)
