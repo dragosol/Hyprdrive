@@ -5007,10 +5007,13 @@ void CScrollOverview::onPreRender() {
         pMonitor->m_solitaryClient.reset();
 
     // A grid reflow runs on a wall clock, not a Hyprland animation variable, so
-    // nothing else asks for the next frame. Damaging here rather than at the end
-    // of render() is what the animation manager does, and is the difference
-    // between the reflow rendering at 60fps and at 20fps. The flag is re-set
-    // while this frame evaluates its boxes, so the chain stops on its own.
+    // nothing else asks for the next frame. The flag is re-set while this frame
+    // evaluates its boxes, so the chain stops on its own.
+    // ponytail: measured at ~30fps, not the 60fps the open animation gets in the
+    // same capture. Neither damaging from here nor scheduleFrame() lifted it, so
+    // the ceiling is the wall clock itself; the upgrade is an Animation::mgr()
+    // animvar with setUpdateCallback -> damage(), paced per vblank. 300ms reads
+    // as motion at the cadence we actually get, so it is not worth it yet.
     if (g_gridReflowActive) {
         g_gridReflowActive = false;
         damage();
