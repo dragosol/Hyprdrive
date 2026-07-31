@@ -386,7 +386,10 @@ EScrollAction getVerticalScrollAction(ELayout layout) {
         case 2: return EScrollAction::WORKSPACE;
         case 3: return EScrollAction::COLUMN;
         case 0:
-        default: return defaultVerticalScrollAction(layout);
+        // ponytail: mission control draws a grid, not scrolling columns, so COLUMN
+        // has nothing to select there - the vertical wheel is only useful as a
+        // desktop switch. Explicit scrolling_mode above still overrides this.
+        default: return getMissionControl() ? EScrollAction::WORKSPACE : defaultVerticalScrollAction(layout);
     }
 }
 
