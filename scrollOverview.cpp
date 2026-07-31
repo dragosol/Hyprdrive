@@ -258,6 +258,20 @@ static Vector2D overviewGridWindowSize(const PHLWINDOW& window) {
     return window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT).size();
 }
 
+// Workspace thumbnail strip, OVERVIEW_CPP_SPEC §5 D'4 + E. A row of mini
+// workspace previews along the top of the focused workspace card. It exists
+// because at scale 0.82 the neighbour cards are ~180px slivers: there was
+// nothing on screen to aim a drag at, and nowhere for D'4's post-drop preview
+// to appear. Minis are real windows rendered small; spec §6 exempts them from
+// frost, so this does not reopen section C.
+static float overviewStripLogicalHeight(PHLMONITOR monitor) {
+    if (!ScrollOverview::Config::getStrip() || !monitor)
+        return 0.F;
+
+    const float H = sc<float>(ScrollOverview::Config::getStripHeight());
+    return H > 1.F && H < sc<float>(monitor->m_size.y) / 2.F ? H : 0.F;
+}
+
 // ponytail: recomputed per window per frame, O(windows^2) on the focused
 // workspace. Fine at desktop counts; memoise per frame if it ever shows up.
 static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor, const PHLWINDOW& target, CBox& out) {
@@ -272,6 +286,14 @@ static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor
             usable = WORKAREA;
     }
 
+
+    // Grid tiles must not slide under the strip band.
+    if (const float STRIPH = overviewStripLogicalHeight(monitor); STRIPH > 0.F) {
+        usable.y += STRIPH;
+        usable.h -= STRIPH;
+        if (usable.h <= 1)
+            return false;
+    }
     const size_t COUNT = WINDOWS.size();
     const float  GAP   = sc<float>(ScrollOverview::Config::getMissionControlGap());
 
@@ -2438,6 +2460,11 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
     const auto ACTIVEIDX       = activeWorkspaceIndex();
     const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(MONITOR, scale->value(), layout);
 
+    // The band overlaps the main tiles it floats above, so it must be tested
+    // first or a drop on the strip would land on whatever tile is underneath.
+    if (const auto STRIPWORKSPACE = workspaceAtStripPoint(point, hoveredWorkspaceIdx); STRIPWORKSPACE)
+        return STRIPWORKSPACE;
+
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
         if (!wimg || !wimg->pWorkspace)
@@ -4224,6 +4251,140 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     renderDropIndicator();
 }
 
+CBox CScrollOverview::stripCellLogicalBox(size_t workspaceIdx) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || workspaceIdx >= images.size() || images.empty())
+        return {};
+
+    const float BAND = overviewStripLogicalHeight(MONITOR);
+    if (BAND <= 0.F)
+        return {};
+
+    const float  PAD    = BAND * 0.18F;
+    const float  GAP    = sc<float>(ScrollOverview::Config::getStripGap());
+    const float  ASPECT = MONITOR->m_size.y > 1 ? sc<float>(MONITOR->m_size.x) / sc<float>(MONITOR->m_size.y) : 1.6F;
+    const size_t COUNT  = images.size();
+
+    float cellH = BAND - 2.F * PAD;
+    float cellW = cellH * ASPECT;
+    float total = cellW * sc<float>(COUNT) + GAP * sc<float>(COUNT - 1);
+
+    // Many workspaces must shrink the cells rather than overflow the monitor.
+    if (const float MAXW = sc<float>(MONITOR->m_size.x) - 2.F * PAD; total > MAXW) {
+        cellW = (MAXW - GAP * sc<float>(COUNT - 1)) / sc<float>(COUNT);
+        cellH = cellW / ASPECT;
+        total = MAXW;
+    }
+
+    if (cellW <= 1.F || cellH <= 1.F)
+        return {};
+
+    const float X = sc<float>(MONITOR->m_position.x) + (sc<float>(MONITOR->m_size.x) - total) / 2.F + sc<float>(workspaceIdx) * (cellW + GAP);
+    const float Y = sc<float>(MONITOR->m_position.y) + PAD + (BAND - 2.F * PAD - cellH) / 2.F;
+
+    return CBox{X, Y, cellW, cellH};
+}
+
+// ponytail: the strip rides the active workspace card (offset 0), so it scales
+// with the open animation and pans with the view for free. Make it screen-fixed
+// chrome if panning ever needs the strip to stay put.
+CBox CScrollOverview::stripCellBox(size_t workspaceIdx, PHLMONITOR monitor, float renderScale) const {
+    const auto LOGICAL = stripCellLogicalBox(workspaceIdx);
+    if (!monitor || LOGICAL.width <= 0)
+        return {};
+
+    return getOverviewGlobalBox(LOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+}
+
+PHLWORKSPACE CScrollOverview::workspaceAtStripPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || overviewStripLogicalHeight(MONITOR) <= 0.F)
+        return nullptr;
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& wimg = images[workspaceIdx];
+        if (!wimg || !wimg->pWorkspace)
+            continue;
+
+        if (!stripCellBox(workspaceIdx, MONITOR, scale->value()).containsPoint(point))
+            continue;
+
+        if (hoveredWorkspaceIdx)
+            *hoveredWorkspaceIdx = workspaceIdx;
+
+        return wimg->pWorkspace;
+    }
+
+    return nullptr;
+}
+
+void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now) {
+    if (!monitor || overviewStripLogicalHeight(monitor) <= 0.F)
+        return;
+
+    auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
+    const auto DRAGGED     = getOverviewWindowToShow(dragContext->dragActiveWindow.lock());
+
+    size_t hoveredIdx = images.size();
+    if (DRAGGED && isOverviewPointerOnMonitor(monitor))
+        workspaceAtStripPoint(lastMousePosLocal, &hoveredIdx);
+
+    const int ROUND = sc<int>(std::round(12.F * monitor->m_scale * renderScale));
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        const auto& wimg = images[workspaceIdx];
+        if (!wimg || !wimg->pWorkspace)
+            continue;
+
+        const auto CELL = stripCellBox(workspaceIdx, monitor, renderScale);
+        if (CELL.width <= 1 || !overviewBoxIntersectsMonitor(CELL, monitor))
+            continue;
+
+        renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false);
+
+        CRectPassElement::SRectData backdrop;
+        backdrop.box           = CELL;
+        backdrop.color         = CHyprColor{0.F, 0.F, 0.F, 0.38F};
+        backdrop.round         = ROUND;
+        backdrop.roundingPower = 2.F;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(backdrop));
+
+        // Minis map the window's REAL desktop rect into the cell, not its grid
+        // slot: a thumbnail of the desktop, not a second copy of the grid.
+        const float MINISCALEX = sc<float>(CELL.width) / std::max(1.F, sc<float>(monitor->m_size.x));
+        const float MINISCALEY = sc<float>(CELL.height) / std::max(1.F, sc<float>(monitor->m_size.y));
+        const float MINIRENDERSCALE = renderScale * sc<float>(CELL.width) / std::max(1.F, sc<float>(monitor->m_size.x) * monitor->m_scale);
+
+        for (const auto& windowRef : wimg->windows) {
+            const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
+            if (!shouldShowOverviewWindow(WINDOW) || WINDOW == DRAGGED)
+                continue;
+
+            const auto GEOM = WINDOW->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+            const CBox MINI = {
+                sc<float>(CELL.x) + (sc<float>(GEOM.x) - sc<float>(monitor->m_position.x)) * MINISCALEX,
+                sc<float>(CELL.y) + (sc<float>(GEOM.y) - sc<float>(monitor->m_position.y)) * MINISCALEY,
+                sc<float>(GEOM.w) * MINISCALEX,
+                sc<float>(GEOM.h) * MINISCALEY,
+            };
+
+            if (MINI.width < 2 || MINI.height < 2 || MINI.intersection(CELL).empty())
+                continue;
+
+            renderWindowLive(monitor, WINDOW, MINI.copy().round(), MINIRENDERSCALE, now, &CELL);
+        }
+
+        if (workspaceIdx == hoveredIdx) {
+            CRectPassElement::SRectData hover;
+            hover.box           = CELL;
+            hover.color         = CHyprColor{1.F, 1.F, 1.F, 0.22F};
+            hover.round         = ROUND;
+            hover.roundingPower = 2.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(hover));
+        }
+    }
+}
+
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
     auto*      dragOwner = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
     const auto WINDOW    = getOverviewWindowToShow(dragOwner->dragActiveWindow.lock());
@@ -5246,6 +5407,7 @@ void CScrollOverview::render() {
         renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
     }
 
+    renderStrip(MONITOR, SCALE, NOW);
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
     renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
 

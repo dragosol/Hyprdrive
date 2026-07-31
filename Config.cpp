@@ -307,6 +307,13 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:mission_control_reflow_ms", "ms for a grid tile to travel to a new slot", 300, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:strip", "workspace thumbnail strip across the top of the overview", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:strip_height", "logical px the strip band reserves at the top of the workspace", 260,
+                                                        SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:strip_gap", "gap between strip cells", 28, SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:tap_super", "tapping SUPER alone toggles the overview", true));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:tap_super_timeout_ms", "longest press-to-release still counted as a SUPER tap (0 = no limit)",
@@ -409,6 +416,18 @@ int getMissionControlGap() {
 
 int getMissionControlReflowMs() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:mission_control_reflow_ms"));
+}
+
+bool getStrip() {
+    return getValue<bool>("plugin:scrolloverview:strip");
+}
+
+int getStripHeight() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:strip_height"));
+}
+
+int getStripGap() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:strip_gap"));
 }
 
 float getDragMiniScale() {

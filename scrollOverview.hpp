@@ -70,6 +70,10 @@ class CScrollOverview : public IOverview {
                              bool dragged = false);
     void   renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now);
     void   renderPinnedFloatingWindows(PHLMONITOR monitor, float overviewScale, const Time::steady_tp& now);
+    CBox         stripCellLogicalBox(size_t workspaceIdx) const;
+    CBox         stripCellBox(size_t workspaceIdx, PHLMONITOR monitor, float renderScale) const;
+    PHLWORKSPACE workspaceAtStripPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx = nullptr) const;
+    void         renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now);
     void   moveViewportWorkspace(bool up);
     void   trackpadSwipeLayout(const PHLWORKSPACE target, const double delta);
     void   trackpadSwipeWorkspace(const double delta);
