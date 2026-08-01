@@ -63,9 +63,9 @@ SDispatcher* findDispatcher(const std::string_view name) {
         },
         {
             .name            = "window",
-            .argPattern      = std::regex{"^(select|close)$"},
+            .argPattern      = std::regex{"^(select|close|click)$"},
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected one of: select, close",
+            .invalidArgError = "expected one of: select, close, click",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "window"); },
         },
     };

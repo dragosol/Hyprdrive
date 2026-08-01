@@ -81,7 +81,7 @@ class CScrollOverview : public IOverview {
     PHLWINDOW    windowAtStripPoint(const Vector2D& point, CBox* miniBox = nullptr) const;
     void         focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx);
     void         renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now);
-    void         renderSearch(PHLMONITOR monitor);
+    void         renderSearch(PHLMONITOR monitor, float renderScale);
     void   moveViewportWorkspace(bool up);
     void   trackpadSwipeLayout(const PHLWORKSPACE target, const double delta);
     void   trackpadSwipeWorkspace(const double delta);

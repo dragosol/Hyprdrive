@@ -5009,13 +5009,11 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 // placeholder while empty, and a fixed field width that widens once a query is
 // typed. Metrics are the reference's: 40px row + 4px margins = 48 high, 15px
 // type, 22px glyph, 210px collapsed / 360px expanded.
-// ponytail: bottom-centre anchor kept. The reference sits at the top, but the
-// workspace strip owns that band until X3 settles the layout.
 // ponytail: the width change is a hard cut; the reference eases it over 300ms.
 // The reference's two trailing icon buttons (Google Lens, SongRec) are not
 // drawn -- neither action exists in this overview, so they would be decoration
 // for nothing.
-void CScrollOverview::renderSearch(PHLMONITOR monitor) {
+void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     if (!monitor)
         return;
 
@@ -5031,23 +5029,34 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor) {
         }
     }
 
-    const bool  EMPTYRESULT = QUERIED && matches == 0;
-    const float SCALE       = std::max<float>(monitor->m_scale, 0.01F);
+    const bool EMPTYRESULT = QUERIED && matches == 0;
 
-    const float PILLH  = std::round(48.F * SCALE);
+    // X10: the pill is laid out in the SAME logical space as the strip it sits
+    // above, and rides the active workspace card through the same transform.
+    // Screen-fixed at the monitor's top edge it landed underneath the
+    // layer-shell bar, which this pass draws after the whole overview -- the
+    // pill was there but invisible.
+    const float FIELDWL = QUERIED ? 360.F : 210.F;
+    const float PILLWL  = 4.F + 40.F + 12.F + FIELDWL + 20.F;
+    const CBox  PILLLOGICAL = {
+        sc<float>(monitor->m_position.x) + (sc<float>(monitor->m_size.x) - PILLWL) / 2.F,
+        sc<float>(monitor->m_position.y) + (overviewSearchLogicalHeight(monitor) - 48.F) / 2.F,
+        PILLWL,
+        48.F,
+    };
+
+    CBox pill = getOverviewGlobalBox(PILLLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+    if (pill.width <= 1.F || !overviewBoxIntersectsMonitor(pill, monitor))
+        return;
+    pill.round();
+
+    // Everything inside the pill is measured off the box as it actually landed,
+    // so the badge and the type follow the card transform for free.
+    const float SCALE  = sc<float>(pill.width) / PILLWL;
     const float BADGED = std::round(40.F * SCALE);
     const float PADL   = std::round(4.F * SCALE);
     const float GAP    = std::round(12.F * SCALE);
-    const float PADR   = std::round(20.F * SCALE);
-    const float FIELDW = std::round((QUERIED ? 360.F : 210.F) * SCALE);
-
-    CBox pill;
-    pill.width  = PADL + BADGED + GAP + FIELDW + PADR;
-    pill.height = PILLH;
-    pill.x      = std::round((sc<float>(monitor->m_size.x) * SCALE - pill.width) / 2.F);
-    // X10: centred inside the top search row, above the strip.
-    pill.y      = std::round((overviewSearchLogicalHeight(monitor) * SCALE - pill.height) / 2.F);
-    pill.round();
+    const float FIELDW = std::round(FIELDWL * SCALE);
 
     // X11: frosted pill -- live rounded blur of whatever is behind it.
     OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, 1.F, false);
@@ -6164,7 +6173,7 @@ void CScrollOverview::render() {
     renderStrip(MONITOR, SCALE, NOW);
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
     renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
-    renderSearch(MONITOR);
+    renderSearch(MONITOR, SCALE);
 
     for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
         for (auto const& ls : MONITOR->m_layerSurfaceLayers[LAYER]) {
