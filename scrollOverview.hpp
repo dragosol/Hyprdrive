@@ -63,6 +63,7 @@ class CScrollOverview : public IOverview {
     void   renderGlobalWallpaper(PHLMONITOR monitor, const Time::steady_tp& now);
     void   renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now, float alpha = 1.F);
     void   updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperMode, const Time::steady_tp& now);
+    void   updateCardWallpaperFB(PHLMONITOR monitor, const Time::steady_tp& now);
     void   renderBackdropBlurCache(PHLMONITOR monitor);
     void   renderWorkspaceBackground(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
     void   renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
@@ -164,6 +165,7 @@ class CScrollOverview : public IOverview {
     int    lastBackdropWallpaperMode = -1;
     Vector2D lastOverviewBlurViewOffset = Vector2D{};
     SP<Render::IFramebuffer> backdropBlurFB;
+    SP<Render::IFramebuffer> cardWallpaperFB;
 
     struct SWorkspaceImage {
         PHLWORKSPACE              pWorkspace;

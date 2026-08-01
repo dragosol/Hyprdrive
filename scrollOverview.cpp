@@ -995,70 +995,6 @@ static SOverviewCardRounding getOverviewCardRounding(PHLMONITOR monitor, float o
     };
 }
 
-// E8-c: an antialiased corner mask. alpha = how much of the pixel falls OUTSIDE
-// the card's superellipse, so painting it in the backdrop colour carves a smooth
-// rounded corner. A CRegion cannot do this -- it is one bit per pixel.
-// ponytail: cached on (radius, power, colour); one set for all monitors, which is
-// right until two monitors run different scales. Regenerate per-monitor then.
-static SP<Render::GL::CGLTexture> g_overviewCornerTex[4];
-static int                        g_overviewCornerRadius = -1;
-static float                      g_overviewCornerPower  = -1.F;
-static uint32_t                   g_overviewCornerColor  = 0;
-
-static void makeOverviewCornerTexture(int radius, float power, const CHyprColor& color) {
-    const uint32_t COLORKEY = (sc<uint32_t>(std::round(color.r * 255.F)) << 24) | (sc<uint32_t>(std::round(color.g * 255.F)) << 16) |
-        (sc<uint32_t>(std::round(color.b * 255.F)) << 8) | sc<uint32_t>(std::round(color.a * 255.F));
-
-    if (radius == g_overviewCornerRadius && std::abs(power - g_overviewCornerPower) < 0.001F && COLORKEY == g_overviewCornerColor && g_overviewCornerTex[0])
-        return;
-
-    g_overviewCornerRadius = radius;
-    g_overviewCornerPower  = power;
-    g_overviewCornerColor  = COLORKEY;
-
-    const int    R   = std::max(1, radius);
-    const double P   = std::max(0.1F, power);
-    const double INV = 1.0 / sc<double>(R);
-    // Feathered signed-distance edge, ~2px wide, instead of binary supersampling:
-    // the rice"s own screenCorners curve has a soft ~2px falloff, and next to it a
-    // hard 1px edge reads as a dotted line against high-contrast content
-    // (user-reported). This reproduces the desktop edge character exactly.
-    const double FEATHER = 2.0;
-
-    // top-left quadrant first; the other three are mirrors of it
-    std::vector<float> coverage(sc<size_t>(R) * sc<size_t>(R), 0.F);
-    for (int py = 0; py < R; ++py) {
-        for (int px = 0; px < R; ++px) {
-            const double dx = (R - (px + 0.5)) * INV;
-            const double dy = (R - (py + 0.5)) * INV;
-            const double g  = std::pow(std::pow(dx, P) + std::pow(dy, P), 1.0 / P);
-            const double dist = (g - 1.0) * R; // approx px outside the curve
-            coverage[sc<size_t>(py) * R + px] = sc<float>(std::clamp(0.5 + dist / FEATHER, 0.0, 1.0));
-        }
-    }
-
-    for (int corner = 0; corner < 4; ++corner) {
-        std::vector<uint8_t> pixels(sc<size_t>(R) * sc<size_t>(R) * 4, 0);
-        for (int y = 0; y < R; ++y) {
-            for (int x = 0; x < R; ++x) {
-                // corner 0=TL 1=TR 2=BL 3=BR
-                const int sxx = (corner == 1 || corner == 3) ? (R - 1 - x) : x;
-                const int syy = (corner == 2 || corner == 3) ? (R - 1 - y) : y;
-                const float A = coverage[sc<size_t>(syy) * R + sxx] * color.a;
-
-                // ARGB8888 is B,G,R,A in memory on little-endian, premultiplied
-                const size_t o = (sc<size_t>(y) * R + x) * 4;
-                pixels[o + 0]  = sc<uint8_t>(std::round(color.b * A * 255.F));
-                pixels[o + 1]  = sc<uint8_t>(std::round(color.g * A * 255.F));
-                pixels[o + 2]  = sc<uint8_t>(std::round(color.r * A * 255.F));
-                pixels[o + 3]  = sc<uint8_t>(std::round(A * 255.F));
-            }
-        }
-
-        g_overviewCornerTex[corner] = makeShared<Render::GL::CGLTexture>(DRM_FORMAT_ARGB8888, pixels.data(), sc<uint32_t>(R * 4), Vector2D{sc<double>(R), sc<double>(R)});
-    }
-}
-
 static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F) {
     if (!monitor)
         return;
@@ -2026,6 +1962,56 @@ void CScrollOverview::renderGlobalWallpaper(PHLMONITOR monitor, const Time::stea
             continue;
 
         g_pHyprRenderer->renderLayer(ls.lock(), monitor, now);
+    }
+}
+
+// E8-c, GNOME-style: the wallpaper at native size, once per frame, so each card
+// can composite it with shader rounding (real clip + AA) instead of a painted
+// mask. Re-rendered every frame because wallpapers animate.
+// ponytail: no dirty tracking; add a dirty flag if profiling ever cares.
+void CScrollOverview::updateCardWallpaperFB(PHLMONITOR monitor, const Time::steady_tp& now) {
+    if (!monitor || !g_pHyprRenderer->m_renderData.currentFB)
+        return;
+
+    const auto FBSIZE     = monitor->m_pixelSize;
+    const auto RENDERSIZE = monitor->m_transformedSize;
+    const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
+    if (!cardWallpaperFB)
+        cardWallpaperFB = g_pHyprRenderer->createFB("scrolloverview_card_wallpaper");
+
+    if (!cardWallpaperFB || !cardWallpaperFB->isAllocated() || cardWallpaperFB->m_size != FBSIZE || cardWallpaperFB->m_drmFormat != FBFORMAT) {
+        if (cardWallpaperFB)
+            cardWallpaperFB->release();
+        if (!cardWallpaperFB || !cardWallpaperFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), FBFORMAT))
+            return;
+    }
+
+    cardWallpaperFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
+
+    const CRegion fullDamage{CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y}};
+
+    {
+        auto bindCard = g_pHyprRenderer->bindTempFB(cardWallpaperFB);
+
+        // The frame damage can be tiny on an idle frame, and queued surface
+        // elements are culled against it -- which left this FB black except the
+        // clear. Same save/override/restore dance the shadow element does.
+        const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
+        g_pHyprRenderer->m_renderData.damage = fullDamage;
+        auto restoreDamage = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
+
+        g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 0.F}}, fullDamage);
+        // BACKGROUND is empty on this rice (the wallpaper is quickshell:background
+        // on BOTTOM), but walk both for generality.
+        for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM}) {
+            for (auto const& ls : monitor->m_layerSurfaceLayers[LAYER]) {
+                if (!Desktop::View::validMapped(ls.lock()))
+                    continue;
+
+                g_pHyprRenderer->renderLayer(ls.lock(), monitor, now);
+            }
+        }
+        OverviewRender::flushPass(monitor);
     }
 }
 
@@ -4477,7 +4463,27 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
     if (wallpaperMode != 0 && WORKSPACEALPHA > 0.001F)
         renderWallpaperLayers(monitor, WORKSPACEBOX, renderScale, now, WORKSPACEALPHA);
 
-    if (WORKSPACEALPHA >= 0.999F)
+    // GNOME-style rounding (user-directed): composite the native-size wallpaper
+    // FB into the card box with shader round/roundingPower. The corners are
+    // genuinely clipped and antialiased against whatever is behind them --
+    // shadow included -- which no painted-on mask could match exactly.
+    if (WORKSPACEALPHA >= 0.999F && cardWallpaperFB && cardWallpaperFB->isAllocated() && cardWallpaperFB->getTexture()) {
+        const auto    CARDROUND = getOverviewCardRounding(monitor, ScrollOverview::Config::getScale());
+        const auto    BOXPX     = WORKSPACEBOX.copy().round();
+        const CRegion DMG{BOXPX};
+
+        g_pHyprRenderer->draw(
+            CTexPassElement::SRenderData{
+                .tex           = cardWallpaperFB->getTexture(),
+                .box           = BOXPX,
+                .a             = 1.F,
+                .damage        = DMG,
+                .round         = CARDROUND.rounding,
+                .roundingPower = CARDROUND.power,
+                .flipEndFrame  = true,
+            },
+            DMG);
+    } else if (WORKSPACEALPHA >= 0.999F)
         renderOverviewLayerLevel(monitor, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, WORKSPACEBOX, renderScale, now);
 }
 
@@ -5831,6 +5837,14 @@ void CScrollOverview::render() {
 
     Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
 
+    // Commit the queued backdrop to the screen BEFORE the temp-FB work below:
+    // flushing inside the bind would swallow those elements into the FB (that
+    // exact bug blacked out the whole backdrop once). And the FB fill has to
+    // happen HERE, not at the top of render() -- layer surfaces demonstrably
+    // render at this stage and not earlier (empty-FB bug, take two).
+    OverviewRender::flushPass(MONITOR);
+    updateCardWallpaperFB(MONITOR, NOW);
+
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceBackground(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
     }
@@ -5861,87 +5875,6 @@ void CScrollOverview::render() {
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
-    }
-
-    // E8-c: the card's wallpaper is a BOTTOM-layer surface drawn via renderLayer,
-    // which forces dontRound, so its corners cannot be rounded at the source.
-    // Paint them out with an ANTIALIASED corner mask instead. A CRegion fill was
-    // tried first and is visibly stair-stepped -- one bit per pixel cannot smooth
-    // a curve. Runs after the live loop so it also cuts windows at the corner.
-    // ponytail: only exact while the area around a card is a FLAT colour, which it
-    // is today (misc:background_color; measured std 0.1 across the backdrop). If
-    // the backdrop ever becomes the blurred wallpaper, this needs the card
-    // rendered into its own FB and drawn with shader rounding.
-    {
-        // Radius at the SETTLED scale, not the animating one: the mask texture is
-        // then generated once per theme/colour change instead of every frame of
-        // the open (integer-radius popping was part of the transition artifact).
-        const auto       CARDROUND = getOverviewCardRounding(MONITOR, ScrollOverview::Config::getScale());
-        const CHyprColor BACKDROP  = WALLPAPERMODE == 1 ?
-            CHyprColor{0.F, 0.F, 0.F, 1.F} :
-            CHyprColor{sc<uint64_t>(ScrollOverview::Config::getValue<int64_t>("misc:background_color"))};
-
-        // Fade with the grid's own open progress. At progress 0 the card is still
-        // the fullscreen desktop -- full-strength corners there are exactly the
-        // transition artifact the user reported.
-        // Tail-only: while the card is still zooming, windows fly across its
-        // corners and any paint there reads as bites out of moving content --
-        // a plain progress fade dims that but cannot remove it (user-verified).
-        // No corners during the motion; quick fade over the last 15%.
-        const float CORNERALPHA = std::clamp((overviewGridProgress(SCALE) - 0.85F) / 0.15F, 0.F, 1.F);
-
-        // The mask lives entirely inside the card shadow's darkest zone, so its
-        // colour must be the SHADOWED backdrop: blending the AA band toward the
-        // raw backdrop leaves a light fringe tracing the arc (user-reported
-        // twice; a binary nub re-render cannot reach partial-coverage pixels).
-        // ponytail: flat near-edge shadow intensity across a <=radius-wide nub,
-        // ~1 value off the shader's true falloff. Bake the per-pixel falloff
-        // into the texture if anyone ever sees the difference.
-        CHyprColor MASKCOLOR = BACKDROP;
-        {
-            const auto SHADOW = getOverviewShadowConfig();
-            const bool HASCOLOR = std::ranges::any_of(SHADOW.color.m_colors, [](const CHyprColor& c) { return c.a > 0.F; });
-            if (SHADOW.enabled && SHADOW.range > 0 && HASCOLOR) {
-                const auto& SC = SHADOW.color.m_colors[0];
-                const float SA = std::clamp(sc<float>(SC.a), 0.F, 1.F);
-                MASKCOLOR = CHyprColor{BACKDROP.r * (1.F - SA) + SC.r * SA, BACKDROP.g * (1.F - SA) + SC.g * SA, BACKDROP.b * (1.F - SA) + SC.b * SA, BACKDROP.a};
-            }
-        }
-
-        makeOverviewCornerTexture(CARDROUND.rounding, CARDROUND.power, MASKCOLOR);
-
-        for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
-            if (!images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
-                continue;
-
-            const auto CARDOFFSET = workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, PITCH);
-            const auto CARDBOX    = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), CARDOFFSET, layout).copy().round();
-            if (!overviewBoxIntersectsMonitor(CARDBOX, MONITOR))
-                continue;
-
-            const double R = sc<double>(CARDROUND.rounding);
-            if (R < 1 || CARDBOX.width < R * 2 || CARDBOX.height < R * 2)
-                continue;
-
-            const std::array<Vector2D, 4> ORIGINS = {
-                Vector2D{CARDBOX.x, CARDBOX.y},
-                Vector2D{CARDBOX.x + CARDBOX.width - R, CARDBOX.y},
-                Vector2D{CARDBOX.x, CARDBOX.y + CARDBOX.height - R},
-                Vector2D{CARDBOX.x + CARDBOX.width - R, CARDBOX.y + CARDBOX.height - R},
-            };
-
-            for (int corner = 0; corner < 4; ++corner) {
-                if (!g_overviewCornerTex[corner] || CORNERALPHA <= 0.001F)
-                    continue;
-
-                CTexPassElement::SRenderData data;
-                data.tex = g_overviewCornerTex[corner];
-                data.box = CBox{ORIGINS[corner].x, ORIGINS[corner].y, R, R};
-                data.a   = CORNERALPHA;
-                g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
-            }
-
-        }
     }
 
     renderStrip(MONITOR, SCALE, NOW);
