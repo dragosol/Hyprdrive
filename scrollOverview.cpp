@@ -4772,9 +4772,14 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         }
 
         if (workspaceIdx == hoveredIdx) {
+            // X4: the hover tint is themed, from the same general:col.active_border
+            // that DropIndicator already reads. White is only the fallback for a
+            // theme that defines no gradient.
+            const auto ACCENT = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
+
             CRectPassElement::SRectData hover;
             hover.box           = CELL;
-            hover.color         = CHyprColor{1.F, 1.F, 1.F, 0.22F};
+            hover.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F} : ACCENT.m_colors[0].modifyA(0.22F);
             hover.round         = ROUND;
             hover.roundingPower = CARDROUND.power;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(hover));
