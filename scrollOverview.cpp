@@ -1407,7 +1407,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             return true;
         };
 
-        if (!dragPendingPrimary && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
+        // submapMouseClickPending IS a held button, exactly like dragPendingPrimary.
+        // Without it here, any pointer transit over a top layer (the bar -- and
+        // ydotool absolute moves slam through the corner every step) silently
+        // cleared the pending press and no submap drag could ever start.
+        if (!dragPendingPrimary && !submapMouseClickPending && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
             return;
