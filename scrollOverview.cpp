@@ -4749,9 +4749,14 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 
         renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false);
 
+        // X4: the cell backdrop is themed from general:col.inactive_border, the
+        // mirror of the hover tint's col.active_border below. Only the hue is
+        // inherited; alpha stays at the tuned 0.38. Black is the no-theme fallback.
+        const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
+
         CRectPassElement::SRectData backdrop;
         backdrop.box           = CELL;
-        backdrop.color         = CHyprColor{0.F, 0.F, 0.F, 0.38F};
+        backdrop.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.38F} : INACTIVE.m_colors[0].modifyA(0.38F);
         backdrop.round         = ROUND;
         backdrop.roundingPower = CARDROUND.power;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(backdrop));
