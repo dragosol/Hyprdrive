@@ -4738,6 +4738,56 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     const auto CARDROUND = getOverviewCardRounding(monitor, renderScale);
     const int  ROUND      = CARDROUND.rounding;
 
+    // X3: the reference wraps the whole strip in ONE rounded container panel
+    // (ii/modules/ii/overview/OverviewWidget.qml:126-135) -- padding 10, radius
+    // largeWorkspaceRadius + padding, a translucent surface colour. Drawn once,
+    // before the cells, so the cells read as sitting on it.
+    if (!images.empty()) {
+        const auto FIRSTLOGICAL = stripCellLogicalBox(0);
+        const auto LASTLOGICAL  = stripCellLogicalBox(images.size() - 1);
+
+        if (FIRSTLOGICAL.width > 1 && LASTLOGICAL.width > 1) {
+            // ponytail: absolute logical px, not a fraction of the cell. E8-c
+            // already settled that the theme's absolute radii are used unshrunk;
+            // a padding derived from them has to follow the same rule or the
+            // panel's curve stops being concentric with the corner cells.
+            constexpr float PANELPAD = 10.F;
+
+            const CBox PANELLOGICAL = {
+                FIRSTLOGICAL.x - PANELPAD,
+                FIRSTLOGICAL.y - PANELPAD,
+                sc<float>(LASTLOGICAL.x) + sc<float>(LASTLOGICAL.width) - sc<float>(FIRSTLOGICAL.x) + 2.F * PANELPAD,
+                sc<float>(FIRSTLOGICAL.height) + 2.F * PANELPAD,
+            };
+
+            const auto PANEL = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+
+            if (PANEL.width > 1 && overviewBoxIntersectsMonitor(PANEL, monitor)) {
+                // Radius in RENDER space = the cells' radius plus the padding as
+                // it actually landed after the transform. Measuring the gap off
+                // the transformed boxes avoids duplicating the scale maths.
+                const auto FIRSTCELL  = stripCellBox(0, monitor, renderScale);
+                const int  PANELROUND = ROUND + std::max(0, sc<int>(std::round(sc<float>(FIRSTCELL.x) - sc<float>(PANEL.x))));
+
+                // X4: hue from the theme, the same general:col.inactive_border the
+                // cell backdrop below reads.
+                // ponytail: alpha 0.25, not the reference's 0.65. The cell backdrop's
+                // tuned 0.38 is this build's fixed point, and the reference keeps its
+                // panel LESS prominent than its cells (0.65 panel under opaque cells);
+                // 0.38 / (1 / 0.65) preserves that ordering instead of burying the
+                // cells under a panel more opaque than they are.
+                const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
+
+                CRectPassElement::SRectData panel;
+                panel.box           = PANEL;
+                panel.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.25F} : INACTIVE.m_colors[0].modifyA(0.25F);
+                panel.round         = PANELROUND;
+                panel.roundingPower = CARDROUND.power;
+                g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(panel));
+            }
+        }
+    }
+
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
         if (!wimg || !wimg->pWorkspace)
