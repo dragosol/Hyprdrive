@@ -1291,11 +1291,13 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     Animation::mgr()->createAnimation({}, viewOffset, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, workspaceInsertProgress, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, workspaceInsertFadeProgress, workspaceInsertFadeConfig, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(1.F, reflowPacer, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
 
     scale->setUpdateCallback([this](auto) { damage(); });
     viewOffset->setUpdateCallback([this](auto) { damage(); });
     workspaceInsertProgress->setUpdateCallback([this](auto) { damage(); });
     workspaceInsertFadeProgress->setUpdateCallback([this](auto) { damage(); });
+    reflowPacer->setUpdateCallback([this](auto) { damage(); });
 
     if (!swipe)
         *scale = ScrollOverview::Config::getScale();
@@ -4972,7 +4974,7 @@ bool CScrollOverview::shouldAllowRealtimePreviewSchedule() {
     if (closing)
         return true;
 
-    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated())
+    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated() || reflowPacer->isBeingAnimated())
         return true;
 
     if (realtimePreviewFrameQueued) {
@@ -5523,18 +5525,23 @@ void CScrollOverview::onPreRender() {
         pMonitor->m_solitaryClient.reset();
 
     // A grid reflow runs on a wall clock, not a Hyprland animation variable, so
-    // nothing else asks for the next frame. The flag is re-set while this frame
-    // evaluates its boxes, so the chain stops on its own.
-    // ponytail: measured at ~30fps, not the 60fps the open animation gets in the
-    // same capture. Neither damaging from here nor scheduleFrame() lifted it, so
-    // the ceiling is the wall clock itself; the upgrade is an Animation::mgr()
-    // animvar with setUpdateCallback -> damage(), paced per vblank. 300ms reads
-    // as motion at the cadence we actually get, so it is not worth it yet.
+    // nothing else asks for the next frame. Re-arming an animvar hands pacing to
+    // the animation manager, which damages per tick exactly like the open
+    // animation, instead of requesting a frame from inside the frame being
+    // rendered. The flag is re-set while this frame evaluates its boxes, so the
+    // chain stops on its own.
+    // ponytail: this is the tidier mechanism, NOT a measured speedup. A 3-vs-4
+    // run A/B on a liveness-certified headless output put the reflow at 27.5fps
+    // median before and 32.9fps after -- overlapping spreads, no significant
+    // difference. Presented frames sit at a 17ms median gap in BOTH builds; what
+    // actually costs the animation its frames is an intermittent 115-240ms
+    // stall, which this change does not remove. Chase the stall, not the pacing.
+    // Rig: share/reflow_measure.sh + share/rf_analyze.py.
     if (g_gridReflowActive) {
         g_gridReflowActive = false;
+        reflowPacer->setValueAndWarp(0.F);
+        *reflowPacer = 1.F;
         damage();
-        if (pMonitor)
-            pMonitor->scheduleFrame(Aquamarine::IOutput::AQ_SCHEDULE_ANIMATION_DAMAGE);
     }
 
     forceLayersAboveFullscreen();

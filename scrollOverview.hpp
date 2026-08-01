@@ -275,6 +275,7 @@ class CScrollOverview : public IOverview {
     PHLANIMVAR<Vector2D>             viewOffset;
     PHLANIMVAR<float>                workspaceInsertProgress;
     PHLANIMVAR<float>                workspaceInsertFadeProgress;
+    PHLANIMVAR<float>                reflowPacer;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceInsertFadeConfig;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceRemoveFadeConfig;
     Time::steady_tp                  lastRealtimePreviewFrame = {};
