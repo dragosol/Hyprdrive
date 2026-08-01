@@ -133,17 +133,7 @@ std::vector<UP<IPassElement>> COverviewShadowPassElement::draw() {
         return {};
 
     CRegion shadowDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.fullBox);
-    if (data.nubsOnly) {
-        const auto BOX = data.cutoutBox.copy().round();
-        const int  R   = std::max(1, data.rounding);
-        CRegion    nubs;
-        nubs.add(CBox{BOX.x, BOX.y, sc<double>(R), sc<double>(R)});
-        nubs.add(CBox{BOX.x + BOX.width - R, BOX.y, sc<double>(R), sc<double>(R)});
-        nubs.add(CBox{BOX.x, BOX.y + BOX.height - R, sc<double>(R), sc<double>(R)});
-        nubs.add(CBox{BOX.x + BOX.width - R, BOX.y + BOX.height - R, sc<double>(R), sc<double>(R)});
-        nubs.subtract(roundedRectRegion(BOX, data.rounding + 1, data.roundingPower));
-        shadowDamage.intersect(nubs);
-    } else if (data.ignoreWindow)
+    if (data.ignoreWindow)
         shadowDamage.subtract(roundedRectRegion(data.cutoutBox, data.rounding + 1, data.roundingPower));
 
     if (shadowDamage.empty())

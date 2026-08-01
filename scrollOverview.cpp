@@ -1018,25 +1018,22 @@ static void makeOverviewCornerTexture(int radius, float power, const CHyprColor&
 
     const int    R   = std::max(1, radius);
     const double P   = std::max(0.1F, power);
-    const int    SS  = 4; // subsamples per axis
     const double INV = 1.0 / sc<double>(R);
+    // Feathered signed-distance edge, ~2px wide, instead of binary supersampling:
+    // the rice"s own screenCorners curve has a soft ~2px falloff, and next to it a
+    // hard 1px edge reads as a dotted line against high-contrast content
+    // (user-reported). This reproduces the desktop edge character exactly.
+    const double FEATHER = 2.0;
 
     // top-left quadrant first; the other three are mirrors of it
     std::vector<float> coverage(sc<size_t>(R) * sc<size_t>(R), 0.F);
     for (int py = 0; py < R; ++py) {
         for (int px = 0; px < R; ++px) {
-            int outside = 0;
-            for (int sy = 0; sy < SS; ++sy) {
-                for (int sx = 0; sx < SS; ++sx) {
-                    const double x  = px + (sx + 0.5) / SS;
-                    const double y  = py + (sy + 0.5) / SS;
-                    const double dx = (R - x) * INV;
-                    const double dy = (R - y) * INV;
-                    if (std::pow(dx, P) + std::pow(dy, P) > 1.0)
-                        ++outside;
-                }
-            }
-            coverage[sc<size_t>(py) * R + px] = sc<float>(outside) / sc<float>(SS * SS);
+            const double dx = (R - (px + 0.5)) * INV;
+            const double dy = (R - (py + 0.5)) * INV;
+            const double g  = std::pow(std::pow(dx, P) + std::pow(dy, P), 1.0 / P);
+            const double dist = (g - 1.0) * R; // approx px outside the curve
+            coverage[sc<size_t>(py) * R + px] = sc<float>(std::clamp(0.5 + dist / FEATHER, 0.0, 1.0));
         }
     }
 
@@ -1062,7 +1059,7 @@ static void makeOverviewCornerTexture(int radius, float power, const CHyprColor&
     }
 }
 
-static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F, bool nubsOnly = false) {
+static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F) {
     if (!monitor)
         return;
 
@@ -1092,7 +1089,6 @@ static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& worksp
         .color         = SHADOW.color,
         .alpha         = alpha,
         .ignoreWindow  = cutoutCenter,
-        .nubsOnly      = nubsOnly,
     }));
 }
 
@@ -5894,7 +5890,25 @@ void CScrollOverview::render() {
         // No corners during the motion; quick fade over the last 15%.
         const float CORNERALPHA = std::clamp((overviewGridProgress(SCALE) - 0.85F) / 0.15F, 0.F, 1.F);
 
-        makeOverviewCornerTexture(CARDROUND.rounding, CARDROUND.power, BACKDROP);
+        // The mask lives entirely inside the card shadow's darkest zone, so its
+        // colour must be the SHADOWED backdrop: blending the AA band toward the
+        // raw backdrop leaves a light fringe tracing the arc (user-reported
+        // twice; a binary nub re-render cannot reach partial-coverage pixels).
+        // ponytail: flat near-edge shadow intensity across a <=radius-wide nub,
+        // ~1 value off the shader's true falloff. Bake the per-pixel falloff
+        // into the texture if anyone ever sees the difference.
+        CHyprColor MASKCOLOR = BACKDROP;
+        {
+            const auto SHADOW = getOverviewShadowConfig();
+            const bool HASCOLOR = std::ranges::any_of(SHADOW.color.m_colors, [](const CHyprColor& c) { return c.a > 0.F; });
+            if (SHADOW.enabled && SHADOW.range > 0 && HASCOLOR) {
+                const auto& SC = SHADOW.color.m_colors[0];
+                const float SA = std::clamp(sc<float>(SC.a), 0.F, 1.F);
+                MASKCOLOR = CHyprColor{BACKDROP.r * (1.F - SA) + SC.r * SA, BACKDROP.g * (1.F - SA) + SC.g * SA, BACKDROP.b * (1.F - SA) + SC.b * SA, BACKDROP.a};
+            }
+        }
+
+        makeOverviewCornerTexture(CARDROUND.rounding, CARDROUND.power, MASKCOLOR);
 
         for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
             if (!images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
@@ -5927,13 +5941,6 @@ void CScrollOverview::render() {
                 g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
             }
 
-            // The masks just repainted the nubs in flat backdrop, erasing the
-            // card shadow there; outside the box the backdrop IS shadowed, and
-            // that discontinuity reads as a faint line tracing the corner
-            // (user-reported). Re-render the shadow clipped to the nubs -- same
-            // shader, same geometry, so it matches by construction, and the
-            // nubs end up with exactly one visible coat.
-            renderOverviewWorkspaceShadow(MONITOR, CARDBOX, SCALE, true, CORNERALPHA, true);
         }
     }
 
