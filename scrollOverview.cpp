@@ -4831,6 +4831,25 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         }
     };
 
+    // X3: a 2px accent border on a cell, the reference's border.width 2. Used
+    // both for the focused desktop (OverviewWidget.qml:432-433) and for the
+    // drag-hover state (OverviewWidget.qml:179-180) -- one lambda so the two
+    // cannot drift apart.
+    // ponytail: ONE radius, not the position-dependent pair addCellRect draws.
+    // CBorderPassElement::SBorderData carries a single `round`, and splitting a
+    // border across two clipped halves would seam at the join where a filled
+    // rect does not. The outer corners are the visible ones at this size.
+    auto addCellBorder = [&](const CBox& cell) {
+        CBorderPassElement::SBorderData border;
+        border.box           = cell;
+        border.grad1         = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
+        border.round         = ROUND;
+        border.roundingPower = CARDROUND.power;
+        border.a             = 1.F;
+        border.borderSize    = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
+    };
+
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
         if (!wimg || !wimg->pWorkspace)
@@ -4898,6 +4917,11 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             const auto ACCENT = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
 
             addCellRect(CELL, ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F} : ACCENT.m_colors[0].modifyA(0.22F), ATLEFT, ATRIGHT);
+
+            // X3 delta 3: the reference borders the hovered cell as well as
+            // tinting it. Drawn after the tint and after the minis, so the drop
+            // target reads as a target even over a cell full of previews.
+            addCellBorder(CELL);
         }
 
         // X3: the reference marks the focused desktop with a 2px accent border
@@ -4908,14 +4932,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         // its indicator is one moving item; here the cell rects are already
         // laid out, so the border simply draws on whichever cell is active.
         if (monitor->m_activeWorkspace && wimg->pWorkspace->m_id == monitor->m_activeWorkspace->m_id) {
-            CBorderPassElement::SBorderData indicator;
-            indicator.box           = CELL;
-            indicator.grad1         = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
-            indicator.round         = ROUND;
-            indicator.roundingPower = CARDROUND.power;
-            indicator.a             = 1.F;
-            indicator.borderSize    = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(indicator));
+            addCellBorder(CELL);
         }
 
     }
