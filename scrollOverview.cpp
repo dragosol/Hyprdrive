@@ -2928,8 +2928,12 @@ void CScrollOverview::performPrimaryClickAction() {
 void CScrollOverview::selectHoveredWorkspace() {
     lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
+    // workspaceAtOverviewCursor writes workspaceIdx; reading it in the same call
+    // expression is unsequenced, and the stale index reached close() as the
+    // "selected" workspace and undid the switch (X15).
     size_t     workspaceIdx = viewportCurrentWorkspace;
-    focusOverviewWorkspace(workspaceAtOverviewCursor(&workspaceIdx), workspaceIdx);
+    const auto HOVEREDWORKSPACE = workspaceAtOverviewCursor(&workspaceIdx);
+    focusOverviewWorkspace(HOVEREDWORKSPACE, workspaceIdx);
 }
 
 bool CScrollOverview::windowDispatcherAction(const std::string& action) {
