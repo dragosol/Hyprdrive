@@ -578,11 +578,15 @@ static CBox getOverviewGlobalBox(CBox globalBox, PHLMONITOR monitor, float scale
 }
 
 static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
-                                 bool round = true) {
+                                 bool round = true, const CBox* geometryOverride = nullptr) {
     if (!window)
         return {};
 
-    auto geometry = window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    // OVERVIEW_CPP_SPEC 13.5 X17. geometryOverride lets a caller push a SNAPSHOT
+    // of a window's desktop geometry through the grid transform below. Everything
+    // the user can see or hit goes through this function; anything that maps raw
+    // desktop geometry itself lands somewhere the tile is not.
+    auto geometry = geometryOverride ? *geometryOverride : window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
     if (CBox slot; overviewGridSlot(window, monitor, slot)) {
         const bool PROMOTED = overviewGridPromoted(window, monitor);
@@ -3070,8 +3074,19 @@ void CScrollOverview::refreshDragOriginalOverviewBoxes() {
     hitbox.translate(tapeDelta);
 
     const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
-    dragOriginalOverviewBox    = getOverviewGlobalBox(visualBox, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
-    dragOriginalOverviewHitbox = getOverviewGlobalBox(hitbox, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, false);
+
+    // OVERVIEW_CPP_SPEC 13.5 X17. These MUST use the same grid-aware mapping as
+    // getOverviewWindowBox(), which is what drew the tile and what
+    // windowAtOverviewPoint() hit-tested. Mapping the raw desktop geometry with
+    // getOverviewGlobalBox() put this box wherever the window sits on the DESKTOP,
+    // not where its tile sits in the overview grid -- measured 800+ px apart on a
+    // 6-window workspace. Consequence: the "cursor is still over where the drag
+    // started" no-op guard in dropAnchorAtOverviewCursorOnWorkspace() essentially
+    // never fired, so every drag, however short, fell through to anchor selection
+    // and swapped the window into another tiling slot. Both windows then took
+    // their new slots' sizes -- the user sees "dragging resizes my windows".
+    dragOriginalOverviewBox    = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, true, &visualBox);
+    dragOriginalOverviewHitbox = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, false, &hitbox);
 }
 
 CBox CScrollOverview::resizedWindowBox() const {
