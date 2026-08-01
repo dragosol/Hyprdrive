@@ -960,8 +960,34 @@ static SOverviewCardRounding getOverviewCardRounding(PHLMONITOR monitor, float o
     const auto THEMEROUNDING = ScrollOverview::Config::getValue<int>("decoration:rounding");
     const auto THEMEPOWER    = ScrollOverview::Config::getValue<float>("decoration:rounding_power");
 
-    const int   LOGICAL     = std::max(THEMEROUNDING, OVERVIEW_MIN_CARD_ROUNDING);
     const float MONITORSCALE = monitor ? monitor->m_scale : 1.F;
+
+    // E8-c (user): the desktop curve the eye compares against is NOT
+    // decoration:rounding -- it is the rice fake screen rounding, the
+    // quickshell:screenCorners overlay. That layer is exactly radius-sized
+    // (23x23 corner pieces today), so read the radius off the live layer and
+    // the cards follow the rice by construction. Unscaled on purpose: the user
+    // asked for the SAME radius as the desktop curve, not a shrunk one.
+    // ponytail: exact namespace match; a differently-named corner overlay
+    // falls back to the theme path below.
+    if (monitor) {
+        for (auto const& lsRef : monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
+            const auto LS = lsRef.lock();
+            if (!LS || LS->m_namespace != "quickshell:screenCorners")
+                continue;
+
+            const int DIM = sc<int>(std::round(std::min(LS->m_geometry.width, LS->m_geometry.height)));
+            if (DIM <= 0)
+                continue;
+
+            return {
+                .rounding = std::max(1, sc<int>(std::round(DIM * MONITORSCALE))),
+                .power    = std::clamp(THEMEPOWER > 0.F ? THEMEPOWER : 2.F, 1.F, 10.F),
+            };
+        }
+    }
+
+    const int LOGICAL = std::max(THEMEROUNDING, OVERVIEW_MIN_CARD_ROUNDING);
 
     return {
         .rounding = std::max(1, sc<int>(std::round(LOGICAL * MONITORSCALE * overviewScale))),
