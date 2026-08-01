@@ -10,5 +10,10 @@ inline HANDLE SCROLLOVERVIEW_HANDLE = nullptr;
 // main.cpp, read by the window gate in scrollOverview.cpp.
 inline std::string g_overviewSearch;
 
+// OVERVIEW_CPP_SPEC §13.2 F3. Index into the ranked app results, -1 meaning
+// "no app selected, the grid owns Return". Paired with the query above: any
+// edit to the query resets it.
+inline int g_overviewAppSelection = -1;
+
 bool ensureScrollOverviewHooks();
 void disableScrollOverviewHooks();

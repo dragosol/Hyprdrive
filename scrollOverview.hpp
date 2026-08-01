@@ -92,6 +92,7 @@ class CScrollOverview : public IOverview {
     bool   selectWindowAtOverviewCursor(bool syncFocus = false);
     PHLWINDOW windowClosestToWorkspaceCenter(size_t workspaceIdx) const;
     void   rememberSelection(PHLWINDOW window);
+    size_t matchingWindowCount() const;
     void   syncSelectionToViewport();
     void   syncFocusedSelection();
     size_t dragWorkspaceIndex(PHLWINDOW window) const;

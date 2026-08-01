@@ -1,4 +1,6 @@
 #include "scrollOverview.hpp"
+
+#include "AppSearch.hpp"
 #include <unordered_set>
 #include <algorithm>
 #include <any>
@@ -105,6 +107,17 @@ static bool hasOverviewSubmap() {
     return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) { return keybind && keybind->submap.name == OVERVIEW_SUBMAP; });
 }
 
+// Whether the submap binds any KEY, as opposed to only mouse buttons.
+// Tested on the key STRING, not SKeybind::mouse: a plain `bind` whose key is
+// "mouse:272" leaves that flag false (it marks bindm-style drag binds), so the
+// flag alone counted this rice's two click binds as keyboard binds and kept the
+// keyboard hook uninstalled -- measured 2026-08-01, arrows and Return dead.
+static bool hasOverviewSubmapKeyBinds() {
+    return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) {
+        return keybind && keybind->submap.name == OVERVIEW_SUBMAP && !keybind->mouse && !keybind->key.starts_with("mouse");
+    });
+}
+
 static bool isOverviewSubmapActive() {
     return g_pKeybindManager && g_pKeybindManager->getCurrentSubmap().name == OVERVIEW_SUBMAP;
 }
@@ -163,6 +176,10 @@ static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
 
     return window;
 }
+
+// OVERVIEW_CPP_SPEC §13.2 F3. How many app results the panel lists. GNOME shows
+// a handful; a long list under the pill would cover the grid it is filtering.
+static constexpr size_t OVERVIEW_APP_RESULT_LIMIT = 5;
 
 // OVERVIEW_CPP_SPEC §5 F2. Case-insensitive substring over title and class.
 static bool overviewSearchMatches(const PHLWINDOW& window) {
@@ -1886,8 +1903,42 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             case XKB_KEY_KP_Down:
                 moveSelection("down");
                 break;
+            case XKB_KEY_Tab:
+            case XKB_KEY_ISO_Left_Tab: {
+                const auto RESULTS = AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT);
+                if (RESULTS.empty())
+                    return;
+
+                // -1 is the grid. Tab walks down the results and back out to it,
+                // so the grid is never unreachable by keyboard.
+                const int COUNT = sc<int>(RESULTS.size());
+                if (KEYSYM == XKB_KEY_ISO_Left_Tab)
+                    g_overviewAppSelection = g_overviewAppSelection <= -1 ? COUNT - 1 : g_overviewAppSelection - 1;
+                else
+                    g_overviewAppSelection = g_overviewAppSelection >= COUNT - 1 ? -1 : g_overviewAppSelection + 1;
+
+                damage();
+                break;
+            }
             case XKB_KEY_Return:
-            case XKB_KEY_KP_Enter: close(); break;
+            case XKB_KEY_KP_Enter: {
+                const auto RESULTS = AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT);
+
+                // An explicit Tab selection wins. Otherwise the top app is only
+                // taken when no window matched at all -- with windows on screen,
+                // Return keeps its measured meaning of "focus the selection".
+                int launchIdx = -1;
+                if (g_overviewAppSelection >= 0 && g_overviewAppSelection < sc<int>(RESULTS.size()))
+                    launchIdx = g_overviewAppSelection;
+                else if (!RESULTS.empty() && matchingWindowCount() == 0)
+                    launchIdx = 0;
+
+                if (launchIdx >= 0)
+                    AppSearch::launch(*RESULTS[launchIdx], ScrollOverview::Config::getTerminal());
+
+                close();
+                break;
+            }
             default: return;
         }
 
@@ -1909,7 +1960,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     workspaceCreatedHook = Event::bus()->m_events.workspace.created.listen(onWorkspaceLifecycle);
     workspaceRemovedHook = Event::bus()->m_events.workspace.removed.listen(onWorkspaceLifecycle);
     activateSubmapIfConfigured();
-    if (!usesSubmapKeybinds)
+    // The submap only owns the KEYBOARD if it actually binds keys. Gating this
+    // on the submap merely existing left arrows, Tab and Return with no handler
+    // at all in a rice whose submap exists purely for the mouse P0 fix (a click
+    // with SUPER still held); measured 2026-08-01, the arrow keys were dead.
+    if (!hasOverviewSubmapKeyBinds())
         keyboardKeyHook = Event::bus()->m_events.input.keyboard.key.listen(onKeyboardKey);
 
     Pointer::Cursor::overrideController->setOverride("left_ptr", Pointer::Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
@@ -5053,23 +5108,31 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 // The reference's two trailing icon buttons (Google Lens, SongRec) are not
 // drawn -- neither action exists in this overview, so they would be decoration
 // for nothing.
+// Counted across every workspace, not just the focused one: the strip shows
+// matching minis from elsewhere, so "no matches" has to agree with that.
+size_t CScrollOverview::matchingWindowCount() const {
+    if (g_overviewSearch.empty())
+        return 0;
+
+    size_t matches = 0;
+    for (const auto& wimg : images) {
+        if (wimg && wimg->pWorkspace)
+            matches += overviewGridWindows(wimg->pWorkspace).size();
+    }
+    return matches;
+}
+
 void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     if (!monitor)
         return;
 
     const bool QUERIED = !g_overviewSearch.empty();
 
-    // Counted across every workspace, not just the focused one: the strip shows
-    // matching minis from elsewhere, so "no matches" has to agree with that.
-    size_t matches = 0;
-    if (QUERIED) {
-        for (const auto& wimg : images) {
-            if (wimg && wimg->pWorkspace)
-                matches += overviewGridWindows(wimg->pWorkspace).size();
-        }
-    }
+    const size_t MATCHES = QUERIED ? matchingWindowCount() : 0;
+    const auto   RESULTS = QUERIED ? AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT) : std::vector<const AppSearch::SEntry*>{};
 
-    const bool EMPTYRESULT = QUERIED && matches == 0;
+    // An app hit is a hit: "no matches" must not contradict a listed result.
+    const bool EMPTYRESULT = QUERIED && MATCHES == 0 && RESULTS.empty();
 
     // X10: the pill is laid out in the SAME logical space as the strip it sits
     // above, and rides the active workspace card through the same transform.
@@ -5145,6 +5208,76 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             sc<float>(GLYPHTEX->m_size.y),
         };
         ADDTEX(GLYPHTEX, glyphBox.round());
+    }
+
+    // F3: the app half of the search, listed under the pill. This is a second,
+    // ordered list ALONGSIDE the window gate -- it deliberately does not change
+    // which windows the grid shows (RICE_PROGRESS.md "F3-scope" §1).
+    if (!RESULTS.empty()) {
+        if (g_overviewAppSelection >= sc<int>(RESULTS.size()))
+            g_overviewAppSelection = sc<int>(RESULTS.size()) - 1;
+
+        constexpr float ROWHL = 34.F, ROWGAPL = 6.F, PANELPADL = 8.F;
+        const float     PANELHL = (PANELPADL * 2.F) + (sc<float>(RESULTS.size()) * ROWHL) + ((sc<float>(RESULTS.size()) - 1.F) * ROWGAPL);
+        const CBox      PANELLOGICAL{PILLLOGICAL.x, PILLLOGICAL.y + PILLLOGICAL.height + 10.F, PILLWL, PANELHL};
+
+        CBox panel = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+        if (panel.width > 1.F && overviewBoxIntersectsMonitor(panel, monitor)) {
+            panel.round();
+
+            const int PANELROUND = std::max(1, sc<int>(std::round(16.F * SCALE)));
+
+            // §10 clause 3: the expanded search surface is frosted, like the pill.
+            OverviewRender::queueBlur(panel, PANELROUND, 2.F, 1.F, false);
+
+            CRectPassElement::SRectData panelBg;
+            panelBg.box           = panel;
+            panelBg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.55F} : INACTIVE.m_colors[0].modifyA(0.55F);
+            panelBg.round         = PANELROUND;
+            panelBg.roundingPower = 2.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(panelBg));
+
+            for (size_t i = 0; i < RESULTS.size(); ++i) {
+                const CBox ROWLOGICAL{PANELLOGICAL.x + PANELPADL, PANELLOGICAL.y + PANELPADL + (sc<float>(i) * (ROWHL + ROWGAPL)), PILLWL - (PANELPADL * 2.F), ROWHL};
+
+                CBox row = getOverviewGlobalBox(ROWLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+                row.round();
+
+                const bool SELECTED = sc<int>(i) == g_overviewAppSelection;
+                if (SELECTED) {
+                    CRectPassElement::SRectData sel;
+                    sel.box           = row;
+                    // OPAQUE on purpose, and the alpha is the whole point.
+                    // This theme's accent (0x77504536) is a dark warm brown that
+                    // happens to sit within a few units of the blurred wallpaper
+                    // behind the panel, so tinting is close to a no-op: measured
+                    // 2026-08-01, alpha 0.35 moved the row's mean by 3/255 and
+                    // 0.85 by only 8/255 -- present but invisible, the same trap
+                    // as X3's dark border.
+                    // Opaque does not rely on the hue winning. The unselected
+                    // rows are frosted and carry the wallpaper's blurred
+                    // STRUCTURE; the selected one is flat. That difference holds
+                    // against any wallpaper, which a colour delta does not.
+                    sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F} : ACCENT.m_colors[0].modifyA(1.F);
+                    sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
+                    sel.roundingPower = 2.F;
+                    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
+                }
+
+                const int  ROWPAD  = sc<int>(std::round(12.F * SCALE));
+                const auto ROWTEX  = g_pHyprRenderer->renderText(RESULTS[i]->name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
+                                                                std::max(1, sc<int>(std::round(14.F * SCALE))), false, "", std::max(1, sc<int>(row.width) - (ROWPAD * 2)));
+                if (ROWTEX && ROWTEX->ok()) {
+                    CBox rowText{
+                        row.x + sc<float>(ROWPAD),
+                        row.y + std::round((row.height - sc<float>(ROWTEX->m_size.y)) / 2.F),
+                        sc<float>(ROWTEX->m_size.x),
+                        sc<float>(ROWTEX->m_size.y),
+                    };
+                    ADDTEX(ROWTEX, rowText.round());
+                }
+            }
+        }
     }
 
     const std::string LABEL = !QUERIED ? "Search, calculate or run" : (EMPTYRESULT ? g_overviewSearch + "    no matches" : g_overviewSearch);

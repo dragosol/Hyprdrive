@@ -245,6 +245,7 @@ static bool openOverview(PHLMONITOR monitor) {
 
 static SDispatchResult onOverviewDispatcher(std::string arg) {
     g_overviewSearch.clear(); // every open starts unfiltered
+    g_overviewAppSelection = -1;
     const auto [ACTION, TARGET] = splitOverviewArg(arg);
     const auto ACTIVE           = activeScrollOverview();
 
@@ -412,6 +413,10 @@ static void applySearchKey(uint32_t keycode) {
         g_overviewSearch.pop_back();
     else if (const char C = searchCharFor(keycode); C != 0)
         g_overviewSearch.push_back(C);
+
+    // The ranking changes under any edit, so a held index would point at a
+    // different app than the one the user saw highlighted.
+    g_overviewAppSelection = -1;
 
     for (const auto& overview : scrollOverviews())
         if (overview)

@@ -274,6 +274,9 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CStringValue>("plugin:scrolloverview:layout", "overview layout", Hyprlang::STRING{"vertical"}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CStringValue>("plugin:scrolloverview:terminal", "terminal used to launch Terminal=true desktop entries; empty falls back to $TERMINAL",
+                                                           Hyprlang::STRING{""}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:input:scroll_event_delay", "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:input:touchpad_scroll_factor", "overview touchpad scroll factor", 1.F,
@@ -344,6 +347,10 @@ float getScale() {
 
 int getWorkspaceGap() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:workspace_gap"));
+}
+
+std::string getTerminal() {
+    return getValue<std::string>("plugin:scrolloverview:terminal");
 }
 
 ELayout getLayout() {

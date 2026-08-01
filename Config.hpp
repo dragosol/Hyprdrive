@@ -98,6 +98,7 @@ EScrollAction getVerticalScrollAction(ELayout layout);
 EScrollAction getHorizontalScrollAction(ELayout layout);
 int           getWallpaperMode();
 bool          getBlur();
+std::string   getTerminal();
 bool          getMissionControl();
 int           getMissionControlGap();
 int           getMissionControlReflowMs();
