@@ -35,6 +35,9 @@ class COverviewShadowPassElement : public IPassElement {
         Config::CGradientValueData color;
         float         alpha        = 1.F;
         bool          ignoreWindow = true;
+        // E8-c: draw ONLY on the corner nubs (inside the box, outside the curve).
+        // Used to repaint the shadow the corner masks overwrote.
+        bool          nubsOnly     = false;
     };
 
     COverviewShadowPassElement(const SData& data_);

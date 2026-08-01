@@ -1036,7 +1036,7 @@ static void makeOverviewCornerTexture(int radius, float power, const CHyprColor&
     }
 }
 
-static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F) {
+static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F, bool nubsOnly = false) {
     if (!monitor)
         return;
 
@@ -1066,6 +1066,7 @@ static void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& worksp
         .color         = SHADOW.color,
         .alpha         = alpha,
         .ignoreWindow  = cutoutCenter,
+        .nubsOnly      = nubsOnly,
     }));
 }
 
@@ -5850,10 +5851,22 @@ void CScrollOverview::render() {
     // the backdrop ever becomes the blurred wallpaper, this needs the card
     // rendered into its own FB and drawn with shader rounding.
     {
-        const auto       CARDROUND = getOverviewCardRounding(MONITOR, SCALE);
+        // Radius at the SETTLED scale, not the animating one: the mask texture is
+        // then generated once per theme/colour change instead of every frame of
+        // the open (integer-radius popping was part of the transition artifact).
+        const auto       CARDROUND = getOverviewCardRounding(MONITOR, ScrollOverview::Config::getScale());
         const CHyprColor BACKDROP  = WALLPAPERMODE == 1 ?
             CHyprColor{0.F, 0.F, 0.F, 1.F} :
             CHyprColor{sc<uint64_t>(ScrollOverview::Config::getValue<int64_t>("misc:background_color"))};
+
+        // Fade with the grid's own open progress. At progress 0 the card is still
+        // the fullscreen desktop -- full-strength corners there are exactly the
+        // transition artifact the user reported.
+        // Tail-only: while the card is still zooming, windows fly across its
+        // corners and any paint there reads as bites out of moving content --
+        // a plain progress fade dims that but cannot remove it (user-verified).
+        // No corners during the motion; quick fade over the last 15%.
+        const float CORNERALPHA = std::clamp((overviewGridProgress(SCALE) - 0.85F) / 0.15F, 0.F, 1.F);
 
         makeOverviewCornerTexture(CARDROUND.rounding, CARDROUND.power, BACKDROP);
 
@@ -5878,15 +5891,23 @@ void CScrollOverview::render() {
             };
 
             for (int corner = 0; corner < 4; ++corner) {
-                if (!g_overviewCornerTex[corner])
+                if (!g_overviewCornerTex[corner] || CORNERALPHA <= 0.001F)
                     continue;
 
                 CTexPassElement::SRenderData data;
                 data.tex = g_overviewCornerTex[corner];
                 data.box = CBox{ORIGINS[corner].x, ORIGINS[corner].y, R, R};
-                data.a   = 1.F;
+                data.a   = CORNERALPHA;
                 g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
             }
+
+            // The masks just repainted the nubs in flat backdrop, erasing the
+            // card shadow there; outside the box the backdrop IS shadowed, and
+            // that discontinuity reads as a faint line tracing the corner
+            // (user-reported). Re-render the shadow clipped to the nubs -- same
+            // shader, same geometry, so it matches by construction, and the
+            // nubs end up with exactly one visible coat.
+            renderOverviewWorkspaceShadow(MONITOR, CARDBOX, SCALE, true, CORNERALPHA, true);
         }
     }
 
