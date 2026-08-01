@@ -312,7 +312,7 @@ static void registerConfigValues() {
                                   makeShared<CIntValue>("plugin:scrolloverview:strip_height", "logical px the strip band reserves at the top of the workspace", 260,
                                                         SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:strip_gap", "gap between strip cells", 28, SIntValueOptions{.min = 0}));
+                                  makeShared<CIntValue>("plugin:scrolloverview:strip_gap", "gap between strip cells", 5, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:tap_super", "tapping SUPER alone toggles the overview", true));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
