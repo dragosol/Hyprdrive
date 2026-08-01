@@ -1436,8 +1436,15 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             const bool DRAGTHRESHOLDREACHED = dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ;
 
             if (submapMouseClickButton == MAIN_BUTTON && !dragActiveWindow && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
-                submapMouseClickPending = false;
-                submapMouseClickButton  = 0;
+                // OVERVIEW_CPP_SPEC 13.5 X16. Do NOT clear the pending press here.
+                // finishWindowDragOrClick() turns a drag that ends near its start back
+                // into a click, but shouldRunDefaultClickAction() needs the pending
+                // press to know the click is ours -- clearing it here meant that
+                // recovery path fell through to "not our click" and the press vanished:
+                // no focus, no close, overview left open. The committed-drag path
+                // already calls clearSubmapMouseClickPending() after endWindowDrag().
+                // Safe to keep set: the !dragActiveWindow guard above stops a re-drag,
+                // and the SECONDARY branches below require a different button.
 
                 if (!INVERT_DRAG_MODE)
                     beginDragAtStart();
@@ -1545,8 +1552,10 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         const auto     shouldRunDefaultClickAction = [&](uint32_t button) {
             if (submapMouseClickPending && submapMouseClickButton == button) {
                 clearSubmapMouseClickPending();
-                dispatchSubmapMouseClick(button);
-                return false;
+                // Only claim the click if the submap bind actually ran. Ignoring the
+                // return value swallowed the click whenever dispatch failed.
+                if (dispatchSubmapMouseClick(button))
+                    return false;
             }
 
             return !usesSubmapKeybinds || !isOverviewSubmapActive();
@@ -1558,7 +1567,15 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             performPrimaryClickAction();
         };
         const auto     finishWindowDragOrClick = [&](uint32_t button, bool allowClick) {
-            const float CLICK_MAX_DRAG_DISTANCE = 10.F * (pMonitor ? pMonitor->m_scale : 1.F);
+            // OVERVIEW_CPP_SPEC 13.5 X16. This MUST exceed the drag threshold or the
+            // click branch below is unreachable: a drag only starts past
+            // getDragThreshold(), so an equal slop means every started drag also fails
+            // the click test. A real click that wobbles 11 px was therefore swallowed --
+            // the overview stayed open and nothing got focused. Measured on the repro:
+            // distSq 104.4 vs threshSq 100.0 -> drag, no focus, no close.
+            // ponytail: flat 3x band (~30 px). If drags start feeling sticky, the upgrade
+            // is a press-duration test, not a bigger number.
+            const float CLICK_MAX_DRAG_DISTANCE = ScrollOverview::Config::getDragThreshold() * 3.F * (pMonitor ? pMonitor->m_scale : 1.F);
 
             if (dragActiveWindow) {
                 if (dragStartMouseLocal.distanceSq(lastMousePosLocal) < CLICK_MAX_DRAG_DISTANCE * CLICK_MAX_DRAG_DISTANCE) {
