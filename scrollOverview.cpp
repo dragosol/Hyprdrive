@@ -331,6 +331,12 @@ static float overviewStripLogicalHeight(PHLMONITOR monitor) {
     return H > 1.F && H < sc<float>(monitor->m_size.y) / 2.F ? H : 0.F;
 }
 
+// X10: the search row above the strip. ponytail: constant 64 logical px
+// (48px pill + 8px margins); make it a config knob if anyone ever asks.
+static float overviewSearchLogicalHeight(PHLMONITOR monitor) {
+    return monitor ? 64.F : 0.F;
+}
+
 // ponytail: recomputed per window per frame, O(windows^2) on the focused
 // workspace. Fine at desktop counts; memoise per frame if it ever shows up.
 static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor, const PHLWINDOW& target, CBox& out) {
@@ -346,10 +352,10 @@ static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor
     }
 
 
-    // Grid tiles must not slide under the strip band.
-    if (const float STRIPH = overviewStripLogicalHeight(monitor); STRIPH > 0.F) {
-        usable.y += STRIPH;
-        usable.h -= STRIPH;
+    // Grid tiles must not slide under the strip band or the search row (X10).
+    if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor); TOPCHROME > 0.F) {
+        usable.y += TOPCHROME;
+        usable.h -= TOPCHROME;
         if (usable.h <= 1)
             return false;
     }
@@ -4680,7 +4686,8 @@ CBox CScrollOverview::stripCellLogicalBox(size_t workspaceIdx) const {
         return {};
 
     const float X = sc<float>(MONITOR->m_position.x) + (sc<float>(MONITOR->m_size.x) - total) / 2.F + sc<float>(workspaceIdx) * (cellW + GAP);
-    const float Y = sc<float>(MONITOR->m_position.y) + PAD + (BAND - 2.F * PAD - cellH) / 2.F;
+    // X10: the search row owns the very top; the band starts under it.
+    const float Y = sc<float>(MONITOR->m_position.y) + overviewSearchLogicalHeight(MONITOR) + PAD + (BAND - 2.F * PAD - cellH) / 2.F;
 
     return CBox{X, Y, cellW, cellH};
 }
@@ -4826,6 +4833,11 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // 0.38 / (1 / 0.65) preserves that ordering instead of burying the
                 // cells under a panel more opaque than they are.
                 const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
+
+                // X11 (user, 2026-08-01): the strip is FROSTED. Live rounded
+                // blur of what is behind the panel, drawn under the tint. The
+                // global backdrop stays sharp -- do not confuse the two.
+                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, 1.F, false);
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
@@ -5029,8 +5041,12 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor) {
     pill.width  = PADL + BADGED + GAP + FIELDW + PADR;
     pill.height = PILLH;
     pill.x      = std::round((sc<float>(monitor->m_size.x) * SCALE - pill.width) / 2.F);
-    pill.y      = std::round(sc<float>(monitor->m_size.y) * SCALE * 0.94F - pill.height);
+    // X10: centred inside the top search row, above the strip.
+    pill.y      = std::round((overviewSearchLogicalHeight(monitor) * SCALE - pill.height) / 2.F);
     pill.round();
+
+    // X11: frosted pill -- live rounded blur of whatever is behind it.
+    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, 1.F, false);
 
     // X4: hue inherited from the theme, alpha kept at the tuned value. The
     // resting surface reads col.inactive_border and the badge the accent -- the
