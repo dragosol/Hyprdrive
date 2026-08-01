@@ -22,6 +22,36 @@ class CScrollOverviewPassElement : public IPassElement {
     }
 };
 
+class COverviewBlurPassElement : public IPassElement {
+  public:
+    struct SData {
+        CBox  box;
+        int   rounding      = 0;
+        float roundingPower = 2.F;
+        float alpha         = 1.F;
+        bool  xray          = false;
+    };
+
+    COverviewBlurPassElement(const SData& data_);
+    ~COverviewBlurPassElement() override = default;
+
+    std::vector<UP<IPassElement>> draw() override;
+    ePassElementType              type() override {
+        return EK_CUSTOM;
+    }
+    bool                          needsLiveBlur() override;
+    bool                          needsPrecomputeBlur() override;
+    std::optional<CBox>           boundingBox() override;
+    CRegion                       opaqueRegion() override;
+
+    const char*                   passName() override {
+        return "COverviewBlurPassElement";
+    }
+
+  private:
+    SData data;
+};
+
 class COverviewShadowPassElement : public IPassElement {
   public:
     struct SData {

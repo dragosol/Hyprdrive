@@ -122,6 +122,63 @@ CRegion CScrollOverviewPassElement::opaqueRegion() {
     return CBox{{}, overview->pMonitor->m_size};
 }
 
+COverviewBlurPassElement::COverviewBlurPassElement(const SData& data_) : data(data_) {
+    ;
+}
+
+std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
+    if (data.box.width < 1 || data.box.height < 1 || data.alpha <= 0.F)
+        return {};
+
+    // X14: upstream's blurred rect keeps SQUARE corners. renderRectWithBlurInternal
+    // draws the blur FB as a texture sized to the whole MONITOR and gives that draw
+    // the rect's radius, so the rounding is applied to the monitor's corners and the
+    // only thing bounding the blur is the damage box. Intersect the damage with the
+    // rounded shape and the blur ends where the tint above it ends.
+    // ponytail: a region is pixel-quantised, so the arc is not antialiased like the
+    // tint drawn over it. Under a translucent tint that is invisible; a shader-side
+    // fix would mean carrying our own blur shader.
+    CRegion clipped = g_pHyprRenderer->m_renderData.damage.copy().intersect(roundedRectRegion(data.box, data.rounding, data.roundingPower));
+    if (clipped.empty())
+        return {};
+
+    const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
+    g_pHyprRenderer->m_renderData.damage = clipped;
+    auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
+
+    Render::GL::g_pHyprOpenGL->renderRect(data.box, CHyprColor{0.F, 0.F, 0.F, 0.F},
+                                          Render::GL::CHyprOpenGLImpl::SRectRenderData{
+                                              .damage        = &clipped,
+                                              .round         = data.rounding,
+                                              .roundingPower = data.roundingPower,
+                                              .blur          = true,
+                                              .blurA         = data.alpha,
+                                              .xray          = data.xray,
+                                          });
+
+    return {};
+}
+
+bool COverviewBlurPassElement::needsLiveBlur() {
+    return !data.xray && data.alpha > 0.F;
+}
+
+bool COverviewBlurPassElement::needsPrecomputeBlur() {
+    return data.xray && data.alpha > 0.F;
+}
+
+std::optional<CBox> COverviewBlurPassElement::boundingBox() {
+    const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor;
+    if (!MONITOR)
+        return std::nullopt;
+
+    return data.box.copy().scale(1.F / MONITOR->m_scale).round();
+}
+
+CRegion COverviewBlurPassElement::opaqueRegion() {
+    return {};
+}
+
 COverviewShadowPassElement::COverviewShadowPassElement(const SData& data_) : data(data_) {
     ;
 }

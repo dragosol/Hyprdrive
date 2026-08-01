@@ -1,4 +1,5 @@
 #include "OverviewRender.hpp"
+#include "OverviewPassElement.hpp"
 #include <chrono>
 #include <cmath>
 #include <sstream>
@@ -22,15 +23,16 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     if (box.empty())
         return;
 
-    CRectPassElement::SRectData data;
+    // X14: NOT a CRectPassElement. Upstream leaves a blurred rect's corners square
+    // (see COverviewBlurPassElement::draw), so every frosted surface here -- strip
+    // panel, workspace card, search pill -- leaked blur into its corner arcs.
+    COverviewBlurPassElement::SData data;
     data.box           = box;
-    data.color         = CHyprColor{0.F, 0.F, 0.F, 0.F};
-    data.round         = rounding;
+    data.rounding      = rounding;
     data.roundingPower = roundingPower;
-    data.blur          = true;
-    data.blurA         = alpha;
+    data.alpha         = alpha;
     data.xray          = usePrecomputedBlur;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(data));
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(data));
 }
 
 void renderBlur(PHLMONITOR monitor, const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur) {
