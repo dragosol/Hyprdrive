@@ -1,4 +1,5 @@
 #include "scrollOverview.hpp"
+#include <unordered_set>
 #include <algorithm>
 #include <any>
 #include <array>
@@ -1297,6 +1298,7 @@ CScrollOverview::~CScrollOverview() {
     restoreForcedLayerVisibility();
     images.clear(); // otherwise we get a vram leak
     trailingWorkspace.reset();
+    gapWorkspaces.clear();
     if (scrollOverviews().empty())
         Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
     if (const auto MONITOR = pMonitor.lock())
@@ -2231,8 +2233,55 @@ void CScrollOverview::ensureTrailingWorkspace() {
     trailingWorkspace = State::workspaceState()->create(maxID + 1, MONITOR->m_id, std::to_string(maxID + 1));
 }
 
+// ponytail: X3 population parity. The reference grid is indexed by workspace
+// NUMBER, not by the workspaces that happen to exist -- it lays out cells 1..N
+// and only hides those past the dynamic count (OverviewWidget.qml:33-36, :161,
+// :167), so jumping straight to desktop 5 shows five desktops, not two.
+// Materialising the missing ids as real workspaces buys that with no new
+// placeholder-card path through the renderer: the strong refs below are the only
+// thing keeping them alive, exactly as E2's trailing workspace works, so closing
+// the overview reaps them for free.
+void CScrollOverview::ensureNoWorkspaceGaps() {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || closing) {
+        gapWorkspaces.clear();
+        return;
+    }
+
+    WORKSPACEID                    maxID = 0;
+    std::unordered_set<WORKSPACEID> existing;
+    for (const auto& w : State::workspaceState()->workspaces()) {
+        const auto WORKSPACE = w.lock();
+        if (!valid(WORKSPACE) || WORKSPACE->m_isSpecialWorkspace)
+            continue;
+
+        // Ids on ANOTHER monitor are not gaps here, and re-creating one would
+        // move it, so they count as occupied without becoming ours.
+        existing.insert(WORKSPACE->m_id);
+        if (WORKSPACE->m_monitor == MONITOR)
+            maxID = std::max(maxID, WORKSPACE->m_id);
+    }
+
+    std::vector<PHLWORKSPACE> kept;
+    for (WORKSPACEID id = 1; id < maxID; ++id) {
+        if (existing.contains(id)) {
+            // Keep paying for the ones we already materialised; anything else is
+            // the user's and must not be adopted.
+            if (const auto it = std::find_if(gapWorkspaces.begin(), gapWorkspaces.end(), [id](const auto& w) { return w && w->m_id == id; }); it != gapWorkspaces.end())
+                kept.emplace_back(*it);
+            continue;
+        }
+
+        if (const auto CREATED = State::workspaceState()->create(id, MONITOR->m_id, std::to_string(id)); CREATED)
+            kept.emplace_back(CREATED);
+    }
+
+    gapWorkspaces = std::move(kept);
+}
+
 void CScrollOverview::rebuildWorkspaceImages() {
     ensureTrailingWorkspace();
+    ensureNoWorkspaceGaps();
     const auto selectedWorkspace = closeOnWindow ? closeOnWindow->m_workspace : startedOn;
     const auto selectedWindow    = closeOnWindow;
     const auto viewportWorkspace = viewportCurrentWorkspace < images.size() ? images[viewportCurrentWorkspace]->pWorkspace : startedOn;
@@ -5940,7 +5989,12 @@ void CScrollOverview::onWorkspaceChange() {
     // "collapse the empty workspace you just left" rule would delete its card the
     // first time you scroll onto it and back off -- and pendingRemovedWorkspace is
     // sticky, so the card never returns even though the workspace is still alive.
-    const bool SHOULDREMOVEPREVIOUSWORKSPACE = previousStartedOn && previousStartedOn != NEWWORKSPACE && previousStartedOn != trailingWorkspace &&
+    // A gap workspace is empty BY DEFINITION, so the same rule would reap it the
+    // first time you scroll across it and the strip would lose the cell again.
+    const bool PREVIOUSISOURS = previousStartedOn &&
+        (previousStartedOn == trailingWorkspace ||
+         std::find(gapWorkspaces.begin(), gapWorkspaces.end(), previousStartedOn) != gapWorkspaces.end());
+    const bool SHOULDREMOVEPREVIOUSWORKSPACE = previousStartedOn && previousStartedOn != NEWWORKSPACE && !PREVIOUSISOURS &&
         !previousStartedOn->m_isSpecialWorkspace && !previousStartedOn->isPersistent() && previousStartedOn->getWindowCount() == 0;
     const auto REMOVEDWORKSPACE = REQUESTEDREMOVEDWORKSPACE ? REQUESTEDREMOVEDWORKSPACE : SHOULDREMOVEPREVIOUSWORKSPACE ? previousStartedOn : PHLWORKSPACE{};
 

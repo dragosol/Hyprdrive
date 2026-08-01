@@ -56,6 +56,7 @@ class CScrollOverview : public IOverview {
 
   private:
     void   ensureTrailingWorkspace();
+    void   ensureNoWorkspaceGaps();
     void   rebuildWorkspaceImages();
     void   seedRememberedSelections();
     void   redrawAll(bool forcelowres = false);
@@ -242,6 +243,7 @@ class CScrollOverview : public IOverview {
     SWorkspaceInsertTransition       workspaceInsertTransition;
     PHLWORKSPACEREF                  pendingRemovedWorkspace;
     PHLWORKSPACE                     trailingWorkspace;
+    std::vector<PHLWORKSPACE>        gapWorkspaces;
     ScrollOverview::Config::ELayout  layout = ScrollOverview::Config::ELayout::VERTICAL;
 
     struct SForcedSurfaceVisibility {
