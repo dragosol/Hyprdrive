@@ -4792,58 +4792,112 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     }
 }
 
-// OVERVIEW_CPP_SPEC §5 F1. The typed query, as a HUD pill. F2 already filters
-// correctly; what was missing was any way to see what you typed, or to tell an
-// empty query apart from one that matches nothing.
-// ponytail: fixed bottom-centre anchor and fixed 22px type, no config keys.
-// Add them if the pill ever needs to live somewhere else.
+// OVERVIEW_CPP_SPEC §5 F1 + §13.4 X2. The search bar, styled after the
+// deprecated Quickshell overview (ii/modules/ii/overview/SearchBar.qml): a
+// full-round pill carrying an accent badge with the Material "search" glyph, a
+// placeholder while empty, and a fixed field width that widens once a query is
+// typed. Metrics are the reference's: 40px row + 4px margins = 48 high, 15px
+// type, 22px glyph, 210px collapsed / 360px expanded.
+// ponytail: bottom-centre anchor kept. The reference sits at the top, but the
+// workspace strip owns that band until X3 settles the layout.
+// ponytail: the width change is a hard cut; the reference eases it over 300ms.
+// The reference's two trailing icon buttons (Google Lens, SongRec) are not
+// drawn -- neither action exists in this overview, so they would be decoration
+// for nothing.
 void CScrollOverview::renderSearch(PHLMONITOR monitor) {
-    if (!monitor || g_overviewSearch.empty())
+    if (!monitor)
         return;
+
+    const bool QUERIED = !g_overviewSearch.empty();
 
     // Counted across every workspace, not just the focused one: the strip shows
     // matching minis from elsewhere, so "no matches" has to agree with that.
     size_t matches = 0;
-    for (const auto& wimg : images) {
-        if (wimg && wimg->pWorkspace)
-            matches += overviewGridWindows(wimg->pWorkspace).size();
+    if (QUERIED) {
+        for (const auto& wimg : images) {
+            if (wimg && wimg->pWorkspace)
+                matches += overviewGridWindows(wimg->pWorkspace).size();
+        }
     }
 
-    const bool        EMPTYRESULT = matches == 0;
-    const std::string LABEL       = EMPTYRESULT ? g_overviewSearch + "    no matches" : g_overviewSearch;
+    const bool  EMPTYRESULT = QUERIED && matches == 0;
+    const float SCALE       = std::max<float>(monitor->m_scale, 0.01F);
 
-    const float SCALE  = std::max<float>(monitor->m_scale, 0.01F);
-    const int   FONTPX = std::max(1, sc<int>(std::round(22.F * SCALE)));
-    const float PADX   = std::round(28.F * SCALE);
-    const float PADY   = std::round(14.F * SCALE);
-
-    const CHyprColor FG  = EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F};
-    const auto       TEX = g_pHyprRenderer->renderText(LABEL, FG, FONTPX, false, "", sc<int>(std::round(monitor->m_size.x * SCALE / 2.F)));
-    if (!TEX || !TEX->ok())
-        return;
+    const float PILLH  = std::round(48.F * SCALE);
+    const float BADGED = std::round(40.F * SCALE);
+    const float PADL   = std::round(4.F * SCALE);
+    const float GAP    = std::round(12.F * SCALE);
+    const float PADR   = std::round(20.F * SCALE);
+    const float FIELDW = std::round((QUERIED ? 360.F : 210.F) * SCALE);
 
     CBox pill;
-    pill.width  = sc<float>(TEX->m_size.x) + PADX * 2.F;
-    pill.height = sc<float>(TEX->m_size.y) + PADY * 2.F;
+    pill.width  = PADL + BADGED + GAP + FIELDW + PADR;
+    pill.height = PILLH;
     pill.x      = std::round((sc<float>(monitor->m_size.x) * SCALE - pill.width) / 2.F);
     pill.y      = std::round(sc<float>(monitor->m_size.y) * SCALE * 0.94F - pill.height);
     pill.round();
 
+    // X4: hue inherited from the theme, alpha kept at the tuned value. The
+    // resting surface reads col.inactive_border and the badge the accent -- the
+    // same pairing renderStrip already uses for its cells.
+    const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
+    const auto ACCENT   = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
+
     CRectPassElement::SRectData bg;
     bg.box           = pill;
-    bg.color         = CHyprColor{0.F, 0.F, 0.F, 0.60F};
+    bg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.60F} : INACTIVE.m_colors[0].modifyA(0.60F);
     bg.round         = sc<int>(std::round(pill.height / 2.F));
     bg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
 
-    CBox textBox = {pill.x + PADX, pill.y + PADY, sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
-    textBox.round();
+    CBox badge = {pill.x + PADL, pill.y + std::round((pill.height - BADGED) / 2.F), BADGED, BADGED};
+    badge.round();
 
-    CTexPassElement::SRenderData data;
-    data.tex = TEX;
-    data.box = textBox;
-    data.a   = 1.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+    CRectPassElement::SRectData badgeBg;
+    badgeBg.box           = badge;
+    badgeBg.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F} : ACCENT.m_colors[0].modifyA(0.30F);
+    badgeBg.round         = sc<int>(std::round(BADGED / 2.F));
+    badgeBg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(badgeBg));
+
+    const auto ADDTEX = [&](const auto& tex, const CBox& box) {
+        CTexPassElement::SRenderData data;
+        data.tex = tex;
+        data.box = box;
+        data.a   = 1.F;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+    };
+
+    // U+E8B6 is the Material Symbols "search" glyph. The codepoint is used
+    // directly rather than the "search" ligature, which needs font shaping the
+    // text renderer does not promise.
+    const auto GLYPHTEX = g_pHyprRenderer->renderText("\uE8B6", CHyprColor{1.F, 1.F, 1.F, 0.92F}, std::max(1, sc<int>(std::round(22.F * SCALE))), false,
+                                                      "Material Symbols Rounded", 0);
+    if (GLYPHTEX && GLYPHTEX->ok()) {
+        CBox glyphBox = {
+            badge.x + std::round((badge.width - sc<float>(GLYPHTEX->m_size.x)) / 2.F),
+            badge.y + std::round((badge.height - sc<float>(GLYPHTEX->m_size.y)) / 2.F),
+            sc<float>(GLYPHTEX->m_size.x),
+            sc<float>(GLYPHTEX->m_size.y),
+        };
+        ADDTEX(GLYPHTEX, glyphBox.round());
+    }
+
+    const std::string LABEL = !QUERIED ? "Search, calculate or run" : (EMPTYRESULT ? g_overviewSearch + "    no matches" : g_overviewSearch);
+    const CHyprColor  FG    = !QUERIED ? CHyprColor{1.F, 1.F, 1.F, 0.55F} : (EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F});
+
+    const int  FONTPX = std::max(1, sc<int>(std::round(15.F * SCALE)));
+    const auto TEX    = g_pHyprRenderer->renderText(LABEL, FG, FONTPX, false, "", sc<int>(FIELDW));
+    if (!TEX || !TEX->ok())
+        return;
+
+    CBox textBox = {
+        badge.x + BADGED + GAP,
+        pill.y + std::round((pill.height - sc<float>(TEX->m_size.y)) / 2.F),
+        sc<float>(TEX->m_size.x),
+        sc<float>(TEX->m_size.y),
+    };
+    ADDTEX(TEX, textBox.round());
 }
 
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
