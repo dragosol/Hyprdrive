@@ -4788,6 +4788,49 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         }
     }
 
+    // X3: the reference rounds only the GRID's outer corners at the large
+    // radius and every inner corner at verysmall (OverviewWidget.qml:171-175).
+    // The strip is one row, so cell 0 is large on its left corners, the last
+    // cell large on its right, and every facing corner is tight.
+    //
+    // CRectPassElement carries ONE radius, so the asymmetry is drawn as two
+    // rects of the SAME box clipped to opposite halves. The clips do not
+    // overlap, which is the point: a translucent backdrop drawn twice over the
+    // same pixel would blend to the wrong alpha.
+    //
+    // ponytail: the inner radius is the reference's verysmall:large ratio
+    // (8:23) applied to whatever the outer radius resolves to, rather than a
+    // literal 8. E8-c pinned the outer radius to the live desktop curve, so a
+    // hardcoded inner would stop tracking the theme the moment that changes.
+    const int INNERROUND = std::max(1, sc<int>(std::round(sc<float>(ROUND) * 8.F / 23.F)));
+
+    auto addCellRect = [&](const CBox& cell, const CHyprColor& color, bool largeLeft, bool largeRight) {
+        if (largeLeft == largeRight) {
+            CRectPassElement::SRectData r;
+            r.box           = cell;
+            r.color         = color;
+            r.round         = largeLeft ? ROUND : INNERROUND;
+            r.roundingPower = CARDROUND.power;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
+            return;
+        }
+
+        const float MID = sc<float>(cell.x) + std::round(sc<float>(cell.width) / 2.F);
+
+        for (int half = 0; half < 2; ++half) {
+            const bool LEFT = half == 0;
+
+            CRectPassElement::SRectData r;
+            r.box           = cell;
+            r.color         = color;
+            r.round         = (LEFT ? largeLeft : largeRight) ? ROUND : INNERROUND;
+            r.roundingPower = CARDROUND.power;
+            r.clipBox       = LEFT ? CBox{sc<float>(cell.x), sc<float>(cell.y), MID - sc<float>(cell.x), sc<float>(cell.height)} :
+                                     CBox{MID, sc<float>(cell.y), sc<float>(cell.x) + sc<float>(cell.width) - MID, sc<float>(cell.height)};
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
+        }
+    };
+
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
         if (!wimg || !wimg->pWorkspace)
@@ -4804,12 +4847,10 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         // inherited; alpha stays at the tuned 0.38. Black is the no-theme fallback.
         const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
 
-        CRectPassElement::SRectData backdrop;
-        backdrop.box           = CELL;
-        backdrop.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.38F} : INACTIVE.m_colors[0].modifyA(0.38F);
-        backdrop.round         = ROUND;
-        backdrop.roundingPower = CARDROUND.power;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(backdrop));
+        const bool ATLEFT  = workspaceIdx == 0;
+        const bool ATRIGHT = workspaceIdx + 1 == images.size();
+
+        addCellRect(CELL, INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.38F} : INACTIVE.m_colors[0].modifyA(0.38F), ATLEFT, ATRIGHT);
 
         // X3: the deprecated overview centres a large, faint workspace number in
         // every cell (ii/modules/ii/overview/OverviewWidget.qml:182-193): 250px
@@ -4856,12 +4897,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             // theme that defines no gradient.
             const auto ACCENT = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
 
-            CRectPassElement::SRectData hover;
-            hover.box           = CELL;
-            hover.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F} : ACCENT.m_colors[0].modifyA(0.22F);
-            hover.round         = ROUND;
-            hover.roundingPower = CARDROUND.power;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(hover));
+            addCellRect(CELL, ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F} : ACCENT.m_colors[0].modifyA(0.22F), ATLEFT, ATRIGHT);
         }
 
         // X3: the reference marks the focused desktop with a 2px accent border
