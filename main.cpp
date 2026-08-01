@@ -489,8 +489,13 @@ static SDispatchResult onWindowDispatcher(std::string arg) {
     if (!OVERVIEW)
         return {};
 
+    if (arg == "click") {
+        OVERVIEW->performPrimaryClickAction();
+        return {};
+    }
+
     if (arg != "select" && arg != "close")
-        return {.success = false, .error = "invalid arg. expected select|close"};
+        return {.success = false, .error = "invalid arg. expected select|close|click"};
 
     OVERVIEW->windowDispatcherAction(arg);
     return {};

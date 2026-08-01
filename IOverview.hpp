@@ -15,6 +15,7 @@ class IOverview {
     virtual ~IOverview() = default;
 
     virtual void  render()           = 0;
+    virtual void  performPrimaryClickAction() = 0;
     virtual void  damage()           = 0;
     virtual void  requestInputFrame() = 0;
     virtual void  onDamageReported() = 0;

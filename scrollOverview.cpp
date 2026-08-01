@@ -1551,25 +1551,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             if (!shouldRunDefaultClickAction(button))
                 return;
 
-            // E6: the strip band floats above the main tiles, so it has to be
-            // tested before them, exactly as the drop path does.
-            //
-            // E8-b: clicking a desktop -- on the strip or adjacent on screen --
-            // switches to it AND exits. This used to keep the overview open for
-            // strip clicks, which spec 13.1 now calls a defect rather than a
-            // design choice. focusOverviewWorkspace changes the workspace, so the
-            // viewport slide starts before the close animation takes over.
-            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-            size_t stripIdx   = viewportCurrentWorkspace;
-            if (const auto STRIPWORKSPACE = workspaceAtStripPoint(lastMousePosLocal, &stripIdx); STRIPWORKSPACE) {
-                focusOverviewWorkspace(STRIPWORKSPACE, stripIdx);
-                close();
-                return;
-            }
-
-            selectHoveredWorkspace();
-            selectWindowAtOverviewCursor(true);
-            close();
+            performPrimaryClickAction();
         };
         const auto     finishWindowDragOrClick = [&](uint32_t button, bool allowClick) {
             const float CLICK_MAX_DRAG_DISTANCE = 10.F * (pMonitor ? pMonitor->m_scale : 1.F);
@@ -2894,6 +2876,28 @@ void CScrollOverview::focusOverviewWorkspace(const PHLWORKSPACE& workspace, size
     }
 
     damage();
+}
+
+// The full default click action, shared between the plain mouse path and the
+// submap's `window click` dispatcher so SUPER-held clicks behave identically.
+void CScrollOverview::performPrimaryClickAction() {
+    // E6: the strip band floats above the main tiles, so it has to be
+    // tested before them, exactly as the drop path does.
+    //
+    // E8-b: clicking a desktop -- on the strip or adjacent on screen --
+    // switches to it AND exits. focusOverviewWorkspace changes the workspace,
+    // so the viewport slide starts before the close animation takes over.
+    lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+    size_t stripIdx   = viewportCurrentWorkspace;
+    if (const auto STRIPWORKSPACE = workspaceAtStripPoint(lastMousePosLocal, &stripIdx); STRIPWORKSPACE) {
+        focusOverviewWorkspace(STRIPWORKSPACE, stripIdx);
+        close();
+        return;
+    }
+
+    selectHoveredWorkspace();
+    selectWindowAtOverviewCursor(true);
+    close();
 }
 
 void CScrollOverview::selectHoveredWorkspace() {
