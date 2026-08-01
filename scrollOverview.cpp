@@ -4761,6 +4761,30 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         backdrop.roundingPower = CARDROUND.power;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(backdrop));
 
+        // X3: the deprecated overview centres a large, faint workspace number in
+        // every cell (ii/modules/ii/overview/OverviewWidget.qml:182-193): 250px
+        // type at the overview's own scale, i.e. 250/1600 = 15.6% of a cell's
+        // height, DemiBold, foreground at alpha 0.2. Reproduced as a fraction of
+        // the strip cell so it tracks the strip instead of a fixed pixel size.
+        // ponytail: white is the colour source. Hyprland exposes no foreground
+        // text colour to inherit -- the same gap renderSearch's FG lives with.
+        const auto NUMTEX = g_pHyprRenderer->renderText(std::to_string(wimg->pWorkspace->m_id), CHyprColor{1.F, 1.F, 1.F, 0.20F},
+                                                        std::max(1, sc<int>(std::round(sc<float>(CELL.height) * 0.156F))), false, "", 0, 600);
+        if (NUMTEX && NUMTEX->ok()) {
+            CBox numBox = {
+                CELL.x + std::round((sc<float>(CELL.width) - sc<float>(NUMTEX->m_size.x)) / 2.F),
+                CELL.y + std::round((sc<float>(CELL.height) - sc<float>(NUMTEX->m_size.y)) / 2.F),
+                sc<float>(NUMTEX->m_size.x),
+                sc<float>(NUMTEX->m_size.y),
+            };
+
+            CTexPassElement::SRenderData num;
+            num.tex = NUMTEX;
+            num.box = numBox.round();
+            num.a   = 1.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(num));
+        }
+
         const float MINIRENDERSCALE = renderScale * sc<float>(CELL.width) / std::max(1.F, sc<float>(monitor->m_size.x) * monitor->m_scale);
 
         for (const auto& windowRef : wimg->windows) {
@@ -4789,6 +4813,25 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             hover.roundingPower = CARDROUND.power;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(hover));
         }
+
+        // X3: the reference marks the focused desktop with a 2px accent border
+        // drawn over the windows (OverviewWidget.qml:414-436, colSecondary).
+        // The accent here is general:col.active_border -- the same source the
+        // hover tint above reads, so both follow the theme (X4).
+        // ponytail: no slide between cells. The reference animates x/y because
+        // its indicator is one moving item; here the cell rects are already
+        // laid out, so the border simply draws on whichever cell is active.
+        if (monitor->m_activeWorkspace && wimg->pWorkspace->m_id == monitor->m_activeWorkspace->m_id) {
+            CBorderPassElement::SBorderData indicator;
+            indicator.box           = CELL;
+            indicator.grad1         = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
+            indicator.round         = ROUND;
+            indicator.roundingPower = CARDROUND.power;
+            indicator.a             = 1.F;
+            indicator.borderSize    = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(indicator));
+        }
+
     }
 }
 
