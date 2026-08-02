@@ -437,6 +437,27 @@ static float overviewSearchLogicalHeight(PHLMONITOR monitor) {
     return monitor ? 64.F : 0.F;
 }
 
+// X21: the results panel is part of the LAYOUT STACK, not an overlay. Its band
+// sits between the search row and the strip, so a growing list pushes the strip
+// down and shrinks the grid instead of covering them. This is the EASED value
+// (X23) mirrored out of CScrollOverview::resultsBand -- the free layout helpers
+// below and the hit-test paths all read it, and none of them can reach a member.
+static float           g_overviewResultsBandH  = 0.F;
+static constexpr float OVERVIEW_RESULT_ROWHL = 34.F, OVERVIEW_RESULT_ROWGAPL = 6.F, OVERVIEW_RESULT_PANELPADL = 8.F, OVERVIEW_RESULT_PANELGAPL = 10.F;
+
+static float overviewResultsLogicalHeight(PHLMONITOR monitor) {
+    return monitor ? std::max(0.F, g_overviewResultsBandH) : 0.F;
+}
+
+// The height the band is easing TOWARD, from the row count alone.
+static float overviewResultsBandTarget(size_t rows) {
+    if (rows == 0)
+        return 0.F;
+
+    const float PANELH = (OVERVIEW_RESULT_PANELPADL * 2.F) + (sc<float>(rows) * OVERVIEW_RESULT_ROWHL) + ((sc<float>(rows) - 1.F) * OVERVIEW_RESULT_ROWGAPL);
+    return PANELH + (OVERVIEW_RESULT_PANELGAPL * 2.F);
+}
+
 // ponytail: recomputed per window per frame, O(windows^2) on the focused
 // workspace. Fine at desktop counts; memoise per frame if it ever shows up.
 static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor, const PHLWINDOW& target, CBox& out) {
@@ -452,8 +473,10 @@ static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor
     }
 
 
-    // Grid tiles must not slide under the strip band or the search row (X10).
-    if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor); TOPCHROME > 0.F) {
+    // Grid tiles must not slide under the strip band or the search row (X10),
+    // nor under the results panel (X21) -- shrinking `usable` here is what makes
+    // the tiles compact to give the space back.
+    if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor) + overviewResultsLogicalHeight(monitor); TOPCHROME > 0.F) {
         usable.y += TOPCHROME;
         usable.h -= TOPCHROME;
         if (usable.h <= 1)
@@ -1458,12 +1481,20 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     Animation::mgr()->createAnimation(1.F, workspaceInsertProgress, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, workspaceInsertFadeProgress, workspaceInsertFadeConfig, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, reflowPacer, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, resultsBand, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
 
     scale->setUpdateCallback([this](auto) { damage(); });
     viewOffset->setUpdateCallback([this](auto) { damage(); });
     workspaceInsertProgress->setUpdateCallback([this](auto) { damage(); });
     workspaceInsertFadeProgress->setUpdateCallback([this](auto) { damage(); });
     reflowPacer->setUpdateCallback([this](auto) { damage(); });
+    resultsBand->setUpdateCallback([this](auto) {
+        g_overviewResultsBandH = resultsBand->value();
+        damage();
+    });
+
+    // A previous overview's band must not open the next one already pushed.
+    g_overviewResultsBandH = 0.F;
 
     if (!swipe)
         *scale = ScrollOverview::Config::getScale();
@@ -4874,7 +4905,9 @@ CBox CScrollOverview::stripCellLogicalBox(size_t workspaceIdx) const {
 
     const float X = sc<float>(MONITOR->m_position.x) + (sc<float>(MONITOR->m_size.x) - total) / 2.F + sc<float>(workspaceIdx) * (cellW + GAP);
     // X10: the search row owns the very top; the band starts under it.
-    const float Y = sc<float>(MONITOR->m_position.y) + overviewSearchLogicalHeight(MONITOR) + PAD + (BAND - 2.F * PAD - cellH) / 2.F;
+    // X21: and under the results panel, which pushes the strip down as it grows.
+    const float Y = sc<float>(MONITOR->m_position.y) + overviewSearchLogicalHeight(MONITOR) + overviewResultsLogicalHeight(MONITOR) + PAD +
+        (BAND - 2.F * PAD - cellH) / 2.F;
 
     return CBox{X, Y, cellW, cellH};
 }
@@ -5222,6 +5255,14 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // An app hit is a hit: "no matches" must not contradict a listed result.
     const bool EMPTYRESULT = QUERIED && MATCHES == 0 && RESULTS.empty();
 
+    // X21: the layout band is driven from the row count HERE, ahead of the pill
+    // culling return below -- the strip and grid reflow off it even on frames
+    // where the pill itself is scrolled off screen.
+    if (const float TARGET = overviewResultsBandTarget(RESULTS.size()); std::abs(resultsBand->goal() - TARGET) > 0.5F)
+        *resultsBand = TARGET;
+
+    g_overviewResultsBandH = resultsBand->value();
+
     // X10: the pill is laid out in the SAME logical space as the strip it sits
     // above, and rides the active workspace card through the same transform.
     // Screen-fixed at the monitor's top edge it landed underneath the
@@ -5301,13 +5342,17 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // F3: the app half of the search, listed under the pill. This is a second,
     // ordered list ALONGSIDE the window gate -- it deliberately does not change
     // which windows the grid shows (RICE_PROGRESS.md "F3-scope" §1).
-    if (!RESULTS.empty()) {
+    if (!RESULTS.empty() && overviewResultsLogicalHeight(monitor) > (OVERVIEW_RESULT_PANELGAPL * 2.F) + 1.F) {
         if (g_overviewAppSelection >= sc<int>(RESULTS.size()))
             g_overviewAppSelection = sc<int>(RESULTS.size()) - 1;
 
-        constexpr float ROWHL = 34.F, ROWGAPL = 6.F, PANELPADL = 8.F;
-        const float     PANELHL = (PANELPADL * 2.F) + (sc<float>(RESULTS.size()) * ROWHL) + ((sc<float>(RESULTS.size()) - 1.F) * ROWGAPL);
-        const CBox      PANELLOGICAL{PILLLOGICAL.x, PILLLOGICAL.y + PILLLOGICAL.height + 10.F, PILLWL, PANELHL};
+        // X21: the panel fills the band it was allocated, so its height is the
+        // ANIMATED band minus the gaps. It is positioned off the monitor and the
+        // search row, not off the pill, because it is a layout row now.
+        constexpr float ROWHL = OVERVIEW_RESULT_ROWHL, ROWGAPL = OVERVIEW_RESULT_ROWGAPL, PANELPADL = OVERVIEW_RESULT_PANELPADL;
+        const float     PANELHL = overviewResultsLogicalHeight(monitor) - (OVERVIEW_RESULT_PANELGAPL * 2.F);
+        const CBox      PANELLOGICAL{PILLLOGICAL.x, sc<float>(monitor->m_position.y) + overviewSearchLogicalHeight(monitor) + OVERVIEW_RESULT_PANELGAPL, PILLWL,
+                                     PANELHL};
 
         CBox panel = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
         if (panel.width > 1.F && overviewBoxIntersectsMonitor(panel, monitor)) {
@@ -5327,6 +5372,12 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
             for (size_t i = 0; i < RESULTS.size(); ++i) {
                 const CBox ROWLOGICAL{PANELLOGICAL.x + PANELPADL, PANELLOGICAL.y + PANELPADL + (sc<float>(i) * (ROWHL + ROWGAPL)), PILLWL - (PANELPADL * 2.F), ROWHL};
+
+                // While the band is still easing open the panel is shorter than
+                // the full list; a row that would spill past its padding is not
+                // drawn yet, so the list unrolls instead of overhanging.
+                if (ROWLOGICAL.y + ROWLOGICAL.height > PANELLOGICAL.y + PANELLOGICAL.height - PANELPADL + 0.5F)
+                    break;
 
                 CBox row = getOverviewGlobalBox(ROWLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
                 row.round();
@@ -5667,7 +5718,7 @@ bool CScrollOverview::shouldAllowRealtimePreviewSchedule() {
     if (closing)
         return true;
 
-    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated() || reflowPacer->isBeingAnimated())
+    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated() || reflowPacer->isBeingAnimated() || resultsBand->isBeingAnimated())
         return true;
 
     if (realtimePreviewFrameQueued) {

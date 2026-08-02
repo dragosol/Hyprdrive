@@ -282,6 +282,8 @@ class CScrollOverview : public IOverview {
     PHLANIMVAR<float>                workspaceInsertProgress;
     PHLANIMVAR<float>                workspaceInsertFadeProgress;
     PHLANIMVAR<float>                reflowPacer;
+    // X21/X23: eased height of the search results band in the layout stack.
+    PHLANIMVAR<float>                resultsBand;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceInsertFadeConfig;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceRemoveFadeConfig;
     Time::steady_tp                  lastRealtimePreviewFrame = {};
