@@ -6293,6 +6293,17 @@ void CScrollOverview::onPreRender() {
     // reflow presents ~57fps on a 60Hz output. There is no stall to chase.
     // Rig: share/reflow_measure.sh + share/rf_analyze.py -- window the timestamps
     // to the motion before reading a worst-case gap out of them.
+    //
+    // Churn and the shrink direction cost nothing on top of that: six keystrokes
+    // 200ms apart, each swinging the results band its full 146px, presented
+    // 57.5fps with 2 of 96 gaps over 34ms -- indistinguishable from one isolated
+    // transition (57.2fps, 1 of 35). Collapsing the band back to zero mirrors
+    // growing it, monotonic at 9.6% of travel per step, and strip_top/tile_h
+    // land back on their exact pre-query values.
+    // Rig: share/x23_churn.sh + share/x23_churn_analyze.py. Track the LAYOUT
+    // (strip_top, tile_h), not pixel diffs -- strip_top is quantised to 2px, so
+    // it holds still through the eased tail and reading THAT as frame timing
+    // invents a 196ms stall which the painted-frame signal shows is not there.
     if (g_gridReflowActive) {
         g_gridReflowActive = false;
         reflowPacer->setValueAndWarp(0.F);
