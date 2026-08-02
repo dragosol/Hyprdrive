@@ -2621,6 +2621,11 @@ void CScrollOverview::ensureNoWorkspaceGaps() {
 void CScrollOverview::rebuildWorkspaceImages() {
     ensureTrailingWorkspace();
     ensureNoWorkspaceGaps();
+    // Workspaces created after we opened (the trailing one, or any made while the
+    // overview is up) were never shown, so their alpha is still 0 and
+    // renderWindow would multiply their windows away.
+    if (sharedStateOwner)
+        forceWorkspaceAlphaVisible();
     const auto selectedWorkspace = closeOnWindow ? closeOnWindow->m_workspace : startedOn;
     const auto selectedWindow    = closeOnWindow;
     const auto viewportWorkspace = viewportCurrentWorkspace < images.size() ? images[viewportCurrentWorkspace]->pWorkspace : startedOn;
