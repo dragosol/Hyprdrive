@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -206,37 +207,209 @@ namespace AppSearch {
             }
         }
 
-        // Word-prefix beats substring, and a shorter name beats a longer one at
-        // equal quality, so "fi" puts Files above Firmware Updater without
-        // needing a real fuzzy matcher yet.
-        int score(const SEntry& entry, const std::string& needle) {
-            const auto NAME = lower(entry.name);
+        // X18 wants parity with the search the user actually has on the host,
+        // where fuzzy-application-search@mkhl.codeberg.page overrides the
+        // shell's app search outright. So this is a port of that extension's
+        // scoring.js (itself the TextMate ranker), not a hand-rolled matcher:
+        // any divergence here is one the user would feel. Returns (0,1]; 0 is
+        // no match. share/x18_parity.js diffs it against the real JS.
+        constexpr double KEYWORD_WEIGHT = 0.9;
+        constexpr int    FUZZY_SCALE    = 1'000'000;
+        constexpr int    FUZZY_BASE     = 10;
 
-            int base = -1;
-            if (NAME == needle)
-                base = 1000;
-            else if (NAME.starts_with(needle))
-                base = 900;
-            else {
-                for (size_t i = 0; i + 1 < NAME.size(); ++i) {
-                    if ((NAME[i] == ' ' || NAME[i] == '-') && NAME.compare(i + 1, needle.size(), needle) == 0) {
-                        base = 800;
-                        break;
-                    }
+        // ASCII stand-in for the JS \p{Letter}\p{Number}\p{Connector_Punctuation}:
+        // any UTF-8 lead or continuation byte counts as letter-like but never as
+        // a capital, so a non-latin name still gets its word starts marked.
+        std::vector<bool> capitalIndexes(const std::string& text) {
+            std::vector<bool> caps(text.size(), false);
+            bool              newWord = true;
+            for (size_t i = 0; i < text.size(); ++i) {
+                const unsigned char C          = static_cast<unsigned char>(text[i]);
+                const bool          LETTERLIKE = std::isalnum(C) || C == '_' || C >= 0x80;
+                if ((newWord && LETTERLIKE) || (C < 0x80 && std::isupper(C)))
+                    caps[i] = true;
+                newWord = !LETTERLIKE;
+            }
+            return caps;
+        }
+
+        double fuzzyScore(const std::string& query, const std::string& text) {
+            if (query == text)
+                return 1.0;
+
+            const size_t N = query.size(), M = text.size();
+            if (N == 0 || M == 0 || N > M)
+                return 0.0;
+
+            const auto Q = lower(query);
+            const auto T = lower(text);
+
+            // The JS keeps first/last in Uint8Array, so the matrix path is only
+            // valid while both lengths fit a byte and falls back to a subset
+            // ratio above that. Same bounds here, same answer.
+            if (N > 255 || M > 255 || N * M > 255 * 30) {
+                // Faithful to upstream, including its quirk: the scan position
+                // is not advanced past a hit, so a repeated character can match
+                // the same index twice. Unreachable for app names anyway.
+                size_t pos = 0;
+                for (const char C : Q) {
+                    const auto AT = T.find(C, pos);
+                    if (AT == std::string::npos)
+                        return 0.0;
+                    pos = AT;
+                }
+                return static_cast<double>(N) / static_cast<double>(M);
+            }
+
+            const auto CAPS      = capitalIndexes(text);
+            size_t     capsCount = 0;
+            for (const bool B : CAPS)
+                capsCount += B ? 1 : 0;
+
+            std::vector<uint8_t> matrix(N * M, 0);
+            auto                 at = [&](size_t i, size_t j) -> uint8_t& { return matrix[i * M + j]; };
+
+            std::vector<size_t> first(N, M), last(N, 0);
+
+            for (size_t i = 0; i < N; ++i) {
+                bool   found = false;
+                size_t j     = i == 0 ? 0 : first[i - 1] + 1;
+                for (; j < M; ++j) {
+                    if (Q[i] != T[j])
+                        continue;
+                    at(i, j) = 1;
+                    if (!found)
+                        first[i] = j;
+                    last[i] = j + 1;
+                    found   = true;
+                }
+                if (!found)
+                    return 0.0;
+            }
+
+            for (size_t i = N - 1; i > 0; --i) {
+                size_t bound = last[i] - 1;
+                if (bound >= last[i - 1])
+                    continue;
+                // JS reads matrix[i-1][bound-1]; at bound 0 that is undefined
+                // and ends the loop, so stopping at 0 is the same behaviour.
+                while (bound > 0 && at(i - 1, bound - 1) == 0)
+                    --bound;
+                last[i - 1] = bound;
+            }
+
+            for (size_t i = N - 1; i > 0; --i) {
+                for (size_t j = first[i]; j < last[i]; ++j) {
+                    if (j > 0 && at(i, j) && at(i - 1, j - 1))
+                        at(i - 1, j - 1) = static_cast<uint8_t>(at(i, j) + 1);
                 }
             }
 
-            if (base < 0 && NAME.contains(needle))
-                base = 600;
-            if (base < 0 && lower(entry.id).contains(needle))
-                base = 400;
-            if (base < 0 && entry.haystack.contains(needle))
-                base = 250;
+            size_t capitalsTouched = 0, substrings = 0, prefixLength = 0;
 
-            if (base < 0)
+            for (size_t i = 0; i < N;) {
+                size_t bestJIndex = 0, bestJLength = 0;
+                for (size_t j = first[i]; j < last[i]; ++j) {
+                    if (at(i, j) && CAPS[j]) {
+                        bestJIndex  = j;
+                        bestJLength = at(i, j);
+                        for (size_t k = j; k < j + bestJLength && k < M; ++k) {
+                            if (CAPS[k])
+                                ++capitalsTouched;
+                        }
+                    } else if (bestJLength < at(i, j)) {
+                        bestJIndex  = j;
+                        bestJLength = at(i, j);
+                    }
+                }
+
+                if (i == 0)
+                    prefixLength = bestJIndex;
+
+                // Upstream would spin forever here; a hang on the compositor's
+                // input path is not an acceptable way to be faithful.
+                if (bestJLength == 0)
+                    break;
+
+                size_t length        = 0;
+                bool   foundCapital  = false;
+                while (length < bestJLength && !foundCapital) {
+                    ++i;
+                    ++length;
+                    if (i == N)
+                        break;
+
+                    first[i] = std::max(bestJIndex + length, first[i]);
+                    if (length < bestJLength && N < 4) {
+                        if (first[i] < M && CAPS[first[i]])
+                            continue;
+                        for (size_t j = first[i]; j < last[i]; ++j) {
+                            if (at(i, j) && CAPS[j])
+                                foundCapital = true;
+                        }
+                    }
+                }
+
+                ++substrings;
+            }
+
+            // capitalsTouched accumulates across the whole j scan and CAN exceed
+            // N -- upstream just goes negative there, but in size_t it wraps to
+            // ~1.8e19 and the score comes back as garbage. Do this arithmetic in
+            // double, not in the index type.
+            const double DENOM    = static_cast<double>(N) * (N + 1) + 1;
+            const double SUBTRACT = N == capitalsTouched ? 1.0 : static_cast<double>(substrings) * N + (static_cast<double>(N) - static_cast<double>(capitalsTouched));
+
+            double s = (DENOM - SUBTRACT) / DENOM;
+            s += static_cast<double>(M - prefixLength) / M / (2 * DENOM);
+            if (capsCount > 0)
+                s += static_cast<double>(capitalsTouched) / capsCount / (4 * DENOM);
+            s += static_cast<double>(N) / M / (8 * DENOM);
+
+            return s;
+        }
+
+        std::vector<std::string> splitKeywords(const std::string& keywords) {
+            std::vector<std::string> out;
+            size_t                   start = 0;
+            while (start <= keywords.size()) {
+                const auto END  = keywords.find(';', start);
+                auto       PART = trim(keywords.substr(start, END == std::string::npos ? std::string::npos : END - start));
+                if (!PART.empty())
+                    out.emplace_back(std::move(PART));
+                if (END == std::string::npos)
+                    break;
+                start = END + 1;
+            }
+            return out;
+        }
+
+        // The host extension scores the name at 1.0 and each keyword at 0.9 and
+        // keeps the best, so ranking among matches it would produce is identical.
+        // `query` is the raw text, NOT lowercased: upstream's exact-equality fast
+        // path is case sensitive and lowering first would silently skip it.
+        int score(const SEntry& entry, const std::string& query) {
+            // Guard the fallback below: haystack.contains("") is true for every
+            // entry, so an empty query would match the whole inventory.
+            if (query.empty())
                 return -1;
 
-            return base - std::min<int>(99, static_cast<int>(entry.name.size()));
+            double best = fuzzyScore(query, entry.name);
+
+            for (const auto& KW : splitKeywords(entry.keywords))
+                best = std::max(best, fuzzyScore(query, KW) * KEYWORD_WEIGHT);
+
+            if (best > 0.0)
+                return FUZZY_BASE + static_cast<int>(best * FUZZY_SCALE);
+
+            // Deliberately NOT parity. The extension only ever sees name and
+            // keywords, so going pure-parity would stop "nautilus" finding
+            // Files. Every fuzzy hit outranks this whole band, so host ordering
+            // is untouched and this only adds results the host would not show.
+            if (entry.haystack.contains(lower(query)))
+                return 1;
+
+            return -1;
         }
 
         // App icons in practice live in hicolor, NOT in the active theme:
@@ -434,11 +607,9 @@ namespace AppSearch {
         if (query.empty() || limit == 0)
             return results;
 
-        const auto NEEDLE = lower(query);
-
         std::vector<std::pair<int, const SEntry*>> scored;
         for (const auto& ENTRY : inventory()) {
-            const int S = score(ENTRY, NEEDLE);
+            const int S = score(ENTRY, query);
             if (S >= 0)
                 scored.emplace_back(S, &ENTRY);
         }
@@ -567,15 +738,40 @@ int main() {
     f.id       = "org.fwupd.fwupdmgr";
     f.haystack = lower("Firmware Updater org.fwupd.fwupdmgr");
 
-    assert(score(e, "files") == 1000 - 5);
-    assert(score(e, "fi") > score(f, "fi")); // shorter name wins at equal quality
-    assert(score(e, "nautilus") > 0);        // id match
+    // X18: fuzzy, not substring. "fls" is not a substring of "Files" and must
+    // still match -- this is the assertion the old scorer could not pass.
+    assert(score(e, "fls") > 0);
+    assert(score(e, "files") > score(e, "fls")); // contiguous beats scattered
+    assert(score(e, "fi") > score(f, "fi"));     // shorter name wins at equal quality
     assert(score(e, "zzzz") == -1);
+    assert(score(e, "filesfilesfiles") == -1);   // needle longer than name
+    assert(score(e, "nautilus") > 0);            // id match, via the fallback band
+    assert(score(e, "fls") > score(e, "nautilus")); // any fuzzy hit outranks the band
 
     SEntry w;
     w.name     = "Text Editor";
     w.haystack = lower("Text Editor");
-    assert(score(w, "editor") == 800 - 11); // word-prefix beats plain substring
+    assert(score(w, "editor") > 0);
+    assert(score(w, "txed") > 0); // initials-ish, scattered across both words
+
+    // Keywords are matched too, at 0.9, and split on ';' like the desktop spec.
+    SEntry k;
+    k.name     = "Console";
+    k.keywords = "terminal;shell;";
+    k.haystack = lower("Console terminal shell");
+    assert(score(k, "terminal") > 0);
+    // Upstream's equality fast path is case SENSITIVE, so an exactly-typed
+    // keyword (1.0 x 0.9) genuinely outranks a name that only differs in case
+    // (~0.77). Real host behaviour, not a defect in the port -- assert the
+    // direction that is actually invariant instead.
+    assert(score(k, "Console") > score(k, "terminal"));
+
+    // The ranker must not hang or trip UB on degenerate input.
+    assert(score(e, "") == -1);
+    SEntry punct;
+    punct.name     = "-- --";
+    punct.haystack = lower("-- --");
+    assert(score(punct, "--") > 0);
 
     const auto& INV = inventory();
     std::printf("inventory: %zu visible apps\n", INV.size());
