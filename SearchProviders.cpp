@@ -1,0 +1,671 @@
+#include "SearchProviders.hpp"
+
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <condition_variable>
+#include <cstdlib>
+#include <cstring>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+#include <fcntl.h>
+#include <poll.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <systemd/sd-bus.h>
+
+namespace SearchProviders {
+    namespace {
+        constexpr const char* IFACE          = "org.gnome.Shell.SearchProvider2";
+        constexpr uint64_t    CALL_TIMEOUT_US = 400'000;
+        // GNOME shows a handful per provider; asking for metas on 200 character
+        // glyphs would cost more than the panel can ever show.
+        constexpr size_t MAX_PER_PROVIDER = 6;
+
+        std::string trim(const std::string& s) {
+            const auto B = s.find_first_not_of(" \t\r\n");
+            if (B == std::string::npos)
+                return "";
+            return s.substr(B, s.find_last_not_of(" \t\r\n") - B + 1);
+        }
+
+        std::vector<std::string> dataDirs() {
+            std::vector<std::string> dirs;
+            if (const char* HOME_DATA = std::getenv("XDG_DATA_HOME"); HOME_DATA && *HOME_DATA)
+                dirs.emplace_back(HOME_DATA);
+            else if (const char* HOME = std::getenv("HOME"); HOME)
+                dirs.emplace_back(std::string{HOME} + "/.local/share");
+
+            const char* SYS = std::getenv("XDG_DATA_DIRS");
+            std::string sys = SYS && *SYS ? SYS : "/usr/local/share:/usr/share";
+            for (size_t pos = 0; pos <= sys.size();) {
+                const auto SEP  = sys.find(':', pos);
+                const auto PART = sys.substr(pos, SEP == std::string::npos ? std::string::npos : SEP - pos);
+                if (!PART.empty())
+                    dirs.push_back(PART);
+                if (SEP == std::string::npos)
+                    break;
+                pos = SEP + 1;
+            }
+            return dirs;
+        }
+
+        std::vector<std::string> splitTerms(const std::string& text) {
+            std::vector<std::string> terms;
+            size_t                   i = 0;
+            while (i < text.size()) {
+                while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i])))
+                    ++i;
+                const size_t START = i;
+                while (i < text.size() && !std::isspace(static_cast<unsigned char>(text[i])))
+                    ++i;
+                if (i > START)
+                    terms.push_back(text.substr(START, i - START));
+            }
+            return terms;
+        }
+
+        std::vector<char*> cstrv(std::vector<std::string>& v) {
+            std::vector<char*> out;
+            out.reserve(v.size() + 1);
+            for (auto& S : v)
+                out.push_back(S.data());
+            out.push_back(nullptr);
+            return out;
+        }
+
+        // ---- discovery ----------------------------------------------------
+
+        std::vector<SProvider> g_providers;
+        bool                   g_scanned = false;
+
+        void                   scan() {
+            g_providers.clear();
+            for (const auto& DIR : dataDirs()) {
+                const std::filesystem::path P = DIR + "/gnome-shell/search-providers";
+                std::error_code             ec;
+                if (!std::filesystem::is_directory(P, ec))
+                    continue;
+                for (const auto& ENT : std::filesystem::directory_iterator(P, ec)) {
+                    if (ENT.path().extension() != ".ini")
+                        continue;
+                    std::ifstream in(ENT.path());
+                    SProvider     p;
+                    std::string   line;
+                    while (std::getline(in, line)) {
+                        const auto EQ = line.find('=');
+                        if (EQ == std::string::npos)
+                            continue;
+                        const auto KEY = trim(line.substr(0, EQ));
+                        const auto VAL = trim(line.substr(EQ + 1));
+                        if (KEY == "DesktopId")
+                            p.desktopId = VAL.ends_with(".desktop") ? VAL.substr(0, VAL.size() - 8) : VAL;
+                        else if (KEY == "BusName")
+                            p.busName = VAL;
+                        else if (KEY == "ObjectPath")
+                            p.objectPath = VAL;
+                        else if (KEY == "Version")
+                            p.version = std::atoi(VAL.c_str());
+                    }
+                    if (p.busName.empty() || p.objectPath.empty())
+                        continue;
+                    // Earlier data dirs win, same rule as AppSearch's desktop ids.
+                    if (std::ranges::none_of(g_providers, [&](const SProvider& E) { return E.busName == p.busName; }))
+                        g_providers.push_back(std::move(p));
+                }
+            }
+            // ponytail: alphabetical. The user's gsettings sort-order/disabled is
+            // checklist item X18 and lands on top of this ordering.
+            std::ranges::sort(g_providers, {}, &SProvider::desktopId);
+            g_scanned = true;
+        }
+
+        // ---- shared state between render thread and worker ----------------
+
+        std::mutex              g_mutex;
+        std::condition_variable g_cv;
+        std::vector<SResult>    g_results;
+        std::atomic<uint64_t>   g_revision{0};
+
+        std::string             g_wantQuery;
+        uint64_t                g_wantGen = 0;
+        bool                    g_stop    = false;
+
+        std::vector<std::function<void(sd_bus*)>> g_actions;
+
+        std::thread                               g_worker;
+        std::atomic<bool>                         g_running{false};
+        int                                       g_wakeFd[2] = {-1, -1};
+
+        void                                      wake() {
+            if (g_wakeFd[1] >= 0) {
+                const char B = 1;
+                [[maybe_unused]] auto _ = ::write(g_wakeFd[1], &B, 1);
+            }
+        }
+
+        // ---- worker-only state --------------------------------------------
+
+        struct SCall {
+            uint64_t gen         = 0;
+            size_t   providerIdx = 0;
+            bool     metas       = false;
+        };
+
+        uint64_t                             w_gen = 0;
+        std::vector<sd_bus_slot*>            w_slots;
+        std::deque<std::unique_ptr<SCall>>   w_calls;
+        std::string                          w_query;
+        std::vector<std::string>             w_terms;
+        // Previous generation's ids per provider, for GetSubsearchResultSet.
+        std::vector<std::vector<std::string>> w_prevIds;
+        std::string                          w_prevQuery;
+        std::atomic<uint64_t>                w_subsearchCalls{0};
+
+        void                                 dropInFlight() {
+            for (auto* S : w_slots)
+                sd_bus_slot_unref(S);
+            w_slots.clear();
+            w_calls.clear();
+        }
+
+        // A GIcon lands here as (sv): ("themed", <as>) or ("file", <s>).
+        std::string readGIcon(sd_bus_message* m) {
+            std::string out;
+            if (sd_bus_message_enter_container(m, 'r', "sv") <= 0)
+                return out;
+
+            const char* tag = nullptr;
+            sd_bus_message_read_basic(m, 's', &tag);
+
+            char        type     = 0;
+            const char* contents = nullptr;
+            sd_bus_message_peek_type(m, &type, &contents);
+            const std::string SIG = contents ? contents : "";
+
+            if (SIG == "as") {
+                sd_bus_message_enter_container(m, 'v', "as");
+                char** names = nullptr;
+                if (sd_bus_message_read_strv(m, &names) > 0 && names) {
+                    // GThemedIcon names are a preference chain; first wins.
+                    for (char** p = names; *p; ++p) {
+                        if (out.empty())
+                            out = *p;
+                        free(*p);
+                    }
+                    free(names);
+                }
+                sd_bus_message_exit_container(m);
+            } else if (SIG == "s") {
+                sd_bus_message_enter_container(m, 'v', "s");
+                const char* val = nullptr;
+                sd_bus_message_read_basic(m, 's', &val);
+                if (val)
+                    out = val;
+                sd_bus_message_exit_container(m);
+            } else
+                sd_bus_message_skip(m, nullptr);
+
+            sd_bus_message_exit_container(m);
+            return out;
+        }
+
+        void assign(SResult& r, const std::string& key, const std::string& val) {
+            if (key == "id")
+                r.id = val;
+            else if (key == "name")
+                r.name = val;
+            else if (key == "description")
+                r.description = val;
+            else if (key == "clipboardText")
+                r.clipboardText = val;
+            else if (key == "icon" || key == "gicon")
+                r.icon = val;
+        }
+
+        // One a{sv} meta dict. Unknown keys and icon-data (iiibiiay) are skipped
+        // rather than fatal -- a provider we have never seen must degrade, not
+        // abort the whole reply.
+        bool readMeta(sd_bus_message* m, SResult& out) {
+            if (sd_bus_message_enter_container(m, 'a', "{sv}") <= 0)
+                return false;
+
+            while (sd_bus_message_enter_container(m, 'e', "sv") > 0) {
+                const char* key = nullptr;
+                if (sd_bus_message_read_basic(m, 's', &key) < 0 || !key) {
+                    sd_bus_message_exit_container(m);
+                    break;
+                }
+                const std::string KEY = key;
+
+                char              type     = 0;
+                const char*       contents = nullptr;
+                sd_bus_message_peek_type(m, &type, &contents);
+                const std::string SIG = contents ? contents : "";
+
+                if (SIG == "s") {
+                    sd_bus_message_enter_container(m, 'v', "s");
+                    const char* val = nullptr;
+                    sd_bus_message_read_basic(m, 's', &val);
+                    sd_bus_message_exit_container(m);
+                    assign(out, KEY, val ? val : "");
+                } else if (SIG == "(sv)") {
+                    sd_bus_message_enter_container(m, 'v', "(sv)");
+                    const auto ICON = readGIcon(m);
+                    sd_bus_message_exit_container(m);
+                    if (KEY == "icon" || KEY == "gicon")
+                        out.icon = ICON;
+                } else
+                    sd_bus_message_skip(m, nullptr);
+
+                sd_bus_message_exit_container(m);
+            }
+
+            sd_bus_message_exit_container(m);
+            return !out.id.empty();
+        }
+
+        int onMetas(sd_bus_message* m, void* userdata, sd_bus_error*) {
+            auto* call = static_cast<SCall*>(userdata);
+            if (call->gen != w_gen || sd_bus_message_is_method_error(m, nullptr))
+                return 0;
+
+            const auto& PROV = g_providers[call->providerIdx];
+
+            std::vector<SResult> batch;
+            if (sd_bus_message_enter_container(m, 'a', "a{sv}") > 0) {
+                while (true) {
+                    SResult r;
+                    r.providerBus       = PROV.busName;
+                    r.providerDesktopId = PROV.desktopId;
+                    r.providerRank      = call->providerIdx;
+                    if (!readMeta(m, r))
+                        break;
+                    batch.push_back(std::move(r));
+                }
+                sd_bus_message_exit_container(m);
+            }
+            if (batch.empty())
+                return 0;
+
+            {
+                std::lock_guard lock(g_mutex);
+                if (call->gen != g_wantGen)
+                    return 0;
+                g_results.insert(g_results.end(), batch.begin(), batch.end());
+                std::ranges::stable_sort(g_results, {}, &SResult::providerRank);
+            }
+            g_revision.fetch_add(1);
+            return 0;
+        }
+
+        int onResultSet(sd_bus_message* m, void* userdata, sd_bus_error*) {
+            auto* call = static_cast<SCall*>(userdata);
+            if (call->gen != w_gen || sd_bus_message_is_method_error(m, nullptr))
+                return 0;
+
+            char** ids = nullptr;
+            if (sd_bus_message_read_strv(m, &ids) <= 0 || !ids)
+                return 0;
+
+            std::vector<std::string> kept;
+            for (char** p = ids; *p; ++p) {
+                if (kept.size() < MAX_PER_PROVIDER)
+                    kept.emplace_back(*p);
+                free(*p);
+            }
+            free(ids);
+
+            w_prevIds[call->providerIdx] = kept;
+            if (kept.empty())
+                return 0;
+
+            sd_bus*     bus  = sd_bus_message_get_bus(m);
+            const auto& PROV = g_providers[call->providerIdx];
+
+            sd_bus_message* req = nullptr;
+            if (sd_bus_message_new_method_call(bus, &req, PROV.busName.c_str(), PROV.objectPath.c_str(), IFACE, "GetResultMetas") < 0)
+                return 0;
+            auto ARGV = cstrv(kept);
+            sd_bus_message_append_strv(req, ARGV.data());
+
+            auto next  = std::make_unique<SCall>(SCall{call->gen, call->providerIdx, true});
+            auto* raw  = next.get();
+            sd_bus_slot* slot = nullptr;
+            if (sd_bus_call_async(bus, &slot, req, onMetas, raw, CALL_TIMEOUT_US) >= 0) {
+                w_slots.push_back(slot);
+                w_calls.push_back(std::move(next));
+            }
+            sd_bus_message_unref(req);
+            return 0;
+        }
+
+        void startGeneration(sd_bus* bus) {
+            dropInFlight();
+            auto prev = std::move(w_prevIds);
+            w_prevIds.assign(g_providers.size(), {});
+
+            if (w_terms.empty()) {
+                w_prevQuery.clear();
+                return;
+            }
+
+            // X20: when the query only got longer, hand back the previous ids so
+            // providers narrow instead of searching from scratch.
+            const bool EXTENDS = !w_prevQuery.empty() && w_query.starts_with(w_prevQuery);
+
+            for (size_t i = 0; i < g_providers.size(); ++i) {
+                const auto&     PROV = g_providers[i];
+                sd_bus_message* req  = nullptr;
+                const bool      SUB  = EXTENDS && i < prev.size() && !prev[i].empty();
+
+                if (sd_bus_message_new_method_call(bus, &req, PROV.busName.c_str(), PROV.objectPath.c_str(), IFACE,
+                                                   SUB ? "GetSubsearchResultSet" : "GetInitialResultSet") < 0)
+                    continue;
+
+                if (SUB) {
+                    auto PREV_ARGV = cstrv(prev[i]);
+                    sd_bus_message_append_strv(req, PREV_ARGV.data());
+                    w_subsearchCalls.fetch_add(1);
+                }
+                auto TERM_ARGV = cstrv(w_terms);
+                sd_bus_message_append_strv(req, TERM_ARGV.data());
+
+                auto         call = std::make_unique<SCall>(SCall{w_gen, i, false});
+                auto*        raw  = call.get();
+                sd_bus_slot* slot = nullptr;
+                if (sd_bus_call_async(bus, &slot, req, onResultSet, raw, CALL_TIMEOUT_US) >= 0) {
+                    w_slots.push_back(slot);
+                    w_calls.push_back(std::move(call));
+                }
+                sd_bus_message_unref(req);
+            }
+            w_prevQuery = w_query;
+        }
+
+        void workerMain() {
+            sd_bus* bus = nullptr;
+            if (sd_bus_open_user(&bus) < 0) {
+                g_running = false;
+                return;
+            }
+
+            while (true) {
+                std::vector<std::function<void(sd_bus*)>> actions;
+                bool                                      newQuery = false;
+                {
+                    std::unique_lock lock(g_mutex);
+                    if (g_stop)
+                        break;
+                    if (g_wantGen != w_gen) {
+                        w_gen    = g_wantGen;
+                        w_query  = g_wantQuery;
+                        w_terms  = splitTerms(w_query);
+                        newQuery = true;
+                    }
+                    actions.swap(g_actions);
+                }
+
+                for (auto& A : actions)
+                    A(bus);
+                if (newQuery)
+                    startGeneration(bus);
+
+                int r = 0;
+                do {
+                    r = sd_bus_process(bus, nullptr);
+                } while (r > 0);
+
+                uint64_t deadline = 0;
+                sd_bus_get_timeout(bus, &deadline);
+                int msec = 1000;
+                if (deadline != UINT64_MAX) {
+                    timespec now{};
+                    clock_gettime(CLOCK_MONOTONIC, &now);
+                    const uint64_t NOW = static_cast<uint64_t>(now.tv_sec) * 1'000'000 + now.tv_nsec / 1000;
+                    msec               = deadline <= NOW ? 0 : static_cast<int>(std::min<uint64_t>((deadline - NOW) / 1000 + 1, 1000));
+                }
+
+                pollfd pfds[2] = {
+                    {sd_bus_get_fd(bus), static_cast<short>(sd_bus_get_events(bus)), 0},
+                    {g_wakeFd[0], POLLIN, 0},
+                };
+                poll(pfds, 2, msec);
+
+                if (pfds[1].revents & POLLIN) {
+                    char drain[64];
+                    while (::read(g_wakeFd[0], drain, sizeof(drain)) > 0) { }
+                }
+            }
+
+            dropInFlight();
+            sd_bus_flush_close_unref(bus);
+            g_running = false;
+        }
+
+        void ensureWorker() {
+            if (g_running.exchange(true))
+                return;
+            if (pipe(g_wakeFd) < 0) {
+                g_running = false;
+                return;
+            }
+            // Non-blocking read end, so draining never parks the worker.
+            for (int i = 0; i < 2; ++i) {
+                const int FL = fcntl(g_wakeFd[i], F_GETFL, 0);
+                fcntl(g_wakeFd[i], F_SETFL, FL | O_NONBLOCK);
+            }
+            g_stop   = false;
+            g_worker = std::thread(workerMain);
+        }
+    }
+
+    const std::vector<SProvider>& providers() {
+        if (!g_scanned)
+            scan();
+        return g_providers;
+    }
+
+    void refresh() {
+        scan();
+    }
+
+    void query(const std::string& text) {
+        providers();
+        ensureWorker();
+        {
+            std::lock_guard lock(g_mutex);
+            if (g_wantQuery == text)
+                return;
+            g_wantQuery = text;
+            ++g_wantGen;
+            // Synchronously, or the caller reads the PREVIOUS query's results in
+            // the window before the worker wakes -- which looks like an instant
+            // answer and is the wrong answer.
+            g_results.clear();
+        }
+        g_revision.fetch_add(1);
+        wake();
+    }
+
+    std::vector<SResult> results() {
+        std::lock_guard lock(g_mutex);
+        return g_results;
+    }
+
+    uint64_t revision() {
+        return g_revision.load();
+    }
+
+    void activate(const SResult& result, const std::string& queryText) {
+        providers();
+        ensureWorker();
+        const auto PROV = std::ranges::find_if(g_providers, [&](const SProvider& P) { return P.busName == result.providerBus; });
+        if (PROV == g_providers.end())
+            return;
+
+        SProvider   prov  = *PROV;
+        std::string id    = result.id;
+        auto        terms = splitTerms(queryText);
+        {
+            std::lock_guard lock(g_mutex);
+            g_actions.emplace_back([prov, id, terms](sd_bus* bus) mutable {
+                sd_bus_message* req = nullptr;
+                if (sd_bus_message_new_method_call(bus, &req, prov.busName.c_str(), prov.objectPath.c_str(), IFACE, "ActivateResult") < 0)
+                    return;
+                sd_bus_message_append_basic(req, 's', id.c_str());
+                auto ARGV = cstrv(terms);
+                sd_bus_message_append_strv(req, ARGV.data());
+                const uint32_t TS = 0;
+                sd_bus_message_append_basic(req, 'u', &TS);
+                sd_bus_call_async(bus, nullptr, req, nullptr, nullptr, CALL_TIMEOUT_US);
+                sd_bus_message_unref(req);
+            });
+        }
+        wake();
+    }
+
+    void launchSearch(const SProvider& provider, const std::string& queryText) {
+        providers();
+        ensureWorker();
+        SProvider prov  = provider;
+        auto      terms = splitTerms(queryText);
+        {
+            std::lock_guard lock(g_mutex);
+            g_actions.emplace_back([prov, terms](sd_bus* bus) mutable {
+                sd_bus_message* req = nullptr;
+                if (sd_bus_message_new_method_call(bus, &req, prov.busName.c_str(), prov.objectPath.c_str(), IFACE, "LaunchSearch") < 0)
+                    return;
+                auto ARGV = cstrv(terms);
+                sd_bus_message_append_strv(req, ARGV.data());
+                const uint32_t TS = 0;
+                sd_bus_message_append_basic(req, 'u', &TS);
+                sd_bus_call_async(bus, nullptr, req, nullptr, nullptr, CALL_TIMEOUT_US);
+                sd_bus_message_unref(req);
+            });
+        }
+        wake();
+    }
+
+    void shutdown() {
+        if (!g_worker.joinable())
+            return;
+        {
+            std::lock_guard lock(g_mutex);
+            g_stop = true;
+        }
+        wake();
+        g_worker.join();
+        close(g_wakeFd[0]);
+        close(g_wakeFd[1]);
+        g_wakeFd[0] = g_wakeFd[1] = -1;
+        g_running                 = false;
+    }
+}
+
+// Build with:
+//   g++ -std=c++2b -DSEARCHPROVIDERS_TEST SearchProviders.cpp -o /tmp/spv_test \
+//       $(pkg-config --cflags --libs libsystemd)
+#ifdef SEARCHPROVIDERS_TEST
+    #include <cassert>
+    #include <cstdio>
+
+namespace {
+    // Poll for up to timeoutMs, returning as soon as pred() holds. Measures the
+    // wall clock so the dead-provider assertion below is real.
+    long waitFor(const std::function<bool()>& pred, long timeoutMs) {
+        timespec t0{};
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        while (true) {
+            timespec now{};
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            const long MS = (now.tv_sec - t0.tv_sec) * 1000 + (now.tv_nsec - t0.tv_nsec) / 1'000'000;
+            if (pred() || MS >= timeoutMs)
+                return MS;
+            usleep(20'000);
+        }
+    }
+}
+
+int main() {
+    using namespace SearchProviders;
+
+    assert(splitTerms("  two  words ").size() == 2);
+    assert(splitTerms("").empty());
+
+    const auto& PROV = providers();
+    std::printf("providers: %zu\n", PROV.size());
+    for (const auto& P : PROV)
+        std::printf("  %-34s %s %s v%d\n", P.desktopId.c_str(), P.busName.c_str(), P.objectPath.c_str(), P.version);
+    assert(!PROV.empty());
+
+    // DoD clause 15, "I can do sums in it".
+    query("2+2");
+    long ms = waitFor([] { return std::ranges::any_of(results(), [](const SResult& R) { return R.description.find('4') != std::string::npos || R.clipboardText == "4"; }); }, 3000);
+    auto R  = results();
+    std::printf("query \"2+2\": %zu results in %ld ms\n", R.size(), ms);
+    for (const auto& E : R)
+        std::printf("  [%s] id=%s name=%s desc=%s icon=%s clip=%s\n", E.providerDesktopId.c_str(), E.id.c_str(), E.name.c_str(), E.description.c_str(), E.icon.c_str(), E.clipboardText.c_str());
+    assert(std::ranges::any_of(R, [](const SResult& E) { return E.description.find('4') != std::string::npos || E.clipboardText == "4"; }));
+
+    // The whole point of X19's async requirement: org.gnome.Weather activates
+    // and then never replies (28 s to the D-Bus default). If any of that leaked
+    // into the caller this would not be under a second.
+    assert(ms < 2000);
+
+    // A new query must not report the PREVIOUS query's results while the worker
+    // is still waking. This regressed once: it read as an instant answer.
+    query("heart");
+    assert(results().empty());
+
+    // DoD clause 15, "find characters".
+    ms = waitFor([] { return !results().empty(); }, 3000);
+    R  = results();
+    std::printf("query \"heart\": %zu results in %ld ms\n", R.size(), ms);
+    assert(!R.empty());
+    assert(std::ranges::any_of(R, [](const SResult& E) { return !E.name.empty(); }));
+
+    // X20 groundwork: extending the query must take the GetSubsearchResultSet
+    // path, and the set must still be coherent, not the previous leftovers.
+    const uint64_t SUBS = w_subsearchCalls.load();
+    query("heart s");
+    ms = waitFor([] { return !results().empty(); }, 3000);
+    std::printf("query \"heart s\" (subsearch): %zu results in %ld ms, %llu subsearch calls\n", results().size(), ms,
+                static_cast<unsigned long long>(w_subsearchCalls.load() - SUBS));
+    assert(w_subsearchCalls.load() > SUBS);
+
+    // The other icon form. Settings serializes a GIcon as ('themed', <as>)
+    // while Calculator sends a bare string; a client that handles only one of
+    // them silently loses every icon from half the providers.
+    query("display");
+    ms = waitFor([] { return std::ranges::any_of(results(), [](const SResult& E) { return E.providerDesktopId == "org.gnome.Settings"; }); }, 3000);
+    R  = results();
+    std::printf("query \"display\": %zu results in %ld ms\n", R.size(), ms);
+    for (const auto& E : R)
+        std::printf("  [%s] id=%s name=%s icon=%s\n", E.providerDesktopId.c_str(), E.id.c_str(), E.name.c_str(), E.icon.c_str());
+    const auto SETTINGS = std::ranges::find_if(R, [](const SResult& E) { return E.providerDesktopId == "org.gnome.Settings"; });
+    assert(SETTINGS != R.end());
+    assert(!SETTINGS->icon.empty()); // the ('themed', as) branch
+
+    // Empty query clears, and does it without a round trip.
+    query("");
+    waitFor([] { return results().empty(); }, 1000);
+    assert(results().empty());
+
+    // A provider that answers must still resolve an icon name for the panel.
+    query("2+2");
+    waitFor([] { return !results().empty(); }, 3000);
+    assert(std::ranges::any_of(results(), [](const SResult& E) { return !E.icon.empty(); }));
+
+    shutdown();
+    std::printf("SearchProviders self-check OK\n");
+    return 0;
+}
+#endif

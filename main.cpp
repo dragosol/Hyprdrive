@@ -28,6 +28,7 @@ using namespace Hyprutils::String;
 #include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
 #include "OverviewGesture.hpp"
+#include "SearchProviders.hpp"
 
 // Methods
 static CFunctionHook* g_pScrollRenderWorkspaceHook = nullptr;
@@ -715,6 +716,9 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pTapSuperButtonHook.reset();
 
     g_unloading = true;
+    // The D-Bus worker outlives the overview otherwise, and hyprpm reloads the
+    // plugin in-process.
+    SearchProviders::shutdown();
     clearScrollOverviews();
     disableScrollOverviewHooks();
 

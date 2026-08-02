@@ -27,6 +27,7 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     hyprland
     libdrm
     libinput
+    libsystemd
     libudev
     lua5.4
     pangocairo
