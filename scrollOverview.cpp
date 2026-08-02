@@ -401,7 +401,7 @@ static std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace)
 // card's offset. Done here rather than by shuffling windows between the
 // per-workspace loops so the B1 invariant holds: render, hit-test and drag all
 // still read the same getOverviewWindowBox and cannot disagree.
-static bool overviewGridPromoted(const PHLWINDOW& window, PHLMONITOR monitor) {
+static bool overviewGridPromotable(const PHLWINDOW& window, PHLMONITOR monitor) {
     if (g_overviewSearch.empty() || !ScrollOverview::Config::getMissionControl() || !window || !monitor)
         return false;
 
@@ -410,6 +410,76 @@ static bool overviewGridPromoted(const PHLWINDOW& window, PHLMONITOR monitor) {
 
     const auto WORKSPACE = window->m_workspace;
     return WORKSPACE && WORKSPACE != monitor->m_activeWorkspace && shouldShowOverviewWindow(window);
+}
+
+// OVERVIEW_CPP_SPEC 13.2 F3-b, the symmetric half: "released back OUT to its own
+// desktop as the query stops matching". The instant a promoted window stops
+// matching it leaves the grid, so gridReflowBox is never called for it and it
+// cuts -- the exact mirror of the pull-in defect. Keep it promoted for one
+// reflow after the match dies so it still has somewhere to travel FROM.
+//
+// The clock is anchored to the FIRST FRAME THE MATCH IS SEEN TO BE GONE, not to
+// the last frame it was seen present. That distinction is the whole ballgame:
+// this runs only when something renders, and a static overview renders nothing.
+// Timestamping "last seen matching" therefore measured idle time -- after a
+// couple of idle seconds the release was already expired on the frame it was
+// born and the tile cut. Measured: it made the fix land or not land at random,
+// 1 of 2 runs at 300ms and 1 of 2 at 2000ms.
+struct SGridRelease {
+    PHLWINDOWREF    window;
+    Time::steady_tp start;
+    bool            started = false; // armed while matching, started when the match dies
+};
+
+static std::unordered_map<Desktop::View::CWindow*, SGridRelease> g_gridReleases;
+
+// The outbound ease starts on the first releasing frame, one frame after the
+// last matching one, so the clock has to outlast the reflow or the tile is cut
+// just short of home.
+static constexpr float GRID_RELEASE_GRACE_MS = 50.F;
+
+static bool overviewGridReleasing(const PHLWINDOW& window, PHLMONITOR monitor) {
+    const int DURATION = ScrollOverview::Config::getMissionControlReflowMs();
+    if (DURATION <= 0 || !window)
+        return false;
+
+    const auto NOW = Time::steadyNow();
+
+    if (overviewGridPromotable(window, monitor)) {
+        if (g_gridReleases.size() > 64)
+            std::erase_if(g_gridReleases, [](const auto& entry) { return !entry.second.window.lock(); });
+
+        g_gridReleases[window.get()] = SGridRelease{window, {}, false}; // armed, not running
+        return false;
+    }
+
+    const auto IT = g_gridReleases.find(window.get());
+    if (IT == g_gridReleases.end())
+        return false;
+
+    // A recycled address must not inherit a dead window's release, and a window
+    // that unmapped mid-flight must stop being drawn -- the render gate below
+    // trusts this function to have checked.
+    if (IT->second.window.lock() != window || !validMapped(window)) {
+        g_gridReleases.erase(IT);
+        return false;
+    }
+
+    if (!IT->second.started) {
+        IT->second.started = true;
+        IT->second.start   = NOW; // the match died on THIS frame, whenever it is
+    }
+
+    if (std::chrono::duration<float, std::milli>(NOW - IT->second.start).count() > sc<float>(DURATION) + GRID_RELEASE_GRACE_MS) {
+        g_gridReleases.erase(IT);
+        return false;
+    }
+
+    return true;
+}
+
+static bool overviewGridPromoted(const PHLWINDOW& window, PHLMONITOR monitor) {
+    return overviewGridPromotable(window, monitor) || overviewGridReleasing(window, monitor);
 }
 
 // Membership of the MAIN grid. Identical to overviewGridWindows for an empty
@@ -421,7 +491,10 @@ static std::vector<PHLWINDOW> overviewMainGridWindows(const PHLWORKSPACE& worksp
         return windows;
 
     for (const auto& window : Desktop::windowState()->windows()) {
-        if (getOverviewWindowToShow(window) == window && overviewGridPromoted(window, monitor))
+        // Promotable, not promoted: a RELEASING tile must leave the grid
+        // immediately so the survivors close up WHILE it travels (F3-b-iii,
+        // outbound). It keeps being drawn -- it just no longer owns a slot.
+        if (getOverviewWindowToShow(window) == window && overviewGridPromotable(window, monitor))
             windows.emplace_back(window);
     }
 
@@ -733,7 +806,21 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
     // desktop geometry itself lands somewhere the tile is not.
     auto geometry = geometryOverride ? *geometryOverride : window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
-    if (CBox slot; overviewGridSlot(window, monitor, slot)) {
+    // F3-b outbound. It has just stopped matching, so it owns no slot and
+    // overviewGridSlot says no, but it is still drawn on the active card for one
+    // reflow. `geometry` already IS its real rect on its own desktop, so easing
+    // to it means the frame the release expires draws the identical box down the
+    // ordinary path below and the handover is invisible. The offset carries the
+    // direction that desktop lies in, in RENDERED px against logical geometry,
+    // hence the divide -- same conversion as the inbound seed.
+    if (overviewGridReleasing(window, monitor)) {
+        CBox home = geometry;
+        if (const float UNIT = scale * std::max(monitor->m_scale, 0.01F); UNIT > 0.01F && std::abs(offset) > 0.01F)
+            home.translate(axisOffsetVector(offset / UNIT, layout));
+
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, home), overviewGridProgress(scale));
+        offset   = 0.F;
+    } else if (CBox slot; overviewGridSlot(window, monitor, slot)) {
         const bool PROMOTED = overviewGridPromoted(window, monitor);
 
         // F3-b-i: a promoted tile enters from the place it occupies on its own
@@ -4868,12 +4955,16 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     });
 
     const auto renderOverviewWindow = [&](const PHLWINDOW& window) {
-        if (!shouldShowOverviewWindow(window))
+        // F3-b outbound: a releasing tile no longer matches, so the search half
+        // of shouldShowOverviewWindow would delete it on its first outbound
+        // frame. overviewGridReleasing only admits a window that was legally
+        // shown a moment ago and is still validMapped.
+        const bool PROMOTED = overviewGridPromoted(window, monitor);
+        if (!PROMOTED && !shouldShowOverviewWindow(window))
             return;
         if (dragActiveWindow && window == getOverviewWindowToShow(dragActiveWindow.lock()))
             return;
 
-        const bool PROMOTED = overviewGridPromoted(window, monitor);
         if (!WORKSPACEVISIBLE && !PROMOTED)
             return;
 
@@ -5573,7 +5664,11 @@ bool CScrollOverview::hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t
         const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, renderScale, monitor);
         // B2: with a query typed, an off-screen workspace can still own a
         // promoted tile drawn on the active card, so it must not be culled here.
-        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor) && g_overviewSearch.empty())
+        // ...and after the query is EMPTIED a releasing tile is still crossing
+        // the active card, so it must keep its frost the whole way: section C
+        // outranks this cull.
+        const bool HASPROMOTED = std::ranges::any_of(workspaceImage->windows, [&](const auto& ref) { return overviewGridPromoted(getOverviewWindowToShow(ref.lock()), monitor); });
+        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor) && g_overviewSearch.empty() && !HASPROMOTED)
             continue;
 
         const auto workspace = workspaceImage->pWorkspace;
