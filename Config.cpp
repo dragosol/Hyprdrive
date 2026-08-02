@@ -301,6 +301,10 @@ static void registerConfigValues() {
                                   makeShared<CIntValue>("plugin:scrolloverview:drag_mini_ms", "ms for the drag proxy to shrink to, or grow back from, mini scale", 150,
                                                         SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:drag_recentre_ms",
+                                                        "ms for the drag proxy's grab point to slide to its centre while over a drop target", 160,
+                                                        SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -446,6 +450,10 @@ float getDragMiniScale() {
 
 int getDragMiniMs() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:drag_mini_ms"));
+}
+
+int getDragRecentreMs() {
+    return std::max<int>(0, getValue<int>("plugin:scrolloverview:drag_recentre_ms"));
 }
 
 bool getTapSuper() {

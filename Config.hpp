@@ -93,6 +93,7 @@ int           getDragMode();
 int           getDragThreshold();
 float         getDragMiniScale();
 int           getDragMiniMs();
+int           getDragRecentreMs();
 float         getTouchpadScrollFactor();
 EScrollAction getVerticalScrollAction(ELayout layout);
 EScrollAction getHorizontalScrollAction(ELayout layout);

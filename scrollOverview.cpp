@@ -3220,6 +3220,41 @@ float CScrollOverview::dragMiniProgress() const {
     return dragMiniFrom + (TARGET - dragMiniFrom) * T;
 }
 
+// X3 delta 6. The reference slides the proxy's grab point to its centre while it
+// is over a drop target and keeps the raw grab fraction when it is free of one
+// (Overview.qml:391-397), "because an edge grab looks wrong once the proxy is
+// thumbnail-sized". Its predicate is `overTarget`, i.e. targetKind "cell" OR
+// "tiles" (OverviewDrag.qml:48-49) -- the main area counts, so this is NOT the
+// same predicate as the mini shrink, which fires only on a FOREIGN workspace.
+// Hence its own progress rather than a reuse of dragMiniProgress().
+//
+// Deviation from the reference, deliberate: its Behavior carries no easing curve,
+// so the QML default makes the slide LINEAR. This uses the house gridReflowEase
+// that every other overview motion uses, including the size shrink this rides
+// alongside on the same proxy -- two coupled motions on one object reading on two
+// different curves is worse than the deviation.
+float CScrollOverview::dragRecentreProgress() const {
+    const int   DURATION = ScrollOverview::Config::getDragRecentreMs();
+    const float TARGET   = dragRecentreOver ? 1.F : 0.F;
+    if (DURATION <= 0)
+        return TARGET;
+
+    const float ELAPSED = std::chrono::duration<float, std::milli>(Time::steadyNow() - dragRecentreChangedAt).count();
+    const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
+    if (T < 1.F)
+        g_gridReflowActive = true; // rides the overview's existing next-frame request
+
+    return dragRecentreFrom + (TARGET - dragRecentreFrom) * T;
+}
+
+Vector2D CScrollOverview::dragEffectiveGrabRatio() const {
+    const float T = std::clamp(dragRecentreProgress(), 0.F, 1.F);
+    return Vector2D{
+        std::clamp(dragGrabRatio.x, 0.0, 1.0) + (0.5 - std::clamp(dragGrabRatio.x, 0.0, 1.0)) * T,
+        std::clamp(dragGrabRatio.y, 0.0, 1.0) + (0.5 - std::clamp(dragGrabRatio.y, 0.0, 1.0)) * T,
+    };
+}
+
 CBox CScrollOverview::draggedWindowGlobalBox() const {
     const auto WINDOW  = getOverviewWindowToShow(dragActiveWindow.lock());
     const auto MONITOR = pMonitor.lock();
@@ -3238,9 +3273,11 @@ CBox CScrollOverview::draggedWindowGlobalBox() const {
     const auto  GLOBALSIZE = SOURCEBOX.size() * (1.F / std::max(MONITOR->m_scale, 0.01F)) * MINI;
     const auto CURSOR     = g_pInputManager->getMouseCoordsInternal();
 
+    const auto GRAB = dragEffectiveGrabRatio();
+
     return {
-        CURSOR.x - GLOBALSIZE.x * std::clamp(dragGrabRatio.x, 0.0, 1.0),
-        CURSOR.y - GLOBALSIZE.y * std::clamp(dragGrabRatio.y, 0.0, 1.0),
+        CURSOR.x - GLOBALSIZE.x * GRAB.x,
+        CURSOR.y - GLOBALSIZE.y * GRAB.y,
         GLOBALSIZE.x,
         GLOBALSIZE.y,
     };
@@ -3378,6 +3415,12 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
     dragMiniFrom      = dragMiniOver ? 1.F : 0.F;
     dragMiniChangedAt = Time::steadyNow();
 
+    // The grab starts at the fraction the cursor actually pressed (D1); the
+    // updateWindowDrag() below is what notices a drop target and starts the slide.
+    dragRecentreOver      = false;
+    dragRecentreFrom      = 0.F;
+    dragRecentreChangedAt = Time::steadyNow();
+
     updateWindowDrag();
 }
 
@@ -3423,6 +3466,14 @@ void CScrollOverview::updateWindowDrag() {
         dragMiniFrom      = dragMiniProgress(); // from where it actually is, not from the end
         dragMiniOver      = OVERFOREIGN;
         dragMiniChangedAt = Time::steadyNow();
+    }
+
+    // X3 delta 6. Any drop target, own workspace included -- the reference's
+    // "tiles" DropArea spans the whole main area (WindowTiles.qml:444-452).
+    if (const bool OVERTARGET = DROPWORKSPACE != nullptr; OVERTARGET != dragRecentreOver) {
+        dragRecentreFrom      = dragRecentreProgress(); // from where it actually is
+        dragRecentreOver      = OVERTARGET;
+        dragRecentreChangedAt = Time::steadyNow();
     }
 
     for (const auto& overview : scrollOverviews()) {
@@ -3477,6 +3528,8 @@ void CScrollOverview::clearDragPending() {
     dragOriginalTapeTranslation = Vector2D{};
     dragGrabOffsetLocal         = Vector2D{};
     dragGrabRatio               = Vector2D{0.5, 0.5};
+    dragRecentreOver            = false;
+    dragRecentreFrom            = 0.F;
     dragOriginalBox             = CBox{};
     dragOriginalVisualBox       = CBox{};
     dragOriginalOverviewBox     = CBox{};
@@ -3767,7 +3820,7 @@ void CScrollOverview::endWindowDrag() {
         DROPSCROLLINGALGO->m_scrollingData->controller->isPrimaryHorizontal();
     const auto          ORIGINALWORKSPACE = dragOriginalWorkspace.lock();
     const bool          MOVEWORKSPACE    = DROPWORKSPACE && DROPWORKSPACE != ORIGINALWORKSPACE;
-    const auto          DRAGBOX          = DROPWORKSPACE ? dropOverview->draggedWindowBoxFor(WINDOW, dropWorkspaceIdx, DROPPOINTLOCAL, dragGrabRatio) : CBox{};
+    const auto          DRAGBOX          = DROPWORKSPACE ? dropOverview->draggedWindowBoxFor(WINDOW, dropWorkspaceIdx, DROPPOINTLOCAL, dragEffectiveGrabRatio()) : CBox{};
     int                 dropSide         = 0;
     CDropIndicator::SDropAnchor dropAnchor;
     std::string         dropDirection;
@@ -5029,8 +5082,17 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     const auto DRAGGED     = getOverviewWindowToShow(dragContext->dragActiveWindow.lock());
 
     size_t hoveredIdx = images.size();
-    if (DRAGGED && isOverviewPointerOnMonitor(monitor))
-        workspaceAtStripPoint(lastMousePosLocal, &hoveredIdx);
+    if (DRAGGED && isOverviewPointerOnMonitor(monitor)) {
+        const auto HOVERED = workspaceAtStripPoint(lastMousePosLocal, &hoveredIdx);
+
+        // X3 delta 5: the reference sets hoveredWhileDragging only when the cell is
+        // NOT the drag's own source workspace (OverviewWidget.qml:215). Dropping a
+        // window back where it came from is a no-op, so it must not light up as a
+        // target. Only the HIGHLIGHT is suppressed -- the cell stays a live drop
+        // target, exactly as the reference still claims it.
+        if (HOVERED && HOVERED == dragContext->dragOriginalWorkspace.lock())
+            hoveredIdx = images.size();
+    }
 
     const auto CARDROUND = getOverviewCardRounding(monitor, renderScale);
     const int  ROUND      = CARDROUND.rounding;

@@ -119,6 +119,8 @@ class CScrollOverview : public IOverview {
     void      updateWindowDrag();
     void      endWindowDrag();
     float     dragMiniProgress() const;
+    float     dragRecentreProgress() const;
+    Vector2D  dragEffectiveGrabRatio() const;
     CBox      resizedWindowBox() const;
     void      beginWindowResize();
     void      updateWindowResize();
@@ -204,6 +206,9 @@ class CScrollOverview : public IOverview {
     bool                             dragMiniOver          = false;
     float                            dragMiniFrom          = 0.F;
     Time::steady_tp                  dragMiniChangedAt     = {};
+    bool                             dragRecentreOver      = false;
+    float                            dragRecentreFrom      = 0.F;
+    Time::steady_tp                  dragRecentreChangedAt = {};
     Vector2D                         dragOriginalFloatSize = Vector2D{};
     Vector2D                         dragOriginalTapeTranslation = Vector2D{};
     Vector2D                         resizeStartMouseLocal = Vector2D{};
