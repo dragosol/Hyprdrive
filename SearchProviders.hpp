@@ -30,6 +30,9 @@ namespace SearchProviders {
         std::string icon;          // icon NAME or absolute path; feed to AppSearch::resolveIconPath
         std::string clipboardText; // Calculator returns the bare answer here
         size_t      providerRank = 0;
+        // X20: carried over from the previous query while this provider's answer
+        // for the current one is still in flight.
+        bool        stale = false;
     };
 
     // Scans both search-providers dirs on first call.

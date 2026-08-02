@@ -169,6 +169,20 @@ namespace SearchProviders {
         std::string                          w_prevQuery;
         std::atomic<uint64_t>                w_subsearchCalls{0};
 
+        // Worker thread. This provider has nothing for the current query, so its
+        // carried-over rows come down -- otherwise a provider that stops matching
+        // (or dies) leaves its last answer on screen for every query after it.
+        // Returns 0 to suit the sd_bus callback signature.
+        int                                  dropStaleFor(size_t providerIdx) {
+            {
+                std::lock_guard lock(g_mutex);
+                const auto&     BUS = g_providers[providerIdx].busName;
+                std::erase_if(g_results, [&](const SResult& R) { return R.stale && R.providerBus == BUS; });
+            }
+            g_revision.fetch_add(1);
+            return 0;
+        }
+
         void                                 dropInFlight() {
             for (auto* S : w_slots)
                 sd_bus_slot_unref(S);
@@ -293,12 +307,13 @@ namespace SearchProviders {
                 sd_bus_message_exit_container(m);
             }
             if (batch.empty())
-                return 0;
+                return dropStaleFor(call->providerIdx);
 
             {
                 std::lock_guard lock(g_mutex);
                 if (call->gen != g_wantGen)
                     return 0;
+                std::erase_if(g_results, [&](const SResult& R) { return R.providerBus == PROV.busName; });
                 g_results.insert(g_results.end(), batch.begin(), batch.end());
                 std::ranges::stable_sort(g_results, {}, &SResult::providerRank);
             }
@@ -308,12 +323,15 @@ namespace SearchProviders {
 
         int onResultSet(sd_bus_message* m, void* userdata, sd_bus_error*) {
             auto* call = static_cast<SCall*>(userdata);
-            if (call->gen != w_gen || sd_bus_message_is_method_error(m, nullptr))
+            if (call->gen != w_gen)
                 return 0;
+            // No answer for this query. A CALL_TIMEOUT_US timeout lands here too.
+            if (sd_bus_message_is_method_error(m, nullptr))
+                return dropStaleFor(call->providerIdx);
 
             char** ids = nullptr;
             if (sd_bus_message_read_strv(m, &ids) <= 0 || !ids)
-                return 0;
+                return dropStaleFor(call->providerIdx);
 
             std::vector<std::string> kept;
             for (char** p = ids; *p; ++p) {
@@ -325,7 +343,7 @@ namespace SearchProviders {
 
             w_prevIds[call->providerIdx] = kept;
             if (kept.empty())
-                return 0;
+                return dropStaleFor(call->providerIdx);
 
             sd_bus*     bus  = sd_bus_message_get_bus(m);
             const auto& PROV = g_providers[call->providerIdx];
@@ -486,10 +504,15 @@ namespace SearchProviders {
                 return;
             g_wantQuery = text;
             ++g_wantGen;
-            // Synchronously, or the caller reads the PREVIOUS query's results in
-            // the window before the worker wakes -- which looks like an instant
-            // answer and is the wrong answer.
-            g_results.clear();
+            // X20: refine, do not blank. Clearing here emptied the panel on
+            // every keystroke and refilled it a frame later, which reads as a
+            // submit step. The previous rows stay up flagged stale until each
+            // provider answers -- an empty query has no answer to wait for.
+            if (text.empty())
+                g_results.clear();
+            else
+                for (auto& R : g_results)
+                    R.stale = true;
         }
         g_revision.fetch_add(1);
         wake();
@@ -592,6 +615,16 @@ namespace {
             usleep(20'000);
         }
     }
+
+    // X20 made results() carry the PREVIOUS query's rows until each provider
+    // answers, so "not empty" stopped meaning "answered" -- waiting on it
+    // returns instantly with the old set and every assertion after it is about
+    // the wrong query. Anything that means "answered" waits on these.
+    std::vector<SearchProviders::SResult> fresh() {
+        auto r = SearchProviders::results();
+        std::erase_if(r, [](const SearchProviders::SResult& E) { return E.stale; });
+        return r;
+    }
 }
 
 int main() {
@@ -620,14 +653,17 @@ int main() {
     // into the caller this would not be under a second.
     assert(ms < 2000);
 
-    // A new query must not report the PREVIOUS query's results while the worker
-    // is still waking. This regressed once: it read as an instant answer.
+    // X20: a new query now KEEPS the old rows so the panel refines instead of
+    // blanking. They must all be flagged stale until their provider answers --
+    // that flag is what still guards against reading the previous query's
+    // results as this query's answer, which regressed once and read as an
+    // instant success.
     query("heart");
-    assert(results().empty());
+    assert(std::ranges::all_of(results(), [](const SResult& E) { return E.stale; }));
 
     // DoD clause 15, "find characters".
-    ms = waitFor([] { return !results().empty(); }, 3000);
-    R  = results();
+    ms = waitFor([] { return !fresh().empty(); }, 3000);
+    R  = fresh();
     std::printf("query \"heart\": %zu results in %ld ms\n", R.size(), ms);
     assert(!R.empty());
     assert(std::ranges::any_of(R, [](const SResult& E) { return !E.name.empty(); }));
@@ -636,17 +672,40 @@ int main() {
     // path, and the set must still be coherent, not the previous leftovers.
     const uint64_t SUBS = w_subsearchCalls.load();
     query("heart s");
-    ms = waitFor([] { return !results().empty(); }, 3000);
-    std::printf("query \"heart s\" (subsearch): %zu results in %ld ms, %llu subsearch calls\n", results().size(), ms,
+    ms = waitFor([] { return !fresh().empty(); }, 3000);
+    std::printf("query \"heart s\" (subsearch): %zu results in %ld ms, %llu subsearch calls\n", fresh().size(), ms,
                 static_cast<unsigned long long>(w_subsearchCalls.load() - SUBS));
     assert(w_subsearchCalls.load() > SUBS);
+
+    // X20 proper: refining a live query must never leave the panel empty, not
+    // for a single poll. That gap is the whole difference between "filters as I
+    // type" and a submit step, and it is invisible in a screenshot -- it lasts
+    // one round trip. Every step below extends the last, so the answer set only
+    // narrows; if it ever reads empty, retention is broken.
+    query("dis");
+    waitFor([] { return !fresh().empty(); }, 3000);
+    bool everEmpty = false;
+    for (const char* Q : {"disp", "displa", "display"}) {
+        query(Q);
+        for (int i = 0; i < 40; ++i) {
+            if (results().empty())
+                everEmpty = true;
+            usleep(5'000);
+        }
+    }
+    std::printf("X20 refine \"dis\"->\"display\": blanked = %s, settled %zu results\n", everEmpty ? "YES" : "no", results().size());
+    assert(!everEmpty);
+    // Retention makes "never empty" cheap to satisfy by never answering, so the
+    // set has to settle FRESH for the assertion above to mean anything.
+    waitFor([] { return !fresh().empty(); }, 3000);
+    assert(fresh().size() == results().size());
 
     // The other icon form. Settings serializes a GIcon as ('themed', <as>)
     // while Calculator sends a bare string; a client that handles only one of
     // them silently loses every icon from half the providers.
     query("display");
-    ms = waitFor([] { return std::ranges::any_of(results(), [](const SResult& E) { return E.providerDesktopId == "org.gnome.Settings"; }); }, 3000);
-    R  = results();
+    ms = waitFor([] { return std::ranges::any_of(fresh(), [](const SResult& E) { return E.providerDesktopId == "org.gnome.Settings"; }); }, 3000);
+    R  = fresh();
     std::printf("query \"display\": %zu results in %ld ms\n", R.size(), ms);
     for (const auto& E : R)
         std::printf("  [%s] id=%s name=%s icon=%s\n", E.providerDesktopId.c_str(), E.id.c_str(), E.name.c_str(), E.icon.c_str());
@@ -661,8 +720,8 @@ int main() {
 
     // A provider that answers must still resolve an icon name for the panel.
     query("2+2");
-    waitFor([] { return !results().empty(); }, 3000);
-    assert(std::ranges::any_of(results(), [](const SResult& E) { return !E.icon.empty(); }));
+    waitFor([] { return !fresh().empty(); }, 3000);
+    assert(std::ranges::any_of(fresh(), [](const SResult& E) { return !E.icon.empty(); }));
 
     shutdown();
     std::printf("SearchProviders self-check OK\n");
