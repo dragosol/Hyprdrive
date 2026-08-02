@@ -82,6 +82,38 @@ namespace SearchProviders {
         }
 
         // ---- discovery ----------------------------------------------------
+        // Returns the string list in org.gnome.desktop.search-providers <key>.
+        // Empty on any failure, which degrades to plain alphabetical order --
+        // the behaviour before X18, not a broken search.
+        std::vector<std::string> searchProviderSetting(const std::string& key) {
+            std::vector<std::string> out;
+
+            const std::string CMD = "gsettings get org.gnome.desktop.search-providers " + key + " 2>/dev/null";
+            FILE*             pipe = popen(CMD.c_str(), "r");
+            if (!pipe)
+                return out;
+
+            std::string raw;
+            char        buf[512];
+            while (std::fgets(buf, sizeof(buf), pipe))
+                raw += buf;
+            pclose(pipe);
+
+            // "['a.desktop', 'b.desktop']", or "@as []" when unset.
+            for (size_t i = 0; i < raw.size();) {
+                const auto OPEN = raw.find('\'', i);
+                if (OPEN == std::string::npos)
+                    break;
+                const auto CLOSE = raw.find('\'', OPEN + 1);
+                if (CLOSE == std::string::npos)
+                    break;
+                out.emplace_back(raw.substr(OPEN + 1, CLOSE - OPEN - 1));
+                i = CLOSE + 1;
+            }
+
+            return out;
+        }
+
 
         std::vector<SProvider> g_providers;
         bool                   g_scanned = false;
@@ -121,9 +153,29 @@ namespace SearchProviders {
                         g_providers.push_back(std::move(p));
                 }
             }
-            // ponytail: alphabetical. The user's gsettings sort-order/disabled is
-            // checklist item X18 and lands on top of this ordering.
+            // X18: the user's own gsettings decide order and membership.
+            //
+            // Read through the `gsettings` CLI rather than by linking gio: this
+            // runs once per scan, not per keystroke, and dconf has no stable
+            // file format to parse. The command is a fixed string with nothing
+            // interpolated into it.
+            const auto DISABLED = searchProviderSetting("disabled");
+            const auto ORDER    = searchProviderSetting("sort-order");
+
+            std::erase_if(g_providers, [&](const SProvider& P) { return std::ranges::contains(DISABLED, P.desktopId + ".desktop"); });
+
+            // GNOME's rule: everything named in sort-order first, in that
+            // order, then the rest. Alphabetical for the remainder so the tail
+            // is at least stable.
             std::ranges::sort(g_providers, {}, &SProvider::desktopId);
+            std::ranges::stable_sort(g_providers, [&](const SProvider& A, const SProvider& B) {
+                const auto RANK = [&](const SProvider& P) {
+                    const auto IT = std::ranges::find(ORDER, P.desktopId + ".desktop");
+                    return IT == ORDER.end() ? ORDER.size() : static_cast<size_t>(IT - ORDER.begin());
+                };
+                return RANK(A) < RANK(B);
+            });
+
             g_scanned = true;
         }
 
