@@ -691,13 +691,17 @@ struct SGridReflow {
     CBox            from;
     CBox            to;
     Time::steady_tp start;
-    Time::steady_tp lastTouched;
+    uint64_t        lastFrame    = 0;
+    bool            promotedLast = false;
 };
 
-// A tile whose entry has gone untouched for longer than this was not drawn in
-// the grid last frame, so it is ENTERING rather than reflowing. A few frames is
-// plenty; it only has to outlast one missed render.
-static constexpr float GRID_REENTRY_MS = 100.F;
+// Counts RENDERED frames, which is the only clock this code actually advances
+// on: an idle overview renders nothing, so a wall-clock "last touched" measures
+// how long the user sat still rather than whether the tile was drawn.
+// ponytail: one counter for all monitors, so a second output would advance it
+// twice per frame and every tile would read as skipped; make it per-monitor if
+// this ever runs on more than one.
+static uint64_t g_overviewFrame = 0;
 
 static std::unordered_map<Desktop::View::CWindow*, SGridReflow> g_gridReflows;
 static bool                                      g_gridReflowActive = false;
@@ -715,7 +719,7 @@ static bool gridBoxesDiffer(const CBox& a, const CBox& b) {
 // Called from getOverviewWindowBox, i.e. many times per window per frame from
 // render, hit-test and drag alike. Restarting only when the *target* moves keeps
 // it idempotent within a frame, so those call sites cannot disagree.
-static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom = nullptr) {
+static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom = nullptr, bool promoted = false) {
     const int DURATION = ScrollOverview::Config::getMissionControlReflowMs();
     if (DURATION <= 0)
         return slot;
@@ -737,18 +741,29 @@ static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox*
     // same window a second time re-enters properly instead of reusing its stale
     // settled entry. KNOWN == false also catches a recycled address handing a new
     // window a dead one's entry.
-    const bool KNOWN      = entry.window.lock() == window;
-    const bool REENTERING = KNOWN && std::chrono::duration<float, std::milli>(NOW - entry.lastTouched).count() > GRID_REENTRY_MS;
+    const bool KNOWN = entry.window.lock() == window;
+    // An entering tile is seeded off-screen on purpose, so it is culled -- and
+    // on frames where that culls the whole workspace, its pass is skipped and
+    // this function is not called at all. Reseeding then would throw away an
+    // ease that is still running and draw the tile at its destination.
+    const bool INFLIGHT = KNOWN && std::chrono::duration<float, std::milli>(NOW - entry.start).count() < sc<float>(DURATION);
+    // Genuinely absent: a tile that stopped being drawn entirely, stayed gone
+    // long enough to finish whatever it was doing, and is coming back.
+    const bool UNDRAWN = KNOWN && !INFLIGHT && g_overviewFrame - entry.lastFrame > 1;
+    // ...and the case staleness can never see, because the tile was on screen
+    // the whole time: it just crossed onto the active card.
+    const bool JOINED = KNOWN && promoted && !entry.promotedLast;
 
-    if (!KNOWN || REENTERING) {
+    if (!KNOWN || UNDRAWN || JOINED) {
         const CBox START = enterFrom ? *enterFrom : slot;
-        entry            = SGridReflow{window, START, slot, NOW, NOW};
+        entry            = SGridReflow{window, START, slot, NOW, g_overviewFrame, promoted};
         if (gridBoxesDiffer(START, slot))
             g_gridReflowActive = true;
         return START;
     }
 
-    entry.lastTouched = NOW;
+    entry.lastFrame    = g_overviewFrame;
+    entry.promotedLast = promoted;
 
     const float ELAPSED = std::chrono::duration<float, std::milli>(NOW - entry.start).count();
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
@@ -818,7 +833,7 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
         if (const float UNIT = scale * std::max(monitor->m_scale, 0.01F); UNIT > 0.01F && std::abs(offset) > 0.01F)
             home.translate(axisOffsetVector(offset / UNIT, layout));
 
-        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, home), overviewGridProgress(scale));
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, home, nullptr, false), overviewGridProgress(scale));
         offset   = 0.F;
     } else if (CBox slot; overviewGridSlot(window, monitor, slot)) {
         const bool PROMOTED = overviewGridPromoted(window, monitor);
@@ -837,7 +852,7 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
             }
         }
 
-        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, slot, enterPtr), overviewGridProgress(scale));
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, slot, enterPtr, PROMOTED), overviewGridProgress(scale));
 
         // The active card sits at offset 0. A promoted tile must ignore the
         // caller's per-workspace offset or it lands off-screen beside it.
@@ -3926,7 +3941,7 @@ void CScrollOverview::endWindowDrag() {
                 const float SCALEDIV = std::max(scale->value(), 0.01F) * std::max(MON->m_scale, 0.01F);
 
                 g_gridReflows[WINDOW.get()] =
-                    SGridReflow{WINDOW, CBox{overviewPointToGlobal(WSIDX, FLOATBOX.pos()), FLOATBOX.size() * (1.F / SCALEDIV)}, slot, Time::steadyNow()};
+                    SGridReflow{WINDOW, CBox{overviewPointToGlobal(WSIDX, FLOATBOX.pos()), FLOATBOX.size() * (1.F / SCALEDIV)}, slot, Time::steadyNow(), g_overviewFrame, false};
                 g_gridReflowActive = true;
             }
         }
@@ -6618,6 +6633,8 @@ void CScrollOverview::render() {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return;
+
+    ++g_overviewFrame;
 
     if (g_pointerGrabOverview && g_pointerGrabOverview != this && g_pointerGrabOverview->dragActiveWindow && isOverviewPointerOnMonitor(MONITOR))
         lastMousePosLocal = getOverviewMousePosLocal(MONITOR);
