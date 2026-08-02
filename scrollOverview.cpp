@@ -4794,14 +4794,20 @@ void CScrollOverview::restoreWorkspaceAnimationOverrides() {
     workspaceAnimationsOverridden = false;
 }
 
-void CScrollOverview::forceWorkspaceAlphaVisible() {
-    for (const auto& workspace : State::workspaceState()->workspaces()) {
-        if (!workspace || !workspace->m_alpha)
-            continue;
+void CScrollOverview::forceWorkspaceAlphaVisible(const PHLWORKSPACE& workspace) {
+    if (!workspace || !workspace->m_alpha)
+        return;
 
-        workspace->m_alpha->setValueAndWarp(1.F);
-        *workspace->m_alpha = 1.F;
-    }
+    if (workspace->m_alpha->value() == 1.F && workspace->m_alpha->goal() == 1.F && !workspace->m_alpha->isBeingAnimated())
+        return;
+
+    workspace->m_alpha->setValueAndWarp(1.F);
+    *workspace->m_alpha = 1.F;
+}
+
+void CScrollOverview::forceWorkspaceAlphaVisible() {
+    for (const auto& workspace : State::workspaceState()->workspaces())
+        forceWorkspaceAlphaVisible(workspace.lock());
 }
 
 void CScrollOverview::forceWorkspaceWindowsDecoRecalc(const PHLWORKSPACE& workspace) {
@@ -5800,6 +5806,12 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
 
     forceWindowVisible(window);
     forceWindowSurfaceVisibility(window);
+    // E8-f: renderWindow multiplies the texture by the WORKSPACE alpha, so a
+    // workspace sitting at 0 draws this window's border and nothing else. The
+    // window's own alpha is already forced per frame right above; forcing the
+    // workspace only on rebuild is what let a later zeroing survive until the
+    // overview was reopened -- which was the user's workaround, not a fix.
+    forceWorkspaceAlphaVisible(window->m_workspace);
 
     OverviewWindow::renderOverviewWindow({
         .monitor              = monitor,
