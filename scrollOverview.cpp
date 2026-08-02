@@ -6423,6 +6423,15 @@ void CScrollOverview::close() {
 
     closeOnWindow = getOverviewWindowToShow(closeOnWindow.lock());
 
+    // X43: focus and stacking are two different things. fullWindowFocus() only
+    // makes a window active -- it never restacks -- so a selected floating
+    // window stayed underneath whatever was covering it. Raise here, at the one
+    // point where the overview commits its selection, rather than in
+    // syncFocusedSelection(): that runs on every keyboard navigation step and
+    // would reshuffle the stack while the user is merely browsing.
+    if (closeOnWindow)
+        Desktop::windowState()->raise(closeOnWindow.lock());
+
     if (closeOnWindow && focusSyncedFromWorkspaceID != WORKSPACE_INVALID) {
         const auto FINALWORKSPACE = closeOnWindow->m_workspace;
         size_t     sourceIdx      = images.size();
