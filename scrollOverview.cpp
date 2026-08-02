@@ -4093,11 +4093,24 @@ void CScrollOverview::endWindowDrag() {
         Desktop::globalWindowController()->moveWindowToWorkspace(WINDOW, DROPWORKSPACE);
         RESTOREACTIVEWORKSPACE();
         if (TARGET) {
-            const auto GLOBALSIZE = DRAGBOX.size() * (1.F / (std::max(dropOverview->scale->value(), 0.01F) * std::max(DROPMONITOR ? DROPMONITOR->m_scale : 1.F, 0.01F)));
-            auto       GLOBALBOX  = dropWorkspaceFullyVisible ? CBox{dropOverview->overviewPointToGlobal(dropWorkspaceIdx, DRAGBOX.pos()), GLOBALSIZE} :
-                                                                centerBoxInWorkspace(CBox{Vector2D{}, GLOBALSIZE}, DROPWORKSPACE, DROPMONITOR);
-            if (dropWorkspaceFullyVisible)
-                GLOBALBOX = clampBoxToWorkspace(GLOBALBOX, DROPWORKSPACE, DROPMONITOR, WINDOW->getRealBorderSize());
+            // X41/X42: the proxy box is the MISSION-CONTROL SLOT, i.e. real size
+            // x bestScale (overviewGridLayout), so descaling it by the overview
+            // and monitor scale alone still commits a shrunken window. bestScale
+            // is capped at 1.0, which is why uniform fixture tiles never caught
+            // this and only a large window shows it. A drag moves a window; it
+            // must never resize it.
+            const bool HAVEORIGINAL = !dragOriginalBox.empty();
+            const auto GLOBALSIZE =
+                HAVEORIGINAL ? dragOriginalBox.size() :
+                               DRAGBOX.size() * (1.F / (std::max(dropOverview->scale->value(), 0.01F) * std::max(DROPMONITOR ? DROPMONITOR->m_scale : 1.F, 0.01F)));
+            // X42: a strip-mini drop targets a card that is off-screen by
+            // construction, so there is no in-card point to map the cursor to.
+            // Keeping the window where it already was is what stops every
+            // arrival stacking up on the workspace centre.
+            auto GLOBALBOX = dropWorkspaceFullyVisible ? CBox{dropOverview->overviewPointToGlobal(dropWorkspaceIdx, DRAGBOX.pos()), GLOBALSIZE} :
+                HAVEORIGINAL                           ? CBox{dragOriginalBox.pos(), GLOBALSIZE} :
+                                                         centerBoxInWorkspace(CBox{Vector2D{}, GLOBALSIZE}, DROPWORKSPACE, DROPMONITOR);
+            GLOBALBOX = clampBoxToWorkspace(GLOBALBOX, DROPWORKSPACE, DROPMONITOR, WINDOW->getRealBorderSize());
 
             TARGET->setPositionGlobal(GLOBALBOX);
             TARGET->warpPositionSize();
@@ -4110,7 +4123,12 @@ void CScrollOverview::endWindowDrag() {
 
         const auto FLOATBOX   = draggedWindowBox(workspaceIdx);
         const auto GLOBALPOS  = overviewPointToGlobal(workspaceIdx, FLOATBOX.pos());
-        const auto GLOBALSIZE = FLOATBOX.size() * (1.F / (std::max(scale->value(), 0.01F) * std::max(MONITOR ? MONITOR->m_scale : 1.F, 0.01F)));
+        // X41: same mission-control-slot descaling bug as the branch above. This
+        // is the path a CANCELLED drag takes when the button comes up over the
+        // window's own card, so committing the slot size shrinks it every time.
+        const auto GLOBALSIZE = dragOriginalBox.empty() ?
+            FLOATBOX.size() * (1.F / (std::max(scale->value(), 0.01F) * std::max(MONITOR ? MONITOR->m_scale : 1.F, 0.01F))) :
+            dragOriginalBox.size();
         auto       GLOBALBOX  = CBox{GLOBALPOS, GLOBALSIZE};
         const auto WORKSPACE  = workspaceIdx < images.size() && images[workspaceIdx] ? images[workspaceIdx]->pWorkspace : WINDOW->m_workspace;
 
