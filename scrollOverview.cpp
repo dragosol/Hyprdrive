@@ -264,18 +264,33 @@ static SP<Render::ITexture> overviewAppIcon(const std::string& iconName) {
     return texture;
 }
 
-// OVERVIEW_CPP_SPEC §5 F2. Case-insensitive substring over title and class.
+// OVERVIEW_CPP_SPEC §5 F2, and §13.7 X18's open-window half.
+//
+// Open windows ARE the window search result: they are already the grid's tiles,
+// already promoted from other desktops by B2 and already animated in by F3-b,
+// so a second result ROW for a window the user can see would be the same window
+// twice in one view. What X18 buys is PARITY OF MATCHING with
+// windows-search-provider@G-dH, and the host's own settings were read rather
+// than its defaults: `search-method` is 0 = Strict, so the fuzzy app scorer is
+// the WRONG algorithm here. Strict is every space-separated term appearing
+// somewhere, in any order, case- and accent-insensitively.
+//
+// Haystack is the extension's own, `${wsIndex + 1}: ${title} ${appName}`, plus
+// the window class -- dropping the class would regress the F2 behaviour that
+// shipped long before X18.
 static bool overviewSearchMatches(const PHLWINDOW& window) {
     if (g_overviewSearch.empty())
         return true;
 
-    const auto LOWER = [](std::string s) {
-        std::ranges::transform(s, s.begin(), [](unsigned char c) { return std::tolower(c); });
-        return s;
-    };
+    // Hyprland numbers regular workspaces from 1, which is what the extension
+    // renders as `wsIndex + 1`, so typing "2:" finds desktop 2 on both.
+    std::string haystack = window->m_workspace ? std::format("{}: ", window->m_workspace->m_id) : "";
+    haystack += window->m_title + " " + window->m_class;
 
-    const auto NEEDLE = LOWER(g_overviewSearch);
-    return LOWER(window->m_title).contains(NEEDLE) || LOWER(window->m_class).contains(NEEDLE);
+    if (const auto APPNAME = AppSearch::appNameForClass(window->m_class); !APPNAME.empty())
+        haystack += " " + APPNAME;
+
+    return AppSearch::strictMatch(g_overviewSearch, haystack);
 }
 
 // The search filter hangs off this gate rather than off the grid builder: every

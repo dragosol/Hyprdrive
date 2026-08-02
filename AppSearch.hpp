@@ -43,4 +43,17 @@ namespace AppSearch {
     // terminalCmd is used only for Terminal=true entries; empty falls back to
     // $TERMINAL.
     bool launch(const SEntry& entry, const std::string& terminalCmd);
+
+    // OVERVIEW_CPP_SPEC §13.7 X18, open-window half. Parity with
+    // windows-search-provider@G-dH, read off the HOST's own settings rather
+    // than its defaults: search-method=0 is Strict, not fuzzy. Strict means
+    // every space-separated term must appear somewhere in the text, in any
+    // order, case- and accent-insensitively. Lives here because the accent
+    // fold and the app-name lookup both belong to the desktop-entry layer.
+    bool        strictMatch(const std::string& query, const std::string& text);
+
+    // The app NAME for a window class ("org.gnome.Nautilus" -> "Files"), or ""
+    // when no desktop entry claims it. The host matches window results against
+    // the app name, so without this "files" would never find a Nautilus window.
+    std::string appNameForClass(const std::string& wmClass);
 }

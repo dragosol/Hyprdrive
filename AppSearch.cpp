@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 #include <hyprutils/os/Process.hpp>
@@ -22,6 +24,100 @@ namespace AppSearch {
         std::string         lower(std::string s) {
             std::ranges::transform(s, s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             return s;
+        }
+
+        // X18: what the host's strictMatch() gets from
+        // `normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()` --
+        // the accented Latin letters lose their marks, everything else is left
+        // alone. Only the codepoints with a canonical decomposition are folded,
+        // so AE/O-slash/L-stroke keep their identity here exactly as they do on
+        // the host. ' ' marks "no fold".
+        //
+        // ponytail: outside the two-byte Latin range nothing is folded OR
+        // lowercased, so a Cyrillic query must be typed in the title's own case.
+        // Needs a case map, not a bigger fold table, and only if it ever bites.
+        constexpr std::string_view FOLD_LATIN1 = "aaaaaa c"
+                                                 "eeeeiiii"
+                                                 " nooooo "
+                                                 " uuuuy  "
+                                                 "aaaaaa c"
+                                                 "eeeeiiii"
+                                                 " nooooo "
+                                                 " uuuuy y"; // U+00C0..U+00FF
+
+        constexpr std::string_view FOLD_LATINA = "aaaaaacc"
+                                                 "ccccccdd"
+                                                 "  eeeeee"
+                                                 "eeeegggg"
+                                                 "gggghh  "
+                                                 "iiiiiiii"
+                                                 "i   jjkk"
+                                                 " llllll "
+                                                 "   nnnnn"
+                                                 "n   oooo"
+                                                 "oo  rrrr"
+                                                 "rrssssss"
+                                                 "sstttt  "
+                                                 "uuuuuuuu"
+                                                 "uuuuwwyy"
+                                                 "yzzzzzz "; // U+0100..U+017F
+
+        std::string fold(const std::string& s) {
+            std::string out;
+            out.reserve(s.size());
+
+            for (size_t i = 0; i < s.size();) {
+                const auto C = static_cast<unsigned char>(s[i]);
+
+                if (C < 0x80) {
+                    out += static_cast<char>(std::tolower(C));
+                    ++i;
+                    continue;
+                }
+
+                // Only the two-byte range can hold a foldable letter; anything
+                // longer is copied through a byte at a time.
+                if ((C & 0xE0) == 0xC0 && i + 1 < s.size()) {
+                    const auto CP = ((C & 0x1Fu) << 6) | (static_cast<unsigned char>(s[i + 1]) & 0x3Fu);
+                    if (CP >= 0xC0 && CP <= 0x17F) {
+                        const char F = CP <= 0xFF ? FOLD_LATIN1[CP - 0xC0] : FOLD_LATINA[CP - 0x100];
+                        if (F != ' ') {
+                            out += F;
+                            i += 2;
+                            continue;
+                        }
+
+                        // No decomposition, so it stays itself -- but the host
+                        // still lowercases it, and there are only eight of these
+                        // outside Latin-1's own +0x20 run.
+                        unsigned LOWER = CP;
+                        switch (CP) {
+                            case 0x110:
+                            case 0x126:
+                            case 0x132:
+                            case 0x13F:
+                            case 0x141:
+                            case 0x14A:
+                            case 0x152:
+                            case 0x166: LOWER = CP + 1; break;
+                            default:
+                                if (CP >= 0xC0 && CP <= 0xDE && CP != 0xD7)
+                                    LOWER = CP + 0x20;
+                                break;
+                        }
+
+                        out += static_cast<char>(0xC0 | (LOWER >> 6));
+                        out += static_cast<char>(0x80 | (LOWER & 0x3F));
+                        i += 2;
+                        continue;
+                    }
+                }
+
+                out += s[i];
+                ++i;
+            }
+
+            return out;
         }
 
         std::string trim(const std::string& s) {
@@ -705,6 +801,67 @@ namespace AppSearch {
         CProcess process(BINARY, args);
         return process.runAsync();
     }
+
+    bool strictMatch(const std::string& query, const std::string& text) {
+        const auto HAY     = fold(text);
+        const auto NEEDLES = fold(query);
+
+        size_t start = 0;
+        while (start < NEEDLES.size()) {
+            const auto BEGIN = NEEDLES.find_first_not_of(' ', start);
+            if (BEGIN == std::string::npos)
+                break;
+            const auto END = NEEDLES.find(' ', BEGIN);
+            if (!HAY.contains(NEEDLES.substr(BEGIN, END == std::string::npos ? std::string::npos : END - BEGIN)))
+                return false;
+            if (END == std::string::npos)
+                break;
+            start = END + 1;
+        }
+
+        // Every term hit, or the query was nothing but spaces -- which matches
+        // everything on the host too, since its split leaves one empty pattern.
+        return true;
+    }
+
+    std::string appNameForClass(const std::string& wmClass) {
+        if (wmClass.empty())
+            return "";
+
+        // Called from the overview's per-window membership gate, so it runs for
+        // every window every frame. The inventory is small but the compare is
+        // not free; the answer only changes when the inventory is rescanned.
+        static std::unordered_map<std::string, std::string> cache;
+        static const std::vector<SEntry>*                   cachedFor = nullptr;
+
+        const auto& INV = inventory();
+        if (cachedFor != &INV || (cache.size() > INV.size() + 64)) {
+            cache.clear();
+            cachedFor = &INV;
+        }
+
+        if (const auto IT = cache.find(wmClass); IT != cache.end())
+            return IT->second;
+
+        const auto WANT = lower(wmClass);
+        std::string found;
+
+        for (const auto& ENTRY : INV) {
+            // StartupWMClass is authoritative but measured absent on 185/186
+            // entries, so the desktop id carries the load: on Wayland the app id
+            // usually IS the id ("org.gnome.Nautilus"), and the trailing
+            // component covers the rest ("kitty", "firefox").
+            const auto ID   = lower(ENTRY.id);
+            const auto TAIL = ID.substr(ID.find_last_of('.') == std::string::npos ? 0 : ID.find_last_of('.') + 1);
+            if (lower(ENTRY.wmClass) == WANT || ID == WANT || TAIL == WANT || lower(ENTRY.name) == WANT) {
+                found = ENTRY.name;
+                break;
+            }
+        }
+
+        cache[wmClass] = found;
+        return found;
+    }
 }
 
 // ponytail: self-check lives in the TU so it can reach the anonymous namespace.
@@ -801,6 +958,43 @@ int main() {
     }
     std::printf("icons resolved: %zu / %zu entries\n", withIcons, inventory().size());
     assert(withIcons > 0);
+
+    // X18 open-window half. The host's setting is search-method=0 (Strict), so
+    // parity is multi-term-in-any-order substring, not the fuzzy app scorer.
+    const std::string WIN = "2: nvim ~/notes.md kitty";
+    assert(strictMatch("kitty", WIN));
+    assert(strictMatch("KITTY", WIN));
+    assert(strictMatch("kitty notes", WIN));  // order-independent
+    assert(strictMatch("notes kitty", WIN));  // ... both ways
+    assert(!strictMatch("kitty firefox", WIN)); // every term must hit
+    assert(strictMatch("2:", WIN));           // the workspace number is searchable
+    assert(strictMatch("", WIN));
+    assert(strictMatch("   ", WIN));
+    assert(!strictMatch("fls", WIN));         // strict, NOT fuzzy -- unlike apps
+
+    // Accents are ignored, in the query and in the title alike.
+    assert(strictMatch("cafe", "1: Le Café kitty"));
+    assert(strictMatch("café", "1: Le Cafe kitty"));
+    assert(strictMatch("zlutoucky", "1: Žluťoučký kůň"));       // Latin Ext-A
+    assert(!strictMatch("zlutoucky", "1: Zlutouck kitty"));      // no false hit
+    // No canonical decomposition: folds to nothing, stays matchable as itself.
+    assert(strictMatch("ø", "1: Ørsted"));
+    // Non-Latin passes through untouched rather than collapsing to one blob.
+    assert(strictMatch("東京", "1: 東京 kitty"));
+    assert(!strictMatch("京東", "1: 東京 kitty"));
+
+    assert(appNameForClass("").empty());
+    assert(appNameForClass("definitely-not-an-app-zzz").empty());
+    if (const auto& I = inventory(); !I.empty()) {
+        // Whatever the id's trailing component is, it must find its own entry:
+        // that is the lookup Wayland app ids actually exercise.
+        const auto& FIRST = I.front();
+        const auto  ID    = FIRST.id;
+        const auto  TAIL  = ID.substr(ID.find_last_of('.') == std::string::npos ? 0 : ID.find_last_of('.') + 1);
+        std::printf("appNameForClass(\"%s\") = \"%s\"\n", TAIL.c_str(), appNameForClass(TAIL).c_str());
+        assert(!appNameForClass(TAIL).empty());
+        assert(appNameForClass(TAIL) == appNameForClass(TAIL)); // cache agrees with itself
+    }
 
     const auto R = search("te", 5);
     std::printf("search(\"te\"): %zu results, top = %s\n", R.size(), R.empty() ? "(none)" : R.front()->name.c_str());
