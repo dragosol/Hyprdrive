@@ -6285,10 +6285,14 @@ void CScrollOverview::onPreRender() {
     // ponytail: this is the tidier mechanism, NOT a measured speedup. A 3-vs-4
     // run A/B on a liveness-certified headless output put the reflow at 27.5fps
     // median before and 32.9fps after -- overlapping spreads, no significant
-    // difference. Presented frames sit at a 17ms median gap in BOTH builds; what
-    // actually costs the animation its frames is an intermittent 115-240ms
-    // stall, which this change does not remove. Chase the stall, not the pacing.
-    // Rig: share/reflow_measure.sh + share/rf_analyze.py.
+    // difference. Presented frames sit at a 17ms median gap in BOTH builds.
+    // The "intermittent 115-240ms stall" this comment used to send you after is
+    // an ARTIFACT: rf_analyze.py groups frames into bursts with a 250ms gap, so
+    // the burst swallows the idle screen before and after the animation, and
+    // those idle gaps become its "worst". Windowed to the animation itself the
+    // reflow presents ~57fps on a 60Hz output. There is no stall to chase.
+    // Rig: share/reflow_measure.sh + share/rf_analyze.py -- window the timestamps
+    // to the motion before reading a worst-case gap out of them.
     if (g_gridReflowActive) {
         g_gridReflowActive = false;
         reflowPacer->setValueAndWarp(0.F);
