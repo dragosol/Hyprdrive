@@ -700,6 +700,13 @@ static CBox getOverviewGlobalBox(CBox globalBox, PHLMONITOR monitor, float scale
     return getOverviewBox({globalBox.pos() - monitor->m_position, globalBox.size()}, monitor, scale, viewOffset, offset, layout, round);
 }
 
+// X22: the top chrome -- search pill, results panel, workspace strip -- is
+// STATIC SCREEN FURNITURE. It goes through the SAME transform as the cards but
+// with a zero view offset, so it keeps the open/close scale (and with it the
+// inset from the monitor's top edge that keeps it clear of the layer-shell bar
+// -- X10's occlusion finding stands) while refusing to pan with the desktops.
+static const Vector2D OVERVIEW_CHROME_NO_PAN = {};
+
 static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
                                  bool round = true, const CBox* geometryOverride = nullptr) {
     if (!window)
@@ -4912,15 +4919,14 @@ CBox CScrollOverview::stripCellLogicalBox(size_t workspaceIdx) const {
     return CBox{X, Y, cellW, cellH};
 }
 
-// ponytail: the strip rides the active workspace card (offset 0), so it scales
-// with the open animation and pans with the view for free. Make it screen-fixed
-// chrome if panning ever needs the strip to stay put.
+// X22: screen-fixed. The strip used to ride the active card, which meant a
+// desktop pan carried it clean off the monitor along with the search bar.
 CBox CScrollOverview::stripCellBox(size_t workspaceIdx, PHLMONITOR monitor, float renderScale) const {
     const auto LOGICAL = stripCellLogicalBox(workspaceIdx);
     if (!monitor || LOGICAL.width <= 0)
         return {};
 
-    return getOverviewGlobalBox(LOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+    return getOverviewGlobalBox(LOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
 }
 
 PHLWORKSPACE CScrollOverview::workspaceAtStripPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
@@ -5036,7 +5042,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 sc<float>(FIRSTLOGICAL.height) + 2.F * PANELPAD,
             };
 
-            const auto PANEL = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+            const auto PANEL = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
 
             if (PANEL.width > 1 && overviewBoxIntersectsMonitor(PANEL, monitor)) {
                 // Radius in RENDER space = the cells' radius plus the padding as
@@ -5263,11 +5269,13 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
     g_overviewResultsBandH = resultsBand->value();
 
-    // X10: the pill is laid out in the SAME logical space as the strip it sits
-    // above, and rides the active workspace card through the same transform.
-    // Screen-fixed at the monitor's top edge it landed underneath the
-    // layer-shell bar, which this pass draws after the whole overview -- the
-    // pill was there but invisible.
+    // The pill is laid out in the SAME logical space as the strip it sits above.
+    // That placement is load-bearing and is NOT the part X22 changed: laid out
+    // at the monitor's true top edge it landed underneath the layer-shell bar,
+    // which this pass draws after the whole overview, so the pill was present
+    // but invisible (X10). The overview scale insets this logical row far
+    // enough down to clear the bar; X22 only removed the pan (see
+    // OVERVIEW_CHROME_NO_PAN).
     const float FIELDWL = QUERIED ? 360.F : 210.F;
     const float PILLWL  = 4.F + 40.F + 12.F + FIELDWL + 20.F;
     const CBox  PILLLOGICAL = {
@@ -5277,7 +5285,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         48.F,
     };
 
-    CBox pill = getOverviewGlobalBox(PILLLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+    CBox pill = getOverviewGlobalBox(PILLLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
     if (pill.width <= 1.F || !overviewBoxIntersectsMonitor(pill, monitor))
         return;
     pill.round();
@@ -5354,7 +5362,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         const CBox      PANELLOGICAL{PILLLOGICAL.x, sc<float>(monitor->m_position.y) + overviewSearchLogicalHeight(monitor) + OVERVIEW_RESULT_PANELGAPL, PILLWL,
                                      PANELHL};
 
-        CBox panel = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+        CBox panel = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
         if (panel.width > 1.F && overviewBoxIntersectsMonitor(panel, monitor)) {
             panel.round();
 
@@ -5379,7 +5387,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 if (ROWLOGICAL.y + ROWLOGICAL.height > PANELLOGICAL.y + PANELLOGICAL.height - PANELPADL + 0.5F)
                     break;
 
-                CBox row = getOverviewGlobalBox(ROWLOGICAL, monitor, renderScale, viewOffset->value(), 0.F, layout);
+                CBox row = getOverviewGlobalBox(ROWLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
                 row.round();
 
                 const bool SELECTED = sc<int>(i) == g_overviewAppSelection;
