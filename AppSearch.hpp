@@ -56,4 +56,9 @@ namespace AppSearch {
     // when no desktop entry claims it. The host matches window results against
     // the app name, so without this "files" would never find a Nautilus window.
     std::string appNameForClass(const std::string& wmClass);
+
+    // The Icon= value for a window class, or "" when no entry claims it.
+    // Shares appNameForClass's lookup and cache -- the dock (X27) asks the same
+    // question about the same classes, once per frame.
+    std::string iconForClass(const std::string& wmClass);
 }

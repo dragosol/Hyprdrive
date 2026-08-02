@@ -315,6 +315,27 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
+
+    // OVERVIEW_CPP_SPEC §13.9. Defaults are the user's dumped Dash to Dock
+    // config, not upstream defaults. Real keys from day one so hyprsettings
+    // (X36-X40) has something to bind to.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:dock:enabled", "hyprgnomedock: draw the dock", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:icon_size", "hyprgnomedock: max icon size (dash-max-icon-size)", 54,
+                                                        SIntValueOptions{.min = 8, .max = 512}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:height_fraction",
+                                                          "hyprgnomedock: max fraction of the monitor's long axis the dock may span", 0.90F,
+                                                          SFloatValueOptions{.min = 0.05F, .max = 1.F}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:corner_radius", "hyprgnomedock: pill corner radius", 24,
+                                                        SIntValueOptions{.min = 0}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
+                                                          (Hyprlang::INT)0xFFC0BFBC));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:background_opacity", "hyprgnomedock: pill alpha (D2D background-opacity)", 0.19F,
+                                                          SFloatValueOptions{.min = 0.F, .max = 1.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:live_layer_frost",
                                                          "evaluate dock/bar frost against the overview backdrop instead of the stale optimized blur FB", true));

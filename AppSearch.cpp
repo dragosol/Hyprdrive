@@ -824,15 +824,19 @@ namespace AppSearch {
         return true;
     }
 
-    std::string appNameForClass(const std::string& wmClass) {
+    // Index of the entry a window class belongs to, or npos. Cached as an INDEX
+    // rather than a pointer: refresh() rewrites the inventory in place, so a
+    // pointer cached across it would dangle while the vector's own address does
+    // not change and would not trip the guard below.
+    static size_t entryIndexForClass(const std::string& wmClass) {
         if (wmClass.empty())
-            return "";
+            return std::string::npos;
 
         // Called from the overview's per-window membership gate, so it runs for
         // every window every frame. The inventory is small but the compare is
         // not free; the answer only changes when the inventory is rescanned.
-        static std::unordered_map<std::string, std::string> cache;
-        static const std::vector<SEntry>*                   cachedFor = nullptr;
+        static std::unordered_map<std::string, size_t> cache;
+        static const std::vector<SEntry>*              cachedFor = nullptr;
 
         const auto& INV = inventory();
         if (cachedFor != &INV || (cache.size() > INV.size() + 64)) {
@@ -843,10 +847,11 @@ namespace AppSearch {
         if (const auto IT = cache.find(wmClass); IT != cache.end())
             return IT->second;
 
-        const auto WANT = lower(wmClass);
-        std::string found;
+        const auto WANT  = lower(wmClass);
+        size_t     found = std::string::npos;
 
-        for (const auto& ENTRY : INV) {
+        for (size_t i = 0; i < INV.size(); ++i) {
+            const auto& ENTRY = INV[i];
             // StartupWMClass is authoritative but measured absent on 185/186
             // entries, so the desktop id carries the load: on Wayland the app id
             // usually IS the id ("org.gnome.Nautilus"), and the trailing
@@ -854,13 +859,23 @@ namespace AppSearch {
             const auto ID   = lower(ENTRY.id);
             const auto TAIL = ID.substr(ID.find_last_of('.') == std::string::npos ? 0 : ID.find_last_of('.') + 1);
             if (lower(ENTRY.wmClass) == WANT || ID == WANT || TAIL == WANT || lower(ENTRY.name) == WANT) {
-                found = ENTRY.name;
+                found = i;
                 break;
             }
         }
 
         cache[wmClass] = found;
         return found;
+    }
+
+    std::string appNameForClass(const std::string& wmClass) {
+        const auto IDX = entryIndexForClass(wmClass);
+        return IDX == std::string::npos ? "" : inventory()[IDX].name;
+    }
+
+    std::string iconForClass(const std::string& wmClass) {
+        const auto IDX = entryIndexForClass(wmClass);
+        return IDX == std::string::npos ? "" : inventory()[IDX].icon;
     }
 }
 

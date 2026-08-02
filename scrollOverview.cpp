@@ -220,49 +220,6 @@ static std::vector<SSearchRow> overviewSearchRows() {
     return rows;
 }
 
-// Decode size for app icons. SVG rasterises at whatever size it is asked for,
-// so this is picked once, generously, and scaled down when drawn -- the row
-// height changes with the card transform and re-decoding per frame would be
-// absurd.
-static constexpr int OVERVIEW_APP_ICON_PX = 64;
-
-// Icon name -> texture, built once. NULL entries are cached too: an icon that
-// failed to resolve must not be re-searched on every single frame.
-static std::unordered_map<std::string, SP<Render::ITexture>> g_overviewAppIcons;
-
-static SP<Render::ITexture> overviewAppIcon(const std::string& iconName) {
-    if (iconName.empty())
-        return nullptr;
-
-    if (const auto IT = g_overviewAppIcons.find(iconName); IT != g_overviewAppIcons.end())
-        return IT->second;
-
-    SP<Render::ITexture> texture;
-
-    if (const auto PATH = AppSearch::resolveIconPath(iconName); !PATH.empty()) {
-        Hyprgraphics::CImage image(PATH, {OVERVIEW_APP_ICON_PX, OVERVIEW_APP_ICON_PX});
-        if (image.success()) {
-            if (const auto SURFACE = image.cairoSurface(); SURFACE && SURFACE->cairo()) {
-                auto* const CAIRO = SURFACE->cairo();
-                cairo_surface_flush(CAIRO);
-
-                auto* const   DATA   = cairo_image_surface_get_data(CAIRO);
-                const int     W      = cairo_image_surface_get_width(CAIRO);
-                const int     H      = cairo_image_surface_get_height(CAIRO);
-                const int     STRIDE = cairo_image_surface_get_stride(CAIRO);
-                // cairo hands back premultiplied BGRA on little-endian, which is
-                // what ARGB8888 means to DRM. RGB24 surfaces carry no alpha.
-                const uint32_t FORMAT = cairo_image_surface_get_format(CAIRO) == CAIRO_FORMAT_RGB24 ? DRM_FORMAT_XRGB8888 : DRM_FORMAT_ARGB8888;
-
-                if (DATA && W > 0 && H > 0)
-                    texture = makeShared<Render::GL::CGLTexture>(FORMAT, DATA, sc<uint32_t>(STRIDE), Vector2D{sc<double>(W), sc<double>(H)});
-            }
-        }
-    }
-
-    g_overviewAppIcons[iconName] = texture;
-    return texture;
-}
 
 // OVERVIEW_CPP_SPEC §5 F2, and §13.7 X18's open-window half.
 //
@@ -5655,7 +5612,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
                 // F3: the app's own icon, left of the name.
                 float      textIndent = sc<float>(ROWPAD);
-                const auto ICONTEX    = overviewAppIcon(RESULTS[i].icon);
+                const auto ICONTEX    = OverviewRender::appIcon(RESULTS[i].icon);
                 if (ICONTEX && ICONTEX->ok()) {
                     const float ICOND = std::round(22.F * SCALE);
                     CBox        iconBox{

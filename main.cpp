@@ -25,6 +25,7 @@ using namespace Hyprutils::String;
 
 #include "globals.hpp"
 #include "Config.hpp"
+#include "Dock.hpp"
 #include "Minimize.hpp"
 #include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
@@ -727,6 +728,19 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto P = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
         if (const auto overview = scrollOverviewForMonitor(monitor))
             overview->onPreRender();
+
+        ScrollOverview::Dock::damageIfChanged(monitor);
+    });
+
+    // X27. NOT the renderWorkspace hook: that one is installed on demand by
+    // ensureScrollOverviewHooks() and dropped again by removeOverview(), so it
+    // does not exist on a plain desktop -- which is exactly where a dock lives.
+    // POST_WINDOWS also puts the dock above windows and below the bar's top
+    // layer, and it fires during the overview too, which is what keeps the dock
+    // pinned there (§10 clause 6, X29's unblur-in-overview=false).
+    static auto DOCK = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
+        if (stage == RENDER_POST_WINDOWS)
+            ScrollOverview::Dock::render(g_pHyprRenderer->m_renderData.pMonitor.lock());
     });
 
     ScrollOverview::Config::registerDispatcher("overview", ::onOverviewDispatcher);
