@@ -13,6 +13,8 @@ using namespace Hyprutils::OS;
 
 namespace AppSearch {
     namespace {
+        constexpr const char* GENERIC_ICON = "application-x-executable";
+
         std::vector<SEntry> g_entries;
         bool                g_scanned = false;
 
@@ -237,6 +239,127 @@ namespace AppSearch {
             return base - std::min<int>(99, static_cast<int>(entry.name.size()));
         }
 
+        // App icons in practice live in hicolor, NOT in the active theme:
+        // measured in the guest, Adwaita ships only 16x16/scalable/symbolic UI
+        // icons and every app icon (kitty, org.gnome.Nautilus, foot,
+        // pavucontrol...) is under /usr/share/icons/hicolor. That is why this
+        // does not parse index.theme or walk Inherits= chains -- a filename
+        // search over a few roots answers the question the scope was worried
+        // about, and an SVG rasterises at whatever size the caller wants.
+        std::string iconThemeName() {
+            const char* ENVTHEME = std::getenv("XDG_ICON_THEME");
+            if (ENVTHEME && *ENVTHEME)
+                return ENVTHEME;
+
+            const char* HOME = std::getenv("HOME");
+            if (HOME && *HOME) {
+                std::ifstream settings(std::string{HOME} + "/.config/gtk-3.0/settings.ini");
+                std::string   line;
+                while (std::getline(settings, line)) {
+                    const auto L = trim(line);
+                    if (!L.starts_with("gtk-icon-theme-name"))
+                        continue;
+                    const auto EQ = L.find('=');
+                    if (EQ != std::string::npos)
+                        return trim(L.substr(EQ + 1));
+                }
+            }
+
+            return "Adwaita";
+        }
+
+        // The bases that hold an /icons tree, in XDG priority order.
+        std::vector<std::string> iconBases() {
+            std::vector<std::string> bases;
+            for (const auto& DIR : appDirs()) {
+                // appDirs() hands back ".../applications"; icons are a sibling.
+                bases.emplace_back(DIR.substr(0, DIR.size() - std::string{"/applications"}.size()) + "/icons");
+            }
+            const char* HOME = std::getenv("HOME");
+            if (HOME && *HOME)
+                bases.emplace_back(std::string{HOME} + "/.icons");
+            return bases;
+        }
+
+        // App icons live in hicolor, but NAMED freedesktop icons
+        // (preferences-system, applications-other) live in the theme and its
+        // ancestors: measured in the guest, Adwaita inherits AdwaitaLegacy then
+        // hicolor, and preferences-system exists only in AdwaitaLegacy. So the
+        // Inherits= chain does have to be walked -- just the chain, not the
+        // per-directory Size/Context/Type machinery, which the filename search
+        // makes unnecessary.
+        std::vector<std::string> themeChain(const std::string& theme) {
+            std::vector<std::string> chain, queue{theme};
+
+            for (size_t head = 0; head < queue.size() && chain.size() < 16; ++head) {
+                const auto NAME = queue[head];
+                if (NAME.empty() || std::ranges::contains(chain, NAME))
+                    continue;
+                chain.emplace_back(NAME);
+
+                for (const auto& BASE : iconBases()) {
+                    std::ifstream index(BASE + "/" + NAME + "/index.theme");
+                    if (!index.is_open())
+                        continue;
+
+                    std::string line;
+                    while (std::getline(index, line)) {
+                        const auto L = trim(line);
+                        if (!L.starts_with("Inherits"))
+                            continue;
+                        const auto EQ = L.find('=');
+                        if (EQ == std::string::npos)
+                            continue;
+
+                        const auto VAL = trim(L.substr(EQ + 1));
+                        size_t     start = 0;
+                        while (start <= VAL.size()) {
+                            const auto END  = VAL.find(',', start);
+                            const auto PART = trim(VAL.substr(start, END == std::string::npos ? std::string::npos : END - start));
+                            if (!PART.empty())
+                                queue.emplace_back(PART);
+                            if (END == std::string::npos)
+                                break;
+                            start = END + 1;
+                        }
+                        break;
+                    }
+                    break;
+                }
+            }
+
+            if (!std::ranges::contains(chain, std::string{"hicolor"}))
+                chain.emplace_back("hicolor");
+
+            return chain;
+        }
+
+        // Higher is better. SVG wins outright: one file scales to any row
+        // height, so nothing has to be re-picked when the card transform
+        // changes. Otherwise prefer the largest raster, parsed out of the
+        // "256x256" style directory name.
+        int iconCandidateScore(const std::filesystem::path& path) {
+            if (path.extension() == ".svg")
+                return 100000;
+
+            if (path.extension() != ".png" && path.extension() != ".xpm")
+                return -1;
+
+            int        size = 0;
+            const auto PARENTS = path.parent_path().string();
+            for (size_t i = 0; i < PARENTS.size(); ++i) {
+                if (!std::isdigit(static_cast<unsigned char>(PARENTS[i])))
+                    continue;
+                int n = 0;
+                while (i < PARENTS.size() && std::isdigit(static_cast<unsigned char>(PARENTS[i])))
+                    n = (n * 10) + (PARENTS[i++] - '0');
+                size = std::max(size, n);
+            }
+
+            // A themeless location (pixmaps) still beats nothing.
+            return std::min(size, 4096);
+        }
+
         // Desktop Exec field codes. %% is a literal percent and must be handled
         // before the rest, or "%%f" would lose its f.
         std::string stripFieldCodes(const std::string& exec) {
@@ -331,6 +454,60 @@ namespace AppSearch {
         return results;
     }
 
+    std::string resolveIconPath(const std::string& iconName) {
+        if (iconName.empty())
+            return "";
+
+        std::error_code ec;
+
+        // Icon= may legitimately be an absolute path.
+        if (iconName.starts_with('/'))
+            return std::filesystem::exists(iconName, ec) ? iconName : "";
+
+        std::vector<std::string> roots;
+        for (const auto& THEME : themeChain(iconThemeName())) {
+            for (const auto& BASE : iconBases())
+                roots.emplace_back(BASE + "/" + THEME);
+        }
+        roots.emplace_back("/usr/share/pixmaps");
+
+        std::string best;
+        int         bestScore = -1;
+
+        for (const auto& ROOT : roots) {
+            if (!std::filesystem::is_directory(ROOT, ec))
+                continue;
+
+            for (auto it = std::filesystem::recursive_directory_iterator(ROOT, std::filesystem::directory_options::skip_permission_denied, ec);
+                 it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec)
+                    break;
+
+                const auto& PATH = it->path();
+                if (PATH.stem() != iconName)
+                    continue;
+
+                const int SCORE = iconCandidateScore(PATH);
+                if (SCORE > bestScore) {
+                    bestScore = SCORE;
+                    best      = PATH.string();
+                }
+            }
+
+            // Roots are in priority order, so stop at the first that answers.
+            if (bestScore >= 0)
+                break;
+        }
+
+        // Named icons from another desktop's theme (breeze's
+        // utilities-system-monitor) simply are not present here. A generic tile
+        // is the honest answer, and it is what GNOME shows too.
+        if (best.empty() && iconName != GENERIC_ICON)
+            return resolveIconPath(GENERIC_ICON);
+
+        return best;
+    }
+
     bool launch(const SEntry& entry, const std::string& terminalCmd) {
         auto args = splitArgs(stripFieldCodes(entry.exec));
         if (args.empty())
@@ -403,6 +580,31 @@ int main() {
     const auto& INV = inventory();
     std::printf("inventory: %zu visible apps\n", INV.size());
     assert(!INV.empty());
+
+    std::printf("icon theme: %s\n", iconThemeName().c_str());
+    assert(iconCandidateScore("/usr/share/icons/hicolor/scalable/apps/kitty.svg") > iconCandidateScore("/usr/share/icons/hicolor/256x256/apps/kitty.png"));
+    assert(iconCandidateScore("/usr/share/icons/hicolor/256x256/apps/kitty.png") > iconCandidateScore("/usr/share/icons/hicolor/48x48/apps/foot.png"));
+    assert(iconCandidateScore("/usr/share/icons/hicolor/48x48/apps/x.txt") == -1);
+    assert(resolveIconPath("").empty());
+    // An unknown name resolves to the generic tile, not to nothing.
+    const auto GENERIC = resolveIconPath(GENERIC_ICON);
+    assert(!GENERIC.empty());
+    assert(resolveIconPath("definitely-not-an-icon-zzz") == GENERIC);
+    // The chain must reach the ancestor that actually holds the legacy names.
+    const auto CHAIN = themeChain(iconThemeName());
+    assert(std::ranges::contains(CHAIN, std::string{"hicolor"}));
+    std::printf("theme chain:");
+    for (const auto& T : CHAIN)
+        std::printf(" %s", T.c_str());
+    std::printf("\n");
+
+    size_t withIcons = 0;
+    for (const auto& E : inventory()) {
+        if (!resolveIconPath(E.icon).empty())
+            ++withIcons;
+    }
+    std::printf("icons resolved: %zu / %zu entries\n", withIcons, inventory().size());
+    assert(withIcons > 0);
 
     const auto R = search("te", 5);
     std::printf("search(\"te\"): %zu results, top = %s\n", R.size(), R.empty() ? "(none)" : R.front()->name.c_str());

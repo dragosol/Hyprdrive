@@ -33,6 +33,12 @@ namespace AppSearch {
     // shows windows, not a list of every installed app.
     std::vector<const SEntry*> search(const std::string& query, size_t limit);
 
+    // Absolute path to the best icon file for an Icon= value, or "" if none.
+    // Pure filesystem: decode and texture upload belong to the render layer.
+    // Falls back to a generic application icon when the named one is missing
+    // from the theme chain -- an entry with no icon at all still gets a tile.
+    std::string resolveIconPath(const std::string& iconName);
+
     // Detached, so the app outlives the overview closing.
     // terminalCmd is used only for Terminal=true entries; empty falls back to
     // $TERMINAL.

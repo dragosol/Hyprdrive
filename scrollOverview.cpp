@@ -1,6 +1,10 @@
 #include "scrollOverview.hpp"
 
 #include "AppSearch.hpp"
+
+#include <drm_fourcc.h>
+#include <hyprgraphics/image/Image.hpp>
+#include <hyprland/src/render/gl/GLTexture.hpp>
 #include <unordered_set>
 #include <algorithm>
 #include <any>
@@ -180,6 +184,50 @@ static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
 // OVERVIEW_CPP_SPEC §13.2 F3. How many app results the panel lists. GNOME shows
 // a handful; a long list under the pill would cover the grid it is filtering.
 static constexpr size_t OVERVIEW_APP_RESULT_LIMIT = 5;
+
+// Decode size for app icons. SVG rasterises at whatever size it is asked for,
+// so this is picked once, generously, and scaled down when drawn -- the row
+// height changes with the card transform and re-decoding per frame would be
+// absurd.
+static constexpr int OVERVIEW_APP_ICON_PX = 64;
+
+// Icon name -> texture, built once. NULL entries are cached too: an icon that
+// failed to resolve must not be re-searched on every single frame.
+static std::unordered_map<std::string, SP<Render::ITexture>> g_overviewAppIcons;
+
+static SP<Render::ITexture> overviewAppIcon(const std::string& iconName) {
+    if (iconName.empty())
+        return nullptr;
+
+    if (const auto IT = g_overviewAppIcons.find(iconName); IT != g_overviewAppIcons.end())
+        return IT->second;
+
+    SP<Render::ITexture> texture;
+
+    if (const auto PATH = AppSearch::resolveIconPath(iconName); !PATH.empty()) {
+        Hyprgraphics::CImage image(PATH, {OVERVIEW_APP_ICON_PX, OVERVIEW_APP_ICON_PX});
+        if (image.success()) {
+            if (const auto SURFACE = image.cairoSurface(); SURFACE && SURFACE->cairo()) {
+                auto* const CAIRO = SURFACE->cairo();
+                cairo_surface_flush(CAIRO);
+
+                auto* const   DATA   = cairo_image_surface_get_data(CAIRO);
+                const int     W      = cairo_image_surface_get_width(CAIRO);
+                const int     H      = cairo_image_surface_get_height(CAIRO);
+                const int     STRIDE = cairo_image_surface_get_stride(CAIRO);
+                // cairo hands back premultiplied BGRA on little-endian, which is
+                // what ARGB8888 means to DRM. RGB24 surfaces carry no alpha.
+                const uint32_t FORMAT = cairo_image_surface_get_format(CAIRO) == CAIRO_FORMAT_RGB24 ? DRM_FORMAT_XRGB8888 : DRM_FORMAT_ARGB8888;
+
+                if (DATA && W > 0 && H > 0)
+                    texture = makeShared<Render::GL::CGLTexture>(FORMAT, DATA, sc<uint32_t>(STRIDE), Vector2D{sc<double>(W), sc<double>(H)});
+            }
+        }
+    }
+
+    g_overviewAppIcons[iconName] = texture;
+    return texture;
+}
 
 // OVERVIEW_CPP_SPEC §5 F2. Case-insensitive substring over title and class.
 static bool overviewSearchMatches(const PHLWINDOW& window) {
@@ -5264,12 +5312,29 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
                 }
 
-                const int  ROWPAD  = sc<int>(std::round(12.F * SCALE));
-                const auto ROWTEX  = g_pHyprRenderer->renderText(RESULTS[i]->name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
-                                                                std::max(1, sc<int>(std::round(14.F * SCALE))), false, "", std::max(1, sc<int>(row.width) - (ROWPAD * 2)));
+                const int ROWPAD = sc<int>(std::round(12.F * SCALE));
+
+                // F3: the app's own icon, left of the name.
+                float      textIndent = sc<float>(ROWPAD);
+                const auto ICONTEX    = overviewAppIcon(RESULTS[i]->icon);
+                if (ICONTEX && ICONTEX->ok()) {
+                    const float ICOND = std::round(22.F * SCALE);
+                    CBox        iconBox{
+                        row.x + sc<float>(ROWPAD),
+                        row.y + std::round((row.height - ICOND) / 2.F),
+                        ICOND,
+                        ICOND,
+                    };
+                    ADDTEX(ICONTEX, iconBox.round());
+                    textIndent += ICOND + std::round(10.F * SCALE);
+                }
+
+                const auto ROWTEX = g_pHyprRenderer->renderText(RESULTS[i]->name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
+                                                               std::max(1, sc<int>(std::round(14.F * SCALE))), false, "",
+                                                               std::max(1, sc<int>(row.width - textIndent) - ROWPAD));
                 if (ROWTEX && ROWTEX->ok()) {
                     CBox rowText{
-                        row.x + sc<float>(ROWPAD),
+                        row.x + textIndent,
                         row.y + std::round((row.height - sc<float>(ROWTEX->m_size.y)) / 2.F),
                         sc<float>(ROWTEX->m_size.x),
                         sc<float>(ROWTEX->m_size.y),
