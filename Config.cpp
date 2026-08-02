@@ -308,6 +308,9 @@ static void registerConfigValues() {
                                   makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE, makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:live_layer_frost",
+                                                         "evaluate dock/bar frost against the overview backdrop instead of the stale optimized blur FB", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:prefilter_below",
                                                           "mipmap-prefilter a tile's texture when it is minified below this fraction (0 = never)", 0.55F,
                                                           SFloatValueOptions{.min = 0.F, .max = 1.F}));

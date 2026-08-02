@@ -2220,6 +2220,33 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     syncSelectionToViewport();
 }
 
+// X6: Hyprland's optimized blur FB is baked from the background+bottom pass, so
+// it only ever holds the WALLPAPER -- never the overview backdrop, which this
+// plugin draws later in its own pass. Layer-shell frost sampled from it is
+// therefore stale the whole time the overview is open. Windows already dodge
+// this via blockOverviewWindowBlurOptimization(); layers need the same.
+// ponytail: blanket -- every top/overlay surface goes live for as long as the
+// overview is open, measured +0.9pp GPU busy. If that ever matters, block only
+// the surfaces whose box intersects the backdrop, or bake a second optimized FB
+// that includes it instead of paying per-frame.
+static void blockOverviewLayerBlurOptimization(size_t firstElement) {
+    if (!ScrollOverview::Config::getValue<bool>("plugin:scrolloverview:live_layer_frost"))
+        return;
+
+    auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+    for (size_t i = firstElement; i < passElements.size(); ++i) {
+        const auto& passElement = passElements[i];
+        if (!passElement.element)
+            continue;
+
+        auto* surfacePassElement = dc<CSurfacePassElement*>(passElement.element.get());
+        if (!surfacePassElement || !surfacePassElement->m_data.pLS)
+            continue;
+
+        surfacePassElement->m_data.blockBlurOptimization = true;
+    }
+}
+
 static void renderOverviewLayerLevel(PHLMONITOR monitor, uint32_t layer, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now, float alpha = 1.F) {
     if (!monitor)
         return;
@@ -6717,6 +6744,8 @@ void CScrollOverview::render() {
     renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
     renderSearch(MONITOR, SCALE);
 
+    const size_t FIRSTLAYERELEMENT = g_pHyprRenderer->m_renderPass.m_passElements.size();
+
     for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
         for (auto const& ls : MONITOR->m_layerSurfaceLayers[LAYER]) {
             if (!Desktop::View::validMapped(ls.lock()))
@@ -6725,6 +6754,8 @@ void CScrollOverview::render() {
             g_pHyprRenderer->renderLayer(ls.lock(), MONITOR, NOW);
         }
     }
+
+    blockOverviewLayerBlurOptimization(FIRSTLAYERELEMENT);
 
     sendOverviewFrameCallbacks(NOW);
 }
