@@ -323,5 +323,8 @@ echo "fds:       ${FD0} -> ${FD1} (delta ${DF})"
 [ "$DF" -lt 24 ]    || { echo "fds:       FAIL (fd growth suggests a leak)"; FAIL=1; }
 echo "occupancy: $(wsocc)"
 echo "captures in /mnt/host/x1/: $TAG-p3-noquery.png $TAG-p3-query.png $TAG-p7-rest.png $TAG-p7-middrag.png $TAG-final-open.png"
+systemctl --user stop hyprwall-resume.timer 2>/dev/null
+systemctl --user start hyprwall.timer 2>/dev/null
+
 [ "$FAIL" = "0" ] && echo "X1_STRESS_VERDICT PASS" || echo "X1_STRESS_VERDICT FAIL"
 exit $FAIL

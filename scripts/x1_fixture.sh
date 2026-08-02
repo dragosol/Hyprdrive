@@ -22,6 +22,15 @@ export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
 export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
 OUT=/mnt/host/x1; mkdir -p $OUT
 
+# The wallpaper rotates every 3 minutes and a stress run is longer than that.
+# A wallpaper change mid-run moves every pixel in the frame, so every
+# before/after diff gate would pass trivially -- the exact failure the gates
+# exist to prevent. Deferred restart so an aborted run cannot orphan it off.
+systemctl --user stop hyprwall.timer 2>/dev/null
+systemctl --user stop hyprwall-resume.timer 2>/dev/null
+systemd-run --user --on-active=30min --unit=hyprwall-resume \
+    systemctl --user start hyprwall.timer >/dev/null 2>&1
+
 ov() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
 
 ov off; sleep 1
