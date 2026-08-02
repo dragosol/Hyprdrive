@@ -17,6 +17,15 @@ CFG=$HOME/.config/illogical-impulse/config.json
 [ -d "$DIR" ] || exit 0
 
 CUR=$(jq -r '.background.wallpaperPath' "$CFG")
+
+# A live wallpaper is a video path plus an mpvpaper process, and rotating a
+# still image over it would kill the wallpaper every 3 minutes. Stand down and
+# leave it alone -- switching back to stills is what turns the slideshow on.
+case "${CUR,,}" in
+    *.mp4|*.webm|*.mkv|*.avi|*.mov) exit 0 ;;
+esac
+pgrep -x mpvpaper >/dev/null && exit 0
+
 NEXT=$(find "$DIR" -maxdepth 1 -name '*.jpg' ! -wholename "$CUR" | shuf -n1)
 [ -n "$NEXT" ] || exit 0
 
