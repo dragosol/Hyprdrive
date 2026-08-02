@@ -62,6 +62,14 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "navigate"); },
         },
         {
+            .name            = "minimize",
+            .argPattern      = std::regex{"^(window|restore)$"},
+            .defaultArg      = "window",
+            .typeArgError    = "expected an optional string argument; did you forget quotes around it?",
+            .invalidArgError = "expected one of: window, restore",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "minimize"); },
+        },
+        {
             .name            = "window",
             .argPattern      = std::regex{"^(select|close|click)$"},
             .typeArgError    = "expected a string argument",

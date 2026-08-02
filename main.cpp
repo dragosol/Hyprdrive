@@ -25,6 +25,7 @@ using namespace Hyprutils::String;
 
 #include "globals.hpp"
 #include "Config.hpp"
+#include "Minimize.hpp"
 #include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
 #include "OverviewGesture.hpp"
@@ -653,6 +654,30 @@ static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char
     return result;
 }
 
+// OVERVIEW_CPP_SPEC §13.9 X24. hyprgnomedock does not exist yet, so this is how
+// the minimize engine is driven and tested until its icons can call it.
+static SDispatchResult onMinimizeDispatcher(std::string arg) {
+    if (arg == "restore") {
+        const auto MINIMIZED = ScrollOverview::Minimize::minimized();
+        if (MINIMIZED.empty())
+            return {.success = false, .error = "nothing is minimized"};
+
+        if (!ScrollOverview::Minimize::restore(MINIMIZED.back()))
+            return {.success = false, .error = "restore failed"};
+
+        return {};
+    }
+
+    const auto WINDOW = Desktop::focusState()->window();
+    if (!WINDOW)
+        return {.success = false, .error = "no focused window"};
+
+    if (!ScrollOverview::Minimize::minimize(WINDOW))
+        return {.success = false, .error = "window cannot be minimized"};
+
+    return {};
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     SCROLLOVERVIEW_HANDLE = handle;
 
@@ -707,6 +732,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("overview", ::onOverviewDispatcher);
     ScrollOverview::Config::registerDispatcher("navigate", ::onNavigateDispatcher);
     ScrollOverview::Config::registerDispatcher("window", ::onWindowDispatcher);
+    ScrollOverview::Config::registerDispatcher("minimize", ::onMinimizeDispatcher);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
     registerTapSuper();
