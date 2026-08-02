@@ -76,6 +76,7 @@
 #include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
 #include "Window.hpp"
+#include "SearchProviders.hpp"
 
 static PHLWINDOW getOverviewFullscreenVisibilityWindow(const PHLWORKSPACE& workspace, const PHLWINDOW& fallback = {});
 static constexpr const char* OVERVIEW_SUBMAP = "scrolloverview";
@@ -184,6 +185,40 @@ static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
 // OVERVIEW_CPP_SPEC §13.2 F3. How many app results the panel lists. GNOME shows
 // a handful; a long list under the pill would cover the grid it is filtering.
 static constexpr size_t OVERVIEW_APP_RESULT_LIMIT = 5;
+
+// X19: the panel shows ONE ordered list. Local app entries first -- they are an
+// in-memory scan and always instant -- then whatever the SearchProvider2
+// providers have answered with so far. Providers arrive asynchronously, so this
+// is deliberately a snapshot: the list grows across frames as replies land, and
+// a provider that never answers simply never appears.
+struct SSearchRow {
+    std::string              name;
+    std::string              icon;
+    const AppSearch::SEntry* app = nullptr;
+    SearchProviders::SResult provider;
+};
+
+static std::vector<SSearchRow> overviewSearchRows() {
+    std::vector<SSearchRow> rows;
+    if (g_overviewSearch.empty())
+        return rows;
+
+    for (const auto* E : AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT))
+        rows.push_back({E->name, E->icon, E, {}});
+
+    for (const auto& R : SearchProviders::results()) {
+        // ponytail: one shared cap, apps first, so the panel keeps the row count
+        // its layout was measured against. X21 reflows the panel and is where a
+        // real per-source allocation belongs.
+        if (rows.size() >= OVERVIEW_APP_RESULT_LIMIT)
+            break;
+        // The provider for an app we already list is the same row twice.
+        if (std::ranges::any_of(rows, [&](const SSearchRow& X) { return X.app && X.app->id == R.providerDesktopId; }))
+            continue;
+        rows.push_back({R.description.empty() ? R.name : R.name + "   " + R.description, R.icon, nullptr, R});
+    }
+    return rows;
+}
 
 // Decode size for app icons. SVG rasterises at whatever size it is asked for,
 // so this is picked once, generously, and scaled down when drawn -- the row
@@ -1953,7 +1988,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 break;
             case XKB_KEY_Tab:
             case XKB_KEY_ISO_Left_Tab: {
-                const auto RESULTS = AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT);
+                const auto RESULTS = overviewSearchRows();
                 if (RESULTS.empty())
                     return;
 
@@ -1970,7 +2005,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             }
             case XKB_KEY_Return:
             case XKB_KEY_KP_Enter: {
-                const auto RESULTS = AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT);
+                const auto RESULTS = overviewSearchRows();
 
                 // An explicit Tab selection wins. Otherwise the top app is only
                 // taken when no window matched at all -- with windows on screen,
@@ -1981,8 +2016,13 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 else if (!RESULTS.empty() && matchingWindowCount() == 0)
                     launchIdx = 0;
 
-                if (launchIdx >= 0)
-                    AppSearch::launch(*RESULTS[launchIdx], ScrollOverview::Config::getTerminal());
+                if (launchIdx >= 0) {
+                    const auto& ROW = RESULTS[launchIdx];
+                    if (ROW.app)
+                        AppSearch::launch(*ROW.app, ScrollOverview::Config::getTerminal());
+                    else
+                        SearchProviders::activate(ROW.provider, g_overviewSearch);
+                }
 
                 close();
                 break;
@@ -5177,7 +5217,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const bool QUERIED = !g_overviewSearch.empty();
 
     const size_t MATCHES = QUERIED ? matchingWindowCount() : 0;
-    const auto   RESULTS = QUERIED ? AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT) : std::vector<const AppSearch::SEntry*>{};
+    const auto   RESULTS = QUERIED ? overviewSearchRows() : std::vector<SSearchRow>{};
 
     // An app hit is a hit: "no matches" must not contradict a listed result.
     const bool EMPTYRESULT = QUERIED && MATCHES == 0 && RESULTS.empty();
@@ -5316,7 +5356,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
                 // F3: the app's own icon, left of the name.
                 float      textIndent = sc<float>(ROWPAD);
-                const auto ICONTEX    = overviewAppIcon(RESULTS[i]->icon);
+                const auto ICONTEX    = overviewAppIcon(RESULTS[i].icon);
                 if (ICONTEX && ICONTEX->ok()) {
                     const float ICOND = std::round(22.F * SCALE);
                     CBox        iconBox{
@@ -5329,7 +5369,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     textIndent += ICOND + std::round(10.F * SCALE);
                 }
 
-                const auto ROWTEX = g_pHyprRenderer->renderText(RESULTS[i]->name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
+                const auto ROWTEX = g_pHyprRenderer->renderText(RESULTS[i].name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
                                                                std::max(1, sc<int>(std::round(14.F * SCALE))), false, "",
                                                                std::max(1, sc<int>(row.width - textIndent) - ROWPAD));
                 if (ROWTEX && ROWTEX->ok()) {
