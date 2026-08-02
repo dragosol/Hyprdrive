@@ -1545,6 +1545,7 @@ CScrollOverview::~CScrollOverview() {
     if (backdropBlurFB)
         backdropBlurFB->release();
     backdropBlurFB.reset();
+    OverviewWindow::releaseTexturePrefilterCache();
     const auto MONITOR = pMonitor.lock();
     const auto WORKSPACE = MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{};
     emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(WORKSPACE, Desktop::focusState()->window()), false);

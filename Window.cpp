@@ -19,6 +19,8 @@
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/BorderPassElement.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
+#include <hyprland/src/render/pass/ClearPassElement.hpp>
+#include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/pass/SurfacePassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/render/types.hpp>
@@ -126,6 +128,89 @@ static float getOverviewWindowTargetOpacity(const PHLWINDOW& window) {
     return std::clamp(targetOpacity, 0.F, 1.F);
 }
 
+
+// U2: below ~0.55 the GPU's 2x2 bilinear tap-pair stops covering the source
+// texels and the tile aliases (measured: NEAREST-like by 0.22). The cure is a
+// mip chain, but the tile's texture is EGLImage-backed -- glGenerateMipmap on it
+// reports GL_NO_ERROR and silently orphans level 0, blanking the window. So copy
+// it into an FB we own and mipmap that.
+// This sits UPSTREAM of compositing: the pass element still computes frost from
+// the screen behind the tile, so section C is untouched by design.
+// ponytail: the copy+mipmap is redone every frame for every tile, including
+// tiles whose contents never changed. Measured cost of that waste is +3.4pp GPU
+// busy (20.4% -> 23.9%) for 8 tiles of 2400x1450, which is affordable, so it is
+// left alone. If it ever stops being affordable, the upgrade is to keep the
+// mipmap and skip regeneration while the source texture is unchanged.
+static std::unordered_map<GLuint, SP<Render::IFramebuffer>> g_u2PrefilterFBs;
+
+static void prefilterOverviewWindowTextures(const PHLWINDOW& window, PHLMONITOR monitor, double minify, size_t firstElement) {
+    // ponytail: default 0.55 is just above the measured 0.5 boundary where
+    // bilinear leaves the area-average ideal. Above it the copy would buy
+    // nothing. 0 disables the prefilter entirely.
+    const double MINIFY_THRESHOLD = ScrollOverview::Config::getValue<float>("plugin:scrolloverview:prefilter_below");
+
+    if (!window || !monitor || minify <= 0.0 || minify > MINIFY_THRESHOLD)
+        return;
+    if (!g_pHyprRenderer->m_renderData.currentFB)
+        return;
+
+    const auto FBFORMAT     = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
+    auto&      passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+
+    for (size_t i = firstElement; i < passElements.size(); ++i) {
+        if (!passElements[i].element)
+            continue;
+
+        auto* spe = dc<CSurfacePassElement*>(passElements[i].element.get());
+        if (!spe || spe->m_data.pWindow != window)
+            continue;
+
+        const auto SRC = spe->m_data.texture;
+        if (!SRC || !SRC->m_texID || SRC->m_size.x < 2 || SRC->m_size.y < 2)
+            continue;
+
+        const int W = sc<int>(SRC->m_size.x);
+        const int H = sc<int>(SRC->m_size.y);
+
+        auto&     fb = g_u2PrefilterFBs[SRC->m_texID];
+        if (!fb)
+            fb = g_pHyprRenderer->createFB("scrolloverview_u2_prefilter");
+        if (!fb)
+            continue;
+        if (!fb->isAllocated() || fb->m_size != SRC->m_size || fb->m_drmFormat != FBFORMAT) {
+            fb->release();
+            if (!fb->alloc(W, H, FBFORMAT))
+                continue;
+        }
+        if (g_pHyprRenderer->m_renderData.currentFB)
+            fb->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
+
+        const CBox    FULLBOX{0, 0, sc<double>(W), sc<double>(H)};
+        const CRegion FULLDAMAGE{FULLBOX};
+
+        {
+            auto bindPrefilter = g_pHyprRenderer->bindTempFB(fb);
+            g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 0.F}}, FULLDAMAGE);
+            g_pHyprRenderer->draw(CTexPassElement::SRenderData{.tex = SRC, .box = FULLBOX, .damage = FULLDAMAGE}, FULLDAMAGE);
+        }
+
+        const auto MIPPED = fb->getTexture();
+        if (!MIPPED || !MIPPED->m_texID)
+            continue;
+
+        glBindTexture(GL_TEXTURE_2D, MIPPED->m_texID);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        if (glGetError() != GL_NO_ERROR) {
+            glBindTexture(GL_TEXTURE_2D, 0);
+            continue;
+        }
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        MIPPED->minFilter = GL_LINEAR_MIPMAP_LINEAR;
+
+        spe->m_data.texture = MIPPED;
+    }
+}
 
 static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITOR monitor, float renderScale, size_t firstElement) {
     if (!window || !monitor)
@@ -808,6 +893,14 @@ bool shouldUseBlurFramebuffer(const PHLWINDOW& window, PHLMONITOR monitor, const
          overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox));
 }
 
+void releaseTexturePrefilterCache() {
+    for (auto& [id, fb] : g_u2PrefilterFBs) {
+        if (fb)
+            fb->release();
+    }
+    g_u2PrefilterFBs.clear();
+}
+
 void forceDecoRecalc(const PHLWINDOW& window) {
     const auto WINDOW = getOverviewWindowToShow(window);
     if (!validMapped(WINDOW))
@@ -870,6 +963,9 @@ void renderOverviewWindow(const SRenderParams& params) {
     const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
     g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
     scaleOverviewSubsurfaceOffsets(params.window, params.window->sizeAnimation()->value(), firstWindowPassElement);
+    prefilterOverviewWindowTextures(params.window, params.monitor,
+                                    previousWindowSize.x * params.monitor->m_scale > 0.0 ? params.windowBox.width / (previousWindowSize.x * params.monitor->m_scale) : 0.0,
+                                    firstWindowPassElement);
     if (!usePrecomputedBlur)
         blockOverviewWindowBlurOptimization(params.window, firstWindowPassElement);
     roundStandaloneWindowPassElements(params.window, params.monitor, params.renderScale, firstWindowPassElement);
