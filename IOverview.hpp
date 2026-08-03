@@ -27,6 +27,17 @@ class IOverview {
 
     virtual void  setClosing(bool closing) = 0;
 
+    // A closing overview stays registered until its animation ends, so "exists"
+    // and "is open" are not the same question. Everything that decides whether
+    // to open or to close must ask this one -- otherwise a tap during the close
+    // animation reads as "already open" and is thrown away.
+    virtual bool  isClosing() const = 0;
+
+    // Reverse a close that is still animating. Cheap on purpose: the window
+    // images, the blur framebuffers and the input hooks are all still alive at
+    // this point, so this re-arms them instead of rebuilding them.
+    virtual void  reopen() = 0;
+
     virtual void  resetSwipe()                = 0;
     virtual void  onSwipeUpdate(double delta) = 0;
     virtual void  onSwipeEnd()                = 0;

@@ -41,6 +41,8 @@ class CScrollOverview : public IOverview {
     void         onPreRender() override;
 
     void         setClosing(bool closing) override;
+    bool         isClosing() const override;
+    void         reopen() override;
 
     void         resetSwipe() override;
     void         onSwipeUpdate(double delta) override;
@@ -160,7 +162,7 @@ class CScrollOverview : public IOverview {
     void   scheduleMinimumPreviewFrame();
     void   schedulePreviewFrameAfter(std::chrono::milliseconds delay);
     void   scheduleRealtimePreviewFrame();
-    void   releaseInputListeners();
+    void   suspendInputListeners();
     void   activateSubmapIfConfigured();
     void   restoreSubmapIfActive();
     bool   dispatchSubmapMouseClick(uint32_t button);

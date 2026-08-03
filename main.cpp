@@ -246,8 +246,16 @@ static std::vector<PHLMONITOR> overviewTargetMonitors(const std::string& target)
 }
 
 static bool openOverview(PHLMONITOR monitor) {
-    if (!monitor || scrollOverviewForMonitor(monitor))
+    if (!monitor)
         return true;
+
+    if (const auto EXISTING = scrollOverviewForMonitor(monitor)) {
+        // Already open is a no-op, but still CLOSING is not: reversing the
+        // animation is what makes a second tap of SUPER feel immediate instead
+        // of landing on an overview that is on its way out and being dropped.
+        EXISTING->reopen();
+        return true;
+    }
 
     if (!ensureScrollOverviewHooks())
         return false;
@@ -307,7 +315,10 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
     if (MONITORS.empty())
         return {.success = false, .error = TARGET.empty() ? "no active monitor" : "monitor not found: " + TARGET};
 
-    const bool ALL_OPEN = std::ranges::all_of(MONITORS, [](const auto& monitor) { return !!scrollOverviewForMonitor(monitor); });
+    const bool ALL_OPEN = std::ranges::all_of(MONITORS, [](const auto& monitor) {
+        const auto OVERVIEW = scrollOverviewForMonitor(monitor);
+        return OVERVIEW && !OVERVIEW->isClosing();
+    });
     if (ACTION == "toggle" && ALL_OPEN) {
         for (const auto& monitor : MONITORS) {
             if (const auto overview = scrollOverviewForMonitor(monitor))

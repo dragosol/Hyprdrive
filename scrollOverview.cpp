@@ -7191,24 +7191,69 @@ void CScrollOverview::setClosing(bool closing_) {
         inputFramePending = false;
         clearDragPending();
         restoreSubmapIfActive();
-        releaseInputListeners();
-    } else
+        suspendInputListeners();
+    } else {
         applyWorkspaceAnimationOverrides();
+        activateSubmapIfConfigured();
+    }
 }
 
-void CScrollOverview::releaseInputListeners() {
+// The hooks deliberately SURVIVE a close. Every handler already early-returns
+// on `closing`, so an inert overview costs nothing by keeping them -- and they
+// are constructor-bound lambdas, so dropping them would make reopen() a rebuild
+// of six closures instead of the clearing of one bool.
+void CScrollOverview::suspendInputListeners() {
     if (scrollingPanPointerDown)
         endScrollingPan();
     clearDragPending();
     submapMouseClickPending = false;
     submapMouseClickButton  = 0;
+}
 
-    mouseMoveHook.reset();
-    touchMoveHook.reset();
-    mouseAxisHook.reset();
-    mouseButtonHook.reset();
-    touchDownHook.reset();
-    keyboardKeyHook.reset();
+bool CScrollOverview::isClosing() const {
+    return closing;
+}
+
+void CScrollOverview::reopen() {
+    if (!closeApplied)
+        return;
+
+    // Before anything re-targets the animation: close() left an end callback
+    // that DESTROYS this overview. Re-aiming `scale` below would otherwise run
+    // that teardown at the end of the re-open.
+    scale->setCallbackOnEnd([](auto) {});
+
+    closeApplied = false;
+    closeOnWindow.reset();
+    setClosing(false);
+
+    if (sharedStateOwner)
+        forceWorkspaceAlphaVisible();
+
+    emitFullscreenVisibilityState(Desktop::focusState()->window(), true);
+
+    // close() commits its selection BEFORE it animates, so it may already have
+    // changed workspace and focused a window. That commit is deliberately not
+    // undone: the overview shows every workspace anyway, so the honest resting
+    // place is wherever the desktop now is -- which is offset zero.
+    //
+    // But the workspace handler that would have rebuilt the strip for that
+    // change bails while `closing` is set, so the images still describe the
+    // desk as it was before the close committed -- measured as an overview that
+    // came back with its window previews missing. Rebuilding them here is still
+    // far cheaper than a destroy-and-reconstruct: the blur framebuffers and the
+    // texture prefilter cache survive, and only the workspace images are redone.
+    startedOn = pMonitor ? pMonitor->m_activeWorkspace : startedOn;
+    redrawAll();
+    viewportCurrentWorkspace   = activeWorkspaceIndex();
+    focusSyncedFromWorkspaceID = WORKSPACE_INVALID;
+
+    // Both animate FROM their current value, so the reversal picks up exactly
+    // where the close had got to: no jump, and no restart from the endpoint.
+    *viewOffset = Vector2D{};
+    *scale      = ScrollOverview::Config::getScale();
+
+    damage();
 }
 
 void CScrollOverview::activateSubmapIfConfigured() {
