@@ -444,8 +444,17 @@ static void applySearchKey(uint32_t keycode) {
     }
     else if (keycode == EVDEV_KEY_BACKSPACE)
         g_overviewSearch.pop_back();
-    else if (const char C = searchCharFor(keycode); C != 0)
+    else if (const char C = searchCharFor(keycode); C != 0) {
+        // G1: whitespace must never START a search -- GNOME's trigger test
+        // rejects a keysym whose value is pure whitespace -- but it types
+        // normally once one is running. The key stays CONSUMED either way: the
+        // overview holds the keyboard, so falling through would type a space
+        // into a window the user cannot see.
+        if (C == ' ' && g_overviewSearch.empty())
+            return;
+
         g_overviewSearch.push_back(C);
+    }
 
     // X20: every keystroke starts a new provider generation. Non-blocking, so
     // this costs the keystroke nothing; results land over the next frames.
