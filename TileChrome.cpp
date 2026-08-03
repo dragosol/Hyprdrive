@@ -1,5 +1,6 @@
 #include "TileChrome.hpp"
 
+#include "Config.hpp"
 #include "globals.hpp"
 
 #include "AppSearch.hpp"
@@ -43,16 +44,30 @@ constexpr float PRESS_MS      = 90.F;
 constexpr float ICON_FRACTION   = 0.20F;
 constexpr float ICON_MIN        = 28.F;
 constexpr float ICON_MAX        = 72.F;
+// X55. The host's `.window-close`, from gnome-shell-theme.gresource:
+//     width/height 32, padding 3, StIcon icon-size 24, border-radius 999
+//     background rgba(63,63,70,0.98), colour #fafafb, transition 100ms
+// so the glyph is 24/32 = 0.75 of the button, and 32 is the CAP here rather
+// than a fixed size -- the host's previews are always large, ours can be a
+// twelfth of a screen, and a 32px button on a small tile would swallow it.
 constexpr float CLOSE_FRACTION  = 0.15F;
 constexpr float CLOSE_MIN       = 22.F;
-constexpr float CLOSE_MAX       = 38.F;
-// The button's centre, in button-diameters in from the tile's top-right corner.
-constexpr float CLOSE_INSET     = 0.62F;
-constexpr float CLOSE_GLYPH     = 0.55F;
+constexpr float CLOSE_MAX       = 32.F;
+// X55: ON the corner, not inside it. The host centres the button on the
+// preview's top-right corner so it overhangs on both axes; this was 0.62
+// button-diameters INWARD, which is the "inside corner" the user rejected.
+constexpr float CLOSE_INSET     = 0.F;
+constexpr float CLOSE_GLYPH     = 0.75F;
 
 // The tile has to be most of the way hovered before the button appears, so a
 // cursor crossing a tile on its way somewhere else does not strobe buttons.
 constexpr float CLOSE_VISIBLE_AT = 0.55F;
+
+// X57. The caption clears X8's app icon, which straddles the tile's bottom
+// edge, and CAPTION_H is the plate's own height budget -- labelPill anchors by
+// its BOTTOM, so this is what pushes it clear rather than over the icon.
+constexpr float CAPTION_GAP = 6.F;
+constexpr float CAPTION_H   = 40.F;
 
 constexpr const char* CLOSE_ICON = "window-close-symbolic";
 
@@ -181,13 +196,15 @@ CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorS
     if (!STATE || tileBox.w < 1 || tileBox.h < 1)
         return {};
 
-    if (std::clamp(STATE->hover.value(), 0.F, 1.F) < CLOSE_VISIBLE_AT)
+    if (std::clamp(eased(STATE->hover), 0.F, 1.F) < CLOSE_VISIBLE_AT)
         return {};
 
     const float SCALE = std::max(monitorScale, 0.01F);
     const float D     = std::clamp(shortSide(tileBox) * CLOSE_FRACTION, CLOSE_MIN * SCALE, CLOSE_MAX * SCALE);
     const float CX    = sc<float>(tileBox.x + tileBox.w) - D * CLOSE_INSET;
     const float CY    = sc<float>(tileBox.y) + D * CLOSE_INSET;
+    // With CLOSE_INSET 0 those are exactly the tile's top-right corner, and the
+    // box below is centred on it -- so it overhangs by D/2 on both axes.
 
     return CBox{CX - D / 2.F, CY - D / 2.F, D, D};
 }
@@ -213,17 +230,58 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(icon));
     }
 
+    // X57. The tile's CAPTION -- the overview had none at all. Same pill as the
+    // dock's tooltip, and it rides the hover ease so it fades in and out with
+    // the tile rather than popping. Below the tile, clear of X8's app icon,
+    // which straddles the bottom edge.
+    if (const auto* const HSTATE = stateFor(window, false)) {
+        const float A = std::clamp(eased(HSTATE->hover), 0.F, 1.F);
+        if (A > 0.01F) {
+            const float ICONSIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE);
+            const float BOTTOM   = sc<float>(tileBox.y + tileBox.h) + ICONSIDE / 2.F + CAPTION_GAP * SCALE;
+            OverviewRender::labelPill(monitor, window->m_title, sc<float>(tileBox.x + tileBox.w / 2.0), BOTTOM + CAPTION_H * SCALE, A, SCALE);
+        }
+    }
+
     const auto BUTTON = closeButtonBox(window, tileBox, monitorScale);
     if (BUTTON.empty())
         return;
 
-    // A LIGHT disc with the dark symbolic glyph on top. The other way round is
-    // what the theme's own colours suggest and it is invisible: symbolic icons
-    // ship as near-black artwork, so a dark disc hides the X completely.
+    // X55. It FADES rather than popping: the host transitions the button over
+    // 100ms. Driven off the hover ramp above CLOSE_VISIBLE_AT, so it needs no
+    // state of its own and cannot disagree with the threshold the hit-test uses.
+    const auto* const CSTATE = stateFor(window, false);
+    const float       ALPHA  = CSTATE ? std::clamp((eased(CSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F;
+    if (ALPHA <= 0.F)
+        return;
+
+    const int ROUND = sc<int>(std::round(BUTTON.w / 2.0));
+
+    // X56. The RING is Hyprland's -- size from general:border_size, colour from
+    // general:col.active_border -- the same source the tooltip and the drop
+    // indicator read, so the button re-themes with everything else.
+    const int BORDER = std::max(0, ScrollOverview::Config::getValue<int>("general:border_size"));
+    if (BORDER > 0) {
+        if (auto* const ACTIVE = sc<::Config::CGradientValueData*>(ScrollOverview::Config::valueRef<::Config::IComplexConfigValue>("general:col.active_border").ptr());
+            ACTIVE && !ACTIVE->m_colors.empty()) {
+            CRectPassElement::SRectData ring;
+            ring.box           = BUTTON.copy().expand(sc<double>(BORDER) * SCALE);
+            ring.color         = ACTIVE->m_colors[0].modifyA(ALPHA);
+            ring.round         = ROUND + sc<int>(std::round(sc<float>(BORDER) * SCALE));
+            ring.roundingPower = 2.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(ring));
+        }
+    }
+
+    // The DISC stays light, and that is a legibility constraint rather than a
+    // taste one: the symbolic glyph ships as near-black artwork and this render
+    // path cannot recolour a texture, so the host's dark disc would hide the X
+    // completely. The host gets away with rgba(63,63,70,.98) because CSS
+    // recolours its StIcon to #fafafb. Revisit if the glyph ever gets a tint.
     CRectPassElement::SRectData disc;
     disc.box           = BUTTON;
-    disc.color         = CHyprColor{0.93F, 0.93F, 0.93F, 0.95F};
-    disc.round         = sc<int>(std::round(BUTTON.w / 2.0));
+    disc.color         = CHyprColor{0.93F, 0.93F, 0.93F, 0.95F * ALPHA};
+    disc.round         = ROUND;
     disc.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(disc));
 
@@ -234,7 +292,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
         x.tex = GLYPH;
         x.box = CBox{sc<float>(BUTTON.x + BUTTON.w / 2.0) - SIDE / 2.F, sc<float>(BUTTON.y + BUTTON.h / 2.0) - SIDE / 2.F, SIDE, SIDE};
         x.box.round();
-        x.a = 1.F;
+        x.a = ALPHA;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(x));
     }
 }

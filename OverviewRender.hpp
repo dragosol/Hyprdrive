@@ -16,6 +16,16 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
 // and both the overview's result rows and the dock need the same cache.
 SP<Render::ITexture> appIcon(const std::string& iconName);
 
+// OVERVIEW_CPP_SPEC 13.12 X57. The label plate, drawn ONCE for both surfaces
+// that need one: hyprgnomedock's icon tooltip and the overview tile's caption.
+// GNOME styles its `.dash-label` and its `.window-caption` with a single css
+// rule, so a single function here is the same decision -- and it is what stops
+// the two drifting apart the next time one of them is tuned.
+//
+// Centred horizontally on `cx`, with the plate's BOTTOM edge at `bottomY`.
+// Returns the plate box, or an empty box if the text could not be rendered.
+CBox labelPill(PHLMONITOR monitor, const std::string& str, double cx, double bottomY, float alpha, float scale);
+
 // g_pHyprRenderer->renderText(), cached on everything that changes the pixels.
 //
 // The uncached call rasterises through pango/cairo and then UPLOADS a texture,

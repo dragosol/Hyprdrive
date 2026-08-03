@@ -1245,54 +1245,12 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
     }
 
     const float SCALE = std::max(monitor->m_scale, 0.01F);
-    const auto  TEX   = OverviewRender::text(g_tip.name, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(TOOLTIP_FONT * SCALE))), false, "", 0, 500);
-    if (!TEX || !TEX->ok())
-        return;
-
-    const float PADX  = TOOLTIP_PAD_X * SCALE;
-    const float PADY  = TOOLTIP_PAD_Y * SCALE;
-    const float W     = sc<float>(TEX->m_size.x) + 2.F * PADX;
-    const float H     = sc<float>(TEX->m_size.y) + 2.F * PADY;
     const float CX    = sc<float>(g_tip.anchor.x) + sc<float>(g_tip.anchor.width) / 2.F;
 
-    CBox plate{std::round(CX - W / 2.F), std::round(sc<float>(layout.pill.y) - TOOLTIP_GAP * SCALE - H), std::round(W), std::round(H)};
-
-    // Keep it on screen when the hovered icon is at either end of a wide pill.
-    plate.x = std::clamp(plate.x, 0.0, std::max(0.0, monitor->m_size.x * SCALE - plate.width));
-
-    // X56/X57. `border-radius: 999px` is a full pill, so the radius is half the
-    // plate's height rather than a constant -- it then stays a pill when the
-    // font or the padding changes.
-    const int ROUND = sc<int>(std::round(plate.height / 2.0));
-
-    // X56: the border is HYPRLAND'S, not the host stylesheet's 1px white-10%.
-    // Same source the drop indicator reads, so the tooltip re-themes with
-    // everything else the moment the user changes their border.
-    const int BORDER = std::max(0, Config::getValue<int>("general:border_size"));
-    if (BORDER > 0) {
-        if (auto* const ACTIVE = sc<::Config::CGradientValueData*>(Config::valueRef<::Config::IComplexConfigValue>("general:col.active_border").ptr());
-            ACTIVE && !ACTIVE->m_colors.empty()) {
-            CRectPassElement::SRectData edge;
-            edge.box           = plate.copy().expand(sc<double>(BORDER) * SCALE);
-            edge.color         = ACTIVE->m_colors[0].modifyA(ALPHA);
-            edge.round         = ROUND + sc<int>(std::round(sc<float>(BORDER) * SCALE));
-            edge.roundingPower = 2.F;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(edge));
-        }
-    }
-
-    CRectPassElement::SRectData bg;
-    bg.box           = plate;
-    bg.color         = CHyprColor{0.F, 0.F, 0.F, TOOLTIP_BG_A * ALPHA};
-    bg.round         = ROUND;
-    bg.roundingPower = 2.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
-
-    CTexPassElement::SRenderData text;
-    text.tex = TEX;
-    text.box = CBox{std::round(plate.x + PADX), std::round(plate.y + PADY), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
-    text.a   = ALPHA;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+    // X57. Drawn by the SHARED pill, the same one the overview tile caption
+    // uses -- the host styles both with one css rule and this is that decision
+    // in code.
+    OverviewRender::labelPill(monitor, g_tip.name, CX, sc<float>(layout.pill.y) - TOOLTIP_GAP * SCALE, ALPHA, SCALE);
 }
 
 // X24. Stash first, then fly. Order matters: minimize() is what stops the

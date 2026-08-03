@@ -9,6 +9,9 @@
 #include <drm_fourcc.h>
 #include <hyprgraphics/image/Image.hpp>
 #include "AppSearch.hpp"
+#include "Config.hpp"
+#include <hyprland/src/render/pass/RectPassElement.hpp>
+#include <hyprland/src/render/pass/TexPassElement.hpp>
 #include "globals.hpp"
 #include <string>
 #include <unordered_map>
@@ -159,6 +162,75 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     data.alpha         = alpha;
     data.xray          = usePrecomputedBlur;
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(data));
+}
+
+
+// X57 / X56. Shape from the host, palette and border from Hyprland.
+//
+//   .dash-label, .window-caption {
+//       background-color rgba(0,0,0,0.9); border 1px rgba(255,255,255,0.1);
+//       border-radius 999px; padding 6px 12px; color #ffffff }
+//
+// The PILL and the 12x6 padding ratio are the host's; the SIZE is the user's
+// ("make the tooltips bigger"); the BORDER is Hyprland's rather than that
+// stylesheet's white-10%, per X56, so it re-themes with everything else.
+namespace {
+    constexpr float PILL_FONT  = 16.F;
+    constexpr float PILL_PAD_X = 16.F;
+    constexpr float PILL_PAD_Y = 9.F;
+    constexpr float PILL_BG_A  = 0.90F;
+}
+
+CBox labelPill(PHLMONITOR monitor, const std::string& str, double cx, double bottomY, float alpha, float scale) {
+    if (str.empty() || alpha <= 0.F || !monitor)
+        return {};
+
+    const float SCALE = std::max(scale, 0.01F);
+    const auto  TEX   = text(str, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(PILL_FONT * SCALE))), false, "", 0, 500);
+    if (!TEX || !TEX->ok())
+        return {};
+
+    const float PADX = PILL_PAD_X * SCALE;
+    const float PADY = PILL_PAD_Y * SCALE;
+    const float W    = sc<float>(TEX->m_size.x) + 2.F * PADX;
+    const float H    = sc<float>(TEX->m_size.y) + 2.F * PADY;
+
+    CBox plate{std::round(sc<float>(cx) - W / 2.F), std::round(sc<float>(bottomY) - H), std::round(W), std::round(H)};
+    // Keep it on screen: a tile or an icon at either end would otherwise push
+    // its label off the edge.
+    plate.x = std::clamp(plate.x, 0.0, std::max(0.0, monitor->m_size.x * SCALE - plate.width));
+
+    // `border-radius: 999px` is a full pill, so the radius is half the height
+    // rather than a constant -- it stays a pill when the font or padding moves.
+    const int ROUND = sc<int>(std::round(plate.height / 2.0));
+
+    const int BORDER = std::max(0, ScrollOverview::Config::getValue<int>("general:border_size"));
+    if (BORDER > 0) {
+        if (auto* const ACTIVE = sc<::Config::CGradientValueData*>(ScrollOverview::Config::valueRef<::Config::IComplexConfigValue>("general:col.active_border").ptr());
+            ACTIVE && !ACTIVE->m_colors.empty()) {
+            CRectPassElement::SRectData ring;
+            ring.box           = plate.copy().expand(sc<double>(BORDER) * SCALE);
+            ring.color         = ACTIVE->m_colors[0].modifyA(alpha);
+            ring.round         = ROUND + sc<int>(std::round(sc<float>(BORDER) * SCALE));
+            ring.roundingPower = 2.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(ring));
+        }
+    }
+
+    CRectPassElement::SRectData bg;
+    bg.box           = plate;
+    bg.color         = CHyprColor{0.F, 0.F, 0.F, PILL_BG_A * alpha};
+    bg.round         = ROUND;
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+
+    CTexPassElement::SRenderData label;
+    label.tex = TEX;
+    label.box = CBox{std::round(plate.x + PADX), std::round(plate.y + PADY), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
+    label.a   = alpha;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(label));
+
+    return plate;
 }
 
 }
