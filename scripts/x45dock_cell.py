@@ -17,8 +17,8 @@ import json
 import sys
 
 # Dock.cpp constants -- keep in step with it.
-ITEM_PAD_TOP = 16.0
-ITEM_MARGIN_X, CONTAINER_PAD_X, EDGE_MARGIN = 5.5, 10.5, 4.0
+ITEM_PAD_TOP, ITEM_PAD_BOTTOM = 18.0, 20.0
+ITEM_MARGIN_X, CONTAINER_PAD_X, EDGE_MARGIN = 8.0, 8.0, 4.0
 HOVER_PAD = 6.0
 ICON_MAX, FRACTION = 54.0, 0.90
 MW, MH = 2560.0, 1600.0
@@ -36,7 +36,7 @@ units = float(len(classes))
 chrome = 2 * CONTAINER_PAD_X + 2 * ITEM_MARGIN_X * slots
 icon = max(8.0, min(ICON_MAX, (FRACTION * MW - chrome) / max(units, 0.01)))
 width = chrome + icon * units
-height = 2 * ITEM_PAD_TOP + icon
+height = ITEM_PAD_TOP + ITEM_PAD_BOTTOM + icon
 xl, yl = (MW - width) / 2.0, MH - EDGE_MARGIN - height
 
 target = sys.argv[1]
