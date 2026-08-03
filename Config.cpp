@@ -336,6 +336,39 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:dock:background_opacity", "hyprgnomedock: pill alpha (D2D background-opacity)", 0.19F,
                                                           SFloatValueOptions{.min = 0.F, .max = 1.F}));
+    // X29. The dock's frost is blur-my-shell's `[dash-to-dock]`, not the desktop's
+    // window blur: sigma 30, brightness 0.60, live (static-blur false), and no
+    // grain. Hyprland's dual-kawase has no sigma at all, so size/passes are not
+    // converted, they are MEASURED: 7/3 fits a gaussian of sigma 29.5 against the
+    // real backdrop (share/x29/x29_gate.py). 15/2 fits 30.0 just as closely and
+    // was passed over because more passes is the better gaussian approximation,
+    // which is what the reference actually applies.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:blur_size", "hyprgnomedock: blur size (-1 = follow decoration:blur:size)", 7,
+                                                        SIntValueOptions{.min = -1, .max = 64}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:blur_passes", "hyprgnomedock: blur passes (-1 = follow decoration:blur:passes)", 3,
+                                                        SIntValueOptions{.min = -1, .max = 10}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_brightness",
+                                                          "hyprgnomedock: blur brightness (blur-my-shell brightness; -1 = follow decoration:blur:brightness)", 0.60F,
+                                                          SFloatValueOptions{.min = -1.F, .max = 2.F}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_noise",
+                                                          "hyprgnomedock: blur grain; the reference has none (-1 = follow decoration:blur:noise)", 0.F,
+                                                          SFloatValueOptions{.min = -1.F, .max = 1.F}));
+    // blur-my-shell applies a gaussian and a brightness and nothing else. Leaving
+    // Hyprland's contrast at 0.89 and vibrancy at 0.5 in place put an affine term
+    // and a saturation boost on top of that, which is a different look -- and it
+    // made the measured brightness unrecoverable (it fitted 1.26 with a -51 offset).
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_contrast",
+                                                          "hyprgnomedock: blur contrast; the reference applies none (-1 = follow decoration:blur:contrast)", 1.F,
+                                                          SFloatValueOptions{.min = -1.F, .max = 2.F}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_vibrancy",
+                                                          "hyprgnomedock: blur vibrancy; the reference applies none (-1 = follow decoration:blur:vibrancy)", 0.F,
+                                                          SFloatValueOptions{.min = -1.F, .max = 1.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:live_layer_frost",
                                                          "evaluate dock/bar frost against the overview backdrop instead of the stale optimized blur FB", true));

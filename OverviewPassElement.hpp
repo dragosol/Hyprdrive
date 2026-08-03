@@ -30,6 +30,18 @@ class COverviewBlurPassElement : public IPassElement {
         float roundingPower = 2.F;
         float alpha         = 1.F;
         bool  xray          = false;
+
+        // X29. The dock's frost is the reference's, not the desktop's. The blur
+        // runs inside draw(), long after whoever queued this element returned, so
+        // the override has to travel WITH it -- setting the config around
+        // queueBlur would restore it before a single pixel had been blurred.
+        // Negative means "leave the global value alone".
+        int   blurSize       = -1;
+        int   blurPasses     = -1;
+        float blurBrightness = -1.F;
+        float blurNoise      = -1.F;
+        float blurContrast   = -1.F;
+        float blurVibrancy   = -1.F;
     };
 
     COverviewBlurPassElement(const SData& data_);

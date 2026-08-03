@@ -146,6 +146,40 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
     g_pHyprRenderer->m_renderData.damage = clipped;
     auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
 
+    // X29. Same idiom the shadow element below uses for shadow:render_power: the
+    // blur shader reads the GLOBAL config, so a surface with its own frost swaps
+    // the values in for the length of one draw. Saved and restored unconditionally
+    // -- writing back a value that was never changed is cheaper than tracking
+    // which of the four were.
+    const auto PREVSIZE       = ScrollOverview::Config::getValue<int>("decoration:blur:size");
+    const auto PREVPASSES     = ScrollOverview::Config::getValue<int>("decoration:blur:passes");
+    const auto PREVBRIGHTNESS = ScrollOverview::Config::getValue<float>("decoration:blur:brightness");
+    const auto PREVNOISE      = ScrollOverview::Config::getValue<float>("decoration:blur:noise");
+    const auto PREVCONTRAST   = ScrollOverview::Config::getValue<float>("decoration:blur:contrast");
+    const auto PREVVIBRANCY   = ScrollOverview::Config::getValue<float>("decoration:blur:vibrancy");
+
+    auto       restoreBlur = Hyprutils::Utils::CScopeGuard([PREVSIZE, PREVPASSES, PREVBRIGHTNESS, PREVNOISE, PREVCONTRAST, PREVVIBRANCY] {
+        ScrollOverview::Config::setValue("decoration:blur:size", PREVSIZE);
+        ScrollOverview::Config::setValue("decoration:blur:passes", PREVPASSES);
+        ScrollOverview::Config::setValue("decoration:blur:brightness", PREVBRIGHTNESS);
+        ScrollOverview::Config::setValue("decoration:blur:noise", PREVNOISE);
+        ScrollOverview::Config::setValue("decoration:blur:contrast", PREVCONTRAST);
+        ScrollOverview::Config::setValue("decoration:blur:vibrancy", PREVVIBRANCY);
+    });
+
+    if (data.blurSize > 0)
+        ScrollOverview::Config::setValue("decoration:blur:size", data.blurSize);
+    if (data.blurPasses > 0)
+        ScrollOverview::Config::setValue("decoration:blur:passes", data.blurPasses);
+    if (data.blurBrightness >= 0.F)
+        ScrollOverview::Config::setValue("decoration:blur:brightness", data.blurBrightness);
+    if (data.blurNoise >= 0.F)
+        ScrollOverview::Config::setValue("decoration:blur:noise", data.blurNoise);
+    if (data.blurContrast >= 0.F)
+        ScrollOverview::Config::setValue("decoration:blur:contrast", data.blurContrast);
+    if (data.blurVibrancy >= 0.F)
+        ScrollOverview::Config::setValue("decoration:blur:vibrancy", data.blurVibrancy);
+
     Render::GL::g_pHyprOpenGL->renderRect(data.box, CHyprColor{0.F, 0.F, 0.F, 0.F},
                                           Render::GL::CHyprOpenGLImpl::SRectRenderData{
                                               .damage        = &clipped,

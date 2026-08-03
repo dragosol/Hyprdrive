@@ -3,6 +3,7 @@
 #include "AppSearch.hpp"
 #include "Config.hpp"
 #include "Minimize.hpp"
+#include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
 #include "Window.hpp"
 
@@ -92,6 +93,12 @@ constexpr const char* KEY_FRACTION   = "plugin:scrolloverview:dock:height_fracti
 constexpr const char* KEY_RADIUS     = "plugin:scrolloverview:dock:corner_radius";
 constexpr const char* KEY_BG_COLOR   = "plugin:scrolloverview:dock:background_color";
 constexpr const char* KEY_BG_OPACITY = "plugin:scrolloverview:dock:background_opacity";
+constexpr const char* KEY_BLUR_SIZE   = "plugin:scrolloverview:dock:blur_size";
+constexpr const char* KEY_BLUR_PASSES = "plugin:scrolloverview:dock:blur_passes";
+constexpr const char* KEY_BLUR_BRIGHT = "plugin:scrolloverview:dock:blur_brightness";
+constexpr const char* KEY_BLUR_NOISE  = "plugin:scrolloverview:dock:blur_noise";
+constexpr const char* KEY_BLUR_CONTR  = "plugin:scrolloverview:dock:blur_contrast";
+constexpr const char* KEY_BLUR_VIBR   = "plugin:scrolloverview:dock:blur_vibrancy";
 
 struct SMetrics {
     float icon   = 0.F;
@@ -382,9 +389,28 @@ void render(PHLMONITOR monitor) {
     if (LAYOUT.pill.empty())
         return;
 
-    // X13: frost is always on. The reference's blur PARAMETERS (sigma 30,
-    // brightness 0.60, live) are X29's job; this is the surface they land on.
-    OverviewRender::queueBlur(LAYOUT.pill, LAYOUT.rounding, 2.F, 1.F, false);
+    // X13/X29: frost is always on, and it is the REFERENCE's frost --
+    // blur-my-shell's `[dash-to-dock]` sigma 30 / brightness 0.60 / no grain,
+    // not the desktop's window blur. `static-blur` is false there, so this stays
+    // live. Queued directly rather than through OverviewRender::queueBlur: the
+    // overrides ride on the element because the blur runs inside draw(), long
+    // after this function has returned.
+    //
+    // `unblur-in-overview` is false in the reference, and the overview now draws
+    // this same call, so the pill keeps its frost there instead of losing it.
+    COverviewBlurPassElement::SData blur;
+    blur.box            = LAYOUT.pill;
+    blur.rounding       = LAYOUT.rounding;
+    blur.roundingPower  = 2.F;
+    blur.alpha          = 1.F;
+    blur.xray           = false;
+    blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
+    blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);
+    blur.blurBrightness = Config::getValue<float>(KEY_BLUR_BRIGHT);
+    blur.blurNoise      = Config::getValue<float>(KEY_BLUR_NOISE);
+    blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
+    blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
 
     CRectPassElement::SRectData bg;
     bg.box           = LAYOUT.pill;
