@@ -52,6 +52,45 @@ class COverviewBlurPassElement : public IPassElement {
     SData data;
 };
 
+// X3 bug (user, 2026-08-02): the strip's cells round their OUTER corners large
+// and every facing corner tight, but CBorderPassElement carries one radius, so
+// the focused-desktop outline traced a shape the cell underneath does not have.
+// The fill already solves this by drawing the same box twice with the two radii
+// and clipping to opposite halves; a border has no clipBox, so the halves are
+// separated by intersecting the damage instead -- the idiom the shadow element
+// below already uses. Equal radii render in a single pass.
+class COverviewSplitBorderPassElement : public IPassElement {
+  public:
+    struct SData {
+        CBox                       box;
+        Config::CGradientValueData color;
+        int                        roundLeft     = 0;
+        int                        roundRight    = 0;
+        float                      roundingPower = 2.F;
+        int                        borderSize    = 1;
+        float                      a             = 1.F;
+    };
+
+    COverviewSplitBorderPassElement(const SData& data_);
+    ~COverviewSplitBorderPassElement() override = default;
+
+    std::vector<UP<IPassElement>> draw() override;
+    ePassElementType              type() override {
+        return EK_CUSTOM;
+    }
+    bool                          needsLiveBlur() override;
+    bool                          needsPrecomputeBlur() override;
+    std::optional<CBox>           boundingBox() override;
+    CRegion                       opaqueRegion() override;
+
+    const char*                   passName() override {
+        return "COverviewSplitBorderPassElement";
+    }
+
+  private:
+    SData data;
+};
+
 class COverviewShadowPassElement : public IPassElement {
   public:
     struct SData {

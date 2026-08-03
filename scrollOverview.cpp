@@ -5425,19 +5425,32 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     // both for the focused desktop (OverviewWidget.qml:432-433) and for the
     // drag-hover state (OverviewWidget.qml:179-180) -- one lambda so the two
     // cannot drift apart.
-    // ponytail: ONE radius, not the position-dependent pair addCellRect draws.
-    // CBorderPassElement::SBorderData carries a single `round`, and splitting a
-    // border across two clipped halves would seam at the join where a filled
-    // rect does not. The outer corners are the visible ones at this size.
-    auto addCellBorder = [&](const CBox& cell) {
-        CBorderPassElement::SBorderData border;
-        border.box           = cell;
-        border.grad1         = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
-        border.round         = ROUND;
-        border.roundingPower = CARDROUND.power;
-        border.a             = 1.F;
-        border.borderSize    = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
+    // BUG (user, 2026-08-02): this used ONE radius for every cell, so the
+    // outline traced a shape the cell underneath does not have -- large curves
+    // over the tight facing corners of an inner cell, and the wrong radius on
+    // the inside edge of each end cell. It takes the SAME largeLeft/largeRight
+    // the fill does, and COverviewSplitBorderPassElement draws the asymmetric
+    // case as two damage-clipped halves.
+    // (user, 2026-08-03): the stroke sits on the cell's INNER edge, not around
+    // its outside, and it is the search placeholder's white rather than the
+    // accent -- renderSearch's FG for the un-queried state.
+    auto addCellBorder = [&](const CBox& cell, bool largeLeft, bool largeRight) {
+        const int BORDER = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
+        // Inset by the full stroke width: renderBorder centres nothing, it grows
+        // outward from the box, so the box has to be the INNER rectangle for the
+        // stroke to land inside the tile. Radii shrink with it or the curve would
+        // no longer be concentric with the fill's.
+        const CBox INNER = cell.copy().expand(-BORDER);
+
+        g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewSplitBorderPassElement>(COverviewSplitBorderPassElement::SData{
+            .box           = INNER,
+            .color         = ::Config::CGradientValueData{CHyprColor{1.F, 1.F, 1.F, 0.55F}},
+            .roundLeft     = std::max(0, (largeLeft ? ROUND : INNERROUND) - BORDER),
+            .roundRight    = std::max(0, (largeRight ? ROUND : INNERROUND) - BORDER),
+            .roundingPower = CARDROUND.power,
+            .borderSize    = BORDER,
+            .a             = 1.F,
+        }));
     };
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
@@ -5511,7 +5524,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             // X3 delta 3: the reference borders the hovered cell as well as
             // tinting it. Drawn after the tint and after the minis, so the drop
             // target reads as a target even over a cell full of previews.
-            addCellBorder(CELL);
+            addCellBorder(CELL, ATLEFT, ATRIGHT);
         }
 
         // X3: the reference marks the focused desktop with a 2px accent border
@@ -5522,7 +5535,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         // its indicator is one moving item; here the cell rects are already
         // laid out, so the border simply draws on whichever cell is active.
         if (monitor->m_activeWorkspace && wimg->pWorkspace->m_id == monitor->m_activeWorkspace->m_id) {
-            addCellBorder(CELL);
+            addCellBorder(CELL, ATLEFT, ATRIGHT);
         }
 
     }

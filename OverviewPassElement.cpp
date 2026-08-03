@@ -179,6 +179,85 @@ CRegion COverviewBlurPassElement::opaqueRegion() {
     return {};
 }
 
+COverviewSplitBorderPassElement::COverviewSplitBorderPassElement(const SData& data_) : data(data_) {
+    ;
+}
+
+std::vector<UP<IPassElement>> COverviewSplitBorderPassElement::draw() {
+    if (data.box.width < 1 || data.box.height < 1 || data.borderSize < 1 || data.a <= 0.F)
+        return {};
+
+    auto stroke = [this](int round) {
+        Render::GL::g_pHyprOpenGL->renderBorder(data.box, data.color,
+                                                {
+                                                    .round         = round,
+                                                    .roundingPower = data.roundingPower,
+                                                    .borderSize    = data.borderSize,
+                                                    .a             = data.a,
+                                                });
+    };
+
+    if (data.roundLeft == data.roundRight) {
+        stroke(data.roundLeft);
+        return {};
+    }
+
+    // The two halves meet on a straight edge far from every corner, so the top
+    // and bottom strokes abut exactly and there is nothing to seam.
+    //
+    // Splitting by intersecting m_renderData.damage was tried first -- the idiom
+    // the shadow element below uses -- and drew NOTHING at all: the inner cell's
+    // single-pass stroke measured 182 luminance while the split cell's whole span
+    // sat at the fill's 94. clipBox is what the cell FILL splits with two screens
+    // up, and it is the knob the scissor actually reads.
+    const auto SAVEDCLIP = g_pHyprRenderer->m_renderData.clipBox;
+    auto       restore   = Hyprutils::Utils::CScopeGuard([SAVEDCLIP] { g_pHyprRenderer->m_renderData.clipBox = SAVEDCLIP; });
+
+    const double MID = std::round(data.box.x + data.box.width / 2.0);
+
+    for (int half = 0; half < 2; ++half) {
+        const bool   LEFT = half == 0;
+        const double B    = data.borderSize;
+
+        // The border grows OUTWARD from the box, so the clip has to grow with it
+        // or the stroke is shaved off its own edge -- but NOT at the seam, where
+        // an overlap would blend the translucent stroke over itself.
+        CBox clip = LEFT ? CBox{data.box.x - B, data.box.y - B, MID - data.box.x + B, data.box.height + 2 * B} :
+                           CBox{MID, data.box.y - B, data.box.x + data.box.width - MID + B, data.box.height + 2 * B};
+
+        if (SAVEDCLIP.width > 0 && SAVEDCLIP.height > 0)
+            clip = clip.intersection(SAVEDCLIP);
+
+        if (clip.width < 1 || clip.height < 1)
+            continue;
+
+        g_pHyprRenderer->m_renderData.clipBox = clip;
+        stroke(LEFT ? data.roundLeft : data.roundRight);
+    }
+
+    return {};
+}
+
+bool COverviewSplitBorderPassElement::needsLiveBlur() {
+    return false;
+}
+
+bool COverviewSplitBorderPassElement::needsPrecomputeBlur() {
+    return false;
+}
+
+std::optional<CBox> COverviewSplitBorderPassElement::boundingBox() {
+    const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor;
+    if (!MONITOR)
+        return std::nullopt;
+
+    return data.box.copy().expand(data.borderSize).scale(1.F / MONITOR->m_scale).round();
+}
+
+CRegion COverviewSplitBorderPassElement::opaqueRegion() {
+    return {};
+}
+
 COverviewShadowPassElement::COverviewShadowPassElement(const SData& data_) : data(data_) {
     ;
 }
