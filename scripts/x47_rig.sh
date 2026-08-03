@@ -32,8 +32,33 @@ ov()   { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
 # ydotool's absolute space is HALF this guest's output (standing rig rule).
 warp() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
 
+cfg() { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
+
+# RESTORE ON EVERY EXIT PATH, including the aborts below. An earlier run of this
+# rig exited through one of those aborts and left the guest on a headless output
+# with Virtual-1 disabled -- so the VM's actual screen was blank, and the next
+# thing to re-enable Virtual-1 put two outputs at 0x0 and Hyprland's "monitor
+# layout is set up incorrectly, HEADLESS-1 overlaps" banner came up. A rig that
+# swaps the display out is only safe if the swap back cannot be skipped.
+restore() {
+    ov off
+    cfg "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false"
+    hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1
+    sleep 1.2
+    # Virtual-1 comes back FIRST: removing the last output while it is the only
+    # enabled one is what leaves the session with nowhere to put its windows.
+    for m in $(hyprctl monitors all -j | python3 -c "
+import json,sys
+print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
+        hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
+    done
+    systemctl --user start hyprwall.timer 2>/dev/null
+}
+trap restore EXIT
+
 systemctl --user stop hyprwall.timer 2>/dev/null
-# Put it back even if this run dies, so the desktop is not left frozen.
+# Put it back even if this run dies in a way the trap cannot catch (SIGKILL, or
+# the compositor going down under it), so the desktop is not left frozen.
 systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
 
 ov off; sleep 1
@@ -75,9 +100,8 @@ case "$MON" in HEADLESS*) ;; *) echo "ABORT: expected the headless output, got $
 
 # `hyprctl keyword` is DEAD in 0.56 -- every call answers "can't work with
 # non-legacy parsers" on stderr and returns 0, so a rig that used it configured
-# nothing and said nothing. Config goes through hl.config, and cfg() below reads
-# the value back to prove it landed.
-cfg() { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
+# nothing and said nothing. Config goes through cfg() (hl.config), and want()
+# reads the value back to prove it landed.
 want() {
     read -r VAL SET <<< "$(hyprctl getoption "plugin:scrolloverview:dock:$1" | head -2 | awk '{print $2}' | tr '\n' ' ')"
     [ "$VAL" = "$2" ] || { echo "ABORT: dock:$1 is $VAL, wanted $2"; exit 1; }
@@ -189,7 +213,7 @@ shot g0
 sleep 1.6            # grace + PANEL_OUT_MS, with room
 shot c2
 
-ov off
-cfg "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false"
+# The overview, the dock config and the DISPLAY all go back in restore(), on the
+# EXIT trap, so an abort restores as thoroughly as a clean finish does.
 echo "frames: $(ls $OUT/$TAG-*.png | wc -l)"
 echo X47_RIG_OK
