@@ -806,6 +806,33 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // reached the window underneath would focus it, and a release that leaked
     // after a swallowed press would leave the pointer stuck.
     static auto DOCKCLICK = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
+        // X33 adds the middle button. It carries no drag -- the reorder is the
+        // left button's gesture -- so it takes the short path below and only the
+        // PRESS acts, with the release swallowed to keep the pair balanced.
+        if (event.button == BTN_MIDDLE) {
+            const auto MIDPOINT = g_pInputManager->getMouseCoordsInternal();
+            for (const auto& MONITOR : State::monitorState()->monitors()) {
+                if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(MIDPOINT))
+                    continue;
+
+                const auto LOCAL = (MIDPOINT - MONITOR->m_position) * MONITOR->m_scale;
+                if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL))
+                    return;
+
+                info.cancelled = true;
+
+                if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                    const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+                    const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
+                    ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, true);
+                }
+
+                return;
+            }
+
+            return;
+        }
+
         if (event.button != BTN_LEFT)
             return;
 
@@ -843,6 +870,33 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
             const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
             ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT);
+            return;
+        }
+    });
+
+    // X33. The wheel over the pill, on the PLAIN desktop only.
+    //
+    // Deliberate divergence, and the one place X33 does not copy the reference:
+    // with the overview open the reference scrolls the dash's icon to
+    // `this.app.activate()`, which would close the overview on a wheel graze.
+    // The pill is pinned OVER the overview here (§10 clause 6) and the wheel is
+    // the overview's primary navigation, so inside it the overview keeps the
+    // tick. Recorded rather than silently dropped.
+    static auto DOCKSCROLL = Event::bus()->m_events.input.mouse.axis.listen([](IPointer::SAxisEvent event, Event::SCallbackInfo& info) {
+        // Vertical notches only. A horizontal wheel has no reference behaviour,
+        // and a touchpad's continuous stream is not a notch -- the dead time
+        // would turn it into one arbitrary step per 250ms.
+        if (event.axis != WL_POINTER_AXIS_VERTICAL_SCROLL || event.source != WL_POINTER_AXIS_SOURCE_WHEEL || event.delta == 0.0)
+            return;
+
+        const auto POINT = g_pInputManager->getMouseCoordsInternal();
+        for (const auto& MONITOR : State::monitorState()->monitors()) {
+            if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(POINT))
+                continue;
+
+            if (ScrollOverview::Dock::scroll(MONITOR, (POINT - MONITOR->m_position) * MONITOR->m_scale, event.delta < 0.0))
+                info.cancelled = true;
+
             return;
         }
     });

@@ -113,6 +113,25 @@ bool minimize(PHLWINDOW window) {
                                   TARGET->position(), window->m_isFloating});
 
     Desktop::globalWindowController()->moveWindowToWorkspace(window, STASHWS);
+
+    // A stashed window must not keep the keyboard. Measured 2026-08-03 by X33's
+    // rig: minimize left focus on the window it had just taken off screen, so
+    // typing went to something invisible and the dock read the app as still
+    // focused -- which is the test `cycle-windows` branches on. Hand the focus
+    // to whatever is left on the workspace it came from.
+    if (Desktop::focusState()->isWindowActive(window)) {
+        PHLWINDOW next;
+        for (const auto& CANDIDATE : Desktop::windowState()->windows()) {
+            if (CANDIDATE != window && CANDIDATE->m_isMapped && CANDIDATE->m_workspace == WORKSPACE)
+                next = CANDIDATE;
+        }
+
+        if (next)
+            Desktop::focusState()->fullWindowFocus(next, Desktop::FOCUS_REASON_OTHER);
+        else
+            Desktop::focusState()->resetWindowFocus();
+    }
+
     return true;
 }
 

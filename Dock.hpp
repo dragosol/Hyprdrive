@@ -59,7 +59,22 @@ bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
 // applies `minimize-shift` -- the whole app rather than just the front window.
 // Returns whether an item claimed the click; the caller swallows the event
 // either way, since the pill is not a window and must not leak clicks through.
-bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift);
+//
+// X33. `middle` runs `middle-click-action` / `shift-middle-click-action`
+// instead, which reach ICONS only -- the reference hangs middle-click off the
+// AppIcon, so previews and Show Applications are not targets for it.
+bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle = false);
+
+// X33. A wheel tick over the pill, `up` for one notch away from the user.
+// `scroll_action` decides: `cycle-windows` steps through the windows of the icon
+// under the pointer, `switch-workspace` moves to the neighbouring workspace from
+// anywhere on the pill, `do-nothing` does nothing. All three SWALLOW the tick,
+// which is what the return value says -- true whenever the point is on the pill,
+// because the pill is not a window and a tick must not leak to the tile under it.
+// The reference's two behaviours are ONE setting and are mutually exclusive; see
+// the note beside the key in Config.cpp for why `scroll-switch-workspace` is not
+// a key of its own.
+bool    scroll(PHLMONITOR monitor, const Vector2D& point, bool up);
 
 // X32 reordering and G12 share ONE drop handler, per G12's "the two drag
 // sources land in the same dock drop handler and must not fight". Both end in

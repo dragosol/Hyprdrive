@@ -1944,6 +1944,22 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 }
                 return;
             }
+
+            // X33. The middle button over the pill, and it MUST be claimed here
+            // rather than further down: BTN_MIDDLE is also SECONDARY_DRAG_BUTTON,
+            // so without this a middle-click on an icon would start a workspace
+            // pan instead of launching. Both edges are eaten so the pan branch
+            // never sees the release either.
+            if (event.button == BTN_MIDDLE && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
+                lastMousePosLocal = DOCKPOINT;
+
+                if (PRESSED) {
+                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+                    ScrollOverview::Dock::click(DOCKMONITOR, DOCKPOINT, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), true);
+                }
+
+                return;
+            }
         }
 
         if (event.button == MAIN_BUTTON) {

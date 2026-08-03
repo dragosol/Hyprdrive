@@ -388,6 +388,43 @@ static void registerConfigValues() {
                                                          "hyprgnomedock: keep Show Applications hard against the dock's edge (D2D show-apps-always-in-the-edge)", true));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CStringValue>("plugin:scrolloverview:dock:show_apps_icon", "hyprgnomedock: Show Applications artwork", Hyprlang::STRING{"view-app-grid-symbolic"}));
+
+    // X33. Scroll and middle-click.
+    //
+    // `scroll-switch-workspace` is NOT a key here, and that is a finding rather
+    // than an omission: it is VESTIGIAL in the reference. It survives in the
+    // gschema but nothing reads it -- grepped docking.js, appIcons.js, dash.js
+    // and prefs.js at master. The switch is `scroll-action='switch-workspace'`,
+    // the SAME setting that turns icon cycling off
+    // (`_optionalScrollWorkspaceSwitch` binds its handler only when scrollAction
+    // is SWITCH_WORKSPACE, `_optionalScrollCycleWindows` only when it is
+    // CYCLE_WINDOWS), so the two behaviours are mutually exclusive and one enum
+    // is the whole setting.
+    //
+    // `scroll-to-focused-application` is not a key either: it scrolls a dash
+    // that has OVERFLOWED so the focused icon stays in view. This pill never
+    // overflows -- the icon size shrinks against height_fraction until it fits --
+    // so the requirement holds by construction and a key would be a no-op.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CStringValue>("plugin:scrolloverview:dock:scroll_action",
+                                                           "hyprgnomedock: wheel over the dock: cycle-windows | switch-workspace | do-nothing (D2D scroll-action)",
+                                                           Hyprlang::STRING{"cycle-windows"}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CStringValue>("plugin:scrolloverview:dock:middle_click_action",
+                                                           "hyprgnomedock: middle click on an icon: launch | minimize | cycle-windows | quit | skip (D2D middle-click-action)",
+                                                           Hyprlang::STRING{"launch"}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CStringValue>("plugin:scrolloverview:dock:shift_middle_click_action",
+                                                           "hyprgnomedock: shift+middle click on an icon (D2D shift-middle-click-action)", Hyprlang::STRING{"launch"}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:isolate_workspaces",
+                                                         "hyprgnomedock: the dock lists only windows on the current workspace (D2D isolate-workspaces)", false));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:workspace_agnostic_urgent",
+                                                         "hyprgnomedock: an urgent window stays listed even when isolate_workspaces hides its workspace "
+                                                         "(D2D workspace-agnostic-urgent-windows)",
+                                                         true));
+
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
                                                           (Hyprlang::INT)0xFFC0BFBC));

@@ -40,6 +40,7 @@
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/state/WorkspaceState.hpp>
 #undef protected
 #undef private
 
@@ -201,6 +202,21 @@ constexpr const char* KEY_SHOW_APPS_EDGE = "plugin:scrolloverview:dock:show_apps
 // is the one part of the button a theme changes.
 constexpr const char* KEY_SHOW_APPS_ICON = "plugin:scrolloverview:dock:show_apps_icon";
 
+// X33. Scroll, middle-click, and the workspace scoping X31 left alone.
+constexpr const char* KEY_SCROLL_ACTION = "plugin:scrolloverview:dock:scroll_action";
+constexpr const char* KEY_MIDDLE_CLICK  = "plugin:scrolloverview:dock:middle_click_action";
+constexpr const char* KEY_SHIFT_MIDDLE  = "plugin:scrolloverview:dock:shift_middle_click_action";
+constexpr const char* KEY_ISOLATE_WS    = "plugin:scrolloverview:dock:isolate_workspaces";
+constexpr const char* KEY_AGNOSTIC_URG  = "plugin:scrolloverview:dock:workspace_agnostic_urgent";
+
+// The reference's own two numbers, hardcoded because the reference hardcodes
+// them: 250ms of dead time between wheel events, so one flick is one step rather
+// than ten (`_optionalScrollCycleWindowsDeadTimeId`), and 3000ms of memory for
+// the cycle's window list, because activating a window reorders the stack the
+// list came from (`MEMORY_TIME` in `_cycleThroughWindows`).
+constexpr float SCROLL_DEAD_MS  = 250.F;
+constexpr float CYCLE_MEMORY_MS = 3000.F;
+
 // X24, the last piece: the shrink INTO the dock.
 //
 // The window is stashed IMMEDIATELY and this then draws it, live, from its last
@@ -352,6 +368,41 @@ void toggleFavorite(const std::string& id) {
     writeFavorites();
 }
 
+// X33. The reference's `getInterestingWindows()`: the one filter every list the
+// dock builds runs through, so the icons, the dot, the menu, the cycle and the
+// quit all agree on which windows exist.
+//
+// `isolate-workspaces` is FALSE in the reference, so by default this is every
+// mapped window and the dock stays workspace-agnostic exactly as X27 left it.
+// Turned on, it is the CURRENT workspace only -- the focused monitor's, because
+// `isolate-monitors` is false and the reference then asks the global workspace
+// manager, not a per-monitor one.
+//
+// Two exemptions, both load-bearing:
+//   * `workspace-agnostic-urgent-windows` (TRUE) keeps an urgent window listed
+//     wherever it is, which is the whole point of the key: an app demanding
+//     attention on another desktop must still be reachable from the dock.
+//   * a MINIMIZED window is always interesting. Ours are stashed on a special
+//     workspace that is never any monitor's active one, so isolation would hide
+//     every minimized window and X24's click-to-restore would have nothing left
+//     to restore. Its real home is the workspace it will come back to.
+bool interesting(const PHLWINDOW& window) {
+    if (!window || !window->m_isMapped)
+        return false;
+
+    if (!Config::getValue<bool>(KEY_ISOLATE_WS))
+        return true;
+
+    if (Minimize::isMinimized(window))
+        return true;
+
+    if (window->m_isUrgent && Config::getValue<bool>(KEY_AGNOSTIC_URG))
+        return true;
+
+    const auto MONITOR = Desktop::focusState()->monitor();
+    return MONITOR && window->m_workspace == MONITOR->m_activeWorkspace;
+}
+
 // X27 showed what is RUNNING and nothing else. X32 keeps that list and puts the
 // FAVOURITES in front of it: the compositor's own window order, which is stable
 // across frames -- an MRU order here would make the dock reshuffle on every
@@ -362,7 +413,7 @@ std::vector<std::string> runningClasses() {
 
     for (const auto& windowRef : Desktop::windowState()->windows()) {
         const auto& WINDOW = windowRef;
-        if (!WINDOW || !WINDOW->m_isMapped || WINDOW->m_class.empty())
+        if (!interesting(WINDOW) || WINDOW->m_class.empty())
             continue;
 
         if (seen.insert(WINDOW->m_class).second)
@@ -1002,29 +1053,123 @@ std::vector<PHLWINDOW> classWindows(const std::string& wmClass) {
 
     std::vector<PHLWINDOW> out;
     for (const auto& WINDOW : Desktop::windowState()->windows()) {
-        if (WINDOW && WINDOW->m_isMapped && WINDOW->m_class == wmClass)
+        if (interesting(WINDOW) && WINDOW->m_class == wmClass)
             out.emplace_back(WINDOW);
     }
 
     return out;
 }
 
+// The reference's `Main.activateWindow`, which is what every X33 path ends in.
+// Focus alone is not enough: the window may be on another desktop, it may be
+// minimized, and X43 already established that focus and stacking are separate
+// questions.
+void activateWindow(const PHLWINDOW& window) {
+    if (!window)
+        return;
+
+    if (Minimize::isMinimized(window)) {
+        Minimize::restore(window);
+        return;
+    }
+
+    if (const auto WORKSPACE = window->m_workspace; WORKSPACE) {
+        if (const auto MONITOR = WORKSPACE->m_monitor.lock(); MONITOR && MONITOR->m_activeWorkspace != WORKSPACE)
+            MONITOR->changeWorkspace(WORKSPACE, false, true, true);
+    }
+
+    Desktop::windowState()->raise(window);
+    Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
+}
+
+// X33 `scroll-action='cycle-windows'`, transcribed from `_cycleThroughWindows`.
+//
+// The list is REMEMBERED for CYCLE_MEMORY_MS rather than recomputed per tick,
+// and that is the entire subtlety of the feature: activating a window reorders
+// the compositor's stack, so a cycle driven off a freshly-read order would step
+// between the same two windows forever. The memory is dropped when the app
+// changes or the app's window COUNT changes -- the reference's own staleness
+// test, which deliberately does not notice a reorder.
+struct SCycle {
+    std::string               wmClass;
+    std::vector<PHLWINDOWREF> windows;
+    int                       index = 0;
+    Time::steady_tp           at;
+};
+
+std::optional<SCycle> g_cycle;
+
+void cycleThroughWindows(const std::string& wmClass, bool reversed) {
+    const auto WINDOWS = classWindows(wmClass);
+    if (WINDOWS.empty())
+        return;
+
+    const bool STALE = !g_cycle || g_cycle->wmClass != wmClass || g_cycle->windows.size() != WINDOWS.size() || elapsedMs(g_cycle->at) > CYCLE_MEMORY_MS;
+
+    if (STALE) {
+        g_cycle = SCycle{.wmClass = wmClass, .index = 0};
+        g_cycle->windows.reserve(WINDOWS.size());
+        for (const auto& WINDOW : WINDOWS)
+            g_cycle->windows.emplace_back(WINDOW);
+    }
+
+    g_cycle->at = Time::steadyNow();
+
+    const int COUNT = sc<int>(g_cycle->windows.size());
+    g_cycle->index  = reversed ? (g_cycle->index - 1 + COUNT) % COUNT : (g_cycle->index + 1) % COUNT;
+
+    // A window can die while the memory still holds it. Dropping the memory
+    // rather than skipping the slot keeps the index and the list in step.
+    const auto WINDOW = g_cycle->windows[g_cycle->index].lock();
+    if (!WINDOW) {
+        g_cycle.reset();
+        return;
+    }
+
+    activateWindow(WINDOW);
+}
+
+// The reference's shared entry point for a cycle: if the app already has focus
+// and nothing of it is shouting, step to its next window; otherwise the gesture
+// is simply "bring this app forward", which is what an urgent window wants.
+void cycleOrActivate(const std::string& wmClass, bool reversed) {
+    const auto WINDOWS = classWindows(wmClass);
+    if (WINDOWS.empty())
+        return;
+
+    const auto FOCUSED = Desktop::focusState()->window();
+    const bool OWNSFOCUS = FOCUSED && FOCUSED->m_class == wmClass;
+
+    if (OWNSFOCUS && !classUrgent(wmClass))
+        cycleThroughWindows(wmClass, reversed);
+    else
+        activateWindow(WINDOWS.front());
+}
+
+// The overview gets out of the way, because a window that maps behind an open
+// overview is a window the user cannot see they just started.
+//
+// X33 gave this a second caller and with it a second way to be asked: a RUNNING
+// app middle-clicked for a new window owns a class but need not own a favourite,
+// so `desktopId` can be empty where `idForClass` still answers.
+void launchApp(PHLMONITOR monitor, const SItem& item) {
+    const auto  ID    = item.desktopId.empty() ? AppSearch::idForClass(item.wmClass) : item.desktopId;
+    const auto* ENTRY = AppSearch::entryForId(ID);
+    if (!ENTRY)
+        return;
+
+    AppSearch::launch(*ENTRY, Config::getTerminal());
+
+    if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
+        OVERVIEW->close();
+}
+
 void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
     const auto windows = classWindows(item.wmClass);
 
-    // X32. Nothing to minimize, so this is a launch -- and the overview gets out
-    // of the way, because a window that maps behind an open overview is a window
-    // the user cannot see they just started.
+    // X32. Nothing to minimize, so this is a launch.
     if (windows.empty()) {
-        const auto* ENTRY = AppSearch::entryForId(item.desktopId);
-        if (!ENTRY)
-            return;
-
-        AppSearch::launch(*ENTRY, Config::getTerminal());
-
-        if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
-            OVERVIEW->close();
-
+        launchApp(monitor, item);
         return;
     }
 
@@ -1063,6 +1208,38 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
     // case that matters. Picking among several is X28's "All Windows" menu; the
     // front of the compositor's stack is the stand-in until it exists.
     minimizeWithFlight(monitor, visible.back());
+}
+
+// X33. `middle-click-action` and `shift-middle-click-action`, both `launch` in
+// the reference.
+//
+// The structure is the reference's, not a switch of my own: the whole action
+// table lives inside `if (this.running)`, and a NOT-running app ignores the
+// setting entirely and just launches. That is why the empty check comes first
+// and takes no notice of `action`.
+//
+// `minimize` routes back through activateItem so the two buttons cannot drift
+// apart -- it is the left button's action, and a user who sets middle to
+// `minimize` means that one.
+void applyClickAction(PHLMONITOR monitor, const SItem& item, const std::string& action, bool shift) {
+    const auto WINDOWS = classWindows(item.wmClass);
+
+    if (WINDOWS.empty()) {
+        launchApp(monitor, item);
+        return;
+    }
+
+    if (action == "launch")
+        launchApp(monitor, item);
+    else if (action == "minimize")
+        activateItem(monitor, item, shift);
+    else if (action == "cycle-windows")
+        cycleOrActivate(item.wmClass, false);
+    else if (action == "quit") {
+        for (const auto& WINDOW : WINDOWS)
+            WINDOW->sendClose();
+    } else if (action == "skip")
+        activateWindow(WINDOWS.front());
 }
 
 // ---------------------------------------------------------------- X28 menu --
@@ -1379,13 +1556,79 @@ bool pillContains(PHLMONITOR monitor, const Vector2D& point) {
     return PILL.width >= 1 && PILL.height >= 1 && PILL.containsPoint(point);
 }
 
-bool click(PHLMONITOR monitor, const Vector2D& point, bool shift) {
+bool scroll(PHLMONITOR monitor, const Vector2D& point, bool up) {
+    if (!pillContains(monitor, point))
+        return false;
+
+    const auto ACTION = Config::getValue<std::string>(KEY_SCROLL_ACTION);
+    if (ACTION != "cycle-windows" && ACTION != "switch-workspace")
+        return true; // `do-nothing` still SWALLOWS: the pill is not a window.
+
+    // The dead time is checked before the hit-test and after the action, so a
+    // swallowed tick does not start the clock and `do-nothing` never does. One
+    // clock for both actions, as in the reference -- they can never both be on.
+    static Time::steady_tp s_last{};
+    static bool            s_seen = false;
+
+    if (s_seen && elapsedMs(s_last) < SCROLL_DEAD_MS)
+        return true;
+
+    s_last = Time::steadyNow();
+    s_seen = true;
+
+    if (ACTION == "switch-workspace") {
+        // `activeWs.get_neighbor(direction)`: up is the PREVIOUS workspace, and
+        // an edge is a no-op rather than a wrap -- get_neighbor hands back the
+        // same workspace when there is nothing past it.
+        const auto ACTIVE = monitor->m_activeWorkspace;
+        if (!ACTIVE)
+            return true;
+
+        const WORKSPACEID WANTED = ACTIVE->m_id + (up ? -1 : 1);
+        for (const auto& CANDIDATE : State::workspaceState()->workspaces()) {
+            const auto TARGET = CANDIDATE.lock();
+            if (TARGET && TARGET->m_id == WANTED && TARGET != ACTIVE) {
+                monitor->changeWorkspace(TARGET, false, true, true);
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    // `cycle-windows` is an ICON action: the reference binds it to the AppIcon,
+    // so the pill's own background does nothing under this setting. It still
+    // swallowed the tick above, which is the point of the pill.
+    const auto LAYOUT = layout(monitor);
+    const auto ITEM   = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(point); });
+    if (ITEM == LAYOUT.items.end())
+        return true;
+
+    cycleOrActivate(ITEM->wmClass, up);
+    return true;
+}
+
+bool click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle) {
     if (!monitor)
         return false;
 
     const auto LAYOUT = layout(monitor);
     if (LAYOUT.pill.width < 1 || LAYOUT.pill.height < 1)
         return false;
+
+    // X33. The middle button reaches ICONS only. A preview is one window and
+    // "launch a new one" is not a thing to do to it, and Show Applications is a
+    // button rather than an app -- the reference's middle-click lives on the
+    // AppIcon and nowhere else.
+    if (middle) {
+        const auto ITEM =
+            std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(point); });
+        if (ITEM == LAYOUT.items.end())
+            return false;
+
+        applyClickAction(monitor, *ITEM, Config::getValue<std::string>(shift ? KEY_SHIFT_MIDDLE : KEY_MIDDLE_CLICK), shift);
+        return true;
+    }
 
     // A preview is one specific window, so it restores that window rather than
     // going through the class -- two minimized windows of one app are two
