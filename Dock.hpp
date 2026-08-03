@@ -126,6 +126,24 @@ void closeMenu();
 bool menuContains(PHLMONITOR monitor, const Vector2D& point);
 bool menuClick(PHLMONITOR monitor, const Vector2D& point);
 
+// X34. A hotkey press. `number` is the reference's 1..10 -- the SLOT, so the
+// tenth app is 10 even though its key is <Super>0 -- and not a keycap, so a
+// config that rebinds the digits still names the same app. `shift` and `ctrl`
+// are the modifier the binding carries and they pick the same three behaviours
+// a click does: plain runs `click-action`, shift runs `shift-click-action`,
+// ctrl opens a new window. Out of range is not an error -- the reference
+// activates nothing and still shows the overlay, which is what tells you the
+// slot is empty.
+void hotkey(int number, bool shift, bool ctrl);
+
+// X34. `<Super>q`: show the number overlay for `shortcut_timeout`, and reveal
+// the dock while it is up if `hotkeys_show_dock`. Also runs after every hotkey.
+void showOverlay();
+
+// X34. Is the overlay up right now? For the acceptance rig, which has to know
+// what the frame it is about to capture is supposed to contain.
+bool overlayVisible();
+
 // Damage the monitor when the pill's shape changes -- an app opening or closing,
 // the dock being switched off, the hovered icon moving -- and every frame while a
 // live preview is in it. MUST be called before the frame is rendered: damage

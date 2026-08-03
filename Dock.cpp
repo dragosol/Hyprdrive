@@ -209,6 +209,57 @@ constexpr const char* KEY_SHIFT_MIDDLE  = "plugin:scrolloverview:dock:shift_midd
 constexpr const char* KEY_ISOLATE_WS    = "plugin:scrolloverview:dock:isolate_workspaces";
 constexpr const char* KEY_AGNOSTIC_URG  = "plugin:scrolloverview:dock:workspace_agnostic_urgent";
 
+// X34, one key per reference setting: `hot-keys`, `hotkeys-overlay`,
+// `hotkeys-show-dock`, `shortcut-timeout` 2.0. The ACCELERATORS themselves are
+// deliberately not keys here -- the reference stores `<Super>1`..`<Super>0` in
+// gsettings because GNOME's `Main.wm.addKeybinding` reads them from there, and
+// under Hyprland the config's own `bind` lines ARE that store. A second copy
+// inside the plugin could only disagree with the one the compositor obeys.
+constexpr const char* KEY_HOT_KEYS       = "plugin:scrolloverview:dock:hot_keys";
+constexpr const char* KEY_HOTKEY_OVERLAY = "plugin:scrolloverview:dock:hotkeys_overlay";
+constexpr const char* KEY_HOTKEY_DOCK    = "plugin:scrolloverview:dock:hotkeys_show_dock";
+constexpr const char* KEY_SHORTCUT_SECS  = "plugin:scrolloverview:dock:shortcut_timeout";
+
+// `const NUM_HOTKEYS = 10` -- the reference binds ten keys and numbers ten
+// icons, and the eleventh icon onwards gets neither.
+constexpr int NUM_HOTKEYS = 10;
+
+// `updateNumberOverlay`: `font-size: max(12, 0.3 * natWidth)` logical px against
+// the icon, and a box `1.2` times that, square. `border-radius: iconSize` is far
+// past half the box, and CSS clamps a radius to half -- so the shape is a circle
+// and half the box is the number that stays one at any icon size.
+constexpr float NUMBER_FONT_MIN   = 12.F;
+constexpr float NUMBER_FONT_RATIO = 0.3F;
+constexpr float NUMBER_BOX_RATIO  = 1.2F;
+
+// `.number-overlay`: `color: white; background-color: rgba(0, 0, 0, 0.8)`.
+constexpr float NUMBER_BG_ALPHA = 0.8F;
+
+// The reference keeps one timeout id per dock and restarts it on every press
+// (`_showOverlay`: "Restart the counting if the shortcut is pressed again"). A
+// DEADLINE is the same thing with no timer to leak: restarting is one
+// assignment and asking whether the overlay is up is one comparison. ONE
+// deadline rather than one per monitor because there is one keyboard --
+// `_showOverlay` loops over `allDocks` and hands every dock the same timeout.
+Time::steady_tp g_overlayUntil = Time::steadyNow();
+
+bool overlayUp() {
+    return Config::getValue<bool>(KEY_HOT_KEYS) && Config::getValue<bool>(KEY_HOTKEY_OVERLAY) && Time::steadyNow() < g_overlayUntil;
+}
+
+// X34. Reveal the dock while the overlay is up, on the same `want` the pressure
+// barrier feeds. The reference calls `dock._show()` and then leans on the
+// timeout's `_updateDashVisibility()` to put it back -- so the hold ENDS with
+// the overlay rather than being undone separately, which is what a deadline
+// read once per frame gives for free.
+//
+// Gated on `hotkeys-show-dock`, and the reference gates it again on the dock
+// being hideable at all (`_intellihideIsEnabled || _autohideIsEnabled`) -- with
+// autohide off the pill is already up and there is nothing to reveal.
+bool overlayHoldsDock() {
+    return Config::getValue<bool>(KEY_HOT_KEYS) && Config::getValue<bool>(KEY_HOTKEY_DOCK) && Config::getValue<bool>(KEY_AUTOHIDE) && Time::steadyNow() < g_overlayUntil;
+}
+
 // The reference's own two numbers, hardcoded because the reference hardcodes
 // them: 250ms of dead time between wheel events, so one flick is one step rather
 // than ten (`_optionalScrollCycleWindowsDeadTimeId`), and 3000ms of memory for
@@ -808,7 +859,10 @@ void updateAutohide(PHLMONITOR monitor) {
     } else
         want = R.pressure >= Config::getValue<float>(KEY_PRESSURE); // `require-pressure-to-show`
 
-    want = want || URGENT;
+    // X34 `hotkeys-show-dock`, ORed in beside URGENT for the same reason: it has
+    // to HOLD the pill up as well as bring it out, or the pointer sitting
+    // anywhere else would slide it away under the numbers the press just drew.
+    want = want || URGENT || overlayHoldsDock();
 
     if (want == R.shown) {
         R.pending = false;
@@ -965,6 +1019,53 @@ void renderBadge(PHLMONITOR monitor, const SItem& item) {
     CTexPassElement::SRenderData text;
     text.tex = TEX;
     text.box = CBox{std::round(X + PADX), std::round(Y + PADY), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
+    text.a   = 1.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+}
+
+// X34. The Hot-Key visual aid. `_updateNumberOverlay` numbers the icons 1..9,
+// gives the TENTH a `0` -- the digit on its key, not its ordinal -- and leaves
+// every icon past that without one.
+//
+// Reference divergence worth naming: the reference numbers `getAppIcons()`
+// (every child with an `.icon`) but ACTIVATES out of a list filtered on
+// `.child.app`, so once X35 puts trash and mounts in the dash the number drawn
+// on an icon and the slot its key reaches can drift apart. Here both come from
+// `LAYOUT.items`, which is ONE list, so they cannot.
+void renderNumberOverlay(PHLMONITOR monitor, const SItem& item, int index) {
+    if (!overlayUp() || index >= NUM_HOTKEYS)
+        return;
+
+    const int   DIGIT = (index + 1) % 10; // the tenth slot is `0`
+    const float SCALE = std::max(monitor->m_scale, 0.01F);
+    const float ICON  = sc<float>(item.iconBox.width) / SCALE; // logical px, as the reference measures
+
+    const float FONT  = std::round(std::max(NUMBER_FONT_MIN, NUMBER_FONT_RATIO * ICON));
+    const float SIZE  = std::round(FONT * NUMBER_BOX_RATIO * SCALE);
+
+    const auto  TEX = g_pHyprRenderer->renderText(std::to_string(DIGIT), CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(FONT * SCALE))));
+    if (!TEX || !TEX->ok())
+        return;
+
+    // `ActorAlign.START` on both axes and the CSS adds no margin: flush into the
+    // icon's top-left corner.
+    const float X = sc<float>(item.iconBox.x);
+    const float Y = sc<float>(item.iconBox.y);
+
+    CRectPassElement::SRectData bg;
+    bg.box   = CBox{std::round(X), std::round(Y), SIZE, SIZE};
+    bg.color = CHyprColor{0.F, 0.F, 0.F, NUMBER_BG_ALPHA};
+    // Truncated for the same reason the running dot is: a radius even slightly
+    // over half the box collapses the circle into a diamond.
+    bg.round         = sc<int>(SIZE / 2.F);
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+
+    // `text-align: center`, and vertically too -- the label fills the bin.
+    CTexPassElement::SRenderData text;
+    text.tex = TEX;
+    text.box = CBox{std::round(X + (SIZE - sc<float>(TEX->m_size.x)) / 2.F), std::round(Y + (SIZE - sc<float>(TEX->m_size.y)) / 2.F), sc<float>(TEX->m_size.x),
+                    sc<float>(TEX->m_size.y)};
     text.a   = 1.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
 }
@@ -1608,6 +1709,66 @@ bool scroll(PHLMONITOR monitor, const Vector2D& point, bool up) {
     return true;
 }
 
+bool overlayVisible() {
+    return overlayUp();
+}
+
+void showOverlay() {
+    if (!Config::getValue<bool>(KEY_HOT_KEYS))
+        return;
+
+    // `_optionalNumberOverlay`: the extra shortcut is registered at all only
+    // when one of the two is on, and each effect is gated again on its own key
+    // inside `_showOverlay`. With both off this is a no-op, which is why the
+    // deadline is not moved rather than moved and then ignored twice.
+    if (!Config::getValue<bool>(KEY_HOTKEY_OVERLAY) && !Config::getValue<bool>(KEY_HOTKEY_DOCK))
+        return;
+
+    const float SECS = std::max(0.F, Config::getValue<float>(KEY_SHORTCUT_SECS));
+    g_overlayUntil   = Time::steadyNow() + std::chrono::milliseconds(sc<int>(std::round(SECS * 1000.F)));
+
+    // A keypress is not a frame, and render.pre only fires inside one, so the
+    // first repaint has to be asked for here. Every monitor, because the
+    // reference shows the numbers on every dock it has, not just the focused
+    // one.
+    for (const auto& MONITOR : State::monitorState()->monitors()) {
+        if (MONITOR)
+            damageIfChanged(MONITOR);
+    }
+}
+
+void hotkey(int number, bool shift, bool ctrl) {
+    if (!Config::getValue<bool>(KEY_HOT_KEYS))
+        return;
+
+    // `_showOverlay()` runs beside `_activateApp`, not after a successful one,
+    // and `_activateApp` no-ops past the end of the dash. An empty slot
+    // therefore still draws the numbers -- which is how you see it is empty.
+    showOverlay();
+
+    const auto MONITOR = Desktop::focusState()->monitor();
+    if (!MONITOR)
+        return;
+
+    const auto LAYOUT = layout(MONITOR);
+    const int  INDEX  = number - 1;
+    if (INDEX < 0 || INDEX >= sc<int>(LAYOUT.items.size()))
+        return;
+
+    const auto& ITEM = LAYOUT.items[INDEX];
+
+    // The three modifiers are three branches of ONE `AppIcon.activate(button=1)`
+    // reading the KEY event's state, not three behaviours of their own -- which
+    // is why the reference binds all thirty accelerators to one callback.
+    // CONTROL short-circuits to GNOME's own activate (a new window of a running
+    // app, a launch of a stopped one); SHIFT picks `shift-click-action`; neither
+    // reaches `clickAction`.
+    if (ctrl)
+        launchApp(MONITOR, ITEM);
+    else
+        activateItem(MONITOR, ITEM, shift);
+}
+
 bool click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle) {
     if (!monitor)
         return false;
@@ -1891,7 +2052,7 @@ bool damageIfChanged(PHLMONITOR monitor) {
     // the next burst instead would save them; measure it before building it.
     const bool WIGGLING = Config::getValue<bool>(KEY_DANCE_URGENT) && anyUrgent(layout(monitor).items);
 
-    if (autohideAnimating(monitor) || WIGGLING)
+    if (autohideAnimating(monitor) || WIGGLING || overlayUp())
         g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
             if (MONITOR)
                 g_pHyprRenderer->damageMonitor(MONITOR.lock());
@@ -1942,6 +2103,12 @@ bool damageIfChanged(PHLMONITOR monitor) {
         // frame during a drag.
         if (const int CARET = caretIndex(); CARET >= 0)
             signature += "^" + std::to_string(CARET);
+
+        // X34. Same reasoning as the badge: the numbers arrive and leave
+        // without a single box moving, so they have to be in here or the frame
+        // that draws them -- and the one that clears them -- is never asked for.
+        if (overlayUp())
+            signature += "~overlay";
 
         // X28. The menu is part of what the dock looks like, and its hovered row
         // moves with a bare pointer move exactly as the icon highlight does.
@@ -2064,6 +2231,11 @@ void render(PHLMONITOR monitor) {
 
             renderBadge(monitor, ITEM);
         }
+
+        // X34. Over the badge and the dot, because it is transient and it is the
+        // thing being read for as long as it is up. OUTSIDE the running gate:
+        // a pinned app that is not running still has a key.
+        renderNumberOverlay(monitor, ITEM, sc<int>(&ITEM - LAYOUT.items.data()));
     }
 
     // X32 Show Applications, drawn last of the icon row so its cell is complete

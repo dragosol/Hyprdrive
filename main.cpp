@@ -699,6 +699,28 @@ static SDispatchResult onMinimizeDispatcher(std::string arg) {
     return {};
 }
 
+// OVERVIEW_CPP_SPEC §13.9 X34. All thirty accelerators and `<Super>q` land
+// here; the compositor's `bind` lines carry which is which.
+static SDispatchResult onHotkeyDispatcher(std::string arg) {
+    if (arg == "overlay") {
+        ScrollOverview::Dock::showOverlay();
+        return {};
+    }
+
+    bool shift = false;
+    bool ctrl  = false;
+    if (arg.starts_with("shift ")) {
+        shift = true;
+        arg   = arg.substr(6);
+    } else if (arg.starts_with("ctrl ")) {
+        ctrl = true;
+        arg  = arg.substr(5);
+    }
+
+    ScrollOverview::Dock::hotkey(std::stoi(arg), shift, ctrl);
+    return {};
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     SCROLLOVERVIEW_HANDLE = handle;
 
@@ -916,6 +938,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("navigate", ::onNavigateDispatcher);
     ScrollOverview::Config::registerDispatcher("window", ::onWindowDispatcher);
     ScrollOverview::Config::registerDispatcher("minimize", ::onMinimizeDispatcher);
+    ScrollOverview::Config::registerDispatcher("hotkey", ::onHotkeyDispatcher);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
     registerTapSuper();

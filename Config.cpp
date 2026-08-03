@@ -70,6 +70,17 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "minimize"); },
         },
         {
+            // X34. `1`..`10` are the reference's SLOT numbers, not the digits on
+            // the keys -- `<Super>0` is the tenth app and so binds `10`. One
+            // dispatcher for all thirty accelerators, because the reference has
+            // one callback for all thirty and the modifier is an argument to it.
+            .name            = "hotkey",
+            .argPattern      = std::regex{"^(overlay|((shift|ctrl) )?([1-9]|10))$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected overlay, or 1-10 optionally prefixed with 'shift ' or 'ctrl '",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "hotkey"); },
+        },
+        {
             .name            = "window",
             .argPattern      = std::regex{"^(select|close|click)$"},
             .typeArgError    = "expected a string argument",
@@ -424,6 +435,21 @@ static void registerConfigValues() {
                                                          "hyprgnomedock: an urgent window stays listed even when isolate_workspaces hides its workspace "
                                                          "(D2D workspace-agnostic-urgent-windows)",
                                                          true));
+
+    // X34. The accelerators are NOT keys -- Hyprland's own `bind` lines are the
+    // store GNOME uses gsettings for. These four are the behaviour around them.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:hot_keys", "hyprgnomedock: Super+number activates dock apps (D2D hot-keys)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:hotkeys_overlay",
+                                                         "hyprgnomedock: a hotkey press draws the slot numbers on the icons (D2D hotkeys-overlay)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:hotkeys_show_dock",
+                                                         "hyprgnomedock: a hotkey press reveals a hidden dock while the overlay is up (D2D hotkeys-show-dock)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:shortcut_timeout",
+                                                          "hyprgnomedock: seconds the number overlay stays up (D2D shortcut-timeout)", 2.F,
+                                                          SFloatValueOptions{.min = 0.F, .max = 10.F}));
 
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
