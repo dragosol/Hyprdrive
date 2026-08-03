@@ -142,6 +142,25 @@ constexpr float  MENU_SEP_H     = 9.F;
 constexpr float  MENU_MIN_W     = 170.F;
 constexpr size_t MENU_LABEL_MAX = 44; // bytes; window titles are arbitrarily long
 
+// OVERVIEW_CPP_SPEC 13.12 X47. The hover preview panel. Windows' taskbar for
+// placement and trigger, this rice for looks: the same frost, the same plate and
+// the same house curves the X28 menu already uses, because it is the same class
+// of floating chrome one gap above the pill.
+constexpr float  PANEL_GAP      = 8.F;   // above the pill, matching MENU_GAP
+constexpr float  PANEL_PAD      = 10.F;
+constexpr float  PANEL_CELL_H   = 132.F; // logical px, the preview row's height
+constexpr float  PANEL_CELL_GAP = 10.F;
+constexpr float  PANEL_RADIUS   = 12.F;
+constexpr float  PANEL_IN_MS    = 170.F;
+constexpr float  PANEL_OUT_MS   = 130.F; // exits ~25% quicker, house rule
+constexpr float  PANEL_SLIDE_MS = 160.F; // travel from one icon to the next
+// A short hold before the dismissal starts, so crossing the gap between two
+// icons does not flicker the panel away and back.
+constexpr float  PANEL_GRACE_MS = 180.F;
+// ponytail: past this the cells are too narrow to read anyway. Scroll or a
+// second row if an app with a dozen windows ever needs them all.
+constexpr size_t PANEL_MAX      = 6;
+
 // X31 RUNNING INDICATOR. `running-indicator-style` is DEFAULT in the reference,
 // and DEFAULT is not a Dash to Dock drawing at all: appIconIndicators.js's
 // RunningIndicatorDefault only adds a css class and leaves GNOME SHELL's own dot
@@ -2425,6 +2444,237 @@ void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
     restoreWithFlightImpl(monitor, window);
 }
 
+
+namespace {
+
+// OVERVIEW_CPP_SPEC 13.12 X47. HOVER RAISES A LIVE PREVIEW.
+//
+// The previews are REAL, LIVE, compositor-rendered windows -- X25's requirement
+// carried over unchanged into this new home. What X47 changes is WHEN they are
+// drawn: hover, rather than a permanent slot in the pill (which X46 deleted).
+// That is also what makes this cheaper than the inline previews it replaces --
+// 13.9's live-on-demand constraint says a window nobody renders gets no frame
+// callbacks, and hover is the natural on-demand signal.
+//
+// X25's drawing path, lifted out of render()'s lambda so the panel can use it
+// too. `forcePreviewVisible` is gated on MINIMIZED: a window that is already on
+// screen needs none of it, and asserting its alpha would stomp whatever the
+// compositor is animating.
+void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now) {
+    const bool STASHED = Minimize::isMinimized(window);
+    if (STASHED)
+        forcePreviewVisible(window);
+
+    const auto  SIZE        = window->m_realSize->value();
+    const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(box.height / (SIZE.y * monitor->m_scale)) : 1.F;
+
+    OverviewWindow::renderOverviewWindow({
+        .monitor     = monitor,
+        .window      = window,
+        .windowBox   = box,
+        .renderScale = RENDERSCALE,
+        .now         = now,
+    });
+
+    if (STASHED)
+        presentPreview(window, monitor, now);
+}
+
+// The panel GROWS OUT OF THE ICON rather than fading in on the spot -- the same
+// trick X54's flight uses, and it is why this needs no alpha on the window
+// content: renderOverviewWindow has no alpha parameter, but it scales, so the
+// entrance is a box lerp and the previews ride it.
+struct SPanel {
+    std::string     wmClass;
+    CBox            anchor;                          // the icon it belongs to
+    CBox            target;                          // where it settles
+    CBox            from;                            // where the current move started
+    Time::steady_tp moveSince = Time::steadyNow();
+    float           moveMs    = PANEL_IN_MS;
+    bool            decel     = true;                // entrances decelerate, exits do not
+    bool            out       = false;
+    bool            leaving   = false;               // inside the grace period
+    Time::steady_tp leftAt    = Time::steadyNow();
+};
+
+std::optional<SPanel> g_panel;
+
+bool sameBox(const CBox& a, const CBox& b) {
+    return sc<int>(a.x) == sc<int>(b.x) && sc<int>(a.y) == sc<int>(b.y) && sc<int>(a.width) == sc<int>(b.width) && sc<int>(a.height) == sc<int>(b.height);
+}
+
+// The windows an icon previews. classWindows already answers with the minimized
+// ones included, which is what makes a minimized window reachable from its own
+// icon -- the whole point of X45's 1-window branch.
+std::vector<PHLWINDOW> panelWindows(const std::string& wmClass) {
+    if (wmClass.empty())
+        return {};
+
+    auto out = classWindows(wmClass);
+    std::erase_if(out, [](const auto& window) { return !window || !window->m_isMapped || !window->wlSurface() || !window->wlSurface()->resource(); });
+    if (out.size() > PANEL_MAX)
+        out.resize(PANEL_MAX);
+
+    return out;
+}
+
+// One cell per window, side by side, each keeping its window's aspect.
+CBox panelTarget(PHLMONITOR monitor, const SLayout& layout, const std::vector<PHLWINDOW>& windows, const CBox& anchor) {
+    const float SCALE = std::max(monitor->m_scale, 0.01F);
+    const float CELLH = PANEL_CELL_H * SCALE;
+
+    float content = 0.F;
+    for (size_t i = 0; i < windows.size(); ++i)
+        content += CELLH * previewAspect(windows[i]) + (i ? PANEL_CELL_GAP * SCALE : 0.F);
+
+    const float WIDTH  = std::round(content + 2.F * PANEL_PAD * SCALE);
+    const float HEIGHT = std::round(CELLH + 2.F * PANEL_PAD * SCALE);
+    const float CX     = sc<float>(anchor.x) + sc<float>(anchor.width) / 2.F;
+
+    // Clamped to the monitor: an icon near either end would otherwise push half
+    // the panel off screen, which is where a taskbar preview stops being one.
+    const float MARGIN = PANEL_PAD * SCALE;
+    const float MAXX   = sc<float>(monitor->m_size.x) * SCALE - WIDTH - MARGIN;
+    const float X      = std::clamp(CX - WIDTH / 2.F, MARGIN, std::max(MARGIN, MAXX));
+
+    return CBox{std::round(X), std::round(sc<float>(layout.pill.y) - PANEL_GAP * SCALE - HEIGHT), WIDTH, HEIGHT};
+}
+
+// Pass an empty class when nothing is hovered; like the tooltip, the panel
+// outlives the hover so that it can animate AWAY instead of blinking out.
+void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor, const std::string& wmClass, const Time::steady_tp& now) {
+    auto       windows = panelWindows(wmClass);
+    const bool WANT    = !windows.empty();
+
+    if (WANT) {
+        const CBox TARGET = panelTarget(monitor, layout, windows, anchor);
+
+        if (!g_panel) {
+            // Rises out of the icon, decelerating into place.
+            g_panel = SPanel{.wmClass = wmClass, .anchor = anchor, .target = TARGET, .from = anchor, .moveSince = now, .moveMs = PANEL_IN_MS, .decel = true};
+        } else {
+            g_panel->leaving = false;
+            g_panel->wmClass = wmClass;
+            g_panel->anchor  = anchor;
+
+            // Caught mid-dismissal, or moved to another icon: in both cases the
+            // move restarts from WHERE IT IS, which is what makes it read as one
+            // panel following the pointer rather than two panels swapping.
+            if (g_panel->out || !sameBox(g_panel->target, TARGET)) {
+                const float T = std::clamp(elapsedMs(g_panel->moveSince) / std::max(1.F, g_panel->moveMs), 0.F, 1.F);
+
+                g_panel->from      = lerpBox(g_panel->from, g_panel->target, houseEase(g_panel->decel, T));
+                g_panel->target    = TARGET;
+                g_panel->moveSince = now;
+                g_panel->moveMs    = g_panel->out ? PANEL_IN_MS : PANEL_SLIDE_MS;
+                g_panel->decel     = true;
+                g_panel->out       = false;
+            }
+        }
+    } else if (g_panel) {
+        if (!g_panel->out && !g_panel->leaving) {
+            g_panel->leaving = true;
+            g_panel->leftAt  = now;
+        }
+
+        // The grace expires: shrink back into the icon, accelerating.
+        if (g_panel->leaving && elapsedMs(g_panel->leftAt) >= PANEL_GRACE_MS) {
+            const float T = std::clamp(elapsedMs(g_panel->moveSince) / std::max(1.F, g_panel->moveMs), 0.F, 1.F);
+
+            g_panel->from      = lerpBox(g_panel->from, g_panel->target, houseEase(g_panel->decel, T));
+            g_panel->target    = g_panel->anchor;
+            g_panel->moveSince = now;
+            g_panel->moveMs    = PANEL_OUT_MS;
+            g_panel->decel     = false;
+            g_panel->out       = true;
+            g_panel->leaving   = false;
+        }
+
+        // The panel keeps drawing the LAST app's windows while it dismisses --
+        // the pointer has already left, so nothing else names them.
+        windows = panelWindows(g_panel->wmClass);
+        if (windows.empty()) {
+            g_panel.reset();
+            return;
+        }
+    } else
+        return;
+
+    const float T = std::clamp(elapsedMs(g_panel->moveSince) / std::max(1.F, g_panel->moveMs), 0.F, 1.F);
+    if (g_panel->out && T >= 1.F) {
+        g_panel.reset();
+        return;
+    }
+
+    const CBox  DRAWN = lerpBox(g_panel->from, g_panel->target, houseEase(g_panel->decel, T));
+    const float SCALE = std::max(monitor->m_scale, 0.01F);
+
+    if (DRAWN.width < 2.0 || DRAWN.height < 2.0)
+        return;
+
+    // The plate fades with the growth so the frost does not slam on at full
+    // strength over the icon it is still the size of.
+    const float ALPHA   = g_panel->out ? 1.F - houseEase(false, T) : houseEase(true, T);
+    const int   ROUNDED = sc<int>(std::round(PANEL_RADIUS * SCALE));
+
+    // X13/X29 frost, the dock's own -- the panel is part of the dock, not a
+    // second surface with a taste of its own.
+    COverviewBlurPassElement::SData blur;
+    blur.box            = DRAWN;
+    blur.rounding       = ROUNDED;
+    blur.roundingPower  = 2.F;
+    blur.alpha          = ALPHA;
+    blur.xray           = false;
+    blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
+    blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);
+    blur.blurBrightness = Config::getValue<float>(KEY_BLUR_BRIGHT);
+    blur.blurNoise      = Config::getValue<float>(KEY_BLUR_NOISE);
+    blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
+    blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
+
+    auto                        colour = background();
+    CRectPassElement::SRectData bg;
+    bg.box           = DRAWN;
+    bg.color         = CHyprColor{colour.r, colour.g, colour.b, colour.a * ALPHA};
+    bg.round         = ROUNDED;
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+
+    // Cells are laid out inside the box that is actually on screen this frame,
+    // not inside the settled one -- otherwise the contents would overflow the
+    // plate for the whole of the entrance.
+    const float PAD   = PANEL_PAD * SCALE;
+    const float CELLH = sc<float>(DRAWN.height) - 2.F * PAD;
+    const float GAPS  = PANEL_CELL_GAP * SCALE * sc<float>(windows.size() - 1);
+    const float AVAIL = sc<float>(DRAWN.width) - 2.F * PAD - GAPS;
+    if (CELLH < 1.F || AVAIL < 1.F)
+        return;
+
+    float sum = 0.F;
+    for (const auto& WINDOW : windows)
+        sum += previewAspect(WINDOW);
+
+    float x = sc<float>(DRAWN.x) + PAD;
+    for (const auto& WINDOW : windows) {
+        const float WIDTH = AVAIL * previewAspect(WINDOW) / std::max(sum, 0.01F);
+
+        CBox cell{std::round(x), std::round(sc<float>(DRAWN.y) + PAD), std::round(WIDTH), std::round(CELLH)};
+        renderLivePreview(monitor, WINDOW, cell, now);
+
+        x += WIDTH + PANEL_CELL_GAP * SCALE;
+    }
+}
+
+// Whether anything of the panel is on screen. render()'s damage loop asks: a
+// pointer resting on an icon emits no motion, so without a frame of its own the
+// entrance would freeze on its first step and the previews would be stills.
+bool panelUp() {
+    return g_panel.has_value();
+}
+
+}
+
 void render(PHLMONITOR monitor) {
     const auto LAYOUT = layout(monitor);
     if (LAYOUT.pill.empty())
@@ -2543,20 +2793,6 @@ void render(PHLMONITOR monitor) {
         }
     }
 
-    // The menu says the app's name louder than the tooltip does, and the two
-    // plates would otherwise sit on top of each other.
-    // The empty-name call is what drives the fade-OUT: without it the plate would
-    // simply stop being drawn, which is the pop X57 is removing.
-    if (!g_menu) {
-        if (HASHOVER)
-            renderTooltip(monitor, LAYOUT, HOVEREDITEM->iconBox, itemName(*HOVEREDITEM));
-        else if (HOVERAPPS)
-            renderTooltip(monitor, LAYOUT, LAYOUT.showApps, "Show Applications");
-        else
-            renderTooltip(monitor, LAYOUT, CBox{}, "");
-    } else
-        renderTooltip(monitor, LAYOUT, CBox{}, "");
-
     // Above the pill by construction (MENU_GAP), so the previews below cannot
     // overdraw it and it does not have to wait for them.
     renderMenu(monitor, LAYOUT);
@@ -2566,22 +2802,37 @@ void render(PHLMONITOR monitor) {
     // X25. The REAL window, through the same path the overview tiles use --
     // which is the point of rebuilding the dock in C++ at all. An icon or a
     // cached screenshot here would be the defect the spec names.
-    const auto drawWindowAt = [&](const PHLWINDOW& window, const CBox& box) {
-        forcePreviewVisible(window);
+    const auto drawWindowAt = [&](const PHLWINDOW& window, const CBox& box) { renderLivePreview(monitor, window, box, NOW); };
 
-        const auto  SIZE        = window->m_realSize->value();
-        const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(box.height / (SIZE.y * monitor->m_scale)) : 1.F;
+    // X47. Over the pill, under the flight -- a window on its way into an icon
+    // must not disappear behind the panel it flies past. Suppressed while the
+    // X28 menu is up (the two plates would stack) and while the dock's own drag
+    // is live (a panel following a dragged icon is noise, not information).
+    const bool PANELWANTED = HASHOVER && !g_menu && !dragging() && !dragPending();
+    renderHoverPreview(monitor, LAYOUT, PANELWANTED ? HOVEREDITEM->iconBox : CBox{}, PANELWANTED ? HOVEREDITEM->wmClass : "", NOW);
 
-        OverviewWindow::renderOverviewWindow({
-            .monitor     = monitor,
-            .window      = window,
-            .windowBox   = box,
-            .renderScale = RENDERSCALE,
-            .now         = NOW,
-        });
-
-        presentPreview(window, monitor, NOW);
-    };
+    // The menu says the app's name louder than the tooltip does, and the two
+    // plates would otherwise sit on top of each other.
+    //
+    // X47 makes the PANEL a third plate in the same place, so it suppresses the
+    // name the same way -- a name plate under a wall of previews of that very
+    // app is the stack the menu branch already refuses to draw.
+    // ponytail: the panel therefore shows no text at all. Windows puts each
+    // window's TITLE over its thumbnail; add that (labelPill per cell, it is
+    // already shared with the overview caption) when per-window identification
+    // matters, e.g. once G15's window rows land.
+    //
+    // The empty-name call is what drives the fade-OUT: without it the plate would
+    // simply stop being drawn, which is the pop X57 is removing.
+    if (!g_menu && !panelUp()) {
+        if (HASHOVER)
+            renderTooltip(monitor, LAYOUT, HOVEREDITEM->iconBox, itemName(*HOVEREDITEM));
+        else if (HOVERAPPS)
+            renderTooltip(monitor, LAYOUT, LAYOUT.showApps, "Show Applications");
+        else
+            renderTooltip(monitor, LAYOUT, CBox{}, "");
+    } else
+        renderTooltip(monitor, LAYOUT, CBox{}, "");
 
     // X46. A minimize now flies into the app's OWN ICON. It used to fly into the
     // preview slot the minimize itself created, which is the entry X46 deletes;
@@ -2610,7 +2861,9 @@ void render(PHLMONITOR monitor) {
     for (const auto& PREVIEW : LAYOUT.previews)
         drawWindowAt(PREVIEW.window, PREVIEW.box);
 
-    if (LAYOUT.previews.empty() && !g_flight)
+    // X47. The panel needs the same loop: its entrance, its travel and its live
+    // previews all need frames nothing else on an idle desktop would ask for.
+    if (LAYOUT.previews.empty() && !g_flight && !panelUp())
         return;
 
     // X25. A minimized window sits on a hidden workspace, so its commits damage
