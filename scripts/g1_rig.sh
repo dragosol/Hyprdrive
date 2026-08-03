@@ -33,7 +33,7 @@ ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]
 dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
 key() { ydotool key "$1:1" "$1:0"; sleep 0.30; }
 
-K_ESC=1; K_K=37; K_X=45; K_SPACE=57
+K_ESC=1; K_K=37; K_X=45; K_SPACE=57; K_TAB=15; K_BKSP=14; K_F5=63
 
 case "${1:?usage: g1_rig.sh fixture|run <tag>}" in
 
@@ -100,6 +100,12 @@ run)
     key $K_ESC;     sleep 1.2
     key $K_K; key $K_SPACE; key $K_X; sleep 1.5; shot 40-k_x
     key $K_ESC;     sleep 1.0
+
+    # G1's negative half: TAB, BACKSPACE and an F-key must not start a search.
+    # ARROWS are deliberately absent -- they legitimately move the tile
+    # selection, so a frame diff cannot tell "a search started" from "the
+    # selection moved" and the phase would be measuring the wrong claim.
+    key $K_TAB; key $K_BKSP; key $K_F5; sleep 1.5; shot 50-nostart
 
     ls -la $OUT/$TAG-*.png
     echo G1_RUN_OK

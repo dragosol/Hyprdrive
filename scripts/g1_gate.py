@@ -29,12 +29,14 @@ ctrlA_space = diff("00-ctrlA", "10-space")
 ctrlA_ctrlB = diff("00-ctrlA", "01-ctrlB")
 ctrlA_typed = diff("00-ctrlA", "20-typed")
 kx_k_x = diff("30-kx", "40-k_x")
+ctrlA_nostart = diff("00-ctrlA", "50-nostart")
 
 rows = [
     ("SPACE on an empty query is a no-op", "ctrlA vs 10-space", ctrlA_space, ctrlA_space <= NOISE),
     ("no drift between two idle frames", "ctrlA vs 01-ctrlB", ctrlA_ctrlB, ctrlA_ctrlB <= NOISE),
     ("LIVENESS: 'k' does start a search", "ctrlA vs 20-typed", ctrlA_typed, ctrlA_typed > NOISE),
     ("SPACE types once a search is active", "30-kx vs 40-k_x", kx_k_x, kx_k_x > NOISE),
+    ("TAB/BACKSPACE/F5 start no search", "ctrlA vs 50-nostart", ctrlA_nostart, ctrlA_nostart <= NOISE),
 ]
 
 print(f"{'claim':44} {'frames':22} {'changed px':>11}  verdict")
