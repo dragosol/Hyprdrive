@@ -22,13 +22,11 @@
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
-#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
-#include <hyprland/src/render/pass/BorderPassElement.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #undef protected
@@ -69,6 +67,7 @@ constexpr float EDGE_MARGIN     = 4.F;
 // icon is already CONTAINER_PAD_X + ITEM_MARGIN_X clear of both ends by
 // construction, so top/bottom is the only pair that can drift.
 static_assert(ITEM_PAD_TOP == ITEM_PAD_BOTTOM, "dock icons must sit equidistant from the pill's top and bottom");
+static_assert(ITEM_PAD_TOP == CONTAINER_PAD_X + ITEM_MARGIN_X, "hoverInset() assumes the icon is the same distance from every pill edge");
 
 // X25. A preview is as TALL as an icon -- it shares the icon row -- and as wide
 // as the window's own aspect makes it. The clamp is what stops one ultrawide or
@@ -81,7 +80,6 @@ constexpr float PREVIEW_MAX_ASPECT = 2.20F;
 // user showed: a rounded cell slightly larger than the icon, and a dark plate
 // above the dock carrying the app's name.
 constexpr float HOVER_PAD      = 6.F;
-constexpr float HOVER_RADIUS   = 12.F;
 constexpr float TOOLTIP_FONT   = 13.F;
 constexpr float TOOLTIP_PAD_X  = 10.F;
 constexpr float TOOLTIP_PAD_Y  = 6.F;
@@ -281,6 +279,13 @@ SLayout layout(PHLMONITOR monitor) {
 
 namespace {
 
+// How far the hover cell sits inside the pill, on every side. The icon is
+// ITEM_PAD_TOP from the pill's top and CONTAINER_PAD_X + ITEM_MARGIN_X from its
+// left, and those are equal by construction, so one number covers all four.
+float hoverInset() {
+    return ITEM_PAD_TOP - HOVER_PAD;
+}
+
 // The hovered cell, not the icon: GNOME's highlight is the .app-well-app box,
 // which is the icon plus its padding. Symmetric now that the vertical padding is.
 CBox hoverBox(const CBox& iconBox, float scale) {
@@ -396,24 +401,16 @@ void render(PHLMONITOR monitor) {
     const bool HASHOVER    = HOVEREDITEM != LAYOUT.items.end();
 
     if (HASHOVER) {
-        const auto BOX   = hoverBox(HOVEREDITEM->iconBox, monitor->m_scale);
-        const int  ROUND = sc<int>(std::round(HOVER_RADIUS * monitor->m_scale));
-
+        // (user, 2026-08-03) A flat fill, no outline. The radius is CONCENTRIC
+        // with the pill rather than a constant: the cell is inset from the pill
+        // by the same amount on every side, so its curve only reads as parallel
+        // to the dock's if the radius drops by that inset too.
         CRectPassElement::SRectData fill;
-        fill.box           = BOX;
+        fill.box           = hoverBox(HOVEREDITEM->iconBox, monitor->m_scale);
         fill.color         = CHyprColor{1.F, 1.F, 1.F, 0.10F};
-        fill.round         = ROUND;
+        fill.round         = std::max(0, LAYOUT.rounding - sc<int>(std::round(hoverInset() * monitor->m_scale)));
         fill.roundingPower = 2.F;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(fill));
-
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(CBorderPassElement::SBorderData{
-            .box           = BOX,
-            .grad1         = ::Config::CGradientValueData{CHyprColor{1.F, 1.F, 1.F, 0.22F}},
-            .a             = 1.F,
-            .round         = ROUND,
-            .borderSize    = std::max(1, sc<int>(std::round(monitor->m_scale))),
-            .roundingPower = 2.F,
-        }));
     }
 
     for (const auto& ITEM : LAYOUT.items) {
