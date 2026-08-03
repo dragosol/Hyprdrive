@@ -2,6 +2,9 @@
 
 #include <hyprland/src/plugins/PluginAPI.hpp>
 
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <string>
 
 inline HANDLE SCROLLOVERVIEW_HANDLE = nullptr;
@@ -27,6 +30,50 @@ inline constexpr const char* HOUSE_ACCEL_BEZIER = "scrolloverviewClose";
 // Falls back to a cubic of the right direction if called before the curves are
 // registered -- a wrong-but-sane shape beats linear.
 float houseEase(bool decel, float t);
+
+// OVERVIEW_CPP_SPEC §13.12 X52. Keystroke-to-paint profiler for the search
+// path. Gated on $SCROLLOVERVIEW_PROFILE so it is one predictable branch when
+// off; the standing rule is that a performance claim is closed by a measurement
+// of the moment complained about, and this is the instrument for that moment.
+namespace Prof {
+    inline bool enabled() {
+        static const bool ON = std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr;
+        return ON;
+    }
+
+    using clock = std::chrono::steady_clock;
+
+    inline uint64_t    matchNs = 0, matchCalls = 0;   // overviewSearchMatches
+    inline uint64_t    appNs   = 0, appCalls   = 0;   // AppSearch::search
+    inline uint64_t    rowsNs  = 0, rowsCalls  = 0;   // overviewSearchRows
+    inline uint64_t    srchNs  = 0, srchCalls  = 0;   // renderSearch (layout + text + icons)
+    inline uint64_t    icoResolveNs = 0, icoDecodeNs = 0, icoUploadNs = 0, icoCold = 0;
+    inline uint64_t    frameNs = 0, frameCalls = 0;   // the whole overview render pass
+    inline clock::time_point keyAt{};
+    inline bool        pending = false;
+    inline uint64_t    frames  = 0;                   // frames since the keystroke
+
+    inline void reset() { matchNs = matchCalls = appNs = appCalls = rowsNs = rowsCalls = srchNs = srchCalls = frameNs = frameCalls = frames = 0; icoResolveNs = icoDecodeNs = icoUploadNs = icoCold = 0; }
+
+    // Accumulates into a counter pair. Reads the clock only while profiling.
+    struct Timer {
+        uint64_t*        ns    = nullptr;
+        uint64_t*        calls = nullptr;
+        clock::time_point t0{};
+
+        Timer(uint64_t& nsSink, uint64_t& callSink) {
+            if (!enabled())
+                return;
+            ns = &nsSink; calls = &callSink; t0 = clock::now();
+        }
+        ~Timer() {
+            if (!ns)
+                return;
+            *ns += std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now() - t0).count();
+            ++*calls;
+        }
+    };
+}
 
 bool ensureScrollOverviewHooks();
 void disableScrollOverviewHooks();

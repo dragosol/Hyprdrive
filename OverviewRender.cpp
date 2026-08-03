@@ -9,6 +9,7 @@
 #include <drm_fourcc.h>
 #include <hyprgraphics/image/Image.hpp>
 #include "AppSearch.hpp"
+#include "globals.hpp"
 #include <string>
 #include <unordered_map>
 
@@ -33,8 +34,21 @@ SP<Render::ITexture> appIcon(const std::string& iconName) {
 
     SP<Render::ITexture> texture;
 
+    // X52 profile: split the COLD path three ways -- the icon-theme filesystem
+    // walk, the decode/rasterise, and the texture upload -- because the fix for
+    // each is a different fix.
+    ++Prof::icoCold;
+    const auto T0  = Prof::clock::now();
+    auto       UP0 = T0;
+
     if (const auto PATH = AppSearch::resolveIconPath(iconName); !PATH.empty()) {
+        const auto T1 = Prof::clock::now();
+        Prof::icoResolveNs += std::chrono::duration_cast<std::chrono::nanoseconds>(T1 - T0).count();
+
         Hyprgraphics::CImage image(PATH, {OVERVIEW_APP_ICON_PX, OVERVIEW_APP_ICON_PX});
+        const auto T2 = Prof::clock::now();
+        Prof::icoDecodeNs += std::chrono::duration_cast<std::chrono::nanoseconds>(T2 - T1).count();
+        UP0 = T2;
         if (image.success()) {
             if (const auto SURFACE = image.cairoSurface(); SURFACE && SURFACE->cairo()) {
                 auto* const CAIRO = SURFACE->cairo();
@@ -53,6 +67,8 @@ SP<Render::ITexture> appIcon(const std::string& iconName) {
             }
         }
     }
+
+    Prof::icoUploadNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Prof::clock::now() - UP0).count();
 
     g_overviewAppIcons[iconName] = texture;
     return texture;

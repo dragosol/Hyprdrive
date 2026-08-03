@@ -1,5 +1,7 @@
 #include "AppSearch.hpp"
 
+#include "globals.hpp"
+
 #include <algorithm>
 #include <ranges>
 #include <cctype>
@@ -701,6 +703,7 @@ namespace AppSearch {
     }
 
     std::vector<const SEntry*> search(const std::string& query, size_t limit) {
+        Prof::Timer PROF{Prof::appNs, Prof::appCalls};
         std::vector<const SEntry*> results;
         if (query.empty() || limit == 0)
             return results;

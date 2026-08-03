@@ -1,5 +1,7 @@
 #include "scrollOverview.hpp"
 
+#include <cstdio>
+
 #include "AppSearch.hpp"
 #include "TileChrome.hpp"
 
@@ -238,6 +240,8 @@ static std::vector<SSearchRow> overviewSearchRows() {
     if (g_overviewSearch.empty())
         return rows;
 
+    Prof::Timer PROF{Prof::rowsNs, Prof::rowsCalls};
+
     for (const auto* E : AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT))
         rows.push_back({E->name, E->icon, E, {}});
 
@@ -303,6 +307,8 @@ static const SSearchRowHit* searchRowAt(const Vector2D& point) {
 static bool overviewSearchMatches(const PHLWINDOW& window) {
     if (g_overviewSearch.empty())
         return true;
+
+    Prof::Timer PROF{Prof::matchNs, Prof::matchCalls};
 
     // Hyprland numbers regular workspaces from 1, which is what the extension
     // renders as `wsIndex + 1`, so typing "2:" finds desktop 2 on both.
@@ -5813,6 +5819,7 @@ size_t CScrollOverview::matchingWindowCount() const {
 }
 
 void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
+    Prof::Timer PROF{Prof::srchNs, Prof::srchCalls};
     if (!monitor)
         return;
 
@@ -7023,6 +7030,7 @@ void CScrollOverview::onWorkspaceChange() {
 }
 
 void CScrollOverview::render() {
+    Prof::Timer PROF{Prof::frameNs, Prof::frameCalls};
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return;
@@ -7130,6 +7138,24 @@ void CScrollOverview::render() {
     // user is dropping onto belongs. main.cpp skips the desktop hook while an
     // overview owns the monitor, so the pill is still drawn exactly once.
     ScrollOverview::Dock::render(MONITOR);
+
+    // X52. One line per frame after a keystroke: the frame that PAINTS the new
+    // results is frame 1, so its total is the keystroke-to-paint cost.
+    if (Prof::enabled() && Prof::pending) {
+        ++Prof::frames;
+        const auto SINCEKEY = std::chrono::duration<double, std::milli>(Prof::clock::now() - Prof::keyAt).count();
+        if (FILE* const F = std::fopen("/tmp/scrolloverview-prof.log", "a")) {
+            std::fprintf(F, "q=%-6s f=%llu sinceKey=%7.2fms  FRAME=%6.2fms  renderSearch=%6.2fms  match=%5.2fms/%llu  rows=%5.2fms  app=%5.2fms  ICON[cold=%llu resolve=%6.2f decode=%6.2f upload=%6.2f]\n",
+                         g_overviewSearch.c_str(), (unsigned long long)Prof::frames, SINCEKEY,
+                         Prof::frameNs / 1e6, Prof::srchNs / 1e6,
+                         Prof::matchNs / 1e6, (unsigned long long)Prof::matchCalls,
+                         Prof::rowsNs / 1e6, Prof::appNs / 1e6,
+                         (unsigned long long)Prof::icoCold, Prof::icoResolveNs / 1e6, Prof::icoDecodeNs / 1e6, Prof::icoUploadNs / 1e6);
+            std::fclose(F);
+        }
+        if (Prof::frames >= 3)
+            Prof::pending = false;
+    }
 
     // G12. The dragged result follows the pointer, AFTER the dock: the whole
     // gesture is a journey from the panel to the pill, and an icon that vanished

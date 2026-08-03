@@ -456,6 +456,13 @@ static void applySearchKey(uint32_t keycode) {
         g_overviewSearch.push_back(C);
     }
 
+    // X52. The moment being complained about starts HERE, not at the frame.
+    if (Prof::enabled()) {
+        Prof::reset();
+        Prof::keyAt   = Prof::clock::now();
+        Prof::pending = true;
+    }
+
     // X20: every keystroke starts a new provider generation. Non-blocking, so
     // this costs the keystroke nothing; results land over the next frames.
     SearchProviders::query(g_overviewSearch);
