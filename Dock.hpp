@@ -153,8 +153,6 @@ void showOverlay();
 
 // X34. Is the overlay up right now? For the acceptance rig, which has to know
 // what the frame it is about to capture is supposed to contain.
-bool overlayVisible();
-
 // Damage the monitor when the pill's shape changes -- an app opening or closing,
 // the dock being switched off, the hovered icon moving -- and every frame while a
 // live preview is in it. MUST be called before the frame is rendered: damage

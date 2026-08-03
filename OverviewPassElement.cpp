@@ -88,40 +88,6 @@ static CRegion roundedRectRegion(const CBox& box, int rounding, float roundingPo
     return region;
 }
 
-CScrollOverviewPassElement::CScrollOverviewPassElement() {
-    ;
-}
-
-std::vector<UP<IPassElement>> CScrollOverviewPassElement::draw() {
-    if (const auto overview = activeScrollOverview())
-        overview->fullRender();
-    return {};
-}
-
-bool CScrollOverviewPassElement::needsLiveBlur() {
-    return false;
-}
-
-bool CScrollOverviewPassElement::needsPrecomputeBlur() {
-    return false;
-}
-
-std::optional<CBox> CScrollOverviewPassElement::boundingBox() {
-    const auto overview = activeScrollOverview();
-    if (!overview || !overview->pMonitor)
-        return std::nullopt;
-
-    return CBox{{}, overview->pMonitor->m_size};
-}
-
-CRegion CScrollOverviewPassElement::opaqueRegion() {
-    const auto overview = activeScrollOverview();
-    if (!overview || !overview->pMonitor)
-        return CRegion{};
-
-    return CBox{{}, overview->pMonitor->m_size};
-}
-
 COverviewBlurPassElement::COverviewBlurPassElement(const SData& data_) : data(data_) {
     ;
 }

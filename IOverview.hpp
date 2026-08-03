@@ -18,7 +18,6 @@ class IOverview {
     virtual void  performPrimaryClickAction() = 0;
     virtual void  damage()           = 0;
     virtual void  requestInputFrame() = 0;
-    virtual void  onDamageReported() = 0;
     virtual bool  shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) = 0;
     virtual bool  shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) = 0;
     virtual bool  shouldAllowRealtimePreviewSchedule() = 0;
@@ -46,8 +45,6 @@ class IOverview {
     virtual void  selectHoveredWorkspace() = 0;
     virtual bool  moveSelection(const std::string& direction) = 0;
     virtual bool  windowDispatcherAction(const std::string& action) = 0;
-
-    virtual void  fullRender() = 0;
 
     // X24. Where a window is DRAWN in the overview, monitor-local render px.
     // The dock is only ever on screen while the overview is, so a minimize

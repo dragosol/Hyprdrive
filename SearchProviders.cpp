@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -182,9 +181,7 @@ namespace SearchProviders {
         // ---- shared state between render thread and worker ----------------
 
         std::mutex              g_mutex;
-        std::condition_variable g_cv;
         std::vector<SResult>    g_results;
-        std::atomic<uint64_t>   g_revision{0};
 
         std::string             g_wantQuery;
         uint64_t                g_wantGen = 0;
@@ -231,7 +228,6 @@ namespace SearchProviders {
                 const auto&     BUS = g_providers[providerIdx].busName;
                 std::erase_if(g_results, [&](const SResult& R) { return R.stale && R.providerBus == BUS; });
             }
-            g_revision.fetch_add(1);
             return 0;
         }
 
@@ -369,7 +365,6 @@ namespace SearchProviders {
                 g_results.insert(g_results.end(), batch.begin(), batch.end());
                 std::ranges::stable_sort(g_results, {}, &SResult::providerRank);
             }
-            g_revision.fetch_add(1);
             return 0;
         }
 
@@ -566,17 +561,12 @@ namespace SearchProviders {
                 for (auto& R : g_results)
                     R.stale = true;
         }
-        g_revision.fetch_add(1);
         wake();
     }
 
     std::vector<SResult> results() {
         std::lock_guard lock(g_mutex);
         return g_results;
-    }
-
-    uint64_t revision() {
-        return g_revision.load();
     }
 
     void activate(const SResult& result, const std::string& queryText) {
@@ -596,28 +586,6 @@ namespace SearchProviders {
                 if (sd_bus_message_new_method_call(bus, &req, prov.busName.c_str(), prov.objectPath.c_str(), IFACE, "ActivateResult") < 0)
                     return;
                 sd_bus_message_append_basic(req, 's', id.c_str());
-                auto ARGV = cstrv(terms);
-                sd_bus_message_append_strv(req, ARGV.data());
-                const uint32_t TS = 0;
-                sd_bus_message_append_basic(req, 'u', &TS);
-                sd_bus_call_async(bus, nullptr, req, nullptr, nullptr, CALL_TIMEOUT_US);
-                sd_bus_message_unref(req);
-            });
-        }
-        wake();
-    }
-
-    void launchSearch(const SProvider& provider, const std::string& queryText) {
-        providers();
-        ensureWorker();
-        SProvider prov  = provider;
-        auto      terms = splitTerms(queryText);
-        {
-            std::lock_guard lock(g_mutex);
-            g_actions.emplace_back([prov, terms](sd_bus* bus) mutable {
-                sd_bus_message* req = nullptr;
-                if (sd_bus_message_new_method_call(bus, &req, prov.busName.c_str(), prov.objectPath.c_str(), IFACE, "LaunchSearch") < 0)
-                    return;
                 auto ARGV = cstrv(terms);
                 sd_bus_message_append_strv(req, ARGV.data());
                 const uint32_t TS = 0;

@@ -26,7 +26,6 @@ void forget();
 // the unscaled hit area the hover test uses.
 PHLWINDOW hovered();
 
-bool isHovered(const PHLWINDOW& window);
 
 // An ease is still running, so the caller owes another frame.
 bool animating();

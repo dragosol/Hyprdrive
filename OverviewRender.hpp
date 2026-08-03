@@ -10,7 +10,6 @@ namespace OverviewRender {
 
 void flushPass(PHLMONITOR monitor);
 void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur);
-void renderBlur(PHLMONITOR monitor, const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur);
 
 // The texture for a desktop-entry Icon= value, decoded and uploaded once.
 // AppSearch deliberately stops at the file path; the upload is render's job,

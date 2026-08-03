@@ -86,12 +86,4 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(data));
 }
 
-void renderBlur(PHLMONITOR monitor, const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur) {
-    if (!monitor)
-        return;
-
-    queueBlur(box, rounding, roundingPower, alpha, usePrecomputedBlur);
-    flushPass(monitor);
-}
-
 }

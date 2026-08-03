@@ -193,7 +193,6 @@ static void hkAddDamageA(void* thisptr, const CBox& box) {
         return;
     }
 
-    OVERVIEW->onDamageReported();
     rc<origAddDamageA>(g_pScrollAddDamageHookA->m_original)(thisptr, box);
 }
 
@@ -210,7 +209,6 @@ static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
         return;
     }
 
-    OVERVIEW->onDamageReported();
     rc<origAddDamageB>(g_pScrollAddDamageHookB->m_original)(thisptr, rg);
 }
 
@@ -958,8 +956,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    g_pHyprRenderer->m_renderPass.removeAllOfType("CScrollOverviewPassElement");
-
     g_pTapSuperKeyHook.reset();
     g_pTapSuperButtonHook.reset();
 

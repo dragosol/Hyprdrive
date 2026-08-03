@@ -33,7 +33,6 @@ class CScrollOverview : public IOverview {
     void         requestInputFrame() override;
     void         markBlurDirty();
     void         markBackdropBlurDirty();
-    void         onDamageReported() override;
     bool         shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) override;
     bool         shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) override;
     bool         shouldAllowRealtimePreviewSchedule() override;
@@ -54,8 +53,6 @@ class CScrollOverview : public IOverview {
     void         performPrimaryClickAction() override;
     bool         moveSelection(const std::string& direction) override;
     bool         windowDispatcherAction(const std::string& action) override;
-
-    void         fullRender() override;
 
   private:
     void   ensureTrailingWorkspace();
@@ -109,7 +106,6 @@ class CScrollOverview : public IOverview {
     bool      selectAndClose(const PHLWINDOW& window);
     CBox      tileCloseButtonBox(const PHLWINDOW& window) const;
     void      updateTileHover();
-    PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
     CDropIndicator::SDropAnchor dropAnchorAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr,
                                                                       CScrollOverview* dragContext = nullptr);
     PHLWORKSPACE workspaceAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
@@ -156,7 +152,6 @@ class CScrollOverview : public IOverview {
     size_t activeWorkspaceIndex() const;
     bool   isSelectedWorkspace(const PHLWORKSPACE& workspace) const;
     void   sendOverviewFrameCallbacks(const Time::steady_tp& now);
-    bool   isVisibleRealtimePreviewWindow(const PHLWINDOW& window) const;
     bool   hasRunningWorkspaceAnimation() const;
     bool   shouldAllowRealtimePreviewFrame() const;
     void   scheduleMinimumPreviewFrame();
@@ -332,5 +327,4 @@ class CScrollOverview : public IOverview {
     bool                             trackpadGestureSettlePending = false;
     double                           trackpadGestureSettleOffset  = 0.0;
 
-    friend class CScrollOverviewPassElement;
 };

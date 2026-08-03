@@ -48,16 +48,8 @@ namespace SearchProviders {
     // provider then by the provider's own ranking. Safe to call every frame.
     std::vector<SResult> results();
 
-    // Generation counter of the results above. Bumps when a query starts and
-    // again whenever late replies land, so the render layer can skip relayout
-    // on an unchanged set.
-    uint64_t revision();
-
     // ActivateResult on the owning provider. Detached, like AppSearch::launch.
     void activate(const SResult& result, const std::string& queryText);
-
-    // Hand the whole query to the provider's own app (GNOME's "show all").
-    void launchSearch(const SProvider& provider, const std::string& queryText);
 
     // Stops the worker. Idempotent; safe if never started.
     void shutdown();

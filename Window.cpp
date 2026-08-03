@@ -24,7 +24,6 @@
 #include <hyprland/src/render/pass/SurfacePassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/render/types.hpp>
-#include <hyprland/src/render/decorations/CHyprGroupBarDecoration.hpp>
 #include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
@@ -771,49 +770,6 @@ static void renderOverviewGroupTabTitles(PHLMONITOR monitor, const PHLWINDOW& wi
         data.a   = 1.F;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
     }
-}
-
-static void renderOverviewGroupTabs(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const CBox& workspaceBox,
-                                    const SOverviewWindowMetrics& metrics) {
-    if (!monitor || !window || !window->m_group || window->m_group->size() < 1)
-        return;
-
-    auto* const GROUPBAR = dc<CHyprGroupBarDecoration*>(window->getDecorationByType(DECORATION_GROUPBAR));
-    if (!GROUPBAR)
-        return;
-
-    const auto  PHEIGHT          = ScrollOverview::Config::getValue<int>("group:groupbar:height");
-    const auto  PINDICATORGAP    = ScrollOverview::Config::getValue<int>("group:groupbar:indicator_gap");
-    const auto  PINDICATORHEIGHT = ScrollOverview::Config::getValue<int>("group:groupbar:indicator_height");
-    const auto  PRENDERTITLES    = ScrollOverview::Config::getValue<bool>("group:groupbar:render_titles");
-    const auto  PGRADIENTS       = ScrollOverview::Config::getValue<bool>("group:groupbar:gradients");
-    const auto  PSTACKED         = ScrollOverview::Config::getValue<bool>("group:groupbar:stacked");
-    const auto  POUTERGAP        = ScrollOverview::Config::getValue<int>("group:groupbar:gaps_out");
-    const auto  PKEEPUPPERGAP    = ScrollOverview::Config::getValue<int>("group:groupbar:keep_upper_gap");
-
-    const auto  ONEBARHEIGHT     = POUTERGAP + PINDICATORHEIGHT + PINDICATORGAP + (PGRADIENTS || PRENDERTITLES ? PHEIGHT : 0);
-    const auto  DESIREDHEIGHT    = PSTACKED ? (ONEBARHEIGHT * window->m_group->size()) + POUTERGAP * PKEEPUPPERGAP : POUTERGAP * (1 + PKEEPUPPERGAP) + ONEBARHEIGHT;
-    const auto  EDGEPOINT        = g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_TOP, window);
-    CBox        assignedBox      = {window->m_realPosition->value() - Vector2D{0.0, sc<double>(DESIREDHEIGHT) + metrics.hyprbarTopOffsetLogical},
-                                    Vector2D{window->m_realSize->value().x, sc<double>(DESIREDHEIGHT)}};
-    assignedBox.translate(-EDGEPOINT);
-
-    if (window->m_workspace && !window->m_pinned)
-        assignedBox.translate(-window->m_workspace->m_renderOffset->value());
-
-    const auto PREVASSIGNEDBOX = GROUPBAR->m_assignedBox;
-    GROUPBAR->m_assignedBox    = assignedBox;
-    auto restoreAssignedBox    = Hyprutils::Utils::CScopeGuard([GROUPBAR, PREVASSIGNEDBOX] { GROUPBAR->m_assignedBox = PREVASSIGNEDBOX; });
-
-    Render::SRenderModifData modif;
-    modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, metrics.renderScale);
-    modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, workspaceBox.pos());
-
-    GROUPBAR->updateWindow(window);
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
-    GROUPBAR->draw(monitor, metrics.targetOpacity);
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
-    renderOverviewGroupTabIndicators(monitor, window, windowBox, metrics, metrics.targetOpacity);
 }
 
 static SOverviewCustomDecorationRenderState renderOverviewCustomDecorations(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& workspaceBox, const CBox& windowBox,

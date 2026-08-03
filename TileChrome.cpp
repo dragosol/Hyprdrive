@@ -165,10 +165,6 @@ PHLWINDOW hovered() {
     return g_hovered.lock();
 }
 
-bool isHovered(const PHLWINDOW& window) {
-    return window && g_hovered.lock() == window;
-}
-
 bool animating() {
     return std::ranges::any_of(g_states, [](const auto& entry) { return entry.second.hover.running() || entry.second.press.running(); });
 }

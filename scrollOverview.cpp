@@ -3140,55 +3140,6 @@ PHLWINDOW CScrollOverview::windowClosestToWorkspaceCenter(size_t workspaceIdx) c
     return bestWindow;
 }
 
-PHLWINDOW CScrollOverview::windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow, CBox* windowBox) const {
-    const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || workspaceIdx >= images.size() || !images[workspaceIdx])
-        return nullptr;
-
-    const auto ACTIVEIDX         = activeWorkspaceIndex();
-    const auto WORKSPACE_OFFSET = workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
-
-    PHLWINDOW bestWindow;
-    CBox      bestBox;
-    float     bestDistanceSq = std::numeric_limits<float>::max();
-
-    for (const bool floating : {true, false}) {
-        for (auto it = images[workspaceIdx]->windows.rbegin(); it != images[workspaceIdx]->windows.rend(); ++it) {
-            const auto WINDOW = getOverviewWindowToShow(it->lock());
-            if (!shouldShowOverviewWindow(WINDOW) || WINDOW == ignoredWindow || WINDOW->m_isFloating != floating)
-                continue;
-
-            const auto box    = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACE_OFFSET, layout);
-            const auto hitbox = expandOverviewWindowHitbox(box, scale->value(), MONITOR->m_scale);
-            if (box.containsPoint(lastMousePosLocal)) {
-                if (windowBox)
-                    *windowBox = box;
-
-                return WINDOW;
-            }
-
-            if (!hitbox.containsPoint(lastMousePosLocal))
-                continue;
-
-            const auto distanceSq = overviewPointDistanceSqToBox(lastMousePosLocal, box);
-            if (distanceSq >= bestDistanceSq)
-                continue;
-
-            bestWindow     = WINDOW;
-            bestBox        = box;
-            bestDistanceSq = distanceSq;
-        }
-
-        if (bestWindow)
-            break;
-    }
-
-    if (bestWindow && windowBox)
-        *windowBox = bestBox;
-
-    return bestWindow;
-}
-
 CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow,
                                                                                    CScrollOverview* dragContext) {
     CDropIndicator::SDropAnchor result;
@@ -6284,36 +6235,6 @@ void CScrollOverview::markBackdropBlurDirty() {
     backdropBlurDirty = true;
 }
 
-void CScrollOverview::onDamageReported() {
-    return;
-}
-
-bool CScrollOverview::isVisibleRealtimePreviewWindow(const PHLWINDOW& window) const {
-    const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || !window || !Fullscreen::controller()->isFullscreen(window) || window->m_monitor != MONITOR)
-        return false;
-
-    const auto ACTIVEIDX = activeWorkspaceIndex();
-    const auto SCALE     = scale->value();
-    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE, layout);
-
-    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
-        const auto& workspaceImage = images[workspaceIdx];
-        if (!workspaceImage || !workspaceImage->pWorkspace || workspaceImage->pWorkspace != window->m_workspace)
-            continue;
-
-        const auto fullscreenWindow = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(workspaceImage->pWorkspace));
-        if (fullscreenWindow != window)
-            return false;
-
-        const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, PITCH);
-        const auto WINDOWBOX        = getOverviewWindowBox(window, MONITOR, SCALE, viewOffset->value(), WORKSPACEOFFSET, layout);
-        return overviewBoxIntersectsMonitor(WINDOWBOX, MONITOR);
-    }
-
-    return false;
-}
-
 bool CScrollOverview::shouldAllowRealtimePreviewFrame() const {
     if (lastRealtimePreviewFrame.time_since_epoch().count() == 0)
         return true;
@@ -7202,10 +7123,6 @@ void CScrollOverview::render() {
     }
 
     sendOverviewFrameCallbacks(NOW);
-}
-
-void CScrollOverview::fullRender() {
-    return;
 }
 
 static float hyprlerp(const float& from, const float& to, const float perc) {

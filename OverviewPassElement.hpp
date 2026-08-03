@@ -3,25 +3,6 @@
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 
-class CScrollOverviewPassElement : public IPassElement {
-  public:
-    CScrollOverviewPassElement();
-    ~CScrollOverviewPassElement() override = default;
-
-    std::vector<UP<IPassElement>> draw() override;
-    ePassElementType              type() override {
-        return EK_CUSTOM;
-    }
-    bool                          needsLiveBlur() override;
-    bool                          needsPrecomputeBlur() override;
-    std::optional<CBox>           boundingBox() override;
-    CRegion                       opaqueRegion() override;
-
-    const char*                   passName() override {
-        return "CScrollOverviewPassElement";
-    }
-};
-
 class COverviewBlurPassElement : public IPassElement {
   public:
     struct SData {

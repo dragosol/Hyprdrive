@@ -1795,10 +1795,6 @@ bool scroll(PHLMONITOR monitor, const Vector2D& point, bool up) {
     return true;
 }
 
-bool overlayVisible() {
-    return overlayUp();
-}
-
 void showOverlay() {
     if (!Config::getValue<bool>(KEY_HOT_KEYS))
         return;
