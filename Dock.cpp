@@ -78,20 +78,32 @@ namespace {
 // between the top and bottom of the highlight and the top and bottom of the
 // dock (for any icon)".
 //
-// So there is ONE free number -- the gap every highlight keeps from its
-// neighbours and from the pill -- and the other three constants are DERIVED
-// from it. Written as derivations rather than four independent values because
-// that is what stops the identity drifting the next time one is nudged; the
-// asserts below are the same rule stated as arithmetic.
-//
-// The old values satisfied two thirds of it by accident: top/bottom and the
-// left edge were both 6px, but the between-highlights gap was
+// The original values satisfied two thirds of that by accident: top/bottom and
+// the left edge were both 6px, but the between-highlights gap was
 // 2*(2 - 6) = -8px, i.e. adjacent highlights OVERLAPPED. That was the defect.
+//
+// REFINED (user, 2026-08-03, second pass): the icon-to-icon distance is NOT
+// tied to the highlight-to-pill distance after all -- *"I only meant between
+// icons in the dock, not between icon highlight edges and dock"*. So there are
+// TWO numbers now, and they are deliberately independent:
+//
+//   HOVER_GAP  what a highlight keeps clear of the pill, every side
+//   ICON_GAP   icon edge to icon edge, which is what you see at REST
+//
+// The consequence, stated plainly because it is a real trade: two ADJACENT
+// highlights can no longer both fit in ICON_GAP once ICON_GAP < 2*HOVER_PAD
+// (12px), so at 11px they would overlap by 1px. That is harmless here and only
+// here, because **only one highlight is ever drawn** -- the pointer can hover
+// exactly one icon -- so the overlap is a number on paper and never pixels.
+// If two highlights ever become simultaneously visible (a keyboard-selected
+// icon alongside a hovered one, say), this stops being free and ICON_GAP has a
+// floor of 2*HOVER_PAD again.
 constexpr float HOVER_PAD = 6.F;  // the highlight grows the icon box by this
-constexpr float HOVER_GAP = 10.F; // ...and keeps this much clear on every side
+constexpr float HOVER_GAP = 10.F; // ...and keeps this much clear of the PILL
+constexpr float ICON_GAP  = 11.F; // icon edge to icon edge, at rest
 
-constexpr float CONTAINER_PAD_X = HOVER_GAP / 2.F;
-constexpr float ITEM_MARGIN_X   = HOVER_PAD + HOVER_GAP / 2.F;
+constexpr float ITEM_MARGIN_X   = ICON_GAP / 2.F;
+constexpr float CONTAINER_PAD_X = HOVER_GAP + HOVER_PAD - ITEM_MARGIN_X;
 constexpr float ITEM_PAD_TOP    = HOVER_PAD + HOVER_GAP;
 constexpr float ITEM_PAD_BOTTOM = ITEM_PAD_TOP;
 constexpr float EDGE_MARGIN     = 4.F;
@@ -99,7 +111,7 @@ constexpr float EDGE_MARGIN     = 4.F;
 // The user's rule as compile-time equalities. A build that breaks the spacing
 // cannot compile, which is the cheapest runnable check this constraint can
 // have -- there is no frame in which to measure a compile-time identity.
-static_assert(2.F * (ITEM_MARGIN_X - HOVER_PAD) == HOVER_GAP, "X53: the gap BETWEEN two hover highlights must equal HOVER_GAP");
+static_assert(2.F * ITEM_MARGIN_X == ICON_GAP, "X53: icon edge to icon edge must be ICON_GAP");
 static_assert(CONTAINER_PAD_X + ITEM_MARGIN_X - HOVER_PAD == HOVER_GAP, "X53: the first highlight must sit HOVER_GAP from the pill's left edge");
 static_assert(ITEM_PAD_TOP - HOVER_PAD == HOVER_GAP, "X53: a highlight must sit HOVER_GAP from the pill's top and bottom");
 static_assert(ITEM_PAD_TOP == ITEM_PAD_BOTTOM, "dock icons must sit equidistant from the pill's top and bottom");
