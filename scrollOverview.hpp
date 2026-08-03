@@ -163,6 +163,7 @@ class CScrollOverview : public IOverview {
     void   schedulePreviewFrameAfter(std::chrono::milliseconds delay);
     void   scheduleRealtimePreviewFrame();
     void   suspendInputListeners();
+    void   useAnimDirection(bool opening);
     void   activateSubmapIfConfigured();
     void   restoreSubmapIfActive();
     bool   dispatchSubmapMouseClick(uint32_t button);
@@ -298,6 +299,8 @@ class CScrollOverview : public IOverview {
     PHLANIMVAR<float>                resultsBand;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceInsertFadeConfig;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceRemoveFadeConfig;
+    SP<Hyprutils::Animation::SAnimationPropertyConfig> openAnimConfig;
+    SP<Hyprutils::Animation::SAnimationPropertyConfig> closeAnimConfig;
     Time::steady_tp                  lastRealtimePreviewFrame = {};
     Time::steady_tp                  realtimePreviewTimerDue = {};
     wl_event_source*                 realtimePreviewTimer = nullptr;

@@ -85,6 +85,8 @@ void setValue(const std::string& name, const T& value) {
 
 int           getGestureDistance();
 float         getScale();
+float         getOpenSpeed();
+float         getCloseSpeed();
 int           getWorkspaceGap();
 ELayout       getLayout();
 int           getScrollEventDelay();

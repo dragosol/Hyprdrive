@@ -163,6 +163,13 @@ static bool isTopLayerFocused(PHLMONITOR monitor) {
 static constexpr const char* OVERVIEW_INSERT_FADE_BEZIER = "scrolloverviewWorkspaceInsertFade";
 static constexpr const char* OVERVIEW_REMOVE_FADE_BEZIER = "scrolloverviewWorkspaceRemoveFade";
 
+// The overview's own entrance and exit curves. Both end flat rather than
+// overshooting -- an overview that bounces reads as a toy, and a bounce on the
+// exit fights the reversal, because a reversed close would have to unwind an
+// overshoot it had already started.
+static constexpr const char* OVERVIEW_OPEN_BEZIER  = "scrolloverviewOpen";
+static constexpr const char* OVERVIEW_CLOSE_BEZIER = "scrolloverviewClose";
+
 static bool isPointerOnTopLayer(PHLMONITOR monitor) {
     if (!monitor)
         return false;
@@ -1592,6 +1599,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         Animation::mgr()->addBezierWithName(OVERVIEW_INSERT_FADE_BEZIER, Vector2D{0.5, 0.0}, Vector2D{0.5, 0.0});
     if (!Animation::mgr()->bezierExists(OVERVIEW_REMOVE_FADE_BEZIER))
         Animation::mgr()->addBezierWithName(OVERVIEW_REMOVE_FADE_BEZIER, Vector2D{0.5, 1.0}, Vector2D{0.5, 1.0});
+    // Decelerate in: most of the distance is covered early, so the overview is
+    // legible well before it stops moving.
+    if (!Animation::mgr()->bezierExists(OVERVIEW_OPEN_BEZIER))
+        Animation::mgr()->addBezierWithName(OVERVIEW_OPEN_BEZIER, Vector2D{0.05, 0.7}, Vector2D{0.1, 1.0});
+    // Accelerate out: it leaves slowly enough to read as motion, then gets out
+    // of the way. This is the half the user is waiting on.
+    if (!Animation::mgr()->bezierExists(OVERVIEW_CLOSE_BEZIER))
+        Animation::mgr()->addBezierWithName(OVERVIEW_CLOSE_BEZIER, Vector2D{0.3, 0.0}, Vector2D{0.8, 0.15});
 
     workspaceInsertFadeConfig                  = makeShared<Hyprutils::Animation::SAnimationPropertyConfig>();
     workspaceInsertFadeConfig->overridden      = true;
@@ -1609,8 +1624,24 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     workspaceRemoveFadeConfig->internalStyle   = WINDOWSMOVEVALUES ? WINDOWSMOVEVALUES->internalStyle : "";
     workspaceRemoveFadeConfig->pValues         = workspaceRemoveFadeConfig;
 
-    Animation::mgr()->createAnimation(1.F, scale, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
-    Animation::mgr()->createAnimation({}, viewOffset, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
+    openAnimConfig                  = makeShared<Hyprutils::Animation::SAnimationPropertyConfig>();
+    openAnimConfig->overridden      = true;
+    openAnimConfig->internalBezier  = OVERVIEW_OPEN_BEZIER;
+    openAnimConfig->internalSpeed   = ScrollOverview::Config::getOpenSpeed();
+    openAnimConfig->internalEnabled = WINDOWSMOVEVALUES ? WINDOWSMOVEVALUES->internalEnabled : 1;
+    openAnimConfig->internalStyle   = "";
+    openAnimConfig->pValues         = openAnimConfig;
+
+    closeAnimConfig                  = makeShared<Hyprutils::Animation::SAnimationPropertyConfig>();
+    closeAnimConfig->overridden      = true;
+    closeAnimConfig->internalBezier  = OVERVIEW_CLOSE_BEZIER;
+    closeAnimConfig->internalSpeed   = ScrollOverview::Config::getCloseSpeed();
+    closeAnimConfig->internalEnabled = WINDOWSMOVEVALUES ? WINDOWSMOVEVALUES->internalEnabled : 1;
+    closeAnimConfig->internalStyle   = "";
+    closeAnimConfig->pValues         = closeAnimConfig;
+
+    Animation::mgr()->createAnimation(1.F, scale, openAnimConfig, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation({}, viewOffset, openAnimConfig, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, workspaceInsertProgress, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, workspaceInsertFadeProgress, workspaceInsertFadeConfig, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, reflowPacer, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
@@ -6747,6 +6778,7 @@ void CScrollOverview::close() {
     const auto finishClose = [&](const PHLWORKSPACE& finalWorkspace, const PHLWINDOW& finalWindow) {
         emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(finalWorkspace, finalWindow), false);
 
+        useAnimDirection(false);
         *scale = 1.F;
 
         if (!ScrollOverview::Config::getValue<int>("animations:enabled")) {
@@ -7214,6 +7246,19 @@ bool CScrollOverview::isClosing() const {
     return closing;
 }
 
+// Entrance and exit are not the same motion, so they do not share a curve. The
+// swap has to happen BEFORE the new target is assigned: the animation reads its
+// config when it is re-aimed, so setting it afterwards would shape the next
+// transition rather than this one.
+void CScrollOverview::useAnimDirection(bool opening) {
+    const auto CONFIG = opening ? openAnimConfig : closeAnimConfig;
+    if (!CONFIG)
+        return;
+
+    scale->setConfig(CONFIG);
+    viewOffset->setConfig(CONFIG);
+}
+
 void CScrollOverview::reopen() {
     if (!closeApplied)
         return;
@@ -7250,6 +7295,7 @@ void CScrollOverview::reopen() {
 
     // Both animate FROM their current value, so the reversal picks up exactly
     // where the close had got to: no jump, and no restart from the endpoint.
+    useAnimDirection(true);
     *viewOffset = Vector2D{};
     *scale      = ScrollOverview::Config::getScale();
 

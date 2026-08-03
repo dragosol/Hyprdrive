@@ -288,6 +288,20 @@ static void registerConfigValues() {
                                   makeShared<CIntValue>("plugin:scrolloverview:gesture_distance", "gesture distance in pixels", 200, SIntValueOptions{.min = 1}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:scale", "overview scale", 0.82F, SFloatValueOptions{.min = 0.1F, .max = 0.9F}));
+
+    // The overview used to borrow `windowsMove` for its own open and close,
+    // which meant one curve for both directions and no way to shape either
+    // without also changing how every window on the desk moves. These are in
+    // Hyprland's animation units -- tenths of a second, so 3.0 is 300ms.
+    //
+    // The defaults are the house motion rule: an entrance decelerates, an exit
+    // accelerates and is ~25% shorter, and neither overshoots.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:open_speed", "overview open duration, tenths of a second", 3.0F,
+                                                          SFloatValueOptions{.min = 0.1F, .max = 20.F}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:close_speed", "overview close duration, tenths of a second", 2.2F,
+                                                          SFloatValueOptions{.min = 0.1F, .max = 20.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:workspace_gap", "gap between overview workspaces", 40, SIntValueOptions{.min = 0}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -555,6 +569,14 @@ int getGestureDistance() {
 
 float getScale() {
     return std::clamp(getValue<float>("plugin:scrolloverview:scale"), 0.1F, 0.9F);
+}
+
+float getOpenSpeed() {
+    return std::max(0.1F, getValue<float>("plugin:scrolloverview:open_speed"));
+}
+
+float getCloseSpeed() {
+    return std::max(0.1F, getValue<float>("plugin:scrolloverview:close_speed"));
 }
 
 int getWorkspaceGap() {
