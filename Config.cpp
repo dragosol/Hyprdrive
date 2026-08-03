@@ -297,10 +297,10 @@ static void registerConfigValues() {
     // The defaults are the house motion rule: an entrance decelerates, an exit
     // accelerates and is ~25% shorter, and neither overshoots.
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CFloatValue>("plugin:scrolloverview:open_speed", "overview open duration, tenths of a second", 3.0F,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:open_speed", "overview open duration, tenths of a second", 2.6F,
                                                           SFloatValueOptions{.min = 0.1F, .max = 20.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CFloatValue>("plugin:scrolloverview:close_speed", "overview close duration, tenths of a second", 2.2F,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:close_speed", "overview close duration, tenths of a second", 1.9F,
                                                           SFloatValueOptions{.min = 0.1F, .max = 20.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:workspace_gap", "gap between overview workspaces", 40, SIntValueOptions{.min = 0}));

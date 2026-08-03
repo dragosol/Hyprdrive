@@ -167,6 +167,11 @@ static constexpr const char* OVERVIEW_REMOVE_FADE_BEZIER = "scrolloverviewWorksp
 // overshooting -- an overview that bounces reads as a toy, and a bounce on the
 // exit fights the reversal, because a reversed close would have to unwind an
 // overshoot it had already started.
+//
+// These are the rice's two shared curves -- `appleDecel` / `appleAccel` in
+// hyprland/general.lua and in the quickshell Appearance.qml. The plugin cannot
+// reference a config curve by name, so the control points are duplicated here:
+// change all three together or the rice stops speaking one motion language.
 static constexpr const char* OVERVIEW_OPEN_BEZIER  = "scrolloverviewOpen";
 static constexpr const char* OVERVIEW_CLOSE_BEZIER = "scrolloverviewClose";
 
@@ -1603,11 +1608,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     // Decelerate in: most of the distance is covered early, so the overview is
     // legible well before it stops moving.
     if (!Animation::mgr()->bezierExists(OVERVIEW_OPEN_BEZIER))
-        Animation::mgr()->addBezierWithName(OVERVIEW_OPEN_BEZIER, Vector2D{0.05, 0.7}, Vector2D{0.1, 1.0});
+        Animation::mgr()->addBezierWithName(OVERVIEW_OPEN_BEZIER, Vector2D{0.16, 1.0}, Vector2D{0.3, 1.0});
     // Accelerate out: it leaves slowly enough to read as motion, then gets out
     // of the way. This is the half the user is waiting on.
     if (!Animation::mgr()->bezierExists(OVERVIEW_CLOSE_BEZIER))
-        Animation::mgr()->addBezierWithName(OVERVIEW_CLOSE_BEZIER, Vector2D{0.3, 0.0}, Vector2D{0.8, 0.15});
+        Animation::mgr()->addBezierWithName(OVERVIEW_CLOSE_BEZIER, Vector2D{0.7, 0.0}, Vector2D{0.84, 0.0});
 
     workspaceInsertFadeConfig                  = makeShared<Hyprutils::Animation::SAnimationPropertyConfig>();
     workspaceInsertFadeConfig->overridden      = true;
