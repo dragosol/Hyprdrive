@@ -1,5 +1,7 @@
 #include "TileChrome.hpp"
 
+#include "globals.hpp"
+
 #include "AppSearch.hpp"
 #include "OverviewRender.hpp"
 
@@ -21,13 +23,18 @@ namespace ScrollOverview::TileChrome {
 
 namespace {
 
-// X7. The blow-up overshoots and settles -- that is the "playful bouncy" the
-// user asked for and the Easing.OutBack the deprecated overview used. The press
-// shrink does NOT overshoot: a bounce under the finger reads as a misclick.
+// X7 asked for a "playful bouncy" blow-up borrowed from the deprecated
+// overview's Easing.OutBack. **That clause is SUPERSEDED** by the standing
+// Apple-motion rule and by the user's direct report on 2026-08-03 that the
+// hover "is still bouncy and non-apple like". Zero overshoot now, both ways.
+// Do NOT restore easeOutBack here as an X7 regression fix.
+//
+// Hover is a micro-interaction, so it sits in the rice's FAST family (150ms)
+// rather than the 260ms entrance band; the exit is 27% quicker again.
 constexpr float HOVER_GROW    = 0.05F;
 constexpr float PRESS_SHRINK  = 0.04F;
-constexpr float HOVER_IN_MS   = 220.F;
-constexpr float HOVER_OUT_MS  = 140.F;
+constexpr float HOVER_IN_MS   = 150.F;
+constexpr float HOVER_OUT_MS  = 110.F;
 constexpr float PRESS_MS      = 90.F;
 
 // X8 / close button proportions, as fractions of the tile's SHORT side so they
@@ -82,20 +89,6 @@ std::unordered_map<Desktop::View::CWindow*, SState> g_states;
 PHLWINDOWREF                                        g_hovered;
 PHLWINDOWREF                                        g_pressed;
 
-// https://easings.net/#easeOutBack. Overshoots ~10% then settles.
-float easeOutBack(float t) {
-    constexpr float C1 = 1.70158F;
-    constexpr float C3 = C1 + 1.F;
-
-    const float X = std::clamp(t, 0.F, 1.F) - 1.F;
-    return 1.F + C3 * X * X * X + C1 * X * X;
-}
-
-float easeOutCubic(float t) {
-    const float INV = 1.F - std::clamp(t, 0.F, 1.F);
-    return 1.F - INV * INV * INV;
-}
-
 SState* stateFor(const PHLWINDOW& window, bool create) {
     if (!window)
         return nullptr;
@@ -109,14 +102,13 @@ SState* stateFor(const PHLWINDOW& window, bool create) {
     return create ? &g_states[window.get()] : nullptr;
 }
 
-// Hover in and out use different curves: OutBack coming in (the bounce), plain
-// cubic going out, because a bounce on the way out reads as the tile refusing
-// to let go.
-float hoverEased(const SState& state) {
-    const float PROGRESS = std::clamp(std::chrono::duration<float, std::milli>(Time::steadyNow() - state.hover.start).count() / state.hover.ms, 0.F, 1.F);
-    const float CURVE    = state.hover.to > state.hover.from ? easeOutBack(PROGRESS) : easeOutCubic(PROGRESS);
+// Growing is an entrance and shrinking back is an exit, so the direction of the
+// retarget picks the curve -- the same two the compositor and the shell use.
+float eased(const SEase& ease) {
+    const float PROGRESS = std::clamp(std::chrono::duration<float, std::milli>(Time::steadyNow() - ease.start).count() / ease.ms, 0.F, 1.F);
+    const float CURVE    = houseEase(ease.to > ease.from, PROGRESS);
 
-    return state.hover.from + (state.hover.to - state.hover.from) * CURVE;
+    return ease.from + (ease.to - ease.from) * CURVE;
 }
 
 float shortSide(const CBox& box) {
@@ -174,7 +166,7 @@ CBox scaledBox(const PHLWINDOW& window, const CBox& base) {
     if (!STATE || base.w < 1 || base.h < 1)
         return base;
 
-    const float FACTOR = (1.F + HOVER_GROW * hoverEased(*STATE)) * (1.F - PRESS_SHRINK * std::clamp(STATE->press.value(), 0.F, 1.F));
+    const float FACTOR = (1.F + HOVER_GROW * eased(STATE->hover)) * (1.F - PRESS_SHRINK * std::clamp(eased(STATE->press), 0.F, 1.F));
     if (std::abs(FACTOR - 1.F) < 0.0005F)
         return base;
 

@@ -172,8 +172,26 @@ static constexpr const char* OVERVIEW_REMOVE_FADE_BEZIER = "scrolloverviewWorksp
 // hyprland/general.lua and in the quickshell Appearance.qml. The plugin cannot
 // reference a config curve by name, so the control points are duplicated here:
 // change all three together or the rice stops speaking one motion language.
-static constexpr const char* OVERVIEW_OPEN_BEZIER  = "scrolloverviewOpen";
-static constexpr const char* OVERVIEW_CLOSE_BEZIER = "scrolloverviewClose";
+static constexpr const char* OVERVIEW_OPEN_BEZIER  = HOUSE_DECEL_BEZIER;
+static constexpr const char* OVERVIEW_CLOSE_BEZIER = HOUSE_ACCEL_BEZIER;
+
+// Anything that eases by hand -- tile hover, tile press, the grid reflow -- goes
+// through here, so the whole plugin is driven by the same two curve objects the
+// open and close animations use. Approximating them with a polynomial was how
+// the tile hover ended up on an OVERSHOOTING easeOutBack while the rest of the
+// rice had none.
+float houseEase(bool decel, float t) {
+    const float T = std::clamp(t, 0.F, 1.F);
+
+    if (Animation::mgr()) {
+        if (const auto CURVE = Animation::mgr()->getBezier(decel ? HOUSE_DECEL_BEZIER : HOUSE_ACCEL_BEZIER))
+            return CURVE->getYForPoint(T);
+    }
+
+    // Not registered yet: ease-out cubic, or its mirror for an exit.
+    const float INV = 1.F - T;
+    return decel ? 1.F - INV * INV * INV : T * T * T;
+}
 
 static bool isPointerOnTopLayer(PHLMONITOR monitor) {
     if (!monitor)
@@ -724,10 +742,9 @@ static uint64_t g_overviewFrame = 0;
 static std::unordered_map<Desktop::View::CWindow*, SGridReflow> g_gridReflows;
 static bool                                      g_gridReflowActive = false;
 
-// Ease-out cubic: same shape as the open/close animation measured under A2-A4.
+// A reflow is windows arriving at new slots, i.e. an entrance: house decel.
 static float gridReflowEase(float t) {
-    const float INV = 1.F - std::clamp(t, 0.F, 1.F);
-    return 1.F - INV * INV * INV;
+    return houseEase(true, t);
 }
 
 static bool gridBoxesDiffer(const CBox& a, const CBox& b) {
