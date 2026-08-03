@@ -26,6 +26,7 @@ namespace {
     constexpr const char* KEY_SHOW_TRASH  = "plugin:scrolloverview:dock:show_trash";
     constexpr const char* KEY_SHOW_MOUNTS = "plugin:scrolloverview:dock:show_mounts";
     constexpr const char* KEY_MOUNTS_NET  = "plugin:scrolloverview:dock:show_mounts_network";
+    constexpr const char* KEY_MOUNTS_ONLY_MOUNTED = "plugin:scrolloverview:dock:show_mounts_only_mounted";
 
     constexpr const char* TRASH_URI = "trash:///";
 
@@ -119,22 +120,26 @@ namespace {
     static_assert(!networkFs("nfs4x"));      // and it is whole-word, not a prefix test
     static_assert(!networkFs(nullptr));
 
-    // ponytail: MOUNTED volumes only, read from the kernel's mount table.
+    // Mounted volumes come from the kernel's mount table, which is exactly the
+    // set `show-mounts-only-mounted true` asks for -- so the common path needs
+    // neither the gvfs proxy volume monitor nor a GMainLoop to drive it, and it
+    // cannot go stale between polls the way a monitor with no loop to pump it
+    // would.
     //
-    // `show-mounts-only-mounted` is TRUE in the target config, and that is
-    // exactly the set the mount table holds -- so this needs neither the gvfs
-    // proxy volume monitor nor a GMainLoop to drive it, and it cannot go stale
-    // between polls the way a monitor with no loop to pump it would.
+    // With the key FALSE the unmounted half comes from the mount POINTS --
+    // fstab -- which is another plain file read on the same poll. Deliberately
+    // NOT `g_volume_monitor_get()`: that reaches for the gvfs proxy monitor over
+    // D-Bus, and this runs on the render thread once a second, where an earlier
+    // version of this file already wedged the compositor by blocking.
     //
-    // The ceiling: a volume that is present but NOT mounted -- an inserted disc,
-    // an unmounted partition -- has no row here and so no icon, which is what
-    // `show_mounts_only_mounted false` would have to show. Upgrade path is
-    // `g_volume_monitor_get()` + `g_volume_monitor_get_volumes()` on a PRIVATE
-    // GMainContext pumped with `g_main_context_iteration(ctx, FALSE)` at the top
-    // of each poll -- private because iterating the default context inside the
-    // compositor would dispatch whatever else glib has queued there.
+    // ponytail: the ceiling is a device that is neither in fstab nor mounted --
+    // an inserted disc, a stick nobody has mounted yet. It gets no row. Upgrade
+    // path is still the volume monitor, but on a PRIVATE GMainContext pumped
+    // with `g_main_context_iteration(ctx, FALSE)`, and pumped from somewhere
+    // that is allowed to block, which is not here.
     void readMounts(std::vector<SLocation>& out) {
-        const bool NET = Config::getValue<bool>(KEY_MOUNTS_NET);
+        const bool NET          = Config::getValue<bool>(KEY_MOUNTS_NET);
+        const bool ONLY_MOUNTED = Config::getValue<bool>(KEY_MOUNTS_ONLY_MOUNTED);
 
         GList* mounts = g_unix_mount_entries_get(nullptr);
         for (GList* l = mounts; l; l = l->next) {
@@ -160,8 +165,9 @@ namespace {
             GIcon* icon = g_unix_mount_entry_guess_icon(entry);
 
             SLocation loc;
-            loc.uri      = uri ? std::string{uri} : std::string{"file://"} + PATH;
-            loc.name     = label ? std::string{label} : std::string{PATH};
+            loc.uri       = uri ? std::string{uri} : std::string{"file://"} + PATH;
+            loc.mountPath = PATH;
+            loc.name      = label ? std::string{label} : std::string{PATH};
             loc.icon     = iconName(icon);
             loc.mount    = true;
             loc.canEject = g_unix_mount_entry_guess_can_eject(entry);
@@ -178,6 +184,62 @@ namespace {
         }
 
         g_list_free_full(mounts, reinterpret_cast<GDestroyNotify>(g_unix_mount_entry_free));
+
+        if (ONLY_MOUNTED)
+            return;
+
+        const size_t MOUNTEDCOUNT = out.size();
+        GList*       points       = g_unix_mount_points_get(nullptr);
+        for (GList* l = points; l; l = l->next) {
+            auto* point = static_cast<GUnixMountPoint*>(l->data);
+            if (!point)
+                continue;
+
+            // A mount point has no `is_system_internal` / `guess_should_display`
+            // -- glib only offers those for live mounts. `is_user_mountable` is
+            // the honest equivalent and a sharper filter than either: it is true
+            // exactly for the fstab entries carrying `user`/`users`, which are
+            // the ones this dock could actually mount if the row were clicked.
+            if (!g_unix_mount_point_is_user_mountable(point))
+                continue;
+
+            if (networkFs(g_unix_mount_point_get_fs_type(point)) && !NET)
+                continue;
+
+            const char* PATH = g_unix_mount_point_get_mount_path(point);
+            if (!PATH)
+                continue;
+
+            // fstab lists the mounted ones too, and those already have a row
+            // from the mount table above -- with the eject flag and the label
+            // the KERNEL reports, which is the better of the two answers.
+            const bool ALREADYMOUNTED = std::any_of(out.begin(), out.begin() + MOUNTEDCOUNT, [PATH](const SLocation& l) { return l.mountPath == PATH; });
+            if (ALREADYMOUNTED)
+                continue;
+
+            char*  label = g_unix_mount_point_guess_name(point);
+            GIcon* icon  = g_unix_mount_point_guess_icon(point);
+
+            SLocation loc;
+            loc.uri       = std::string{"file://"} + PATH;
+            loc.mountPath = PATH;
+            loc.name      = label ? std::string{label} : std::string{PATH};
+            loc.icon      = iconName(icon);
+            loc.mount     = true;
+            loc.mounted   = false;
+            loc.canEject  = g_unix_mount_point_guess_can_eject(point);
+
+            if (loc.icon.empty())
+                loc.icon = FALLBACK_MEDIA;
+
+            out.emplace_back(std::move(loc));
+
+            if (icon)
+                g_object_unref(icon);
+            g_free(label);
+        }
+
+        g_list_free_full(points, reinterpret_cast<GDestroyNotify>(g_unix_mount_point_free));
     }
 
     // One connection for the lifetime of the process. Opening a user bus means

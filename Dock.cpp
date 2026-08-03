@@ -556,6 +556,7 @@ std::vector<SItem> dockItems() {
             .locationName = LOCATION.name,
             .mount        = LOCATION.mount,
             .canEject     = LOCATION.canEject,
+            .mounted      = LOCATION.mounted,
             .trashEmpty   = LOCATION.empty,
         });
     }
@@ -1405,7 +1406,7 @@ void applyClickAction(PHLMONITOR monitor, const SItem& item, const std::string& 
 
 // ---------------------------------------------------------------- X28 menu --
 
-enum class ERow : uint8_t { Separator, Action, Window, Details, Favorite, Quit, EmptyTrash, Unmount, Eject };
+enum class ERow : uint8_t { Separator, Action, Window, Details, Favorite, Quit, EmptyTrash, Mount, Unmount, Eject };
 
 struct SRow {
     ERow         kind = ERow::Separator;
@@ -1452,9 +1453,15 @@ std::vector<SRow> buildRows(const SItem& item) {
     // menu is a bare plate, which is what the reference shows too.
     if (!item.uri.empty()) {
         if (item.mount) {
-            rows.emplace_back(SRow{.kind = ERow::Unmount, .label = "Unmount"});
-            if (item.canEject)
-                rows.emplace_back(SRow{.kind = ERow::Eject, .label = "Eject"});
+            // An fstab point that is not up yet offers the opposite action --
+            // and no Eject, because there is nothing mounted to eject.
+            if (!item.mounted)
+                rows.emplace_back(SRow{.kind = ERow::Mount, .label = "Mount"});
+            else {
+                rows.emplace_back(SRow{.kind = ERow::Unmount, .label = "Unmount"});
+                if (item.canEject)
+                    rows.emplace_back(SRow{.kind = ERow::Eject, .label = "Eject"});
+            }
         } else if (!item.trashEmpty)
             rows.emplace_back(SRow{.kind = ERow::EmptyTrash, .label = "Empty Trash"});
 
@@ -1499,6 +1506,7 @@ void activateRow(PHLMONITOR monitor, const SItem& item, const SRow& row) {
         case ERow::Separator: return;
 
         case ERow::EmptyTrash: Locations::emptyTrash(); return;
+        case ERow::Mount: Locations::mount(item.uri); return;
         case ERow::Unmount: Locations::unmount(item.uri, false); return;
         case ERow::Eject: Locations::unmount(item.uri, true); return;
 

@@ -33,6 +33,8 @@ struct SItem {
     std::string locationName;
     bool        mount      = false; // so its menu unmounts rather than empties
     bool        canEject   = false;
+    bool        mounted    = true;  // false: an fstab point offering Mount instead
+
     bool        trashEmpty = true;  // no `Empty Trash` row while it is
 };
 

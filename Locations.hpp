@@ -15,10 +15,12 @@ namespace ScrollOverview::Locations {
 
     struct SLocation {
         std::string uri;             // `trash:///`, or the mount root as a file:// URI
+        std::string mountPath;       // mounts only: the bare path, so fstab and the mount table can be matched
         std::string name;            // "Trash", or the volume's label
         std::string icon;            // themed icon NAME, asked of the location itself
         bool        mount    = false;
         bool        canEject = false; // eject rather than unmount, per the reference
+        bool        mounted  = true;  // mounts only: false is an fstab point not currently mounted
         bool        empty    = true;  // trash only: no `Empty Trash` row while it is
     };
 
@@ -49,4 +51,8 @@ namespace ScrollOverview::Locations {
     // draws a row for each, so which one runs is the ROW's answer and not the
     // location's.
     void unmount(const std::string& uri, bool eject);
+
+    // The other half of it, for a location that `show_mounts_only_mounted false`
+    // put on the dock precisely because it is NOT mounted.
+    void mount(const std::string& uri);
 }
