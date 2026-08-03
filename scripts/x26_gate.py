@@ -28,12 +28,41 @@ def clients(name):
 
 
 def green(png):
+    """The LARGEST CONNECTED BLOB of fixture green, never the bounding box of
+    every green pixel. The same window is green in the main tile, in its strip
+    mini AND in its desktop card, so the union box spans 2327px in every frame
+    and P3a's shrink ratio is pinned at exactly 1.00 whatever the proxy does --
+    a check that cannot fail, the same family as X1's bestScale clamp.
+    Labelled on a 4x downsample; there is no scipy on this host.
+    """
     im = np.asarray(Image.open(png).convert("RGB")).astype(int)
     mask = (im[:, :, 1] > 150) & (im[:, :, 0] < 110) & (im[:, :, 2] < 110)
-    ys, xs = np.where(mask)
-    if not len(ys):
+    if not mask.any():
         return None
-    return xs.min(), ys.min(), xs.max() - xs.min() + 1, ys.max() - ys.min() + 1
+
+    S = 4
+    small = mask[::S, ::S]
+    seen = np.zeros_like(small)
+    best, best_n = None, 0
+    for sy, sx in zip(*np.where(small)):
+        if seen[sy, sx]:
+            continue
+        stack, comp = [(sy, sx)], []
+        seen[sy, sx] = True
+        while stack:
+            y, x = stack.pop()
+            comp.append((y, x))
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= ny < small.shape[0] and 0 <= nx < small.shape[1] \
+                        and small[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    stack.append((ny, nx))
+        if len(comp) > best_n:
+            best, best_n = comp, len(comp)
+
+    ys, xs = np.array(best).T
+    return (xs.min() * S, ys.min() * S,
+            (xs.max() - xs.min() + 1) * S, (ys.max() - ys.min() + 1) * S)
 
 
 def pill(png):

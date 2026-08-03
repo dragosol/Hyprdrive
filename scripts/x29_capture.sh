@@ -22,6 +22,28 @@ cfg() { hyprctl eval "return hl.plugin.scrolloverview.configure($1)" >/dev/null;
 systemctl --user stop hyprwall.timer
 hyprctl dispatch "hl.dsp.focus({workspace = 1})" >/dev/null
 
+# This rice floats EVERY window by default (custom/rules.lua matches class .*),
+# so the two fixture windows do not tile -- they stack at kitty's default size
+# 400px ABOVE the pill, and the fit then has a flat wallpaper under it and runs
+# away. Place them by hand: half the screen each, full height, so the seam falls
+# through the pill's centre.
+# hl.dsp.focus takes a window OBJECT, not a class selector: {window = {class =
+# ...}} is rejected outright, so the placement has to walk hl.get_windows().
+place_fixture() {
+    hyprctl eval "$(cat <<'LUA'
+local want = { x29fixL = {0, 0, 1280, 1600}, x29fixR = {1280, 0, 1280, 1600} }
+for _, w in ipairs(hl.get_windows()) do
+    local p = want[w.class]
+    if p then
+        hl.dispatch(hl.dsp.focus({window = w}))
+        hl.dispatch(hl.dsp.window.resize({x = p[3], y = p[4], relative = false}))
+        hl.dispatch(hl.dsp.window.move({x = p[1], y = p[2], relative = false}))
+    end
+end
+return 1
+LUA
+)" >/dev/null
+}
 if ! pgrep -f x29fixL >/dev/null; then
     pkill kitty; sleep 1.5
     setsid -f kitty --class x29fixL --override background=#000000 sh -c 'sleep 3600' </dev/null >/dev/null 2>&1
@@ -29,6 +51,8 @@ if ! pgrep -f x29fixL >/dev/null; then
     setsid -f kitty --class x29fixR --override background=#ffffff sh -c 'sleep 3600' </dev/null >/dev/null 2>&1
     sleep 1.8
 fi
+place_fixture
+sleep 1.0
 
 cfg "{dock = {enabled = false}}"; sleep 1.0
 grim -o Virtual-1 $OUT/nodock.png

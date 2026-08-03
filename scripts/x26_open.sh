@@ -31,6 +31,25 @@ sleep 1.5
 setsid -f kitty --class x26other --override background=#303030 sh -c 'sleep 3600' </dev/null >/dev/null 2>&1
 sleep 1.5
 
+# Place the fixture explicitly. kitty has remember_window_size on by default,
+# so ANY earlier rig that resized a kitty (x29_capture.sh does) changes the size
+# every later fixture spawns at -- which moves the overview tile, the pill width
+# and the grab point all at once. Do not inherit that.
+hyprctl eval "$(cat <<'LUA'
+local want = { x26fix = {200, 200, 900, 600}, x26other = {1300, 300, 900, 600} }
+for _, w in ipairs(hl.get_windows()) do
+    local p = want[w.class]
+    if p then
+        hl.dispatch(hl.dsp.focus({window = w}))
+        hl.dispatch(hl.dsp.window.resize({x = p[3], y = p[4], relative = false}))
+        hl.dispatch(hl.dsp.window.move({x = p[1], y = p[2], relative = false}))
+    end
+end
+return 1
+LUA
+)" >/dev/null
+sleep 1.0
+
 ov on; sleep 1.5
 clear_search
 grim -o Virtual-1 $OUT/open.png

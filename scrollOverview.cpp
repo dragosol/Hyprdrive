@@ -1870,7 +1870,13 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             // underneath takes the press and the click selects a window instead
             // of minimizing one. Both edges are eaten: returning on the press
             // alone would leave the release to performPrimaryClickAction().
-            if (ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
+            //
+            // ...but NOT while a window drag is in flight. X26 drops a dragged
+            // window on this same pill, and eating that release stranded the
+            // drag: endWindowDrag() never ran, so its OVERDOCK branch never
+            // minimized anything and the proxy stayed on screen mid-gesture.
+            // A drag release belongs to the drag, whatever it is released over.
+            if (!dragActiveWindow && ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
                 if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
                     const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
                     ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT));
