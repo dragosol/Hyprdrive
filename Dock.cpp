@@ -20,6 +20,7 @@
 #define protected public
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
@@ -342,6 +343,56 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const SItem& item)
     g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
 }
 
+// X24's click policy, straight off the reference config: `click-action`
+// minimize, `activate-single-window` true, `minimize-shift` true,
+// `shift-click-action` minimize.
+//
+// There is deliberately no launch branch. The dock lists RUNNING classes until
+// X32 brings favourites in, so every icon here already owns a window; a launch
+// path written now would have nothing to launch from.
+void activateClass(const std::string& wmClass, bool shift) {
+    std::vector<PHLWINDOW> windows;
+    for (const auto& WINDOW : Desktop::windowState()->windows()) {
+        if (WINDOW && WINDOW->m_isMapped && WINDOW->m_class == wmClass)
+            windows.emplace_back(WINDOW);
+    }
+
+    if (windows.empty())
+        return;
+
+    // `minimize-shift`: shift takes the whole app down, not just the window in
+    // front. Same action as a plain click otherwise, since `shift-click-action`
+    // is also minimize.
+    if (shift) {
+        for (const auto& WINDOW : windows)
+            Minimize::minimize(WINDOW);
+        return;
+    }
+
+    const auto FOCUSED = Desktop::focusState()->window();
+    if (FOCUSED && FOCUSED->m_class == wmClass && !Minimize::isMinimized(FOCUSED)) {
+        Minimize::minimize(FOCUSED);
+        return;
+    }
+
+    // Not focused, so the click brings the app forward. Restore already raises
+    // and focuses (X43), so only a window that was never minimized needs that
+    // done by hand.
+    bool restored = false;
+    for (const auto& WINDOW : windows)
+        restored = Minimize::restore(WINDOW) || restored;
+
+    if (restored)
+        return;
+
+    // ponytail: `activate-single-window` is exact for one window, which is the
+    // case that matters. Picking among several is X28's "All Windows" menu; the
+    // front of the compositor's stack is the stand-in until it exists.
+    const auto& FRONT = windows.back();
+    Desktop::windowState()->raise(FRONT);
+    Desktop::focusState()->fullWindowFocus(FRONT, Desktop::FOCUS_REASON_KEYBIND);
+}
+
 } // namespace
 
 bool pillContains(PHLMONITOR monitor, const Vector2D& point) {
@@ -350,6 +401,34 @@ bool pillContains(PHLMONITOR monitor, const Vector2D& point) {
 
     const auto PILL = layout(monitor).pill;
     return PILL.width >= 1 && PILL.height >= 1 && PILL.containsPoint(point);
+}
+
+bool click(PHLMONITOR monitor, const Vector2D& point, bool shift) {
+    if (!monitor)
+        return false;
+
+    const auto LAYOUT = layout(monitor);
+    if (LAYOUT.pill.width < 1 || LAYOUT.pill.height < 1)
+        return false;
+
+    // A preview is one specific window, so it restores that window rather than
+    // going through the class -- two minimized windows of one app are two
+    // previews, and the class path could not tell them apart.
+    for (const auto& PREVIEW : LAYOUT.previews) {
+        if (PREVIEW.box.containsPoint(point)) {
+            Minimize::restore(PREVIEW.window);
+            return true;
+        }
+    }
+
+    // Hit-test the same cell the hover highlight lights up, so what looks
+    // clickable is what is clickable.
+    const auto ITEM = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(point); });
+    if (ITEM == LAYOUT.items.end())
+        return false;
+
+    activateClass(ITEM->wmClass, shift);
+    return true;
 }
 
 bool damageIfChanged(PHLMONITOR monitor) {

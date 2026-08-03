@@ -1865,6 +1865,19 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         if (event.button == MAIN_BUTTON) {
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
+            // X24 dock-side, in the overview. The pill is pinned here (§10
+            // clause 6) and floats OVER the main area, so without this the tile
+            // underneath takes the press and the click selects a window instead
+            // of minimizing one. Both edges are eaten: returning on the press
+            // alone would leave the release to performPrimaryClickAction().
+            if (ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
+                if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+                    ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT));
+                }
+                return;
+            }
+
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
                 // The close button eats the press outright -- no drag, no select.
                 // User request 2026-08-02: an X on the top right of the hovered

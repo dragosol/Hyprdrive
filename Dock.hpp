@@ -39,6 +39,14 @@ void    render(PHLMONITOR monitor);
 // area, so the card underneath would otherwise claim the drop.
 bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
 
+// X24. A click inside the pill, in the same monitor-local RENDER px as
+// pillContains. An icon toggles its app's minimized state
+// (`click-action='minimize'`); a preview restores that one window. `shift`
+// applies `minimize-shift` -- the whole app rather than just the front window.
+// Returns whether an item claimed the click; the caller swallows the event
+// either way, since the pill is not a window and must not leak clicks through.
+bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift);
+
 // Damage the monitor when the pill's shape changes -- an app opening or closing,
 // the dock being switched off, the hovered icon moving -- and every frame while a
 // live preview is in it. MUST be called before the frame is rendered: damage

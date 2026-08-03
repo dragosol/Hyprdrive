@@ -755,6 +755,35 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     });
 
+    // X24 dock-side. The overview installs its own button hook; this one is the
+    // plain desktop, where nothing else claims a click on the pill. Both edges
+    // are swallowed over the pill: the dock is not a window, so a press that
+    // reached the window underneath would focus it, and a release that leaked
+    // after a swallowed press would leave the pointer stuck.
+    static auto DOCKCLICK = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
+        if (event.button != BTN_LEFT)
+            return;
+
+        const auto POINT = g_pInputManager->getMouseCoordsInternal();
+        for (const auto& MONITOR : State::monitorState()->monitors()) {
+            if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(POINT))
+                continue;
+
+            const auto LOCAL = (POINT - MONITOR->m_position) * MONITOR->m_scale;
+            if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL))
+                return;
+
+            info.cancelled = true;
+            if (event.state != WL_POINTER_BUTTON_STATE_PRESSED)
+                return;
+
+            const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+            const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
+            ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT);
+            return;
+        }
+    });
+
     static auto DOCK = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_POST_WINDOWS)
             return;
