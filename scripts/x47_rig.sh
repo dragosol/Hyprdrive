@@ -43,6 +43,9 @@ cfg() { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0"
 restore() {
     ov off
     cfg "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false"
+    # Back to Config.cpp's declared defaults. A frost arm that left blur_size=20
+    # behind would silently re-tune the user's dock for every later run.
+    cfg "blur_size=7, blur_passes=3"
     hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1
     sleep 1.2
     # Virtual-1 comes back FIRST: removing the last output while it is the only
@@ -117,6 +120,24 @@ cfg "autohide=false, show_favorites=false, show_apps_button=false, show_trash=fa
 sleep 0.8
 for k in autohide show_favorites show_apps_button show_trash show_mounts; do want $k false; done
 
+# X47_BLUR: the FROST A/B drives the panel's blur through the SAME runtime keys
+# renderHoverPreview() reads per frame (Dock.cpp:2628). Read back, because a
+# config that silently did not land would make the two arms identical and the
+# frost gate would report "no difference" as a product failure.
+#   e.g. X47_BLUR='blur_size=1, blur_passes=1'   (sharp arm)
+#        X47_BLUR='blur_size=20, blur_passes=4'  (frosted arm)
+if [ -n "${X47_BLUR:-}" ]; then
+    cfg "$X47_BLUR"
+    sleep 0.5
+    # NOT a `... | while read`: that runs in a subshell, so want()'s abort would
+    # exit the pipeline and the rig would sail on with unverified config. And NOT
+    # `IFS=, ; for kv in $X47_BLUR`: want()'s own `read -r VAL SET` inherits that
+    # IFS and stops splitting on whitespace, so it compares "1 true " against "1"
+    # and every arm aborts. Commas become spaces instead; no kv contains one.
+    for kv in $(echo "$X47_BLUR" | tr ',' ' '); do want "${kv%%=*}" "${kv##*=}"; done
+    echo "blur: $X47_BLUR"
+fi
+
 # THREE windows of one class, so the panel has to lay out three cells side by
 # side -- one cell would pass on code that ignores the count entirely.
 # The FIRST one prints a fast counter: that is the only thing in this fixture
@@ -130,14 +151,24 @@ setsid kitty -c NONE --class X47A -o background='#101820' -o background_opacity=
     -o font_size=40 -o confirm_os_window_close=0 \
     --hold sh -c 'while :; do s=$(date +%s.%N); printf "\033[H\033[2J"; i=0; while [ $i -lt 40 ]; do printf "%s %d\n" "$s" "$i"; i=$((i+1)); done; sleep 0.08; done' >/dev/null 2>&1 </dev/null &
 sleep 2.4
+# X47_STRIPES: fill the non-counter fixtures with static high-contrast stripes
+# instead of leaving them blank. The FROST A/B needs TEXTURE BEHIND THE PLATE,
+# and the plate's backdrop in this band is the desktop-strip minis of these very
+# windows -- measured: with blank fixtures the band's two control frames are
+# BYTE-IDENTICAL, so a blur of any radius over them is a no-op and a blur_size
+# A/B could not fail. Static, not ticking: LIVE must stay the counter's alone.
+FILL='clear'
+[ "${X47_STRIPES:-0}" = 1 ] && FILL='i=0; while [ $i -lt 40 ]; do
+    if [ $((i%2)) = 0 ]; then printf "\033[107m%*s\033[0m\n" 200 ""
+    else printf "\033[40m%*s\033[0m\n" 200 ""; fi; i=$((i+1)); done; sleep infinity'
 for i in 1 2; do
     setsid kitty -c NONE --class X47A -o background='#101820' -o background_opacity=1.0 \
-        -o confirm_os_window_close=0 --hold sh -c clear >/dev/null 2>&1 </dev/null &
+        -o confirm_os_window_close=0 --hold sh -c "$FILL" >/dev/null 2>&1 </dev/null &
     sleep 2.2
 done
 # A second class, so FOLLOWS has somewhere to travel to.
 setsid kitty -c NONE --class X47B -o background='#302010' -o background_opacity=1.0 \
-    -o confirm_os_window_close=0 --hold sh -c clear >/dev/null 2>&1 </dev/null &
+    -o confirm_os_window_close=0 --hold sh -c "$FILL" >/dev/null 2>&1 </dev/null &
 sleep 2.4
 
 N=$(hyprctl clients -j | python3 -c "

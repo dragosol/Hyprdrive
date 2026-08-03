@@ -123,8 +123,16 @@ live_px = differs(p0, p1).sum()
 check("FRESH", live_px > 0,
       "%d px changed between two full-screen grabs of a counter ticking every 80ms" % live_px)
 
+# --- PANEL. FRESH proves the FULL-SCREEN grim path is live and says NOTHING
+# --- about `grim -g "$BAND"`, which is where every check below gets its pixels.
+# --- Run `c` (2026-08-03 20:31Z) had all seven band frames byte-identical while
+# --- FRESH passed on p0/p1, and both ratio checks below are true of nothing:
+# --- LEFT reads 0 < 2000 and GRACE reads 0 >= 0, so a blank set scored 2 green.
+check("PANEL", area_h0 > 20000,
+      "%d px of panel in the BAND path; below this nothing else is measurable" % area_h0)
+
 # --- the panel LEFT. Graded first: everything below leans on c2 being clean. --
-check("LEFT", area_c2 < max(2000, 0.05 * area_h0),
+check("LEFT", area_h0 > 20000 and area_c2 < max(2000, 0.05 * area_h0),
       "post-control blob %d px, vs %d px while hovered" % (area_c2, area_h0))
 
 # --- RISES ------------------------------------------------------------------
@@ -166,7 +174,7 @@ check("FOLLOWS", ok, detail)
 # Against t0, NOT h0: the pointer leaves from the SECOND icon, so the plate that
 # has to survive the grace period is that icon's, and its window count -- and so
 # its area -- is its own.
-check("GRACE", area_g0 >= 0.5 * area_t0,
+check("GRACE", area_t0 > 20000 and area_g0 >= 0.5 * area_t0,
       "%d px still up 120ms after the pointer left the second icon, vs %d px while it was hovered" % (area_g0, area_t0))
 
 bad = [n for n, ok, _ in results if not ok]
