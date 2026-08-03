@@ -330,6 +330,11 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:dock:corner_radius", "hyprgnomedock: pill corner radius", 24,
                                                         SIntValueOptions{.min = 0}));
+    // X24. 220ms because the standing Apple-motion rule puts entrances at ~300ms
+    // and makes exits 20-30% faster; a minimize is an exit.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:minimize_ms", "hyprgnomedock: shrink-into-the-dock duration, 0 to teleport", 220,
+                                                        SIntValueOptions{.min = 0, .max = 2000}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
                                                           (Hyprlang::INT)0xFFC0BFBC));

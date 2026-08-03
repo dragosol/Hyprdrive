@@ -38,6 +38,12 @@ class IOverview {
 
     virtual void  fullRender() = 0;
 
+    // X24. Where a window is DRAWN in the overview, monitor-local render px.
+    // The dock is only ever on screen while the overview is, so a minimize
+    // started from it has to shrink from the tile the user is looking at, not
+    // from the window's real geometry underneath it.
+    virtual CBox  tileBox(const PHLWINDOW& window) const = 0;
+
     bool          blockDamageReporting   = false;
 
     PHLMONITORREF pMonitor;

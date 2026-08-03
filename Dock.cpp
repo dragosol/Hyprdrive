@@ -2,13 +2,16 @@
 
 #include "AppSearch.hpp"
 #include "Config.hpp"
+#include "IOverview.hpp"
 #include "Minimize.hpp"
 #include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
 #include "Window.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <unordered_map>
@@ -100,6 +103,50 @@ constexpr const char* KEY_BLUR_BRIGHT = "plugin:scrolloverview:dock:blur_brightn
 constexpr const char* KEY_BLUR_NOISE  = "plugin:scrolloverview:dock:blur_noise";
 constexpr const char* KEY_BLUR_CONTR  = "plugin:scrolloverview:dock:blur_contrast";
 constexpr const char* KEY_BLUR_VIBR   = "plugin:scrolloverview:dock:blur_vibrancy";
+constexpr const char* KEY_MINIMIZE_MS = "plugin:scrolloverview:dock:minimize_ms";
+
+// X24, the last piece: the shrink INTO the dock.
+//
+// The window is stashed IMMEDIATELY and this then draws it, live, from its last
+// on-screen box into the slot it is going to occupy. Stashing first is what
+// keeps the compositor from drawing the real window alongside the proxy for the
+// length of the flight -- the double image the overview spec forbids -- and it
+// costs nothing, because a stashed window stays mapped and X25 already renders
+// stashed windows through renderOverviewWindow. So this is the same render path
+// as the previews and the overview's own tiles, not a second one.
+struct SFlight {
+    PHLWINDOWREF window;
+    CBox         from; // monitor-local RENDER px
+    Time::steady_tp startedAt;
+};
+
+// ponytail: one flight at a time. A shift-click minimizes a whole app, and only
+// the last of those animates; the rest teleport as they did before. Per-window
+// flights if that ever reads as wrong.
+std::optional<SFlight> g_flight;
+
+// The standing Apple-motion rule (RICE_PROGRESS, user 2026-08-03): entrances
+// decelerate, exits ACCELERATE and run 20-30% faster. A minimize is an exit, so
+// this is the mirror of the house ease-out cubic rather than a reuse of it.
+float exitEase(float t) {
+    const float T = std::clamp(t, 0.F, 1.F);
+    return T * T * T;
+}
+
+float flightLinearProgress() {
+    if (!g_flight)
+        return 1.F;
+
+    const int DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
+    if (DURATION <= 0)
+        return 1.F;
+
+    return std::clamp(sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - g_flight->startedAt).count()) / sc<float>(DURATION), 0.F, 1.F);
+}
+
+CBox lerpBox(const CBox& a, const CBox& b, float t) {
+    return CBox{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.w + (b.w - a.w) * t, a.h + (b.h - a.h) * t};
+}
 
 struct SMetrics {
     float icon   = 0.F;
@@ -343,6 +390,29 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const SItem& item)
     g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
 }
 
+// X24. Stash first, then fly. Order matters: minimize() is what stops the
+// compositor drawing the real window, so doing it up front is what keeps the
+// flight from being a second copy of a window that is still on screen.
+void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
+    const int  DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
+    const bool ANIMATE  = monitor && window && DURATION > 0 && !Minimize::isMinimized(window);
+
+    // The overview tile, not the window's real box: while the dock is on screen
+    // the overview is too, and the tile is what the user is watching. Must be
+    // read before the stash, which moves the window off the tiled workspace.
+    CBox from;
+    if (ANIMATE) {
+        const auto OVERVIEW = scrollOverviewForMonitor(monitor);
+        if (OVERVIEW)
+            from = OVERVIEW->tileBox(window);
+    }
+
+    Minimize::minimize(window);
+
+    if (ANIMATE && from.width >= 1 && from.height >= 1)
+        g_flight = SFlight{.window = window, .from = from, .startedAt = Time::steadyNow()};
+}
+
 // X24's click policy, straight off the reference config: `click-action`
 // minimize, `activate-single-window` true, `minimize-shift` true,
 // `shift-click-action` minimize.
@@ -350,7 +420,7 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const SItem& item)
 // There is deliberately no launch branch. The dock lists RUNNING classes until
 // X32 brings favourites in, so every icon here already owns a window; a launch
 // path written now would have nothing to launch from.
-void activateClass(const std::string& wmClass, bool shift) {
+void activateClass(PHLMONITOR monitor, const std::string& wmClass, bool shift) {
     std::vector<PHLWINDOW> windows;
     for (const auto& WINDOW : Desktop::windowState()->windows()) {
         if (WINDOW && WINDOW->m_isMapped && WINDOW->m_class == wmClass)
@@ -360,37 +430,41 @@ void activateClass(const std::string& wmClass, bool shift) {
     if (windows.empty())
         return;
 
+    // The toggle is driven by what is ON SCREEN, not by what has focus.
+    //
+    // Focus was the first cut and it made the minimize branch DEAD: the pill is
+    // only ever up while the overview is (§10 clause 6), the overview owns the
+    // focus while it is up, so focusState()->window() is never a dock app's
+    // window and every click fell through to "bring it forward". Measured
+    // 2026-08-03 -- two clicks on an icon, activewindow unchanged both times,
+    // nothing minimized. Nothing else uses this path, so nothing caught it.
+    std::vector<PHLWINDOW> visible;
+    for (const auto& WINDOW : windows) {
+        if (!Minimize::isMinimized(WINDOW))
+            visible.emplace_back(WINDOW);
+    }
+
+    // Whole app already down, so the click brings it back. Restore raises and
+    // focuses on its own (X43).
+    if (visible.empty()) {
+        for (const auto& WINDOW : windows)
+            Minimize::restore(WINDOW);
+        return;
+    }
+
     // `minimize-shift`: shift takes the whole app down, not just the window in
     // front. Same action as a plain click otherwise, since `shift-click-action`
     // is also minimize.
     if (shift) {
-        for (const auto& WINDOW : windows)
-            Minimize::minimize(WINDOW);
+        for (const auto& WINDOW : visible)
+            minimizeWithFlight(monitor, WINDOW);
         return;
     }
-
-    const auto FOCUSED = Desktop::focusState()->window();
-    if (FOCUSED && FOCUSED->m_class == wmClass && !Minimize::isMinimized(FOCUSED)) {
-        Minimize::minimize(FOCUSED);
-        return;
-    }
-
-    // Not focused, so the click brings the app forward. Restore already raises
-    // and focuses (X43), so only a window that was never minimized needs that
-    // done by hand.
-    bool restored = false;
-    for (const auto& WINDOW : windows)
-        restored = Minimize::restore(WINDOW) || restored;
-
-    if (restored)
-        return;
 
     // ponytail: `activate-single-window` is exact for one window, which is the
     // case that matters. Picking among several is X28's "All Windows" menu; the
     // front of the compositor's stack is the stand-in until it exists.
-    const auto& FRONT = windows.back();
-    Desktop::windowState()->raise(FRONT);
-    Desktop::focusState()->fullWindowFocus(FRONT, Desktop::FOCUS_REASON_KEYBIND);
+    minimizeWithFlight(monitor, visible.back());
 }
 
 } // namespace
@@ -427,7 +501,7 @@ bool click(PHLMONITOR monitor, const Vector2D& point, bool shift) {
     if (ITEM == LAYOUT.items.end())
         return false;
 
-    activateClass(ITEM->wmClass, shift);
+    activateClass(monitor, ITEM->wmClass, shift);
     return true;
 }
 
@@ -539,17 +613,32 @@ void render(PHLMONITOR monitor) {
     // X25. The REAL window, through the same path the overview tiles use --
     // which is the point of rebuilding the dock in C++ at all. An icon or a
     // cached screenshot here would be the defect the spec names.
+    // X24. A flight is not a separate animation, it is this same loop drawing
+    // one of the previews at an interpolated box on its way to its slot. It ends
+    // when the clock runs out, or immediately if the slot went away (restored
+    // or closed mid-flight).
+    std::optional<CBox> flightBox;
+    if (g_flight) {
+        const float T    = flightLinearProgress();
+        const auto  SLOT = std::ranges::find_if(LAYOUT.previews, [](const SPreview& p) { return p.window == g_flight->window; });
+        if (T >= 1.F || SLOT == LAYOUT.previews.end())
+            g_flight.reset();
+        else
+            flightBox = lerpBox(g_flight->from, SLOT->box, exitEase(T));
+    }
+
     const auto NOW = Time::steadyNow();
     for (const auto& PREVIEW : LAYOUT.previews) {
         forcePreviewVisible(PREVIEW.window);
 
+        const CBox  BOX         = (flightBox && PREVIEW.window == g_flight->window) ? *flightBox : PREVIEW.box;
         const auto  SIZE        = PREVIEW.window->m_realSize->value();
-        const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(PREVIEW.box.height / (SIZE.y * monitor->m_scale)) : 1.F;
+        const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(BOX.height / (SIZE.y * monitor->m_scale)) : 1.F;
 
         OverviewWindow::renderOverviewWindow({
             .monitor     = monitor,
             .window      = PREVIEW.window,
-            .windowBox   = PREVIEW.box,
+            .windowBox   = BOX,
             .renderScale = RENDERSCALE,
             .now         = NOW,
         });
