@@ -1,6 +1,7 @@
 #include "Dock.hpp"
 
 #include "AppSearch.hpp"
+#include "globals.hpp"
 #include "Config.hpp"
 #include "IOverview.hpp"
 #include "LauncherEntry.hpp"
@@ -290,12 +291,11 @@ struct SFlight {
 // flights if that ever reads as wrong.
 std::optional<SFlight> g_flight;
 
-// The standing Apple-motion rule (RICE_PROGRESS, user 2026-08-03): entrances
-// decelerate, exits ACCELERATE and run 20-30% faster. A minimize is an exit, so
-// this is the mirror of the house ease-out cubic rather than a reuse of it.
+// A minimize is an exit, so it accelerates. This used to be a cubic mirror --
+// the right SHAPE but not the house curve; houseEase evaluates the registered
+// bezier itself, so the dock and the overview are exactly the same motion.
 float exitEase(float t) {
-    const float T = std::clamp(t, 0.F, 1.F);
-    return T * T * T;
+    return houseEase(false, t);
 }
 
 float flightLinearProgress() {
@@ -722,9 +722,10 @@ float wiggleRadians() {
 // The standing Apple-motion rule again: entrances decelerate, exits accelerate.
 // The DURATION stays the reference's `animation-time` in BOTH directions -- the
 // rule shapes the curve, the reference pins the number.
+// Revealing is an entrance, hiding an exit. Same two house curves, so the dock
+// slide matches every other transition in the rice.
 float revealEase(float t, bool showing) {
-    const float T = std::clamp(t, 0.F, 1.F);
-    return showing ? 1.F - (1.F - T) * (1.F - T) * (1.F - T) : T * T * T;
+    return houseEase(showing, t);
 }
 
 // 0 = fully out, 1 = fully tucked below the bottom edge.
