@@ -41,6 +41,11 @@ CBox scaledBox(const PHLWINDOW& window, const CBox& base);
 // cursor.
 CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale);
 
+// The close button's HIT area: the same geometry, but independent of the
+// visibility ramp and with slop. Use this for hover keep-alive and for clicks;
+// closeButtonBox() is what gets DRAWN.
+CBox closeButtonHitBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale);
+
 // App icon (X8) + close button, drawn over an already-rendered tile.
 void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float monitorScale);
 

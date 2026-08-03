@@ -3112,7 +3112,9 @@ bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
 
 CBox CScrollOverview::tileCloseButtonBox(const PHLWINDOW& window) const {
     const auto MONITOR = pMonitor.lock();
-    return MONITOR ? TileChrome::closeButtonBox(window, tileBox(window), MONITOR->m_scale) : CBox{};
+    // The HIT box, not the drawn one: this is used for the hover keep-alive and
+    // for clicks, and the drawn box empties itself as the button fades.
+    return MONITOR ? TileChrome::closeButtonHitBox(window, tileBox(window), MONITOR->m_scale) : CBox{};
 }
 
 // X7. Hover is hit-tested against the UNSCALED slot. Testing the grown box would

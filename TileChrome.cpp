@@ -66,6 +66,11 @@ constexpr float CLOSE_VISIBLE_AT = 0.55F;
 // X57. The caption clears X8's app icon, which straddles the tile's bottom
 // edge, and CAPTION_H is the plate's own height budget -- labelPill anchors by
 // its BOTTOM, so this is what pushes it clear rather than over the icon.
+// Slop around the close button's hit area. The button is 22-32px and sits half
+// off the tile, so a few px either side is the difference between a target you
+// aim at and one you stab at.
+constexpr float CLOSE_SLOP  = 8.F;
+
 constexpr float CAPTION_GAP = 6.F;
 constexpr float CAPTION_H   = 40.F;
 
@@ -189,6 +194,27 @@ CBox scaledBox(const PHLWINDOW& window, const CBox& base) {
     const float DH = sc<float>(base.h) * (FACTOR - 1.F);
 
     return CBox{base.x - DW / 2.F, base.y - DH / 2.F, base.w + DW, base.h + DH};
+}
+
+// The button's HIT area, as opposed to what is drawn.
+//
+// Two differences, and both are why the button was 'barely clickable': it
+// ignores the visibility ramp, and it carries slop. Since X55 put the button ON
+// the corner it overhangs the tile by half its diameter, so for the whole
+// approach the cursor is OUTSIDE the tile's own hit area and the tile is already
+// un-hovering -- which fades the button out and, with the old gate, emptied its
+// hit box at exactly the moment the cursor arrived. A hit area that blinks in
+// time with the thing you are reaching for cannot be hit.
+CBox closeButtonHitBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale) {
+    if (!window || tileBox.w < 1 || tileBox.h < 1)
+        return {};
+
+    const float SCALE = std::max(monitorScale, 0.01F);
+    const float D     = std::clamp(shortSide(tileBox) * CLOSE_FRACTION, CLOSE_MIN * SCALE, CLOSE_MAX * SCALE);
+    const float CX    = sc<float>(tileBox.x + tileBox.w) - D * CLOSE_INSET;
+    const float CY    = sc<float>(tileBox.y) + D * CLOSE_INSET;
+
+    return CBox{CX - D / 2.F, CY - D / 2.F, D, D}.expand(CLOSE_SLOP * SCALE);
 }
 
 CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale) {
