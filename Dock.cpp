@@ -1310,6 +1310,67 @@ void feedPointerMotion(const Vector2D& delta) {
     }
 }
 
+// ------------------------------------------------ X32 reorder, G12 drop --
+
+namespace {
+
+// The dock's own drag, expressed in the store's unit: a press over an icon with
+// no desktop id (a preview, the button, the pill's padding, a running app no
+// entry claims) records nothing and can never become a drag, because there
+// would be nothing to write.
+struct SDockDrag {
+    std::string id;
+    Vector2D    start;
+    bool        live   = false;
+    int         insert = -1;
+};
+
+std::optional<SDockDrag> g_drag;
+
+// G12's caret. A foreign drag keeps its own state in the search panel and only
+// ever hands the dock the index to draw, so the two sources cannot both think
+// they own the gesture.
+int g_foreignInsert = -1;
+
+// Deliberately the overview's own threshold: two drags on one screen that start
+// at different distances would read as one of them being sticky.
+float dragThresholdPx(PHLMONITOR monitor) {
+    return Config::getDragThreshold() * std::max(monitor ? sc<float>(monitor->m_scale) : 1.F, 0.01F);
+}
+
+// The favourite slots, in draw order. Only these take part in a reorder: a
+// running app that is not pinned has no stored position to move, and the
+// stretch of pill it occupies means "after the last favourite" -- which is what
+// size() is.
+std::vector<size_t> favoriteSlots(const SLayout& layout) {
+    std::vector<size_t> out;
+    for (size_t i = 0; i < layout.items.size(); ++i)
+        if (layout.items[i].favorite)
+            out.emplace_back(i);
+    return out;
+}
+
+int caretIndex() {
+    return g_drag && g_drag->live ? g_drag->insert : g_foreignInsert;
+}
+
+// Where the caret sits for an insertion index: hard against the left edge of
+// the icon that would follow it, or past the last favourite when it is the end.
+CBox caretBox(const SLayout& layout, int index, float scale) {
+    const auto SLOTS = favoriteSlots(layout);
+    if (index < 0 || SLOTS.empty())
+        return {};
+
+    const float W = std::max(2.F, std::round(3.F * scale));
+    const auto& REF = layout.items[SLOTS[std::min(sc<size_t>(index), SLOTS.size() - 1)]].iconBox;
+    const bool  END = sc<size_t>(index) >= SLOTS.size();
+
+    const double X = END ? REF.x + REF.width + ITEM_MARGIN_X * scale - W / 2.0 : REF.x - ITEM_MARGIN_X * scale - W / 2.0;
+    return CBox{X, REF.y, W, REF.height}.round();
+}
+
+}
+
 bool pillContains(PHLMONITOR monitor, const Vector2D& point) {
     if (!monitor)
         return false;
@@ -1359,6 +1420,156 @@ bool click(PHLMONITOR monitor, const Vector2D& point, bool shift) {
 
     activateItem(monitor, *ITEM, shift);
     return true;
+}
+
+int dropIndexAt(PHLMONITOR monitor, const Vector2D& point) {
+    if (!monitor)
+        return -1;
+
+    const auto LAYOUT = layout(monitor);
+    if (LAYOUT.pill.width < 1 || !LAYOUT.pill.containsPoint(point))
+        return -1;
+
+    const auto SLOTS = favoriteSlots(LAYOUT);
+    for (size_t k = 0; k < SLOTS.size(); ++k) {
+        // The MIDPOINT, not the edge. Dropping on an icon's left half puts the
+        // dragged app before it; an edge test leaves a dead strip between icons
+        // where the drop has no answer at all.
+        const auto& BOX = LAYOUT.items[SLOTS[k]].iconBox;
+        if (point.x < BOX.x + BOX.width / 2.0)
+            return sc<int>(k);
+    }
+
+    return sc<int>(SLOTS.size());
+}
+
+bool showAppsContains(PHLMONITOR monitor, const Vector2D& point) {
+    if (!monitor)
+        return false;
+
+    const auto LAYOUT = layout(monitor);
+    return !LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(point);
+}
+
+void pinAt(const std::string& desktopId, int index) {
+    if (desktopId.empty() || index < 0)
+        return;
+
+    auto& FAV = favorites();
+
+    // Where the id sits TODAY, counted the way `index` is counted. Removing the
+    // dragged icon shifts everything after it one place left, so a move to a
+    // later slot would otherwise land one short of the caret the user saw.
+    int from = -1;
+    for (int seen = 0; const auto& ID : FAV) {
+        if (!AppSearch::entryForId(ID))
+            continue;
+        if (ID == desktopId) {
+            from = seen;
+            break;
+        }
+        ++seen;
+    }
+
+    if (from >= 0) {
+        std::erase(FAV, desktopId);
+        if (from < index)
+            --index;
+    }
+
+    // `index` counts DRAWN favourites, but the store also holds ids this machine
+    // does not provide -- the seed is the user's HOST list. Walk the store to
+    // find the position the index-th drawn favourite occupies, so the undrawn
+    // ones keep their places instead of being silently reordered around.
+    size_t at = FAV.size();
+    for (size_t i = 0, seen = 0; i < FAV.size(); ++i) {
+        if (!AppSearch::entryForId(FAV[i]))
+            continue;
+        if (seen == sc<size_t>(index)) {
+            at = i;
+            break;
+        }
+        ++seen;
+    }
+
+    FAV.insert(FAV.begin() + sc<long>(at), desktopId);
+    writeFavorites();
+}
+
+void unpin(const std::string& desktopId) {
+    if (desktopId.empty())
+        return;
+
+    if (std::erase(favorites(), desktopId) > 0)
+        writeFavorites();
+}
+
+bool dragBegin(PHLMONITOR monitor, const Vector2D& point) {
+    g_drag.reset();
+
+    if (!monitor)
+        return false;
+
+    const auto LAYOUT = layout(monitor);
+    const auto ITEM   = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(point); });
+    if (ITEM == LAYOUT.items.end() || ITEM->desktopId.empty())
+        return false;
+
+    g_drag = SDockDrag{.id = ITEM->desktopId, .start = point};
+    return true;
+}
+
+bool dragMove(PHLMONITOR monitor, const Vector2D& point) {
+    if (!g_drag || !monitor)
+        return false;
+
+    if (!g_drag->live) {
+        const float T = dragThresholdPx(monitor);
+        if (g_drag->start.distanceSq(point) <= T * T)
+            return false;
+
+        g_drag->live = true;
+    }
+
+    g_drag->insert = dropIndexAt(monitor, point);
+    return true;
+}
+
+bool dragEnd(PHLMONITOR monitor, const Vector2D& point) {
+    if (!g_drag)
+        return false;
+
+    const auto DRAG = *g_drag;
+    g_drag.reset();
+
+    if (!DRAG.live)
+        return false;
+
+    // A drop that leaves the pill is a CANCEL, not an unpin. Losing a favourite
+    // to a slipped gesture is not a thing to offer, and X26 already owns
+    // dragging in the other direction.
+    const int INDEX = dropIndexAt(monitor, point);
+    if (INDEX < 0)
+        return false;
+
+    pinAt(DRAG.id, INDEX);
+    return true;
+}
+
+void dragCancel() {
+    g_drag.reset();
+}
+
+bool dragPending() {
+    return g_drag.has_value();
+}
+
+bool dragging() {
+    return g_drag && g_drag->live;
+}
+
+void setForeignInsert(int index) {
+    g_foreignInsert = index;
 }
 
 bool openMenu(PHLMONITOR monitor, const Vector2D& point) {
@@ -1483,6 +1694,12 @@ bool damageIfChanged(PHLMONITOR monitor) {
         if (!LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(MOUSE))
             signature += "#apps";
 
+        // X32/G12. The insertion caret moves on a bare pointer move exactly as
+        // the hover highlight does, and nothing else on the desktop asks for a
+        // frame during a drag.
+        if (const int CARET = caretIndex(); CARET >= 0)
+            signature += "^" + std::to_string(CARET);
+
         // X28. The menu is part of what the dock looks like, and its hovered row
         // moves with a bare pointer move exactly as the icon highlight does.
         if (g_menu && g_menu->monitor == monitor->m_id) {
@@ -1562,6 +1779,17 @@ void render(PHLMONITOR monitor) {
         fill.round         = std::max(0, LAYOUT.rounding - sc<int>(std::round(hoverInset() * monitor->m_scale)));
         fill.roundingPower = 2.F;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(fill));
+    }
+
+    // X32/G12. Where the dragged app would land. Drawn under the icons so a
+    // caret at the very first slot is not sitting on top of one.
+    if (const CBox CARET = caretBox(LAYOUT, caretIndex(), monitor->m_scale); !CARET.empty()) {
+        CRectPassElement::SRectData caret;
+        caret.box           = CARET;
+        caret.color         = CHyprColor{1.F, 1.F, 1.F, 0.90F};
+        caret.round         = sc<int>(std::round(CARET.width / 2.F));
+        caret.roundingPower = 2.F;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(caret));
     }
 
     for (const auto& ITEM : LAYOUT.items) {

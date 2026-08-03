@@ -226,6 +226,36 @@ static std::vector<SSearchRow> overviewSearchRows() {
 }
 
 
+// OVERVIEW_CPP_SPEC §13.4 G12. The result rows as they were last DRAWN. Same
+// contract as the dock's own menu rows: a row's box is only known inside the
+// render pass, so the hit-test answers against the last frame -- which is the
+// frame the user was looking at when they pressed.
+struct SSearchRowHit {
+    CBox        box;
+    std::string desktopId; // "" for a provider row: those are not draggable
+    std::string icon;
+};
+static std::vector<SSearchRowHit> g_searchRowHits;
+
+// G12. A result drag: press, HOLD, then move. The hold is the gate and the
+// distance is not, so a click can never turn into a drag no matter how far the
+// hand wobbles inside it.
+struct SResultDrag {
+    std::string     desktopId;
+    std::string     icon;
+    Vector2D        start;
+    Time::steady_tp startedAt;
+    bool            live = false;
+};
+static std::optional<SResultDrag> g_resultDrag;
+
+static constexpr float G12_HOLD_MS = 200.F;
+
+static const SSearchRowHit* searchRowAt(const Vector2D& point) {
+    const auto IT = std::ranges::find_if(g_searchRowHits, [&](const SSearchRowHit& row) { return row.box.containsPoint(point); });
+    return IT == g_searchRowHits.end() ? nullptr : &*IT;
+}
+
 // OVERVIEW_CPP_SPEC §5 F2, and §13.7 X18's open-window half.
 //
 // Open windows ARE the window search result: they are already the grid's tiles,
@@ -1642,6 +1672,29 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             requestInputFrame();
         }
 
+        // X32. The dock's drag lives in the dock; the overview only forwards the
+        // motion, exactly as it forwards the button edges.
+        if (ScrollOverview::Dock::dragPending() && ScrollOverview::Dock::dragMove(pMonitor.lock(), lastMousePosLocal)) {
+            damage();
+            requestInputFrame();
+        }
+
+        // G12. The hold has to pass BEFORE the distance is even looked at.
+        if (g_resultDrag && !g_resultDrag->desktopId.empty()) {
+            if (!g_resultDrag->live) {
+                const float HELDMS = std::chrono::duration<float, std::milli>(Time::steadyNow() - g_resultDrag->startedAt).count();
+                if (HELDMS >= G12_HOLD_MS && g_resultDrag->start.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
+                    g_resultDrag->live = true;
+            }
+
+            if (g_resultDrag->live) {
+                const auto MON = pMonitor.lock();
+                ScrollOverview::Dock::setForeignInsert(ScrollOverview::Dock::showAppsContains(MON, lastMousePosLocal) ? -1 : ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal));
+                damage();
+                requestInputFrame();
+            }
+        }
+
         const auto beginScrollingPanAtPoint = [&](const Vector2D& point) {
             auto WORKSPACE = workspaceAtOverviewPoint(point);
             if (!WORKSPACE) {
@@ -1907,12 +1960,69 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             // drag: endWindowDrag() never ran, so its OVERDOCK branch never
             // minimized anything and the proxy stayed on screen mid-gesture.
             // A drag release belongs to the drag, whatever it is released over.
+            // G12. A result drag ends wherever it is released, and it is the
+            // FIRST thing the release is offered to: the dock branch below
+            // would otherwise read the drop as a click on the icon under it.
+            // On the pill it pins, on Show Applications it unpins, and anywhere
+            // else -- including on another result -- it is rejected outright,
+            // which is what "must not create a folder or reorder anything" is.
+            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && g_resultDrag) {
+                const auto DRAG = *g_resultDrag;
+                g_resultDrag.reset();
+                ScrollOverview::Dock::setForeignInsert(-1);
+                damage();
+                requestInputFrame();
+
+                if (DRAG.live && !DRAG.desktopId.empty()) {
+                    const auto MON = pMonitor.lock();
+                    // The button sits INSIDE the pill, so it has to be asked
+                    // first or the drop index would claim it.
+                    if (ScrollOverview::Dock::showAppsContains(MON, lastMousePosLocal))
+                        ScrollOverview::Dock::unpin(DRAG.desktopId);
+                    else if (const int INDEX = ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal); INDEX >= 0)
+                        ScrollOverview::Dock::pinAt(DRAG.desktopId, INDEX);
+                }
+                return;
+            }
+
             if (!dragActiveWindow && ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
+                // X32. The press is no longer the click. It only remembers what
+                // is under it; motion past the threshold turns that into a
+                // reorder, and the RELEASE decides which of the two gestures
+                // happened. Both edges are still eaten either way -- the pill is
+                // not a window and must not leak clicks through to the tile
+                // underneath.
                 if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                    ScrollOverview::Dock::dragBegin(pMonitor.lock(), lastMousePosLocal);
+                    return;
+                }
+
+                if (!ScrollOverview::Dock::dragEnd(pMonitor.lock(), lastMousePosLocal)) {
                     const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
                     ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT));
                 }
                 return;
+            }
+
+            // X32. A dock drag released OFF the pill is a cancel. The press that
+            // started it belonged to the pill, so this release must not also be
+            // read as a click on whatever the pointer has since wandered over.
+            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && ScrollOverview::Dock::dragPending()) {
+                ScrollOverview::Dock::dragCancel();
+                damage();
+                requestInputFrame();
+                return;
+            }
+
+            // G12. A press over a result belongs to the panel, which floats over
+            // the grid exactly as the pill does. Nothing happens yet: only the
+            // hold makes it a drag, and a plain click over a row is still the
+            // panel's to define.
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
+                    g_resultDrag = SResultDrag{.desktopId = ROW->desktopId, .icon = ROW->icon, .start = lastMousePosLocal, .startedAt = Time::steadyNow()};
+                    return;
+                }
             }
 
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
@@ -5685,6 +5795,11 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     if (!monitor)
         return;
 
+    // G12. Cleared here rather than where the rows are drawn: every early
+    // return below is a frame with no rows on it, and a stale box would hand
+    // the next press a result that is no longer on screen.
+    g_searchRowHits.clear();
+
     const bool QUERIED = !g_overviewSearch.empty();
 
     const size_t MATCHES = QUERIED ? matchingWindowCount() : 0;
@@ -5821,6 +5936,11 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
                 CBox row = getOverviewGlobalBox(ROWLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
                 row.round();
+
+                // G12. Recorded as DRAWN, including the rows that are not
+                // draggable: a drop onto one of those still has to be rejected,
+                // and it can only be rejected by something that knows it is there.
+                g_searchRowHits.emplace_back(SSearchRowHit{.box = row, .desktopId = RESULTS[i].app ? RESULTS[i].app->id : "", .icon = RESULTS[i].icon});
 
                 const bool SELECTED = sc<int>(i) == g_overviewAppSelection;
                 if (SELECTED) {
@@ -6594,6 +6714,15 @@ void CScrollOverview::close() {
     // the next time the overview opens.
     ScrollOverview::Dock::closeMenu();
 
+    // X32/G12. Same reasoning for both drags: the overview can close under a
+    // held button (Escape, a keybind, a window taking focus), and the release
+    // that would have ended the gesture then never reaches this hook. Neither
+    // may survive into the next open as a phantom drop.
+    ScrollOverview::Dock::dragCancel();
+    ScrollOverview::Dock::setForeignInsert(-1);
+    g_resultDrag.reset();
+    g_searchRowHits.clear();
+
     setClosing(true);
 
     const auto SELECTEDWORKSPACE =
@@ -7009,6 +7138,20 @@ void CScrollOverview::render() {
     // user is dropping onto belongs. main.cpp skips the desktop hook while an
     // overview owns the monitor, so the pill is still drawn exactly once.
     ScrollOverview::Dock::render(MONITOR);
+
+    // G12. The dragged result follows the pointer, AFTER the dock: the whole
+    // gesture is a journey from the panel to the pill, and an icon that vanished
+    // under the thing it is being dropped on would read as a failed drop.
+    if (g_resultDrag && g_resultDrag->live) {
+        if (const auto TEX = OverviewRender::appIcon(g_resultDrag->icon); TEX && TEX->ok()) {
+            const float        D = std::round(48.F * sc<float>(MONITOR->m_scale));
+            CTexPassElement::SRenderData ghost;
+            ghost.tex = TEX;
+            ghost.box = CBox{lastMousePosLocal.x - D / 2.0, lastMousePosLocal.y - D / 2.0, D, D}.round();
+            ghost.a   = 0.85F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(ghost));
+        }
+    }
 
     sendOverviewFrameCallbacks(NOW);
 }

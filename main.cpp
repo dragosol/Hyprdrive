@@ -787,8 +787,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto DOCKHOVER = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo&) {
         const auto POINT = g_pInputManager->getMouseCoordsInternal();
         for (const auto& MONITOR : State::monitorState()->monitors()) {
-            if (MONITOR && !scrollOverviewForMonitor(MONITOR) && MONITOR->logicalBox().containsPoint(POINT))
-                ScrollOverview::Dock::damageIfChanged(MONITOR);
+            if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(POINT))
+                continue;
+
+            // X32. The desktop dock reorders too, and its drag needs motion for
+            // the same reason the highlight does: on an idle desktop nothing
+            // else is asking for a frame.
+            if (ScrollOverview::Dock::dragPending())
+                ScrollOverview::Dock::dragMove(MONITOR, (POINT - MONITOR->m_position) * MONITOR->m_scale);
+
+            ScrollOverview::Dock::damageIfChanged(MONITOR);
         }
     });
 
@@ -807,11 +815,29 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 continue;
 
             const auto LOCAL = (POINT - MONITOR->m_position) * MONITOR->m_scale;
-            if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL))
+            if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
+                // X32. A drag released OFF the pill is a cancel, and the press
+                // that started it was the dock's -- so this release is not a
+                // click on the desktop either.
+                if (event.state != WL_POINTER_BUTTON_STATE_PRESSED && ScrollOverview::Dock::dragPending()) {
+                    ScrollOverview::Dock::dragCancel();
+                    info.cancelled = true;
+                }
                 return;
+            }
 
             info.cancelled = true;
-            if (event.state != WL_POINTER_BUTTON_STATE_PRESSED)
+
+            // X32. Press remembers, motion commits to a drag, release decides
+            // which of the two gestures happened. See the same three lines in
+            // scrollOverview.cpp's own button hook -- the overview's dock and
+            // the desktop's are one dock and must not behave differently.
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                ScrollOverview::Dock::dragBegin(MONITOR, LOCAL);
+                return;
+            }
+
+            if (ScrollOverview::Dock::dragEnd(MONITOR, LOCAL))
                 return;
 
             const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;

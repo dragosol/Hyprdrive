@@ -61,6 +61,42 @@ bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
 // either way, since the pill is not a window and must not leak clicks through.
 bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift);
 
+// X32 reordering and G12 share ONE drop handler, per G12's "the two drag
+// sources land in the same dock drop handler and must not fight". Both end in
+// pinAt(): a favourite being moved and a search result being pinned are the
+// same edit to the same stored list, one at an index it already holds and one
+// at an index it does not.
+//
+// The insertion index a monitor-local RENDER px point names, counted in
+// FAVOURITE SLOTS as they are drawn -- 0 before the first icon, size() past the
+// last. -1 when the point is not over the pill at all.
+int  dropIndexAt(PHLMONITOR monitor, const Vector2D& point);
+
+// X32/G12. Is the point over the Show Applications button? G12 drops there to
+// UNPIN, so the caller has to tell the two targets apart before it commits.
+bool showAppsContains(PHLMONITOR monitor, const Vector2D& point);
+
+// Move `desktopId` to `index` among the favourites, inserting it if it is not
+// one yet. Writes the store. `index` counts the favourites this machine
+// actually provides; a stored id nothing provides is never drawn and keeps its
+// place.
+void pinAt(const std::string& desktopId, int index);
+void unpin(const std::string& desktopId);
+
+// X32. The dock's own drag, which is why the pill's press is no longer its
+// click: press remembers, motion past the threshold commits to a drag, and only
+// the release decides which of the two gestures happened.
+bool dragBegin(PHLMONITOR monitor, const Vector2D& point);
+bool dragMove(PHLMONITOR monitor, const Vector2D& point);
+bool dragEnd(PHLMONITOR monitor, const Vector2D& point);
+void dragCancel();
+bool dragPending();
+bool dragging();
+
+// G12. A foreign drag (a search result) over the pill lights the same insertion
+// caret the dock's own drag draws. -1 clears it.
+void setForeignInsert(int index);
+
 // X28. The GNOME app-icon menu, opened by a right-click over an icon. It floats
 // above the pill and outlives the press, so while it is up it takes every
 // pointer press and a press that misses it dismisses it.
