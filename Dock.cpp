@@ -159,7 +159,14 @@ constexpr size_t MENU_LABEL_MAX = 44; // bytes; window titles are arbitrarily lo
 // ONE dot, not one per window. The shell's `_dot` is a single actor, and D2D's
 // `running1..running4` classes are css hooks the default theme never styles.
 // (RICE_PROGRESS.md's "DEFAULT (dots)" is a plural the source does not support.)
-constexpr float DOT_MARGIN_B = 2.F;
+// Confirmed against the recording: every dot on the host measures exactly 5px
+// wide, and no icon carries two.
+//
+// The gap between the ICON BOX and the dot, MEASURED, not the css margin-bottom
+// above -- that one is the space under the dot. On the host the dot's first
+// (antialiased) row lands 2px past the icon's last row, i.e. 1px past the icon
+// box, and 2 here put it a pixel low.
+constexpr float DOT_MARGIN_B = 1.F;
 
 // X31 NOTIFICATION COUNTER. `.notification-badge` in the reference's own
 // stylesheet.css: white on red, padding 0.2em 0.5em, border-radius 1em,
@@ -1005,18 +1012,21 @@ CBox hoverBox(const CBox& iconBox, float scale) {
 // and the dot is the only thing on the pill that tells the two apart. The
 // caller gates on SItem::running.
 //
-// It sits in the bottom padding rather than owning it: ITEM_PAD_BOTTOM's own
-// comment reserved this, and the dot's 5+2 clears the icon by 5px.
+// It hangs off the ICON, DOT_MARGIN_B below it -- NOT off the pill's bottom
+// edge, which is where the first cut anchored it. Measured on the host: icon
+// bottom 176, dot 178-182, so the dot's own bottom lands flush with the bottom
+// of the hover highlight. Anchoring to the pill put it ITEM_PAD_BOTTOM -
+// HOVER_PAD = 8px too low, and that gap is what read as "not 1:1".
 void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& item) {
-    const float SCALE  = std::max(monitor->m_scale, 0.01F);
-    const float SIZE   = std::max(1.F, sc<float>(Config::getValue<int>(KEY_DOT_SIZE)) * SCALE);
-    const float CX     = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) / 2.F;
-    const float BOTTOM = sc<float>(layout.pill.y) + sc<float>(layout.pill.height) - DOT_MARGIN_B * SCALE;
+    const float SCALE = std::max(monitor->m_scale, 0.01F);
+    const float SIZE  = std::max(1.F, sc<float>(Config::getValue<int>(KEY_DOT_SIZE)) * SCALE);
+    const float CX    = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) / 2.F;
+    const float TOP   = sc<float>(item.iconBox.y) + sc<float>(item.iconBox.height) + DOT_MARGIN_B * SCALE;
 
     const uint32_t ARGB = Config::getValue<uint32_t>(KEY_DOT_COLOR);
 
     CRectPassElement::SRectData dot;
-    dot.box   = CBox{std::round(CX - SIZE / 2.F), std::round(BOTTOM - SIZE), std::round(SIZE), std::round(SIZE)};
+    dot.box   = CBox{std::round(CX - SIZE / 2.F), std::round(TOP), std::round(SIZE), std::round(SIZE)};
     dot.color = CHyprColor{sc<float>((ARGB >> 16) & 0xFF) / 255.F, sc<float>((ARGB >> 8) & 0xFF) / 255.F, sc<float>(ARGB & 0xFF) / 255.F, sc<float>((ARGB >> 24) & 0xFF) / 255.F};
     // `border-radius: 5px` on a 5px box: a circle. Half the size, so it stays one
     // when the dot is themed larger.
@@ -1161,9 +1171,39 @@ std::string itemName(const SItem& item) {
     return item.wmClass;
 }
 
+// GNOME's dash label does not appear, it FADES: `_showLabel` eases opacity over
+// DASH_ITEM_LABEL_SHOW_TIME. Ours arrived at full alpha, which is what the user
+// reported missing. House entrance curve, because this is an entrance.
+constexpr float TOOLTIP_FADE_MS = 150.F;
+
+std::string     g_tipName;
+Time::steady_tp g_tipSince = Time::steadyNow();
+
 void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor, const std::string& NAME) {
-    if (NAME.empty())
+    if (NAME.empty()) {
+        g_tipName.clear();
         return;
+    }
+
+    // The fade restarts when the label CHANGES, so sliding along the dock gives
+    // each name its own entrance rather than one fade for the whole journey.
+    if (NAME != g_tipName) {
+        g_tipName  = NAME;
+        g_tipSince = Time::steadyNow();
+    }
+
+    const float T     = std::clamp(elapsedMs(g_tipSince) / TOOLTIP_FADE_MS, 0.F, 1.F);
+    const float ALPHA = houseEase(true, T);
+
+    // A pointer resting on an icon emits no motion, so nothing else would ask
+    // for the frames this fade needs. Same doLater the live previews use: a
+    // damage requested inside the pass is cleared with that pass.
+    if (T < 1.F) {
+        g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
+            if (MONITOR)
+                g_pHyprRenderer->damageMonitor(MONITOR.lock());
+        });
+    }
 
     const float SCALE = std::max(monitor->m_scale, 0.01F);
     const auto  TEX   = OverviewRender::text(NAME, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(TOOLTIP_FONT * SCALE))), false, "", 0, 500);
@@ -1183,7 +1223,7 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
 
     CRectPassElement::SRectData bg;
     bg.box           = plate;
-    bg.color         = CHyprColor{0.F, 0.F, 0.F, 0.80F};
+    bg.color         = CHyprColor{0.F, 0.F, 0.F, 0.80F * ALPHA};
     bg.round         = sc<int>(std::round(TOOLTIP_RADIUS * SCALE));
     bg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
@@ -1191,7 +1231,7 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
     CTexPassElement::SRenderData text;
     text.tex = TEX;
     text.box = CBox{std::round(plate.x + PADX), std::round(plate.y + PADY), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
-    text.a   = 1.F;
+    text.a   = ALPHA;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
 }
 
