@@ -253,6 +253,7 @@ namespace AppSearch {
                 return false;
 
             out.id       = id;
+            out.path     = path.string();
             out.haystack = lower(out.name + " " + out.generic + " " + out.comment + " " + out.keywords + " " + id);
 
             return true;
@@ -877,10 +878,94 @@ namespace AppSearch {
         const auto IDX = entryIndexForClass(wmClass);
         return IDX == std::string::npos ? "" : inventory()[IDX].icon;
     }
+
+    std::string idForClass(const std::string& wmClass) {
+        const auto IDX = entryIndexForClass(wmClass);
+        return IDX == std::string::npos ? "" : inventory()[IDX].id;
+    }
+
+    std::vector<SAction> actionsForClass(const std::string& wmClass) {
+        const auto IDX = entryIndexForClass(wmClass);
+        if (IDX == std::string::npos || inventory()[IDX].path.empty())
+            return {};
+
+        std::ifstream file(inventory()[IDX].path);
+        if (!file.is_open())
+            return {};
+
+        // `Actions=` is the declared ORDER and the whitelist; a group with no
+        // matching id is not shown, per the desktop entry spec.
+        std::vector<std::string>                     order;
+        std::unordered_map<std::string, SAction>     found;
+        std::string                                  group, line;
+
+        while (std::getline(file, line)) {
+            const auto L = trim(line);
+            if (L.empty() || L.starts_with('#'))
+                continue;
+
+            if (L.starts_with('[')) {
+                const auto CLOSE = L.find(']');
+                const auto NAME  = CLOSE == std::string::npos ? L.substr(1) : L.substr(1, CLOSE - 1);
+                group            = NAME.starts_with("Desktop Action ") ? trim(NAME.substr(15)) : "";
+                continue;
+            }
+
+            const auto EQ = L.find('=');
+            if (EQ == std::string::npos)
+                continue;
+
+            const auto KEY = trim(L.substr(0, EQ));
+            const auto VAL = trim(L.substr(EQ + 1));
+
+            if (group.empty()) {
+                if (KEY != "Actions")
+                    continue;
+
+                size_t start = 0;
+                while (start < VAL.size()) {
+                    const auto END = VAL.find(';', start);
+                    const auto ID  = trim(VAL.substr(start, END == std::string::npos ? std::string::npos : END - start));
+                    if (!ID.empty())
+                        order.emplace_back(ID);
+                    if (END == std::string::npos)
+                        break;
+                    start = END + 1;
+                }
+                continue;
+            }
+
+            if (KEY == "Name")
+                found[group].name = VAL;
+            else if (KEY == "Exec")
+                found[group].exec = VAL;
+        }
+
+        std::vector<SAction> out;
+        for (const auto& ID : order) {
+            const auto IT = found.find(ID);
+            if (IT != found.end() && !IT->second.name.empty() && !IT->second.exec.empty())
+                out.emplace_back(IT->second);
+        }
+
+        return out;
+    }
+
+    bool launchExec(const std::string& exec) {
+        auto args = splitArgs(stripFieldCodes(exec));
+        if (args.empty())
+            return false;
+
+        const auto BINARY = args.front();
+        args.erase(args.begin());
+
+        CProcess process(BINARY, args);
+        return process.runAsync();
+    }
 }
 
 // ponytail: self-check lives in the TU so it can reach the anonymous namespace.
-// Build with: g++ -std=c++2b -DAPPSEARCH_TEST AppSearch.cpp -o /tmp/appsearch_test
+// Build with: g++ -std=c++2b -DAPPSEARCH_TEST AppSearch.cpp -o /tmp/appsearch_test -lhyprutils
 #ifdef APPSEARCH_TEST
     #include <cassert>
     #include <cstdio>
@@ -1009,6 +1094,23 @@ int main() {
         std::printf("appNameForClass(\"%s\") = \"%s\"\n", TAIL.c_str(), appNameForClass(TAIL).c_str());
         assert(!appNameForClass(TAIL).empty());
         assert(appNameForClass(TAIL) == appNameForClass(TAIL)); // cache agrees with itself
+    }
+
+    // X28. The menu's Actions section. Nautilus is the entry on this host that
+    // actually ships an Actions= list, so it is the only honest fixture; assert
+    // the shape rather than a literal list, which upstream is free to reorder.
+    assert(idForClass("definitely-not-an-app-zzz").empty());
+    assert(actionsForClass("definitely-not-an-app-zzz").empty());
+    if (const auto NAUT = idForClass("org.gnome.Nautilus"); !NAUT.empty()) {
+        const auto ACTS = actionsForClass("org.gnome.Nautilus");
+        std::printf("nautilus actions: %zu\n", ACTS.size());
+        assert(!ACTS.empty());
+        for (const auto& A : ACTS) {
+            // A half-parsed action is worse than none: it renders a blank row
+            // that does nothing when clicked.
+            assert(!A.name.empty() && !A.exec.empty());
+            std::printf("  %s -> %s\n", A.name.c_str(), A.exec.c_str());
+        }
     }
 
     const auto R = search("te", 5);

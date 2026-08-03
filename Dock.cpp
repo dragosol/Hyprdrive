@@ -11,6 +11,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -90,6 +93,17 @@ constexpr float TOOLTIP_PAD_X  = 10.F;
 constexpr float TOOLTIP_PAD_Y  = 6.F;
 constexpr float TOOLTIP_RADIUS = 8.F;
 constexpr float TOOLTIP_GAP    = 8.F;
+
+// X28. The app-icon menu. Same font as the tooltip -- it is the same chrome,
+// one plate up -- with GNOME's roomier row padding.
+constexpr float  MENU_FONT      = 13.F;
+constexpr float  MENU_PAD_X     = 14.F;
+constexpr float  MENU_ROW_PAD_Y = 7.F;
+constexpr float  MENU_RADIUS    = 10.F;
+constexpr float  MENU_GAP       = 8.F;
+constexpr float  MENU_SEP_H     = 9.F;
+constexpr float  MENU_MIN_W     = 170.F;
+constexpr size_t MENU_LABEL_MAX = 44; // bytes; window titles are arbitrarily long
 
 constexpr const char* KEY_ENABLED    = "plugin:scrolloverview:dock:enabled";
 constexpr const char* KEY_ICON_SIZE  = "plugin:scrolloverview:dock:icon_size";
@@ -420,12 +434,18 @@ void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
 // There is deliberately no launch branch. The dock lists RUNNING classes until
 // X32 brings favourites in, so every icon here already owns a window; a launch
 // path written now would have nothing to launch from.
-void activateClass(PHLMONITOR monitor, const std::string& wmClass, bool shift) {
-    std::vector<PHLWINDOW> windows;
+std::vector<PHLWINDOW> classWindows(const std::string& wmClass) {
+    std::vector<PHLWINDOW> out;
     for (const auto& WINDOW : Desktop::windowState()->windows()) {
         if (WINDOW && WINDOW->m_isMapped && WINDOW->m_class == wmClass)
-            windows.emplace_back(WINDOW);
+            out.emplace_back(WINDOW);
     }
+
+    return out;
+}
+
+void activateClass(PHLMONITOR monitor, const std::string& wmClass, bool shift) {
+    const auto windows = classWindows(wmClass);
 
     if (windows.empty())
         return;
@@ -467,6 +487,282 @@ void activateClass(PHLMONITOR monitor, const std::string& wmClass, bool shift) {
     minimizeWithFlight(monitor, visible.back());
 }
 
+// ---------------------------------------------------------------- X28 menu --
+
+enum class ERow : uint8_t { Separator, Action, Window, Details, Favorite, Quit };
+
+struct SRow {
+    ERow         kind = ERow::Separator;
+    std::string  label;
+    std::string  exec;   // ERow::Action
+    PHLWINDOWREF window; // ERow::Window
+    CBox         box;    // monitor-local RENDER px, filled by renderMenu
+};
+
+struct SMenu {
+    MONITORID         monitor = MONITOR_INVALID;
+    std::string       wmClass;
+    CBox              anchor; // the icon cell the menu hangs off
+    CBox              box;    // the whole plate, filled by renderMenu
+    std::vector<SRow> rows;
+};
+
+std::optional<SMenu> g_menu;
+
+// Favourites are a LIST OF DESKTOP IDS, the same unit GNOME's `favorite-apps`
+// key uses, so X32 can adopt this store rather than replace it. A plain file,
+// because a plugin cannot write a Hyprland config key back out and this is user
+// data rather than a tunable.
+std::filesystem::path favoritesPath() {
+    if (const char* STATE = std::getenv("XDG_STATE_HOME"); STATE && *STATE)
+        return std::filesystem::path{STATE} / "scrolloverview" / "favorites";
+
+    if (const char* HOME = std::getenv("HOME"); HOME && *HOME)
+        return std::filesystem::path{HOME} / ".local" / "state" / "scrolloverview" / "favorites";
+
+    return {};
+}
+
+std::vector<std::string>& favorites() {
+    static std::vector<std::string> cache;
+    static bool                     loaded = false;
+
+    if (!loaded) {
+        loaded = true;
+
+        std::ifstream file(favoritesPath());
+        std::string   line;
+        while (std::getline(file, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+                line.pop_back();
+            if (!line.empty())
+                cache.emplace_back(line);
+        }
+    }
+
+    return cache;
+}
+
+void toggleFavorite(const std::string& id) {
+    if (id.empty())
+        return;
+
+    auto& FAV = favorites();
+    if (const auto IT = std::ranges::find(FAV, id); IT != FAV.end())
+        FAV.erase(IT);
+    else
+        FAV.emplace_back(id);
+
+    const auto PATH = favoritesPath();
+    if (PATH.empty())
+        return;
+
+    std::error_code ec;
+    std::filesystem::create_directories(PATH.parent_path(), ec);
+
+    std::ofstream out(PATH, std::ios::trunc);
+    for (const auto& F : FAV)
+        out << F << "\n";
+}
+
+// Back off to a lead byte so a truncated title cannot end mid-codepoint and
+// hand the text renderer a broken string.
+std::string elide(const std::string& text) {
+    if (text.size() <= MENU_LABEL_MAX)
+        return text;
+
+    size_t cut = MENU_LABEL_MAX;
+    while (cut > 0 && (sc<unsigned char>(text[cut]) & 0xC0) == 0x80)
+        --cut;
+
+    return text.substr(0, cut) + "…";
+}
+
+// Spec §13.9 X28, in the order the spec lists them: .desktop Actions, window
+// list, Show Details, Add/Remove from Favorites, Quit.
+std::vector<SRow> buildRows(const std::string& wmClass) {
+    std::vector<SRow> rows;
+
+    for (const auto& ACTION : AppSearch::actionsForClass(wmClass))
+        rows.emplace_back(SRow{.kind = ERow::Action, .label = ACTION.name, .exec = ACTION.exec});
+
+    const auto WINDOWS = classWindows(wmClass);
+    if (!rows.empty() && !WINDOWS.empty())
+        rows.emplace_back(SRow{.kind = ERow::Separator});
+
+    for (const auto& WINDOW : WINDOWS)
+        rows.emplace_back(SRow{.kind = ERow::Window, .label = elide(WINDOW->m_title.empty() ? wmClass : WINDOW->m_title), .window = WINDOW});
+
+    // A class no desktop entry claims has nothing to show the details of and
+    // nothing to favourite by id, so both rows are left out rather than drawn
+    // dead. GNOME does the same with an unmatched window.
+    if (const auto ID = AppSearch::idForClass(wmClass); !ID.empty()) {
+        if (!rows.empty())
+            rows.emplace_back(SRow{.kind = ERow::Separator});
+
+        rows.emplace_back(SRow{.kind = ERow::Details, .label = "Show Details"});
+        rows.emplace_back(SRow{.kind  = ERow::Favorite,
+                               .label = std::ranges::contains(favorites(), ID) ? "Remove from Favorites" : "Add to Favorites"});
+    }
+
+    if (!rows.empty())
+        rows.emplace_back(SRow{.kind = ERow::Separator});
+    rows.emplace_back(SRow{.kind = ERow::Quit, .label = WINDOWS.size() > 1 ? "Quit " + std::to_string(WINDOWS.size()) + " Windows" : "Quit"});
+
+    return rows;
+}
+
+void activateRow(PHLMONITOR monitor, const std::string& wmClass, const SRow& row) {
+    switch (row.kind) {
+        case ERow::Separator: return;
+
+        case ERow::Action: AppSearch::launchExec(row.exec); return;
+
+        case ERow::Window: {
+            const auto WINDOW = row.window.lock();
+            if (!WINDOW)
+                return;
+
+            // ponytail: a minimized window is only restored, not selected. The
+            // overview has no card for the stash workspace, so committing a
+            // selection onto it would land the viewport on the wrong desktop.
+            // Same as clicking its X25 preview, which is the gesture next to it.
+            if (Minimize::isMinimized(WINDOW)) {
+                Minimize::restore(WINDOW);
+                return;
+            }
+
+            if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
+                OVERVIEW->selectAndClose(WINDOW);
+            return;
+        }
+
+        case ERow::Details: {
+            // What GNOME's own Show Details does. Absent gnome-software this
+            // spawns nothing, exactly as it does on a host without it.
+            const auto ID = AppSearch::idForClass(wmClass);
+            if (!ID.empty())
+                AppSearch::launchExec("gnome-software --details=" + ID);
+            return;
+        }
+
+        case ERow::Favorite: toggleFavorite(AppSearch::idForClass(wmClass)); return;
+
+        case ERow::Quit:
+            for (const auto& WINDOW : classWindows(wmClass))
+                WINDOW->sendClose();
+            return;
+    }
+}
+
+// Lays the rows out AND draws them: a row's height is its text's height, and
+// the only way to learn that is to build the texture. Doing both here is what
+// keeps the hit-test boxes and the pixels the user sees the same numbers.
+void renderMenu(PHLMONITOR monitor, const SLayout& layout) {
+    if (!g_menu || !monitor || g_menu->monitor != monitor->m_id)
+        return;
+
+    const float SCALE  = std::max(monitor->m_scale, 0.01F);
+    const int   FONTPX = std::max(1, sc<int>(std::round(MENU_FONT * SCALE)));
+
+    std::vector<SP<Render::ITexture>> textures;
+    textures.reserve(g_menu->rows.size());
+
+    float width = MENU_MIN_W * SCALE;
+    float height = 0.F;
+    for (const auto& ROW : g_menu->rows) {
+        if (ROW.kind == ERow::Separator) {
+            textures.emplace_back(nullptr);
+            height += MENU_SEP_H * SCALE;
+            continue;
+        }
+
+        auto tex = g_pHyprRenderer->renderText(ROW.label, CHyprColor{1.F, 1.F, 1.F, 0.95F}, FONTPX, false, "", 0, 500);
+        if (!tex || !tex->ok()) {
+            textures.emplace_back(nullptr);
+            height += MENU_SEP_H * SCALE;
+            continue;
+        }
+
+        width  = std::max(width, sc<float>(tex->m_size.x) + 2.F * MENU_PAD_X * SCALE);
+        height += sc<float>(tex->m_size.y) + 2.F * MENU_ROW_PAD_Y * SCALE;
+        textures.emplace_back(std::move(tex));
+    }
+
+    if (height < 1.F)
+        return;
+
+    const float CX = sc<float>(g_menu->anchor.x) + sc<float>(g_menu->anchor.width) / 2.F;
+    CBox        plate{std::round(CX - width / 2.F), std::round(sc<float>(layout.pill.y) - MENU_GAP * SCALE - height), std::round(width), std::round(height)};
+    plate.x = std::clamp(plate.x, 0.0, std::max(0.0, monitor->m_size.x * SCALE - plate.width));
+    plate.y = std::max(0.0, plate.y);
+
+    g_menu->box = plate;
+
+    // X13/X29: frost is on for every surface, so the menu gets the pill's own.
+    COverviewBlurPassElement::SData blur;
+    blur.box            = plate;
+    blur.rounding       = sc<int>(std::round(MENU_RADIUS * SCALE));
+    blur.roundingPower  = 2.F;
+    blur.alpha          = 1.F;
+    blur.xray           = false;
+    blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
+    blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);
+    blur.blurBrightness = Config::getValue<float>(KEY_BLUR_BRIGHT);
+    blur.blurNoise      = Config::getValue<float>(KEY_BLUR_NOISE);
+    blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
+    blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
+
+    CRectPassElement::SRectData bg;
+    bg.box           = plate;
+    bg.color         = background();
+    bg.round         = sc<int>(std::round(MENU_RADIUS * SCALE));
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+
+    const auto MOUSE = (g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale;
+
+    float y = sc<float>(plate.y);
+    for (size_t i = 0; i < g_menu->rows.size(); ++i) {
+        auto&      row = g_menu->rows[i];
+        const auto TEX = textures[i];
+
+        if (!TEX) {
+            row.box = CBox{plate.x, std::round(y), plate.width, std::round(MENU_SEP_H * SCALE)};
+
+            CRectPassElement::SRectData sep;
+            sep.box   = CBox{std::round(plate.x + MENU_PAD_X * SCALE), std::round(y + MENU_SEP_H * SCALE / 2.F),
+                             std::round(plate.width - 2.F * MENU_PAD_X * SCALE), sc<double>(std::max(1.F, std::round(SCALE)))};
+            sep.color = CHyprColor{1.F, 1.F, 1.F, 0.15F};
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sep));
+
+            y += MENU_SEP_H * SCALE;
+            continue;
+        }
+
+        const float ROWH = sc<float>(TEX->m_size.y) + 2.F * MENU_ROW_PAD_Y * SCALE;
+        row.box          = CBox{plate.x, std::round(y), plate.width, std::round(ROWH)};
+
+        if (row.box.containsPoint(MOUSE)) {
+            CRectPassElement::SRectData fill;
+            fill.box           = row.box;
+            fill.color         = CHyprColor{1.F, 1.F, 1.F, 0.12F};
+            fill.round         = 0;
+            fill.roundingPower = 2.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(fill));
+        }
+
+        CTexPassElement::SRenderData text;
+        text.tex = TEX;
+        text.box = CBox{std::round(plate.x + MENU_PAD_X * SCALE), std::round(y + MENU_ROW_PAD_Y * SCALE), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
+        text.a   = 1.F;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+
+        y += ROWH;
+    }
+}
+
 } // namespace
 
 bool pillContains(PHLMONITOR monitor, const Vector2D& point) {
@@ -505,6 +801,56 @@ bool click(PHLMONITOR monitor, const Vector2D& point, bool shift) {
     return true;
 }
 
+bool openMenu(PHLMONITOR monitor, const Vector2D& point) {
+    closeMenu();
+
+    if (!monitor)
+        return false;
+
+    const auto LAYOUT = layout(monitor);
+    if (LAYOUT.pill.empty())
+        return false;
+
+    // The same cell the hover highlight and the left-click use, so the three
+    // gestures cannot disagree about which icon is under the pointer.
+    const auto ITEM = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(point); });
+    if (ITEM == LAYOUT.items.end())
+        return false;
+
+    g_menu = SMenu{.monitor = monitor->m_id, .wmClass = ITEM->wmClass, .anchor = ITEM->iconBox, .box = {}, .rows = buildRows(ITEM->wmClass)};
+    return true;
+}
+
+bool menuOpen() {
+    return g_menu.has_value();
+}
+
+void closeMenu() {
+    g_menu.reset();
+}
+
+bool menuContains(PHLMONITOR monitor, const Vector2D& point) {
+    return g_menu && monitor && g_menu->monitor == monitor->m_id && !g_menu->box.empty() && g_menu->box.containsPoint(point);
+}
+
+bool menuClick(PHLMONITOR monitor, const Vector2D& point) {
+    if (!menuContains(monitor, point))
+        return false;
+
+    const auto ROW = std::ranges::find_if(g_menu->rows, [&](const SRow& row) { return row.kind != ERow::Separator && !row.box.empty() && row.box.containsPoint(point); });
+    if (ROW == g_menu->rows.end())
+        return false; // the plate, between rows: swallowed by the caller, menu stays up
+
+    // Copied before the menu goes away: activating a row can close the overview,
+    // and g_menu must not be read through after that.
+    const auto CLASS = g_menu->wmClass;
+    const auto PICK  = *ROW;
+    closeMenu();
+
+    activateRow(monitor, CLASS, PICK);
+    return true;
+}
+
 bool damageIfChanged(PHLMONITOR monitor) {
     if (!monitor)
         return false;
@@ -524,6 +870,18 @@ bool damageIfChanged(PHLMONITOR monitor) {
             if (hoverBox(LAYOUT.items[i].iconBox, monitor->m_scale).containsPoint(MOUSE)) {
                 signature += "#" + std::to_string(i);
                 break;
+            }
+        }
+
+        // X28. The menu is part of what the dock looks like, and its hovered row
+        // moves with a bare pointer move exactly as the icon highlight does.
+        if (g_menu && g_menu->monitor == monitor->m_id) {
+            signature += "@" + g_menu->wmClass;
+            for (size_t i = 0; i < g_menu->rows.size(); ++i) {
+                if (!g_menu->rows[i].box.empty() && g_menu->rows[i].box.containsPoint(MOUSE)) {
+                    signature += "/" + std::to_string(i);
+                    break;
+                }
             }
         }
     }
@@ -604,8 +962,14 @@ void render(PHLMONITOR monitor) {
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
     }
 
-    if (HASHOVER)
+    // The menu says the app's name louder than the tooltip does, and the two
+    // plates would otherwise sit on top of each other.
+    if (HASHOVER && !g_menu)
         renderTooltip(monitor, LAYOUT, *HOVEREDITEM);
+
+    // Above the pill by construction (MENU_GAP), so the previews below cannot
+    // overdraw it and it does not have to wait for them.
+    renderMenu(monitor, LAYOUT);
 
     if (LAYOUT.previews.empty())
         return;

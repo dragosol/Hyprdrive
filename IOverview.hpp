@@ -44,6 +44,12 @@ class IOverview {
     // from the window's real geometry underneath it.
     virtual CBox  tileBox(const PHLWINDOW& window) const = 0;
 
+    // X28. Commit the overview's selection to one window and close, the way a
+    // tile click does. The dock's right-click window list needs exactly this:
+    // focusing the window directly would be overwritten by close()'s own
+    // selection, which is also where X43's raise lives.
+    virtual bool  selectAndClose(const PHLWINDOW& window) = 0;
+
     bool          blockDamageReporting   = false;
 
     PHLMONITORREF pMonitor;

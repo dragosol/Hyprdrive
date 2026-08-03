@@ -21,7 +21,14 @@ namespace AppSearch {
         std::string wmClass; // StartupWMClass=, measured absent on 185/186 entries
         bool        terminal = false;
 
+        std::string path;     // the .desktop file itself, so actions can be read on demand
         std::string haystack; // lowercased name/generic/comment/keywords/id, built once
+    };
+
+    // OVERVIEW_CPP_SPEC §13.9 X28. One `[Desktop Action <id>]` group.
+    struct SAction {
+        std::string name; // Name=
+        std::string exec; // raw Exec=, field codes not yet stripped
     };
 
     // Scans lazily on first call. ~19 visible apps in the test VM, so this is a
@@ -61,4 +68,16 @@ namespace AppSearch {
     // Shares appNameForClass's lookup and cache -- the dock (X27) asks the same
     // question about the same classes, once per frame.
     std::string iconForClass(const std::string& wmClass);
+
+    // The desktop id for a window class, or "". X28's Show Details needs it.
+    std::string idForClass(const std::string& wmClass);
+
+    // X28. The entry's `Actions=` groups in declared order, or empty. Re-reads
+    // the .desktop file: this is asked once per right-click, not per frame, so
+    // the inventory stays the small thing the search path wants.
+    std::vector<SAction> actionsForClass(const std::string& wmClass);
+
+    // X28. Detached spawn of a raw Exec= string, field codes stripped. The
+    // action half of launch(); a desktop action is never Terminal=.
+    bool launchExec(const std::string& exec);
 }

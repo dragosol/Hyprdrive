@@ -47,6 +47,20 @@ bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
 // either way, since the pill is not a window and must not leak clicks through.
 bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift);
 
+// X28. The GNOME app-icon menu, opened by a right-click over an icon. It floats
+// above the pill and outlives the press, so while it is up it takes every
+// pointer press and a press that misses it dismisses it.
+//
+// The row boxes are laid out during render() -- measuring a label means asking
+// the renderer for its texture, which is only legal inside the pass -- so
+// menuContains/menuClick answer against the LAST frame's geometry. That is the
+// frame the user is looking at when they click, which is the one that matters.
+bool openMenu(PHLMONITOR monitor, const Vector2D& point);
+bool menuOpen();
+void closeMenu();
+bool menuContains(PHLMONITOR monitor, const Vector2D& point);
+bool menuClick(PHLMONITOR monitor, const Vector2D& point);
+
 // Damage the monitor when the pill's shape changes -- an app opening or closing,
 // the dock being switched off, the hovered icon moving -- and every frame while a
 // live preview is in it. MUST be called before the frame is rendered: damage

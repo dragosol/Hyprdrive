@@ -1862,6 +1862,37 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             return WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{};
         };
 
+        // OVERVIEW_CPP_SPEC §13.9 X28. The dock's right-click menu, ahead of
+        // every other pointer gesture: it floats over the main area exactly as
+        // the pill does, so the tile underneath would otherwise take the press,
+        // and once it is up it is modal until something dismisses it.
+        //
+        // Only PRESSES are acted on. The right-button RELEASE that follows the
+        // press which opened the menu lands outside the plate, and treating it
+        // as a click would dismiss the menu in the same gesture that opened it.
+        {
+            const auto DOCKMONITOR = pMonitor.lock();
+            const auto DOCKPOINT   = getOverviewMousePosLocal(DOCKMONITOR);
+            const bool PRESSED     = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
+
+            if (PRESSED && event.button == RESIZE_BUTTON && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
+                lastMousePosLocal = DOCKPOINT;
+                ScrollOverview::Dock::openMenu(DOCKMONITOR, DOCKPOINT);
+                return;
+            }
+
+            if (ScrollOverview::Dock::menuOpen()) {
+                if (PRESSED) {
+                    lastMousePosLocal = DOCKPOINT;
+                    if (!ScrollOverview::Dock::menuContains(DOCKMONITOR, DOCKPOINT))
+                        ScrollOverview::Dock::closeMenu();
+                    else
+                        ScrollOverview::Dock::menuClick(DOCKMONITOR, DOCKPOINT);
+                }
+                return;
+            }
+        }
+
         if (event.button == MAIN_BUTTON) {
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
@@ -2866,6 +2897,31 @@ CBox CScrollOverview::tileBox(const PHLWINDOW& window) const {
 
     const auto OFFSET = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
     return TileChrome::scaledBox(window, getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout));
+}
+
+bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
+    if (!window)
+        return false;
+
+    // The window's own workspace, not the one in view: X28's menu can list a
+    // window on any desktop, and committing the selection without moving the
+    // viewport to it would close the overview onto the wrong one.
+    size_t workspaceIdx = images.size();
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (images[i] && images[i]->pWorkspace == window->m_workspace) {
+            workspaceIdx = i;
+            break;
+        }
+    }
+
+    if (workspaceIdx >= images.size())
+        return false;
+
+    if (!selectOverviewWindow(window, workspaceIdx, true))
+        return false;
+
+    close();
+    return true;
 }
 
 CBox CScrollOverview::tileCloseButtonBox(const PHLWINDOW& window) const {
@@ -6532,6 +6588,11 @@ void CScrollOverview::close() {
     if (closeApplied)
         return;
     closeApplied = true;
+
+    // X28. The pill only exists while the overview does, so its menu must go
+    // with it -- otherwise a stale plate is still holding every pointer press
+    // the next time the overview opens.
+    ScrollOverview::Dock::closeMenu();
 
     setClosing(true);
 
