@@ -754,8 +754,15 @@ SLayout baseLayout(PHLMONITOR monitor) {
     if (!monitor || !Config::getValue<bool>(KEY_ENABLED) || monitor->m_size.x < 1 || monitor->m_size.y < 1)
         return out;
 
-    auto       items     = dockItems();
-    const auto MINIMIZED = previewWindows();
+    auto items = dockItems();
+
+    // X46. A minimized window used to be appended to the pill as a preview
+    // slot of its own. It is not any more: the pill's cells, centres and width
+    // must not move when something is minimized, because the user asked for the
+    // window to go INTO its icon rather than to sprout a second entry. Live
+    // previews still exist -- X47 raises them on HOVER instead, which is also
+    // where the SPreview machinery below now gets its contents.
+    const std::vector<PHLWINDOW> MINIMIZED;
 
     // X32. The button is a slot of its own, so it widens the pill and competes
     // for icon size with everything else -- and it is the ONE thing that can put
@@ -1322,47 +1329,55 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
 
     const auto windows = classWindows(item.wmClass);
 
-    // X32. Nothing to minimize, so this is a launch.
+    // X45. NO WINDOWS: launch.
     if (windows.empty()) {
         launchApp(monitor, item);
         return;
     }
 
-    // The toggle is driven by what is ON SCREEN, not by what has focus.
-    //
-    // Focus was the first cut and it made the minimize branch DEAD: the pill is
-    // only ever up while the overview is (§10 clause 6), the overview owns the
-    // focus while it is up, so focusState()->window() is never a dock app's
-    // window and every click fell through to "bring it forward". Measured
-    // 2026-08-03 -- two clicks on an icon, activewindow unchanged both times,
-    // nothing minimized. Nothing else uses this path, so nothing caught it.
-    std::vector<PHLWINDOW> visible;
-    for (const auto& WINDOW : windows) {
-        if (!Minimize::isMinimized(WINDOW))
-            visible.emplace_back(WINDOW);
-    }
-
-    // Whole app already down, so the click brings it back. Restore raises and
-    // focuses on its own (X43).
-    if (visible.empty()) {
-        for (const auto& WINDOW : windows)
-            Minimize::restore(WINDOW);
-        return;
-    }
-
-    // `minimize-shift`: shift takes the whole app down, not just the window in
-    // front. Same action as a plain click otherwise, since `shift-click-action`
-    // is also minimize.
+    // `minimize-shift` survives X45 unchanged: shift takes the WHOLE app down
+    // whatever the count, and brings it all back when it is already down.
     if (shift) {
+        std::vector<PHLWINDOW> visible;
+        for (const auto& WINDOW : windows) {
+            if (!Minimize::isMinimized(WINDOW))
+                visible.emplace_back(WINDOW);
+        }
+
+        if (visible.empty()) {
+            for (const auto& WINDOW : windows)
+                Minimize::restore(WINDOW);
+            return;
+        }
+
         for (const auto& WINDOW : visible)
             minimizeWithFlight(monitor, WINDOW);
         return;
     }
 
-    // ponytail: `activate-single-window` is exact for one window, which is the
-    // case that matters. Picking among several is X28's "All Windows" menu; the
-    // front of the compositor's stack is the stand-in until it exists.
-    minimizeWithFlight(monitor, visible.back());
+    // X45. TWO OR MORE WINDOWS: the click CYCLES. This replaces X24's
+    // "minimize whatever is in front", which could only ever reach one of them.
+    // activateWindow() restores a minimized window on the way, so the cycle
+    // covers windows sitting in the icon as well as windows on screen -- there
+    // is no state a cycle cannot reach.
+    if (windows.size() > 1) {
+        cycleThroughWindows(item.wmClass, false);
+        return;
+    }
+
+    // X45. EXACTLY ONE WINDOW: the click is a toggle against that window --
+    // minimize it into its own icon, and the next click brings it back.
+    //
+    // Decided by the window's OWN state, not by focus. Focus was the first cut
+    // and it made the minimize branch dead: the pill is only ever up while the
+    // overview is (§10 clause 6) and the overview owns the focus while it is
+    // up, so focusState()->window() is never a dock app's window. Measured
+    // 2026-08-03, two clicks and nothing minimized either time.
+    const auto& WINDOW = windows.front();
+    if (Minimize::isMinimized(WINDOW))
+        Minimize::restore(WINDOW);
+    else
+        minimizeWithFlight(monitor, WINDOW);
 }
 
 // X33. `middle-click-action` and `shift-middle-click-action`, both `launch` in
@@ -2366,44 +2381,49 @@ void render(PHLMONITOR monitor) {
     // overdraw it and it does not have to wait for them.
     renderMenu(monitor, LAYOUT);
 
-    if (LAYOUT.previews.empty())
-        return;
+    const auto NOW = Time::steadyNow();
 
     // X25. The REAL window, through the same path the overview tiles use --
     // which is the point of rebuilding the dock in C++ at all. An icon or a
     // cached screenshot here would be the defect the spec names.
-    // X24. A flight is not a separate animation, it is this same loop drawing
-    // one of the previews at an interpolated box on its way to its slot. It ends
-    // when the clock runs out, or immediately if the slot went away (restored
-    // or closed mid-flight).
-    std::optional<CBox> flightBox;
-    if (g_flight) {
-        const float T    = flightLinearProgress();
-        const auto  SLOT = std::ranges::find_if(LAYOUT.previews, [](const SPreview& p) { return p.window == g_flight->window; });
-        if (T >= 1.F || SLOT == LAYOUT.previews.end())
-            g_flight.reset();
-        else
-            flightBox = lerpBox(g_flight->from, SLOT->box, exitEase(T));
-    }
+    const auto drawWindowAt = [&](const PHLWINDOW& window, const CBox& box) {
+        forcePreviewVisible(window);
 
-    const auto NOW = Time::steadyNow();
-    for (const auto& PREVIEW : LAYOUT.previews) {
-        forcePreviewVisible(PREVIEW.window);
-
-        const CBox  BOX         = (flightBox && PREVIEW.window == g_flight->window) ? *flightBox : PREVIEW.box;
-        const auto  SIZE        = PREVIEW.window->m_realSize->value();
-        const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(BOX.height / (SIZE.y * monitor->m_scale)) : 1.F;
+        const auto  SIZE        = window->m_realSize->value();
+        const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(box.height / (SIZE.y * monitor->m_scale)) : 1.F;
 
         OverviewWindow::renderOverviewWindow({
             .monitor     = monitor,
-            .window      = PREVIEW.window,
-            .windowBox   = BOX,
+            .window      = window,
+            .windowBox   = box,
             .renderScale = RENDERSCALE,
             .now         = NOW,
         });
 
-        presentPreview(PREVIEW.window, monitor, NOW);
+        presentPreview(window, monitor, NOW);
+    };
+
+    // X46. A minimize now flies into the app's OWN ICON. It used to fly into the
+    // preview slot the minimize itself created, which is the entry X46 deletes;
+    // the icon is where the window goes and where a click gets it back, so it is
+    // the honest target. Ends when the clock runs out, or immediately if the
+    // icon went away (app closed mid-flight).
+    if (g_flight) {
+        const auto WINDOW = g_flight->window.lock();
+        const float T     = flightLinearProgress();
+        const auto  ITEM  = WINDOW ? std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return item.wmClass == WINDOW->m_class; }) : LAYOUT.items.end();
+
+        if (!WINDOW || T >= 1.F || ITEM == LAYOUT.items.end())
+            g_flight.reset();
+        else
+            drawWindowAt(WINDOW, lerpBox(g_flight->from, ITEM->iconBox, exitEase(T)));
     }
+
+    for (const auto& PREVIEW : LAYOUT.previews)
+        drawWindowAt(PREVIEW.window, PREVIEW.box);
+
+    if (LAYOUT.previews.empty() && !g_flight)
+        return;
 
     // X25. A minimized window sits on a hidden workspace, so its commits damage
     // no monitor and nothing else on an idle desktop asks for a frame. The
