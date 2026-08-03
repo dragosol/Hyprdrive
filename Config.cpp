@@ -352,6 +352,27 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:dock:autohide_ms", "hyprgnomedock: slide duration (D2D animation-time)", 200,
                                                         SIntValueOptions{.min = 0, .max = 2000}));
+    // X31. The dot's two numbers are GNOME SHELL's, not D2D's: the reference runs
+    // `running-indicator-style` DEFAULT, which draws no dot of its own and leaves
+    // the shell's own showing -- `.app-grid-running-dot`, 5px, #fafafb.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:running_indicator", "hyprgnomedock: dot under a running app's icon (D2D show-running)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CColorValue>("plugin:scrolloverview:dock:indicator_color", "hyprgnomedock: running-dot colour (shell .app-grid-running-dot)",
+                                                          (Hyprlang::INT)0xFFFAFAFB));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:indicator_size", "hyprgnomedock: running-dot diameter in px", 5,
+                                                        SIntValueOptions{.min = 1, .max = 64}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:notification_counter",
+                                                         "hyprgnomedock: red count badge on the icon (D2D show-icons-notifications-counter)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:emblems", "hyprgnomedock: draw Unity LauncherEntry emblems at all (D2D show-icons-emblems)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:dance_urgent", "hyprgnomedock: wiggle an urgent app's icon (D2D dance-urgent-applications)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:urgent_notify",
+                                                         "hyprgnomedock: reveal the dock when an app goes urgent (D2D show-dock-urgent-notify)", true));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
                                                           (Hyprlang::INT)0xFFC0BFBC));

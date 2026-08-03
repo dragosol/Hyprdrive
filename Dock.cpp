@@ -3,6 +3,7 @@
 #include "AppSearch.hpp"
 #include "Config.hpp"
 #include "IOverview.hpp"
+#include "LauncherEntry.hpp"
 #include "Minimize.hpp"
 #include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
@@ -106,6 +107,48 @@ constexpr float  MENU_SEP_H     = 9.F;
 constexpr float  MENU_MIN_W     = 170.F;
 constexpr size_t MENU_LABEL_MAX = 44; // bytes; window titles are arbitrarily long
 
+// X31 RUNNING INDICATOR. `running-indicator-style` is DEFAULT in the reference,
+// and DEFAULT is not a Dash to Dock drawing at all: appIconIndicators.js's
+// RunningIndicatorDefault only adds a css class and leaves GNOME SHELL's own dot
+// showing -- `_updateDefaultDot` shows `source._dot`, and only the DOTS style
+// ever calls `_hideDefaultDot`. So the shape to match is the SHELL's, read out
+// of gnome-shell-dark.css and D2D's `.bottom` override:
+//
+//   .app-grid-running-dot   height 5, width 5, border-radius 5, #fafafb
+//   #dashtodockContainer.bottom ... .app-grid-running-dot   margin-bottom 2
+//
+// ONE dot, not one per window. The shell's `_dot` is a single actor, and D2D's
+// `running1..running4` classes are css hooks the default theme never styles.
+// (RICE_PROGRESS.md's "DEFAULT (dots)" is a plural the source does not support.)
+constexpr float DOT_MARGIN_B = 2.F;
+
+// X31 NOTIFICATION COUNTER. `.notification-badge` in the reference's own
+// stylesheet.css: white on red, padding 0.2em 0.5em, border-radius 1em,
+// font-weight bold, margin 2px -- pinned to the icon's TOP-RIGHT, which is the
+// St.Bin xAlign END / yAlign START in `_updateNotificationsBadge`.
+constexpr float BADGE_PAD_X_EM = 0.5F;
+constexpr float BADGE_PAD_Y_EM = 0.2F;
+constexpr float BADGE_MARGIN   = 2.F;
+constexpr int   BADGE_WEIGHT   = 700; // `font-weight: bold`
+
+// `_updateNotificationBadgeStyle`, followed verbatim rather than converted: the
+// host's `font-name` is "Ubuntu 11", points not absolute, so 11 * 0.9 / 0.75,
+// then scaled by iconSize / 48. 48 is the SCHEMA default of `dash-max-icon-size`
+// -- which is what `get_default_value` reads -- and NOT the user's effective 54.
+constexpr float BADGE_FONT_PT      = 11.F;
+constexpr float BADGE_FONT_RATIO   = 0.9F;
+constexpr float BADGE_DEFAULT_ICON = 48.F;
+
+// X31 URGENT, `dance-urgent-applications` true. The reference's IconAnimator
+// (docking.js:2612-2635) runs ONE 3000ms timeline on repeat and sets
+// rotation_angle_z = progress < 1/6 ? 15 * sin(progress * 24 * PI) : 0. So the
+// icon wiggles for the first 500ms of every 3s and is still for the other 2500,
+// two full sine periods per burst (24*PI * 1/6 = 4*PI). One shared clock, so
+// two urgent apps wiggle together instead of each on its own phase.
+constexpr float WIGGLE_PERIOD_MS = 3000.F;
+constexpr float WIGGLE_FRACTION  = 1.F / 6.F;
+constexpr float WIGGLE_DEGREES   = 15.F;
+
 constexpr const char* KEY_ENABLED    = "plugin:scrolloverview:dock:enabled";
 constexpr const char* KEY_ICON_SIZE  = "plugin:scrolloverview:dock:icon_size";
 constexpr const char* KEY_FRACTION   = "plugin:scrolloverview:dock:height_fraction";
@@ -128,6 +171,21 @@ constexpr const char* KEY_PRESSURE     = "plugin:scrolloverview:dock:pressure_th
 constexpr const char* KEY_SHOW_DELAY   = "plugin:scrolloverview:dock:show_delay_ms";
 constexpr const char* KEY_HIDE_DELAY   = "plugin:scrolloverview:dock:hide_delay_ms";
 constexpr const char* KEY_AUTOHIDE_MS  = "plugin:scrolloverview:dock:autohide_ms";
+
+// X31, one key per reference setting: `show-running`, the two that gate the
+// badge (`show-icons-notifications-counter` AND `show-icons-emblems` -- D2D
+// needs both, the emblem switch is what builds the UnityIndicator at all),
+// `dance-urgent-applications` and `show-dock-urgent-notify`. The dot's size and
+// colour are keys too because `custom-theme-customize-running-dots` is FALSE in
+// the reference, which means "take the theme's numbers" -- so the theme's
+// numbers are the defaults and the key is where a different theme would land.
+constexpr const char* KEY_SHOW_RUNNING  = "plugin:scrolloverview:dock:running_indicator";
+constexpr const char* KEY_DOT_COLOR     = "plugin:scrolloverview:dock:indicator_color";
+constexpr const char* KEY_DOT_SIZE      = "plugin:scrolloverview:dock:indicator_size";
+constexpr const char* KEY_BADGE         = "plugin:scrolloverview:dock:notification_counter";
+constexpr const char* KEY_EMBLEMS       = "plugin:scrolloverview:dock:emblems";
+constexpr const char* KEY_DANCE_URGENT  = "plugin:scrolloverview:dock:dance_urgent";
+constexpr const char* KEY_URGENT_NOTIFY = "plugin:scrolloverview:dock:urgent_notify";
 
 // X24, the last piece: the shrink INTO the dock.
 //
@@ -322,6 +380,55 @@ float elapsedMs(const Time::steady_tp& since) {
     return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count());
 }
 
+// ---- X31 -------------------------------------------------------------------
+
+// `workspace-agnostic-urgent-windows` is TRUE, so this asks about the APP and
+// never about a workspace: any mapped window of the class, anywhere, counts.
+// The LauncherEntry half is the same question asked over D-Bus -- an app can
+// demand attention without owning an urgent surface (`urgent` in the protocol),
+// and the reference reads both.
+bool classUrgent(const std::string& wmClass) {
+    for (const auto& WINDOW : Desktop::windowState()->windows()) {
+        if (WINDOW && WINDOW->m_isMapped && WINDOW->m_isUrgent && WINDOW->m_class == wmClass)
+            return true;
+    }
+
+    return LauncherEntry::state(AppSearch::idForClass(wmClass)).urgent;
+}
+
+// `application-counter-overrides-notifications` is TRUE, so a LauncherEntry
+// count wins outright whenever the app publishes one -- which under Hyprland is
+// the whole answer, because the other half of the reference's sum is GNOME
+// Shell's message tray and there is no tray here to read. Named in
+// RICE_PROGRESS.md as an open decision, not silently folded to zero.
+long long badgeCount(const std::string& wmClass) {
+    if (!Config::getValue<bool>(KEY_BADGE) || !Config::getValue<bool>(KEY_EMBLEMS))
+        return 0;
+
+    const auto STATE = LauncherEntry::state(AppSearch::idForClass(wmClass));
+    return STATE.countVisible ? std::max<long long>(0, STATE.count) : 0;
+}
+
+bool anyUrgent(const std::vector<SItem>& items) {
+    return std::ranges::any_of(items, [](const SItem& item) { return classUrgent(item.wmClass); });
+}
+
+// Radians, because CBox::rot is; the reference's degrees are converted at the
+// last moment so the numbers above stay the ones that were read off it. The
+// epoch is shared and set once, which is what keeps two urgent icons in phase.
+float wiggleRadians() {
+    static const Time::steady_tp EPOCH = Time::steadyNow();
+
+    const float PROGRESS = std::fmod(elapsedMs(EPOCH), WIGGLE_PERIOD_MS) / WIGGLE_PERIOD_MS;
+    if (PROGRESS >= WIGGLE_FRACTION)
+        return 0.F;
+
+    const float DEGREES = WIGGLE_DEGREES * std::sin(PROGRESS * 24.F * sc<float>(M_PI));
+    return DEGREES * sc<float>(M_PI) / 180.F;
+}
+
+// ----------------------------------------------------------------------------
+
 // The standing Apple-motion rule again: entrances decelerate, exits accelerate.
 // The DURATION stays the reference's `animation-time` in BOTH directions -- the
 // rule shapes the curve, the reference pins the number.
@@ -437,7 +544,13 @@ void updateAutohide(PHLMONITOR monitor) {
         return;
     }
 
-    bool want = false;
+    // X31 `show-dock-urgent-notify` true: an app demanding attention brings the
+    // dock out on its own. It is ORed into BOTH branches below, not just the
+    // hidden one -- an urgent app also has to stop the pointer leaving from
+    // sliding the dock away again, or the wiggle would play to nobody.
+    const bool URGENT = Config::getValue<bool>(KEY_URGENT_NOTIFY) && anyUrgent(baseLayout(monitor).items);
+
+    bool       want   = false;
     if (R.shown) {
         // Up already: it stays up while the pointer is on it, or while its
         // right-click menu is -- the menu floats ABOVE the pill, so reaching for
@@ -453,6 +566,8 @@ void updateAutohide(PHLMONITOR monitor) {
         }
     } else
         want = R.pressure >= Config::getValue<float>(KEY_PRESSURE); // `require-pressure-to-show`
+
+    want = want || URGENT;
 
     if (want == R.shown) {
         R.pending = false;
@@ -519,6 +634,98 @@ CBox hoverBox(const CBox& iconBox, float scale) {
 // sitting above the pill.
 // ponytail: no delay and no fade -- it appears with the highlight it belongs to.
 // GNOME staggers it by ~500ms; add that if sweeping the dock reads as noisy.
+// X31. The dot says RUNNING, and today every icon in the pill is running --
+// the dock shows running apps and nothing else until X32 brings favourites in.
+// It is drawn now anyway, and correctly, because the moment a pinned favourite
+// that is NOT running appears this is already the thing that tells them apart.
+//
+// It sits in the bottom padding rather than owning it: ITEM_PAD_BOTTOM's own
+// comment reserved this, and the dot's 5+2 clears the icon by 5px.
+void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& item) {
+    const float SCALE  = std::max(monitor->m_scale, 0.01F);
+    const float SIZE   = std::max(1.F, sc<float>(Config::getValue<int>(KEY_DOT_SIZE)) * SCALE);
+    const float CX     = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) / 2.F;
+    const float BOTTOM = sc<float>(layout.pill.y) + sc<float>(layout.pill.height) - DOT_MARGIN_B * SCALE;
+
+    const uint32_t ARGB = Config::getValue<uint32_t>(KEY_DOT_COLOR);
+
+    CRectPassElement::SRectData dot;
+    dot.box   = CBox{std::round(CX - SIZE / 2.F), std::round(BOTTOM - SIZE), std::round(SIZE), std::round(SIZE)};
+    dot.color = CHyprColor{sc<float>((ARGB >> 16) & 0xFF) / 255.F, sc<float>((ARGB >> 8) & 0xFF) / 255.F, sc<float>(ARGB & 0xFF) / 255.F, sc<float>((ARGB >> 24) & 0xFF) / 255.F};
+    // `border-radius: 5px` on a 5px box: a circle. Half the size, so it stays one
+    // when the dot is themed larger.
+    // Truncated, not rounded: a radius even slightly OVER half the box collapses
+    // the circle into a diamond, and the stock 5px dot rounds to 3 against a
+    // half-width of 2.5. Seen on screen 2026-08-03.
+    dot.round         = sc<int>(SIZE / 2.F);
+    dot.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(dot));
+}
+
+// `_notificationBadgeCountToText`, same thresholds and the same rounding.
+std::string badgeText(long long count) {
+    if (count <= 9999)
+        return std::to_string(count);
+
+    char        buf[32] = {};
+    const auto  N       = sc<double>(count);
+    if (count < 100'000)
+        std::snprintf(buf, sizeof(buf), "%.1fk", N / 1e3);
+    else if (count < 1'000'000)
+        std::snprintf(buf, sizeof(buf), "%.0fk", N / 1e3);
+    else if (count < 100'000'000)
+        std::snprintf(buf, sizeof(buf), "%.1fM", N / 1e6);
+    else if (count < 1'000'000'000)
+        std::snprintf(buf, sizeof(buf), "%.0fM", N / 1e6);
+    else
+        std::snprintf(buf, sizeof(buf), "%.1fB", N / 1e9);
+
+    return buf;
+}
+
+void renderBadge(PHLMONITOR monitor, const SItem& item) {
+    const auto COUNT = badgeCount(item.wmClass);
+    if (COUNT <= 0)
+        return;
+
+    const float SCALE = std::max(monitor->m_scale, 0.01F);
+    const float ICON  = sc<float>(item.iconBox.width) / SCALE; // logical px: what the reference scales by
+
+    // `_updateNotificationBadgeStyle`. The small-icon branch is not dead code --
+    // the pill shrinks its icons rather than overflow once it hits the width cap,
+    // which is exactly the case D2D's `iconSize < defaultIconSize` covers.
+    const float MULT = ICON < BADGE_DEFAULT_ICON ? std::max(24.F, std::min(ICON + ICON * 0.3F, BADGE_DEFAULT_ICON)) / BADGE_DEFAULT_ICON : ICON / BADGE_DEFAULT_ICON;
+    const float FONT = std::max(1.F, std::round(MULT * (BADGE_FONT_PT * BADGE_FONT_RATIO / 0.75F)));
+
+    const auto  TEX = g_pHyprRenderer->renderText(badgeText(COUNT), CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(FONT * SCALE))), false, "", 0, BADGE_WEIGHT);
+    if (!TEX || !TEX->ok())
+        return;
+
+    const float PADX = std::round(BADGE_PAD_X_EM * FONT * SCALE);
+    const float PADY = std::round(BADGE_PAD_Y_EM * FONT * SCALE);
+    const float W    = sc<float>(TEX->m_size.x) + 2.F * PADX;
+    const float H    = sc<float>(TEX->m_size.y) + 2.F * PADY;
+
+    const float X    = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) - W - BADGE_MARGIN * SCALE;
+    const float Y    = sc<float>(item.iconBox.y) + BADGE_MARGIN * SCALE;
+
+    CRectPassElement::SRectData bg;
+    bg.box   = CBox{std::round(X), std::round(Y), std::round(W), std::round(H)};
+    bg.color = CHyprColor{1.F, 0.F, 0.F, 1.F}; // `background-color: red`
+    // `border-radius: 1em` -- 1em is the font size, which on a badge this short
+    // is always at least half its height, and css clamps a radius to that. So the
+    // shape is a capsule, and H/2 is the number that stays one at any count.
+    bg.round         = sc<int>(std::round(H / 2.F));
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+
+    CTexPassElement::SRenderData text;
+    text.tex = TEX;
+    text.box = CBox{std::round(X + PADX), std::round(Y + PADY), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
+    text.a   = 1.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+}
+
 void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const SItem& item) {
     const auto NAME = [&] {
         const auto FROMENTRY = AppSearch::appNameForClass(item.wmClass);
@@ -1032,6 +1239,12 @@ bool damageIfChanged(PHLMONITOR monitor) {
     if (!monitor)
         return false;
 
+    // X31. The bus connection is opened by the first frame that could use it, so
+    // a dock switched off -- or one with both badge and urgent-notify off --
+    // never opens one at all. Idempotent.
+    if (Config::getValue<bool>(KEY_ENABLED) && (Config::getValue<bool>(KEY_BADGE) || Config::getValue<bool>(KEY_URGENT_NOTIFY)))
+        LauncherEntry::start();
+
     updateAutohide(monitor);
 
     // X30. A flip waiting out its delay looks EXACTLY like the frame before it,
@@ -1040,7 +1253,15 @@ bool damageIfChanged(PHLMONITOR monitor) {
     // frame is already happening, so the next one has to be asked for here, and
     // after the current frame (doLater) for the same reason the live previews
     // are: damage asked for during the pass is cleared with the pass.
-    if (autohideAnimating(monitor))
+    // X31's wiggle is in here for the same reason: its rotation changes every
+    // frame while it runs, and nothing else on an idle desktop asks for one.
+    //
+    // ponytail: this pumps frames for the 2500ms of every 3000ms the urgent icon
+    // is deliberately STILL, as well as the 500 it moves. Waking on a timer for
+    // the next burst instead would save them; measure it before building it.
+    const bool WIGGLING = Config::getValue<bool>(KEY_DANCE_URGENT) && anyUrgent(layout(monitor).items);
+
+    if (autohideAnimating(monitor) || WIGGLING)
         g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
             if (MONITOR)
                 g_pHyprRenderer->damageMonitor(MONITOR.lock());
@@ -1052,8 +1273,18 @@ bool damageIfChanged(PHLMONITOR monitor) {
         // pill.y is in the signature because during the slide it is the ONLY
         // thing that changes.
         signature = std::to_string(sc<int>(LAYOUT.pill.x)) + "," + std::to_string(sc<int>(LAYOUT.pill.y)) + "," + std::to_string(sc<int>(LAYOUT.pill.width));
-        for (const auto& ITEM : LAYOUT.items)
+        for (const auto& ITEM : LAYOUT.items) {
             signature += "|" + ITEM.wmClass;
+
+            // X31. A badge arriving, or an app going urgent, changes what the
+            // pill LOOKS like without moving a single box -- so the signature
+            // has to carry them or the first frame that would show either one
+            // never gets asked for.
+            if (const auto COUNT = badgeCount(ITEM.wmClass); COUNT > 0)
+                signature += "!" + std::to_string(COUNT);
+            if (classUrgent(ITEM.wmClass))
+                signature += "*";
+        }
 
         // The hovered cell is part of what the pill LOOKS like, so a bare pointer
         // move over an otherwise idle dock has to repaint it -- nothing else on
@@ -1144,15 +1375,28 @@ void render(PHLMONITOR monitor) {
     }
 
     for (const auto& ITEM : LAYOUT.items) {
-        const auto TEX = OverviewRender::appIcon(ITEM.icon);
-        if (!TEX)
-            continue;
+        if (const auto TEX = OverviewRender::appIcon(ITEM.icon); TEX) {
+            CTexPassElement::SRenderData data;
+            data.tex = TEX;
+            data.box = ITEM.iconBox;
 
-        CTexPassElement::SRenderData data;
-        data.tex = TEX;
-        data.box = ITEM.iconBox;
-        data.a   = 1.F;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+            // X31 `dance-urgent-applications`. CBox::rot is radians about the
+            // box's own centre, which is the reference's pivot (0.5, 0.5) --
+            // so the wiggle is one assignment, not a transform stack.
+            if (Config::getValue<bool>(KEY_DANCE_URGENT) && classUrgent(ITEM.wmClass))
+                data.box.rot = wiggleRadians();
+
+            data.a = 1.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+        }
+
+        // Both of these are deliberately OUTSIDE the texture check: an app with
+        // no desktop entry still runs and can still have a count, and losing its
+        // indicators as well as its icon would hide it twice over.
+        if (Config::getValue<bool>(KEY_SHOW_RUNNING))
+            renderRunningDot(monitor, LAYOUT, ITEM);
+
+        renderBadge(monitor, ITEM);
     }
 
     // The menu says the app's name louder than the tooltip does, and the two

@@ -27,6 +27,7 @@ using namespace Hyprutils::String;
 #include "globals.hpp"
 #include "Config.hpp"
 #include "Dock.hpp"
+#include "LauncherEntry.hpp"
 #include "Minimize.hpp"
 #include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
@@ -846,6 +847,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // The D-Bus worker outlives the overview otherwise, and hyprpm reloads the
     // plugin in-process.
     SearchProviders::shutdown();
+    ScrollOverview::LauncherEntry::stop();
     clearScrollOverviews();
     disableScrollOverviewHooks();
 

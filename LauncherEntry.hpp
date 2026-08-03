@@ -1,0 +1,45 @@
+#pragma once
+
+#include <string>
+
+// OVERVIEW_CPP_SPEC §13.9 X31. Where the dock's badges come FROM.
+//
+// The reference (Dash to Dock) feeds its counters from two sources: the
+// `com.canonical.Unity.LauncherEntry` D-Bus protocol -- `launcherAPI.js`'s
+// remote model, which is what Discord/Thunderbird/Nautilus actually broadcast --
+// and GNOME Shell's own message tray. `application-counter-overrides-
+// notifications` is TRUE in the user's config, so the LauncherEntry count is the
+// one that wins whenever an app publishes one.
+//
+// This is the LauncherEntry half. There is no GNOME message tray under
+// Hyprland, so the tray half has no source to read; see RICE_PROGRESS.md for
+// that as a named, open decision rather than a silent gap.
+//
+// A signal match on the session bus, living on the COMPOSITOR'S event loop
+// rather than a worker thread like SearchProviders': the handler's only job is
+// to damage monitors so an idle desktop notices a new badge, and that is a
+// main-thread act. Costs no thread, no mutex and no wake pipe.
+namespace ScrollOverview::LauncherEntry {
+
+// The protocol also carries `progress` / `progress-visible`, and the reference
+// draws them as a bar under the icon. X31 asks for indicators, counters and
+// urgency and does NOT ask for a progress bar, so those two are skipped rather
+// than parsed and left unused.
+struct SState {
+    long long count        = 0;
+    bool      countVisible = false;
+    bool      urgent       = false;
+};
+
+// By DESKTOP ID ("org.gnome.Nautilus"), the same unit X28's favourites store
+// uses -- the protocol carries "application://org.gnome.Nautilus.desktop" and
+// this is the parsed half. An app that has never broadcast reads back zeroed,
+// which is the same answer as "nothing to show".
+SState state(const std::string& desktopId);
+
+// Idempotent. Called when the dock is first drawn rather than from PLUGIN_INIT,
+// so a dock switched off never opens a bus connection at all.
+void start();
+void stop();
+
+}
