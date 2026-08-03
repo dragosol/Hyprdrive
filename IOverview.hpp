@@ -64,5 +64,10 @@ void                              registerScrollOverview(const SP<IOverview>& ov
 void                              unregisterScrollOverview(IOverview* overview);
 void                              clearScrollOverviews();
 
+// X32. Open the overview on a monitor, exactly as the dispatcher does -- the
+// Show Applications button is the first caller outside the dispatcher itself.
+// Already open, or no monitor: a no-op that reports success.
+bool                              openScrollOverview(PHLMONITOR monitor);
+
 // Current interaction/render context. The authoritative state is the registry.
 inline SP<IOverview> g_pScrollOverview;

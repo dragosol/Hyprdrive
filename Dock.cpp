@@ -10,6 +10,7 @@
 #include "Window.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -187,6 +188,19 @@ constexpr const char* KEY_EMBLEMS       = "plugin:scrolloverview:dock:emblems";
 constexpr const char* KEY_DANCE_URGENT  = "plugin:scrolloverview:dock:dance_urgent";
 constexpr const char* KEY_URGENT_NOTIFY = "plugin:scrolloverview:dock:urgent_notify";
 
+// X32, one key per reference setting: `show-favorites`, `show-show-apps-button`,
+// `show-apps-at-top` and `show-apps-always-in-the-edge`. The last two are a PAIR
+// and the reference sets them false/true, which on a bottom dock puts the button
+// at the right-hand edge, past everything else.
+constexpr const char* KEY_SHOW_FAVORITES = "plugin:scrolloverview:dock:show_favorites";
+constexpr const char* KEY_SHOW_APPS      = "plugin:scrolloverview:dock:show_apps_button";
+constexpr const char* KEY_SHOW_APPS_TOP  = "plugin:scrolloverview:dock:show_apps_at_top";
+constexpr const char* KEY_SHOW_APPS_EDGE = "plugin:scrolloverview:dock:show_apps_always_in_the_edge";
+
+// GNOME's own Show Applications artwork. A key rather than a constant because it
+// is the one part of the button a theme changes.
+constexpr const char* KEY_SHOW_APPS_ICON = "plugin:scrolloverview:dock:show_apps_icon";
+
 // X24, the last piece: the shrink INTO the dock.
 //
 // The window is stashed IMMEDIATELY and this then draws it, live, from its last
@@ -258,9 +272,90 @@ SMetrics metrics(size_t slots, float units, float iconMax, float maxWidth) {
     return out;
 }
 
-// X27 shows what is RUNNING. Favourites, pinning and ordering are X32; until
-// then the order is the compositor's own window order, which is stable across
-// frames -- an MRU order here would make the dock reshuffle on every focus.
+// -------------------------------------------------------------- X32 pins --
+
+// Favourites are a LIST OF DESKTOP IDS, the same unit GNOME's `favorite-apps`
+// key uses. A plain file, because a plugin cannot write a Hyprland config key
+// back out and this is user data rather than a tunable.
+std::filesystem::path favoritesPath() {
+    if (const char* STATE = std::getenv("XDG_STATE_HOME"); STATE && *STATE)
+        return std::filesystem::path{STATE} / "scrolloverview" / "favorites";
+
+    if (const char* HOME = std::getenv("HOME"); HOME && *HOME)
+        return std::filesystem::path{HOME} / ".local" / "state" / "scrolloverview" / "favorites";
+
+    return {};
+}
+
+// The user's own `org.gnome.shell favorite-apps`, in order, dumped 2026-08-02
+// and recorded in RICE_PROGRESS.md. It seeds an EMPTY store only -- an id that
+// no desktop entry claims is dropped at layout time, not here, so this list
+// stays the reference's rather than being quietly filtered down to whatever the
+// test VM happens to have installed.
+constexpr std::array<const char*, 14> DEFAULT_FAVORITES = {
+    "app.zen_browser.zen", "com.discordapp.Discord",  "org.gnome.Nautilus",    "net.thunderbird.Thunderbird", "steam",
+    "claude-desktop",      "lmstudio",                "org.gnome.Calendar",    "org.gnome.Software",          "md.obsidian.Obsidian",
+    "org.gnome.TextEditor", "io.github.tobagin.karere", "net.lutris.Lutris",   "org.gnome.Ptyxis",
+};
+
+std::vector<std::string>& favorites() {
+    static std::vector<std::string> cache;
+    static bool                     loaded = false;
+
+    if (!loaded) {
+        loaded = true;
+
+        // A MISSING file seeds; an EMPTY one does not. Unpinning the last
+        // favourite is a thing the user did on purpose, and re-seeding it on the
+        // next start would undo them silently.
+        if (std::error_code ec; !std::filesystem::exists(favoritesPath(), ec)) {
+            cache.assign(DEFAULT_FAVORITES.begin(), DEFAULT_FAVORITES.end());
+            return cache;
+        }
+
+        std::ifstream file(favoritesPath());
+        std::string   line;
+        while (std::getline(file, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+                line.pop_back();
+            if (!line.empty())
+                cache.emplace_back(line);
+        }
+    }
+
+    return cache;
+}
+
+void writeFavorites() {
+    const auto PATH = favoritesPath();
+    if (PATH.empty())
+        return;
+
+    std::error_code ec;
+    std::filesystem::create_directories(PATH.parent_path(), ec);
+
+    std::ofstream out(PATH, std::ios::trunc);
+    for (const auto& F : favorites())
+        out << F << "\n";
+}
+
+void toggleFavorite(const std::string& id) {
+    if (id.empty())
+        return;
+
+    auto& FAV = favorites();
+    if (const auto IT = std::ranges::find(FAV, id); IT != FAV.end())
+        FAV.erase(IT);
+    else
+        FAV.emplace_back(id);
+
+    writeFavorites();
+}
+
+// X27 showed what is RUNNING and nothing else. X32 keeps that list and puts the
+// FAVOURITES in front of it: the compositor's own window order, which is stable
+// across frames -- an MRU order here would make the dock reshuffle on every
+// focus.
 std::vector<std::string> runningClasses() {
     std::vector<std::string>        out;
     std::unordered_set<std::string> seen;
@@ -272,6 +367,71 @@ std::vector<std::string> runningClasses() {
 
         if (seen.insert(WINDOW->m_class).second)
             out.emplace_back(WINDOW->m_class);
+    }
+
+    return out;
+}
+
+// X32. What the pill lists, in order, with no geometry on it yet: every
+// favourite first -- running or not -- then everything running that no favourite
+// already covers.
+//
+// The two lists are keyed on DIFFERENT things, which is the whole difficulty. A
+// favourite is a desktop id and owns no window until it is launched; a running
+// app is a window class and may have no desktop entry at all. `idForClass` is
+// the only bridge, so it is asked once per running class and the answer decides
+// which list the class belongs to.
+std::vector<SItem> dockItems() {
+    const auto RUNNING = runningClasses();
+
+    std::vector<std::string> runningIds;
+    runningIds.reserve(RUNNING.size());
+    for (const auto& CLASS : RUNNING)
+        runningIds.emplace_back(AppSearch::idForClass(CLASS));
+
+    std::vector<SItem> out;
+    std::unordered_set<size_t> claimed;
+
+    if (Config::getValue<bool>(KEY_SHOW_FAVORITES)) {
+        for (const auto& ID : favorites()) {
+            const auto* ENTRY = AppSearch::entryForId(ID);
+            // A favourite nothing on this machine provides is dropped rather
+            // than drawn as a blank slot: the seed is the user's HOST list and
+            // the test VM has a fraction of it installed.
+            if (!ENTRY)
+                continue;
+
+            SItem item;
+            item.desktopId = ID;
+            item.icon      = ENTRY->icon;
+            item.favorite  = true;
+
+            // First running class that resolves to this id owns the slot, so a
+            // pinned app that IS running is one icon, not two.
+            for (size_t i = 0; i < RUNNING.size(); ++i) {
+                if (runningIds[i] != ID || claimed.contains(i))
+                    continue;
+
+                claimed.insert(i);
+                item.wmClass = RUNNING[i];
+                item.running = true;
+                break;
+            }
+
+            out.emplace_back(std::move(item));
+        }
+    }
+
+    for (size_t i = 0; i < RUNNING.size(); ++i) {
+        if (claimed.contains(i))
+            continue;
+
+        out.emplace_back(SItem{
+            .wmClass   = RUNNING[i],
+            .icon      = AppSearch::iconForClass(RUNNING[i]),
+            .desktopId = runningIds[i],
+            .running   = true,
+        });
     }
 
     return out;
@@ -410,7 +570,9 @@ long long badgeCount(const std::string& wmClass) {
 }
 
 bool anyUrgent(const std::vector<SItem>& items) {
-    return std::ranges::any_of(items, [](const SItem& item) { return classUrgent(item.wmClass); });
+    // X32: a pinned app with no window has no class, and classUrgent keyed on ""
+    // would ask LauncherEntry about the empty id once per item per frame.
+    return std::ranges::any_of(items, [](const SItem& item) { return item.running && classUrgent(item.wmClass); });
 }
 
 // Radians, because CBox::rot is; the reference's degrees are converted at the
@@ -463,14 +625,21 @@ SLayout baseLayout(PHLMONITOR monitor) {
     if (!monitor || !Config::getValue<bool>(KEY_ENABLED) || monitor->m_size.x < 1 || monitor->m_size.y < 1)
         return out;
 
-    const auto CLASSES   = runningClasses();
+    auto       items     = dockItems();
     const auto MINIMIZED = previewWindows();
-    if (CLASSES.empty() && MINIMIZED.empty())
+
+    // X32. The button is a slot of its own, so it widens the pill and competes
+    // for icon size with everything else -- and it is the ONE thing that can put
+    // a pill on screen by itself, on a desktop with nothing running and nothing
+    // pinned. That is the reference's behaviour: `show-show-apps-button` does
+    // not go away when the dash is empty.
+    const bool SHOWAPPS = Config::getValue<bool>(KEY_SHOW_APPS);
+    if (items.empty() && MINIMIZED.empty() && !SHOWAPPS)
         return out;
 
     std::vector<float> aspects;
     aspects.reserve(MINIMIZED.size());
-    float units = sc<float>(CLASSES.size());
+    float units = sc<float>(items.size()) + (SHOWAPPS ? 1.F : 0.F);
     for (const auto& WINDOW : MINIMIZED) {
         aspects.emplace_back(previewAspect(WINDOW));
         units += aspects.back();
@@ -479,7 +648,7 @@ SLayout baseLayout(PHLMONITOR monitor) {
     const float SCALE    = std::max(monitor->m_scale, 0.01F);
     const float ICONMAX  = sc<float>(std::clamp(Config::getValue<int>(KEY_ICON_SIZE), 8, 512));
     const float FRACTION = std::clamp(Config::getValue<float>(KEY_FRACTION), 0.05F, 1.F);
-    const auto  M        = metrics(CLASSES.size() + MINIMIZED.size(), units, ICONMAX, FRACTION * sc<float>(monitor->m_size.x));
+    const auto  M        = metrics(items.size() + MINIMIZED.size() + (SHOWAPPS ? 1 : 0), units, ICONMAX, FRACTION * sc<float>(monitor->m_size.x));
 
     // `extend-height` false and `always-center-icons` false: a floating pill
     // sized to its contents, centred on the monitor, clear of the bottom edge.
@@ -491,14 +660,10 @@ SLayout baseLayout(PHLMONITOR monitor) {
     out.rounding = std::max(0, sc<int>(std::round(sc<float>(Config::getValue<int>(KEY_RADIUS)) * SCALE)));
 
     float cursor = XL + CONTAINER_PAD_X + ITEM_MARGIN_X;
-    out.items.reserve(CLASSES.size());
-    for (const auto& CLASS : CLASSES) {
-        SItem item;
-        item.wmClass = CLASS;
-        item.icon    = AppSearch::iconForClass(CLASS);
+    out.items = std::move(items);
+    for (auto& item : out.items) {
         item.iconBox = CBox{cursor * SCALE, (YL + ITEM_PAD_TOP) * SCALE, M.icon * SCALE, M.icon * SCALE};
         item.iconBox.round();
-        out.items.emplace_back(std::move(item));
 
         cursor += M.icon + 2.F * ITEM_MARGIN_X;
     }
@@ -516,6 +681,31 @@ SLayout baseLayout(PHLMONITOR monitor) {
         out.previews.emplace_back(std::move(preview));
 
         cursor += WIDTH + 2.F * ITEM_MARGIN_X;
+    }
+
+    // X32 Show Applications. `show-apps-at-top` FALSE puts it at the far end of
+    // a bottom dock, and `show-apps-always-in-the-edge` TRUE is what keeps it
+    // there rather than letting it float in with the apps -- so it lands after
+    // the previews, which is the last slot the cursor has reached.
+    //
+    // `at_top` true is honoured by laying it out FIRST instead. The pair is the
+    // reference's, and one without the other would be half a setting.
+    if (SHOWAPPS) {
+        const bool  FIRST = Config::getValue<bool>(KEY_SHOW_APPS_TOP) || !Config::getValue<bool>(KEY_SHOW_APPS_EDGE);
+        const float X     = FIRST ? XL + CONTAINER_PAD_X + ITEM_MARGIN_X : cursor;
+
+        out.showApps = CBox{X * SCALE, (YL + ITEM_PAD_TOP) * SCALE, M.icon * SCALE, M.icon * SCALE};
+        out.showApps.round();
+
+        // Laid out first: everything else slides one slot right, rather than
+        // being overdrawn by it.
+        if (FIRST) {
+            const double SHIFT = (M.icon + 2.F * ITEM_MARGIN_X) * SCALE;
+            for (auto& item : out.items)
+                item.iconBox.x += SHIFT;
+            for (auto& preview : out.previews)
+                preview.box.x += SHIFT;
+        }
     }
 
     return out;
@@ -611,6 +801,8 @@ SLayout layout(PHLMONITOR monitor) {
         item.iconBox.y += DY;
     for (auto& preview : out.previews)
         preview.box.y += DY;
+    if (!out.showApps.empty())
+        out.showApps.y += DY;
 
     return out;
 }
@@ -634,10 +826,10 @@ CBox hoverBox(const CBox& iconBox, float scale) {
 // sitting above the pill.
 // ponytail: no delay and no fade -- it appears with the highlight it belongs to.
 // GNOME staggers it by ~500ms; add that if sweeping the dock reads as noisy.
-// X31. The dot says RUNNING, and today every icon in the pill is running --
-// the dock shows running apps and nothing else until X32 brings favourites in.
-// It is drawn now anyway, and correctly, because the moment a pinned favourite
-// that is NOT running appears this is already the thing that tells them apart.
+// X31. The dot says RUNNING, and as of X32 that is a real distinction rather
+// than a tautology: a pinned favourite with no window is an icon with no dot,
+// and the dot is the only thing on the pill that tells the two apart. The
+// caller gates on SItem::running.
 //
 // It sits in the bottom padding rather than owning it: ITEM_PAD_BOTTOM's own
 // comment reserved this, and the dot's 5+2 clears the icon by 5px.
@@ -726,12 +918,21 @@ void renderBadge(PHLMONITOR monitor, const SItem& item) {
     g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
 }
 
-void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const SItem& item) {
-    const auto NAME = [&] {
-        const auto FROMENTRY = AppSearch::appNameForClass(item.wmClass);
-        return FROMENTRY.empty() ? item.wmClass : FROMENTRY;
-    }();
+// X32. A pinned favourite that is not running has no window class, so the class
+// lookup that used to be the whole of this cannot name it -- its desktop entry
+// is the only source. Ordered so a running app is still named by its class,
+// which is what X27 measured.
+std::string itemName(const SItem& item) {
+    if (const auto FROMCLASS = AppSearch::appNameForClass(item.wmClass); !FROMCLASS.empty())
+        return FROMCLASS;
 
+    if (const auto* ENTRY = AppSearch::entryForId(item.desktopId); ENTRY && !ENTRY->name.empty())
+        return ENTRY->name;
+
+    return item.wmClass;
+}
+
+void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor, const std::string& NAME) {
     if (NAME.empty())
         return;
 
@@ -744,7 +945,7 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const SItem& item)
     const float PADY  = TOOLTIP_PAD_Y * SCALE;
     const float W     = sc<float>(TEX->m_size.x) + 2.F * PADX;
     const float H     = sc<float>(TEX->m_size.y) + 2.F * PADY;
-    const float CX    = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) / 2.F;
+    const float CX    = sc<float>(anchor.x) + sc<float>(anchor.width) / 2.F;
 
     CBox plate{std::round(CX - W / 2.F), std::round(sc<float>(layout.pill.y) - TOOLTIP_GAP * SCALE - H), std::round(W), std::round(H)};
 
@@ -792,10 +993,13 @@ void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
 // minimize, `activate-single-window` true, `minimize-shift` true,
 // `shift-click-action` minimize.
 //
-// There is deliberately no launch branch. The dock lists RUNNING classes until
-// X32 brings favourites in, so every icon here already owns a window; a launch
-// path written now would have nothing to launch from.
+// X32 adds the LAUNCH branch, which X27 could not have: a pinned favourite owns
+// no window, so `click-action` has nothing to minimize and the reference falls
+// through to launching the app.
 std::vector<PHLWINDOW> classWindows(const std::string& wmClass) {
+    if (wmClass.empty())
+        return {};
+
     std::vector<PHLWINDOW> out;
     for (const auto& WINDOW : Desktop::windowState()->windows()) {
         if (WINDOW && WINDOW->m_isMapped && WINDOW->m_class == wmClass)
@@ -805,11 +1009,24 @@ std::vector<PHLWINDOW> classWindows(const std::string& wmClass) {
     return out;
 }
 
-void activateClass(PHLMONITOR monitor, const std::string& wmClass, bool shift) {
-    const auto windows = classWindows(wmClass);
+void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
+    const auto windows = classWindows(item.wmClass);
 
-    if (windows.empty())
+    // X32. Nothing to minimize, so this is a launch -- and the overview gets out
+    // of the way, because a window that maps behind an open overview is a window
+    // the user cannot see they just started.
+    if (windows.empty()) {
+        const auto* ENTRY = AppSearch::entryForId(item.desktopId);
+        if (!ENTRY)
+            return;
+
+        AppSearch::launch(*ENTRY, Config::getTerminal());
+
+        if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
+            OVERVIEW->close();
+
         return;
+    }
 
     // The toggle is driven by what is ON SCREEN, not by what has focus.
     //
@@ -869,62 +1086,6 @@ struct SMenu {
 };
 
 std::optional<SMenu> g_menu;
-
-// Favourites are a LIST OF DESKTOP IDS, the same unit GNOME's `favorite-apps`
-// key uses, so X32 can adopt this store rather than replace it. A plain file,
-// because a plugin cannot write a Hyprland config key back out and this is user
-// data rather than a tunable.
-std::filesystem::path favoritesPath() {
-    if (const char* STATE = std::getenv("XDG_STATE_HOME"); STATE && *STATE)
-        return std::filesystem::path{STATE} / "scrolloverview" / "favorites";
-
-    if (const char* HOME = std::getenv("HOME"); HOME && *HOME)
-        return std::filesystem::path{HOME} / ".local" / "state" / "scrolloverview" / "favorites";
-
-    return {};
-}
-
-std::vector<std::string>& favorites() {
-    static std::vector<std::string> cache;
-    static bool                     loaded = false;
-
-    if (!loaded) {
-        loaded = true;
-
-        std::ifstream file(favoritesPath());
-        std::string   line;
-        while (std::getline(file, line)) {
-            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
-                line.pop_back();
-            if (!line.empty())
-                cache.emplace_back(line);
-        }
-    }
-
-    return cache;
-}
-
-void toggleFavorite(const std::string& id) {
-    if (id.empty())
-        return;
-
-    auto& FAV = favorites();
-    if (const auto IT = std::ranges::find(FAV, id); IT != FAV.end())
-        FAV.erase(IT);
-    else
-        FAV.emplace_back(id);
-
-    const auto PATH = favoritesPath();
-    if (PATH.empty())
-        return;
-
-    std::error_code ec;
-    std::filesystem::create_directories(PATH.parent_path(), ec);
-
-    std::ofstream out(PATH, std::ios::trunc);
-    for (const auto& F : FAV)
-        out << F << "\n";
-}
 
 // Back off to a lead byte so a truncated title cannot end mid-codepoint and
 // hand the text renderer a broken string.
@@ -1175,13 +1336,28 @@ bool click(PHLMONITOR monitor, const Vector2D& point, bool shift) {
         }
     }
 
+    // X32 Show Applications. Ahead of the icons because its cell is laid out
+    // like one and would otherwise have to be excluded from their search.
+    if (!LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(point)) {
+        // The app GRID this opens is G5's, and G5 is not built. What X32 owns is
+        // the button: its slot, its edge, and the fact that it opens the surface
+        // apps are searched from. So on the desktop it opens the overview; with
+        // the overview already up there is nothing further to show yet, and it
+        // deliberately does NOT toggle it shut -- a button that closes the thing
+        // it is supposed to open would be worse than one that waits for G5.
+        if (!scrollOverviewForMonitor(monitor))
+            openScrollOverview(monitor);
+
+        return true;
+    }
+
     // Hit-test the same cell the hover highlight lights up, so what looks
     // clickable is what is clickable.
     const auto ITEM = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(point); });
     if (ITEM == LAYOUT.items.end())
         return false;
 
-    activateClass(monitor, ITEM->wmClass, shift);
+    activateItem(monitor, *ITEM, shift);
     return true;
 }
 
@@ -1274,7 +1450,14 @@ bool damageIfChanged(PHLMONITOR monitor) {
         // thing that changes.
         signature = std::to_string(sc<int>(LAYOUT.pill.x)) + "," + std::to_string(sc<int>(LAYOUT.pill.y)) + "," + std::to_string(sc<int>(LAYOUT.pill.width));
         for (const auto& ITEM : LAYOUT.items) {
-            signature += "|" + ITEM.wmClass;
+            // X32. The desktop id is in here as well as the class because a
+            // pinned favourite HAS no class: without it, launching a pinned app
+            // -- or pinning one while another is already pinned -- leaves the
+            // signature identical and the dot never appears.
+            signature += "|" + ITEM.desktopId + "/" + ITEM.wmClass + (ITEM.running ? "+" : "-");
+
+            if (!ITEM.running)
+                continue;
 
             // X31. A badge arriving, or an app going urgent, changes what the
             // pill LOOKS like without moving a single box -- so the signature
@@ -1296,6 +1479,9 @@ bool damageIfChanged(PHLMONITOR monitor) {
                 break;
             }
         }
+
+        if (!LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(MOUSE))
+            signature += "#apps";
 
         // X28. The menu is part of what the dock looks like, and its hovered row
         // moves with a bare pointer move exactly as the icon highlight does.
@@ -1361,13 +1547,17 @@ void render(PHLMONITOR monitor) {
     const auto HOVEREDITEM = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(MOUSE); });
     const bool HASHOVER    = HOVEREDITEM != LAYOUT.items.end();
 
-    if (HASHOVER) {
+    // X32. The button's cell lights up like any other, so it reads as clickable
+    // rather than as decoration.
+    const bool HOVERAPPS = !LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(MOUSE);
+
+    if (HASHOVER || HOVERAPPS) {
         // (user, 2026-08-03) A flat fill, no outline. The radius is CONCENTRIC
         // with the pill rather than a constant: the cell is inset from the pill
         // by the same amount on every side, so its curve only reads as parallel
         // to the dock's if the radius drops by that inset too.
         CRectPassElement::SRectData fill;
-        fill.box           = hoverBox(HOVEREDITEM->iconBox, monitor->m_scale);
+        fill.box           = hoverBox(HASHOVER ? HOVEREDITEM->iconBox : LAYOUT.showApps, monitor->m_scale);
         fill.color         = CHyprColor{1.F, 1.F, 1.F, 0.10F};
         fill.round         = std::max(0, LAYOUT.rounding - sc<int>(std::round(hoverInset() * monitor->m_scale)));
         fill.roundingPower = 2.F;
@@ -1383,7 +1573,7 @@ void render(PHLMONITOR monitor) {
             // X31 `dance-urgent-applications`. CBox::rot is radians about the
             // box's own centre, which is the reference's pivot (0.5, 0.5) --
             // so the wiggle is one assignment, not a transform stack.
-            if (Config::getValue<bool>(KEY_DANCE_URGENT) && classUrgent(ITEM.wmClass))
+            if (ITEM.running && Config::getValue<bool>(KEY_DANCE_URGENT) && classUrgent(ITEM.wmClass))
                 data.box.rot = wiggleRadians();
 
             data.a = 1.F;
@@ -1393,16 +1583,38 @@ void render(PHLMONITOR monitor) {
         // Both of these are deliberately OUTSIDE the texture check: an app with
         // no desktop entry still runs and can still have a count, and losing its
         // indicators as well as its icon would hide it twice over.
-        if (Config::getValue<bool>(KEY_SHOW_RUNNING))
-            renderRunningDot(monitor, LAYOUT, ITEM);
+        //
+        // X32 gates them on RUNNING: a pinned favourite with no window is the
+        // one icon in the pill that must NOT get a dot, and that absence is the
+        // only thing distinguishing it from the app next to it.
+        if (ITEM.running) {
+            if (Config::getValue<bool>(KEY_SHOW_RUNNING))
+                renderRunningDot(monitor, LAYOUT, ITEM);
 
-        renderBadge(monitor, ITEM);
+            renderBadge(monitor, ITEM);
+        }
+    }
+
+    // X32 Show Applications, drawn last of the icon row so its cell is complete
+    // before the plates go over the top.
+    if (!LAYOUT.showApps.empty()) {
+        if (const auto TEX = OverviewRender::appIcon(Config::getValue<std::string>(KEY_SHOW_APPS_ICON)); TEX) {
+            CTexPassElement::SRenderData data;
+            data.tex = TEX;
+            data.box = LAYOUT.showApps;
+            data.a   = 1.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+        }
     }
 
     // The menu says the app's name louder than the tooltip does, and the two
     // plates would otherwise sit on top of each other.
-    if (HASHOVER && !g_menu)
-        renderTooltip(monitor, LAYOUT, *HOVEREDITEM);
+    if (!g_menu) {
+        if (HASHOVER)
+            renderTooltip(monitor, LAYOUT, HOVEREDITEM->iconBox, itemName(*HOVEREDITEM));
+        else if (HOVERAPPS)
+            renderTooltip(monitor, LAYOUT, LAYOUT.showApps, "Show Applications");
+    }
 
     // Above the pill by construction (MENU_GAP), so the previews below cannot
     // overdraw it and it does not have to wait for them.

@@ -72,6 +72,13 @@ namespace AppSearch {
     // The desktop id for a window class, or "". X28's Show Details needs it.
     std::string idForClass(const std::string& wmClass);
 
+    // X32. The entry for a desktop id, or nullptr. Favourites are stored as ids
+    // and a pinned app is usually NOT running, so the dock cannot reach its icon
+    // or its Exec through a window class the way every other lookup here does.
+    // The pointer is into inventory(), so it dies on refresh() -- use it and
+    // drop it, never store it.
+    const SEntry* entryForId(const std::string& id);
+
     // X28. The entry's `Actions=` groups in declared order, or empty. Re-reads
     // the .desktop file: this is asked once per right-click, not per frame, so
     // the inventory stays the small thing the search path wants.

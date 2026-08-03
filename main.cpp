@@ -260,6 +260,12 @@ static bool openOverview(PHLMONITOR monitor) {
     return true;
 }
 
+// X32. The dock's Show Applications button opens the overview, and the hook
+// setup above is not something a second implementation should duplicate.
+bool openScrollOverview(PHLMONITOR monitor) {
+    return openOverview(monitor);
+}
+
 static SDispatchResult onOverviewDispatcher(std::string arg) {
     g_overviewSearch.clear(); // every open starts unfiltered
     SearchProviders::query("");

@@ -1,6 +1,7 @@
 #include "AppSearch.hpp"
 
 #include <algorithm>
+#include <ranges>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -882,6 +883,18 @@ namespace AppSearch {
     std::string idForClass(const std::string& wmClass) {
         const auto IDX = entryIndexForClass(wmClass);
         return IDX == std::string::npos ? "" : inventory()[IDX].id;
+    }
+
+    // X32. Favourites are stored as desktop ids and a pinned app is usually NOT
+    // running, so the dock cannot reach its icon or its Exec through a window
+    // class the way every other lookup here does.
+    const SEntry* entryForId(const std::string& id) {
+        if (id.empty())
+            return nullptr;
+
+        const auto& INV = inventory();
+        const auto  IT  = std::ranges::find_if(INV, [&](const SEntry& entry) { return entry.id == id; });
+        return IT == INV.end() ? nullptr : &*IT;
     }
 
     std::vector<SAction> actionsForClass(const std::string& wmClass) {

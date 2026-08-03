@@ -373,6 +373,21 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:dock:urgent_notify",
                                                          "hyprgnomedock: reveal the dock when an app goes urgent (D2D show-dock-urgent-notify)", true));
+    // X32. `show-favorites`, `show-show-apps-button`, `show-apps-at-top` and
+    // `show-apps-always-in-the-edge`, at the reference's values. The last two are
+    // a pair: false/true is what puts the button at the right-hand end of a
+    // bottom dock rather than in among the apps.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_favorites", "hyprgnomedock: pinned apps in the dock whether running or not (D2D show-favorites)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_apps_button", "hyprgnomedock: the Show Applications button (D2D show-show-apps-button)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_apps_at_top", "hyprgnomedock: Show Applications at the START of the dock (D2D show-apps-at-top)", false));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_apps_always_in_the_edge",
+                                                         "hyprgnomedock: keep Show Applications hard against the dock's edge (D2D show-apps-always-in-the-edge)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CStringValue>("plugin:scrolloverview:dock:show_apps_icon", "hyprgnomedock: Show Applications artwork", Hyprlang::STRING{"view-app-grid-symbolic"}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
                                                           (Hyprlang::INT)0xFFC0BFBC));

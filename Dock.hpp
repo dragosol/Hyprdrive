@@ -15,6 +15,14 @@ struct SItem {
     std::string wmClass;
     std::string icon;    // desktop-entry Icon=, "" when no entry claims the class
     CBox        iconBox; // monitor-local, RENDER px
+
+    // X32. The desktop id, which is what a FAVOURITE is stored as -- and the
+    // only handle a pinned-but-not-running app has, since it owns no window and
+    // therefore no class. `running` is the split the running dot draws and the
+    // click reads: a favourite with no window launches instead of minimizing.
+    std::string desktopId;
+    bool        favorite = false;
+    bool        running  = false;
 };
 
 // X25. One minimized window, drawn in the pill as the REAL window, live.
@@ -28,6 +36,12 @@ struct SLayout {
     int                   rounding = 0;
     std::vector<SItem>    items;
     std::vector<SPreview> previews;
+
+    // X32 Show Applications. `show-apps-at-top` false and
+    // `show-apps-always-in-the-edge` true, so on a bottom dock it is the LAST
+    // slot -- past the previews, hard against the right-hand edge. Empty when
+    // `show-apps-button` is off.
+    CBox showApps;
 };
 
 // Pure geometry, so a test rig can assert proportions without a frame.
