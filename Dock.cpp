@@ -1295,7 +1295,7 @@ CBox windowRenderBox(PHLMONITOR monitor, const PHLWINDOW& window) {
     return CBox{(POS.x - monitor->m_position.x) * SCALE, (POS.y - monitor->m_position.y) * SCALE, SIZE.x * SCALE, SIZE.y * SCALE};
 }
 
-void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
+void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
     const int  DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
     const bool ANIMATE  = monitor && window && DURATION > 0 && !Minimize::isMinimized(window);
 
@@ -1326,7 +1326,7 @@ void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
 // the length of the flight: restoring first would put the real window on screen
 // instantly and the proxy would be a second copy of it. The actual restore
 // happens when the flight lands -- see the render loop.
-void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
+void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
     const int DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
 
     if (!monitor || !window || DURATION <= 0 || !Minimize::isMinimized(window)) {
@@ -1508,12 +1508,12 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
 
         if (visible.empty()) {
             for (const auto& WINDOW : windows)
-                restoreWithFlight(monitor, WINDOW);
+                restoreWithFlightImpl(monitor, WINDOW);
             return;
         }
 
         for (const auto& WINDOW : visible)
-            minimizeWithFlight(monitor, WINDOW);
+            minimizeWithFlightImpl(monitor, WINDOW);
         return;
     }
 
@@ -1537,9 +1537,9 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
     // 2026-08-03, two clicks and nothing minimized either time.
     const auto& WINDOW = windows.front();
     if (Minimize::isMinimized(WINDOW))
-        restoreWithFlight(monitor, WINDOW);
+        restoreWithFlightImpl(monitor, WINDOW);
     else
-        minimizeWithFlight(monitor, WINDOW);
+        minimizeWithFlightImpl(monitor, WINDOW);
 }
 
 // X33. `middle-click-action` and `shift-middle-click-action`, both `launch` in
@@ -2410,6 +2410,19 @@ bool damageIfChanged(PHLMONITOR monitor) {
     LAST = signature;
     g_pHyprRenderer->damageMonitor(monitor);
     return true;
+}
+
+// X54. The PUBLIC way to minimize or restore. Everything must come through
+// these: onMinimizeDispatcher called Minimize::minimize straight through, so a
+// keybind-driven minimize never armed a flight at all -- which is why every rig
+// pointed at the dispatcher measured "no animation", and why the diagnostic log
+// came back EMPTY rather than wrong.
+void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
+    minimizeWithFlightImpl(monitor, window);
+}
+
+void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
+    restoreWithFlightImpl(monitor, window);
 }
 
 void render(PHLMONITOR monitor) {

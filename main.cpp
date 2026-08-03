@@ -709,9 +709,9 @@ static SDispatchResult onMinimizeDispatcher(std::string arg) {
         if (MINIMIZED.empty())
             return {.success = false, .error = "nothing is minimized"};
 
-        if (!ScrollOverview::Minimize::restore(MINIMIZED.back()))
-            return {.success = false, .error = "restore failed"};
-
+        // X54: back out through the DOCK, so it flies from its icon instead of
+        // reappearing. The dock owns the animation because it owns the target.
+        ScrollOverview::Dock::restoreWithFlight(Desktop::focusState()->monitor(), MINIMIZED.back());
         return {};
     }
 
@@ -719,9 +719,7 @@ static SDispatchResult onMinimizeDispatcher(std::string arg) {
     if (!WINDOW)
         return {.success = false, .error = "no focused window"};
 
-    if (!ScrollOverview::Minimize::minimize(WINDOW))
-        return {.success = false, .error = "window cannot be minimized"};
-
+    ScrollOverview::Dock::minimizeWithFlight(Desktop::focusState()->monitor(), WINDOW);
     return {};
 }
 

@@ -172,4 +172,11 @@ bool damageIfChanged(PHLMONITOR monitor);
 // as zero.
 void feedPointerMotion(const Vector2D& delta);
 
+// OVERVIEW_CPP_SPEC 13.12 X54. Minimize / restore WITH the shrink-into-the-icon
+// flight. Everything that minimizes must come through these, not through
+// Minimize:: directly -- the dispatcher did exactly that and so a keybind
+// minimize never animated at all.
+void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window);
+void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window);
+
 }
