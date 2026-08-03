@@ -117,10 +117,18 @@ constexpr float PREVIEW_MAX_ASPECT = 2.20F;
 // (user, 2026-08-03) hover highlight and tooltip, read off the GNOME shell the
 // user showed: a rounded cell slightly larger than the icon, and a dark plate
 // above the dock carrying the app's name.
-constexpr float TOOLTIP_FONT   = 13.F;
-constexpr float TOOLTIP_PAD_X  = 10.F;
-constexpr float TOOLTIP_PAD_Y  = 6.F;
-constexpr float TOOLTIP_RADIUS = 8.F;
+// X57. The host draws its dash label and its overview window caption with ONE
+// style, so this is both of them:
+//     .dash-label, .window-caption {
+//         background-color rgba(0,0,0,0.9); border 1px rgba(255,255,255,0.1);
+//         border-radius 999px; padding 6px 12px; color #ffffff }
+// The PILL shape and the 12x6 padding ratio are the host's. The size is the
+// user's ("make the tooltips bigger"), and the border comes from Hyprland
+// rather than from that stylesheet -- see X56.
+constexpr float TOOLTIP_FONT   = 16.F;
+constexpr float TOOLTIP_PAD_X  = 16.F;
+constexpr float TOOLTIP_PAD_Y  = 9.F;
+constexpr float TOOLTIP_BG_A   = 0.90F;
 constexpr float TOOLTIP_GAP    = 8.F;
 
 // X28. The app-icon menu. Same font as the tooltip -- it is the same chrome,
@@ -1183,26 +1191,48 @@ std::string itemName(const SItem& item) {
 // GNOME's dash label does not appear, it FADES: `_showLabel` eases opacity over
 // DASH_ITEM_LABEL_SHOW_TIME. Ours arrived at full alpha, which is what the user
 // reported missing. House entrance curve, because this is an entrance.
-constexpr float TOOLTIP_FADE_MS = 150.F;
+constexpr float TOOLTIP_FADE_MS     = 150.F;
+constexpr float TOOLTIP_FADE_OUT_MS = 110.F; // exits are ~25% quicker, house rule
 
-std::string     g_tipName;
-Time::steady_tp g_tipSince = Time::steadyNow();
+// The plate outlives the hover so it can fade AWAY; the caller passes an empty
+// name when nothing is hovered and this keeps drawing the last one until it has
+// gone. Anchor is remembered for the same reason -- the icon it belonged to is
+// no longer under the pointer.
+struct STooltip {
+    std::string     name;
+    CBox            anchor;
+    Time::steady_tp since = Time::steadyNow();
+    bool            out   = false;
+};
+STooltip g_tip;
 
 void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor, const std::string& NAME) {
-    if (NAME.empty()) {
-        g_tipName.clear();
+    if (!NAME.empty()) {
+        // The fade restarts when the label CHANGES, so sliding along the dock
+        // gives each name its own entrance rather than one fade for the trip.
+        if (NAME != g_tip.name || g_tip.out) {
+            g_tip.name  = NAME;
+            g_tip.since = Time::steadyNow();
+            g_tip.out   = false;
+        }
+        g_tip.anchor = anchor;
+    } else {
+        if (g_tip.name.empty())
+            return;
+        if (!g_tip.out) {
+            g_tip.out   = true;
+            g_tip.since = Time::steadyNow();
+        }
+    }
+
+    const float T = std::clamp(elapsedMs(g_tip.since) / (g_tip.out ? TOOLTIP_FADE_OUT_MS : TOOLTIP_FADE_MS), 0.F, 1.F);
+    if (g_tip.out && T >= 1.F) {
+        g_tip.name.clear();
         return;
     }
 
-    // The fade restarts when the label CHANGES, so sliding along the dock gives
-    // each name its own entrance rather than one fade for the whole journey.
-    if (NAME != g_tipName) {
-        g_tipName  = NAME;
-        g_tipSince = Time::steadyNow();
-    }
-
-    const float T     = std::clamp(elapsedMs(g_tipSince) / TOOLTIP_FADE_MS, 0.F, 1.F);
-    const float ALPHA = houseEase(true, T);
+    // Entrances decelerate, exits accelerate: the house rule, both directions.
+    const float ALPHA = g_tip.out ? 1.F - houseEase(false, T) : houseEase(true, T);
 
     // A pointer resting on an icon emits no motion, so nothing else would ask
     // for the frames this fade needs. Same doLater the live previews use: a
@@ -1215,7 +1245,7 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
     }
 
     const float SCALE = std::max(monitor->m_scale, 0.01F);
-    const auto  TEX   = OverviewRender::text(NAME, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(TOOLTIP_FONT * SCALE))), false, "", 0, 500);
+    const auto  TEX   = OverviewRender::text(g_tip.name, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(TOOLTIP_FONT * SCALE))), false, "", 0, 500);
     if (!TEX || !TEX->ok())
         return;
 
@@ -1223,17 +1253,38 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
     const float PADY  = TOOLTIP_PAD_Y * SCALE;
     const float W     = sc<float>(TEX->m_size.x) + 2.F * PADX;
     const float H     = sc<float>(TEX->m_size.y) + 2.F * PADY;
-    const float CX    = sc<float>(anchor.x) + sc<float>(anchor.width) / 2.F;
+    const float CX    = sc<float>(g_tip.anchor.x) + sc<float>(g_tip.anchor.width) / 2.F;
 
     CBox plate{std::round(CX - W / 2.F), std::round(sc<float>(layout.pill.y) - TOOLTIP_GAP * SCALE - H), std::round(W), std::round(H)};
 
     // Keep it on screen when the hovered icon is at either end of a wide pill.
     plate.x = std::clamp(plate.x, 0.0, std::max(0.0, monitor->m_size.x * SCALE - plate.width));
 
+    // X56/X57. `border-radius: 999px` is a full pill, so the radius is half the
+    // plate's height rather than a constant -- it then stays a pill when the
+    // font or the padding changes.
+    const int ROUND = sc<int>(std::round(plate.height / 2.0));
+
+    // X56: the border is HYPRLAND'S, not the host stylesheet's 1px white-10%.
+    // Same source the drop indicator reads, so the tooltip re-themes with
+    // everything else the moment the user changes their border.
+    const int BORDER = std::max(0, Config::getValue<int>("general:border_size"));
+    if (BORDER > 0) {
+        if (auto* const ACTIVE = sc<::Config::CGradientValueData*>(Config::valueRef<::Config::IComplexConfigValue>("general:col.active_border").ptr());
+            ACTIVE && !ACTIVE->m_colors.empty()) {
+            CRectPassElement::SRectData edge;
+            edge.box           = plate.copy().expand(sc<double>(BORDER) * SCALE);
+            edge.color         = ACTIVE->m_colors[0].modifyA(ALPHA);
+            edge.round         = ROUND + sc<int>(std::round(sc<float>(BORDER) * SCALE));
+            edge.roundingPower = 2.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(edge));
+        }
+    }
+
     CRectPassElement::SRectData bg;
     bg.box           = plate;
-    bg.color         = CHyprColor{0.F, 0.F, 0.F, 0.80F * ALPHA};
-    bg.round         = sc<int>(std::round(TOOLTIP_RADIUS * SCALE));
+    bg.color         = CHyprColor{0.F, 0.F, 0.F, TOOLTIP_BG_A * ALPHA};
+    bg.round         = ROUND;
     bg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
 
@@ -2454,12 +2505,17 @@ void render(PHLMONITOR monitor) {
 
     // The menu says the app's name louder than the tooltip does, and the two
     // plates would otherwise sit on top of each other.
+    // The empty-name call is what drives the fade-OUT: without it the plate would
+    // simply stop being drawn, which is the pop X57 is removing.
     if (!g_menu) {
         if (HASHOVER)
             renderTooltip(monitor, LAYOUT, HOVEREDITEM->iconBox, itemName(*HOVEREDITEM));
         else if (HOVERAPPS)
             renderTooltip(monitor, LAYOUT, LAYOUT.showApps, "Show Applications");
-    }
+        else
+            renderTooltip(monitor, LAYOUT, CBox{}, "");
+    } else
+        renderTooltip(monitor, LAYOUT, CBox{}, "");
 
     // Above the pill by construction (MENU_GAP), so the previews below cannot
     // overdraw it and it does not have to wait for them.
