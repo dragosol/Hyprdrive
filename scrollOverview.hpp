@@ -103,6 +103,9 @@ class CScrollOverview : public IOverview {
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
+    CBox      tileBox(const PHLWINDOW& window) const;
+    CBox      tileCloseButtonBox(const PHLWINDOW& window) const;
+    void      updateTileHover();
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
     CDropIndicator::SDropAnchor dropAnchorAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr,
                                                                       CScrollOverview* dragContext = nullptr);

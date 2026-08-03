@@ -1,6 +1,9 @@
 #include "scrollOverview.hpp"
 
 #include "AppSearch.hpp"
+#include "TileChrome.hpp"
+
+namespace TileChrome = ScrollOverview::TileChrome;
 
 #include <drm_fourcc.h>
 #include <hyprgraphics/image/Image.hpp>
@@ -503,10 +506,24 @@ static float overviewResultsBandTarget(size_t rows) {
     return PANELH + (OVERVIEW_RESULT_PANELGAPL * 2.F);
 }
 
+// The tile currently being dragged. It gives up its grid slot for the duration
+// so the survivors close the gap it left WHILE it travels -- F3-b-iii's "the
+// windows already in the grid must be seen moving to make room", applied to a
+// drag instead of a search (user request, 2026-08-02). Nothing else is needed:
+// SGridReflow already eases every tile whose slot changed.
+static Desktop::View::CWindow* g_dragReflowExcluded = nullptr;
+
 // ponytail: recomputed per window per frame, O(windows^2) on the focused
 // workspace. Fine at desktop counts; memoise per frame if it ever shows up.
 static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor, const PHLWINDOW& target, CBox& out) {
-    const auto WINDOWS = overviewMainGridWindows(workspace, monitor);
+    auto WINDOWS = overviewMainGridWindows(workspace, monitor);
+
+    // The dragged window keeps a slot for its OWN query: the drag proxy is sized
+    // off it, and a proxy sized from the N-1 layout would jump the frame the
+    // drag begins. It is absent only from everyone else's layout.
+    if (g_dragReflowExcluded && target.get() != g_dragReflowExcluded)
+        std::erase_if(WINDOWS, [](const auto& window) { return window.get() == g_dragReflowExcluded; });
+
     const auto TARGETIT = std::ranges::find(WINDOWS, target);
     if (TARGETIT == WINDOWS.end())
         return false;
@@ -1489,6 +1506,8 @@ static void moveOverviewTargetNextToWindow(const SP<Layout::ITarget>& target, co
 }
 
 CScrollOverview::~CScrollOverview() {
+    TileChrome::forget();
+    g_dragReflowExcluded = nullptr;
     if (g_pointerGrabOverview == this)
         g_pointerGrabOverview = nullptr;
     transferSharedStateOwnership();
@@ -1606,6 +1625,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         const float    DRAGTHRESHOLDSQ       = std::pow(DRAGTHRESHOLD, 2);
 
         lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+        updateTileHover();
 
         const auto beginScrollingPanAtPoint = [&](const Vector2D& point) {
             auto WORKSPACE = workspaceAtOverviewPoint(point);
@@ -1831,6 +1852,20 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                // The close button eats the press outright -- no drag, no select.
+                // User request 2026-08-02: an X on the top right of the hovered
+                // tile. Drop the hover first so the button cannot be clicked
+                // twice while the window takes its time going away.
+                if (const auto HOVERED = TileChrome::hovered(); HOVERED && tileCloseButtonBox(HOVERED).containsPoint(lastMousePosLocal)) {
+                    TileChrome::setHovered(PHLWINDOW{});
+                    HOVERED->sendClose();
+                    return;
+                }
+
+                // Before the submap check: that branch returns, and the press
+                // shrink has to show whether or not a submap is active.
+                TileChrome::setPressed(windowAtOverviewPoint(lastMousePosLocal), true);
+
                 if (beginSubmapMouseClickPending(event.button))
                     return;
 
@@ -1838,6 +1873,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 dragStartMouseLocal = lastMousePosLocal;
                 return;
             }
+
+            TileChrome::setPressed(PHLWINDOW{}, false);
 
             const bool WASPANNING = scrollingPanPointerDown;
             if (scrollingPanPointerDown)
@@ -2775,6 +2812,52 @@ PHLWINDOW CScrollOverview::windowAtOverviewCursor(size_t* hoveredWorkspaceIdx) {
     return windowAtOverviewPoint(lastMousePosLocal, hoveredWorkspaceIdx);
 }
 
+// The tile as DRAWN -- grown by the hover ease, shrunk by the press ease -- so
+// the close button the user aims at and the circle that gets hit-tested are the
+// same circle.
+CBox CScrollOverview::tileBox(const PHLWINDOW& window) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!window || !MONITOR)
+        return {};
+
+    size_t workspaceIdx = images.size();
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (images[i] && images[i]->pWorkspace == window->m_workspace) {
+            workspaceIdx = i;
+            break;
+        }
+    }
+
+    if (workspaceIdx >= images.size())
+        return {};
+
+    const auto OFFSET = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
+    return TileChrome::scaledBox(window, getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout));
+}
+
+CBox CScrollOverview::tileCloseButtonBox(const PHLWINDOW& window) const {
+    const auto MONITOR = pMonitor.lock();
+    return MONITOR ? TileChrome::closeButtonBox(window, tileBox(window), MONITOR->m_scale) : CBox{};
+}
+
+// X7. Hover is hit-tested against the UNSCALED slot. Testing the grown box would
+// let a tile that grew under the cursor hold its own hover, and the shrink on the
+// way out would re-enter it -- a tile that flutters rather than one that bounces.
+// The close button is the single exception: it is drawn on the grown box, so it
+// pokes a few px past the slot, and without this the hover (and the button with
+// it) would vanish exactly as the cursor arrived on it.
+void CScrollOverview::updateTileHover() {
+    if (closing || dragActiveWindow || resizeActiveWindow || scrollingPanPointerDown) {
+        TileChrome::setHovered(PHLWINDOW{});
+        return;
+    }
+
+    if (const auto HOVERED = TileChrome::hovered(); HOVERED && tileCloseButtonBox(HOVERED).containsPoint(lastMousePosLocal))
+        return;
+
+    TileChrome::setHovered(windowAtOverviewPoint(lastMousePosLocal));
+}
+
 PHLWINDOW CScrollOverview::windowClosestToWorkspaceCenter(size_t workspaceIdx) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || workspaceIdx >= images.size() || !images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
@@ -3513,6 +3596,11 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
     dragRecentreFrom      = 0.F;
     dragRecentreChangedAt = Time::steadyNow();
 
+    // Last, after refreshDragOriginalOverviewBoxes() above has read the boxes it
+    // needs out of the full grid.
+    g_dragReflowExcluded = WINDOW.get();
+    TileChrome::setHovered(PHLWINDOW{});
+
     updateWindowDrag();
 }
 
@@ -3612,6 +3700,7 @@ void CScrollOverview::updateWindowResize() {
 }
 
 void CScrollOverview::clearDragPending() {
+    g_dragReflowExcluded        = nullptr;
     dragPendingPrimary          = false;
     dragActiveWindow.reset();
     dragOriginalWorkspace.reset();
@@ -3892,6 +3981,10 @@ bool CScrollOverview::moveScrollingStackSelection(bool next) {
 }
 
 void CScrollOverview::endWindowDrag() {
+    // Before anything below reads a slot: the D5 return seed wants this window's
+    // slot in the FULL grid, not the gap it has been leaving open.
+    g_dragReflowExcluded = nullptr;
+
     const auto WINDOW = getOverviewWindowToShow(dragActiveWindow.lock());
     const auto TARGET = WINDOW ? WINDOW->layoutTarget() : nullptr;
     const auto SPACE  = TARGET ? TARGET->space() : nullptr;
@@ -4983,6 +5076,11 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         workspace->m_forceRendering = WASFORCERENDERING;
     });
 
+    // X7/X8 chrome is drawn in a SECOND pass. The app icon straddles the tile's
+    // bottom edge and a hovered tile grows into its neighbours, so chrome drawn
+    // with its own tile gets painted over by the next one.
+    std::vector<std::pair<PHLWINDOW, CBox>> tileChrome;
+
     const auto renderOverviewWindow = [&](const PHLWINDOW& window) {
         // F3-b outbound: a releasing tile no longer matches, so the search half
         // of shouldShowOverviewWindow would delete it on its first outbound
@@ -4997,11 +5095,17 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         if (!WORKSPACEVISIBLE && !PROMOTED)
             return;
 
-        const auto windowBox = getOverviewWindowBox(window, monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
+        const auto windowBox = TileChrome::scaledBox(window, getOverviewWindowBox(window, monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout));
         if (!overviewBoxIntersectsMonitor(windowBox, monitor))
             return;
 
         renderWindowLive(monitor, window, windowBox, renderScale, now, PROMOTED ? &ACTIVECARDBOX : &WORKSPACEBOX);
+        tileChrome.emplace_back(window, windowBox);
+    };
+
+    const auto renderTileChrome = [&] {
+        for (const auto& [window, box] : tileChrome)
+            TileChrome::render(monitor, window, box, monitor->m_scale);
     };
 
     const auto fullscreenWindow = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(workspace));
@@ -5049,6 +5153,7 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
 
             renderOverviewWindow(window);
         }
+        renderTileChrome();
         if (WORKSPACEVISIBLE)
             renderDropIndicator();
         return;
@@ -5066,6 +5171,7 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
 
     renderWindowsByState(false);
     renderWindowsByState(true);
+    renderTileChrome();
     if (WORKSPACEVISIBLE)
         renderDropIndicator();
 }
@@ -6520,6 +6626,9 @@ void CScrollOverview::onPreRender() {
     // (strip_top, tile_h), not pixel diffs -- strip_top is quantised to 2px, so
     // it holds still through the eased tail and reading THAT as frame timing
     // invents a 196ms stall which the painted-frame signal shows is not there.
+    if (TileChrome::animating())
+        g_gridReflowActive = true;
+
     if (g_gridReflowActive) {
         g_gridReflowActive = false;
         reflowPacer->setValueAndWarp(0.F);
