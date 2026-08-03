@@ -726,6 +726,78 @@ namespace AppSearch {
         return results;
     }
 
+    // OVERVIEW_CPP_SPEC §13.12 X52. `stem -> best path`, built once.
+    //
+    // This used to walk the icon-theme roots recursively PER ICON, comparing
+    // `path.stem()` against the name. Profiled at ~250ms for a single cold
+    // icon -- 99% of the whole keystroke-to-paint cost of the search -- and a
+    // miss then recursed into GENERIC_ICON and walked them all a second time.
+    // A full pass over this machine's ~20k icon files costs ~10ms, so doing it
+    // ONCE and hashing afterwards is the entire fix. See RICE_PROGRESS X52.
+    struct SIconCandidate {
+        std::string path;
+        int         score = -1;
+        size_t      root  = 0;
+    };
+
+    static std::unordered_map<std::string, SIconCandidate> g_iconIndex;
+    static std::string                                     g_iconIndexTheme;
+    static bool                                            g_iconIndexBuilt = false;
+
+    static std::vector<std::string> iconRoots() {
+        std::vector<std::string> roots;
+        for (const auto& THEME : themeChain(iconThemeName())) {
+            for (const auto& BASE : iconBases())
+                roots.emplace_back(BASE + "/" + THEME);
+        }
+        roots.emplace_back("/usr/share/pixmaps");
+        return roots;
+    }
+
+    void warmIconIndex() {
+        const auto THEME = iconThemeName();
+        if (g_iconIndexBuilt && g_iconIndexTheme == THEME)
+            return;
+
+        g_iconIndex.clear();
+        g_iconIndexTheme = THEME;
+        g_iconIndexBuilt = true;
+
+        std::error_code ec;
+        const auto      ROOTS = iconRoots();
+
+        for (size_t r = 0; r < ROOTS.size(); ++r) {
+            if (!std::filesystem::is_directory(ROOTS[r], ec))
+                continue;
+
+            for (auto it = std::filesystem::recursive_directory_iterator(ROOTS[r], std::filesystem::directory_options::skip_permission_denied, ec);
+                 it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec)
+                    break;
+
+                const auto& PATH  = it->path();
+                const int   SCORE = iconCandidateScore(PATH);
+                // Negative means "not an icon file" -- the old loop could never
+                // pick one either, because it started bestScore at -1. Skipping
+                // here also keeps directories out of the index.
+                if (SCORE < 0)
+                    continue;
+
+                auto& SLOT = g_iconIndex[PATH.stem().string()];
+
+                // Roots are in priority order and the old code stopped at the
+                // first root that answered, so a later root must never override
+                // an earlier one -- only beat a sibling inside the same root.
+                if (SLOT.score < 0)
+                    SLOT = SIconCandidate{PATH.string(), SCORE, r};
+                else if (SLOT.root == r && SCORE > SLOT.score) {
+                    SLOT.path  = PATH.string();
+                    SLOT.score = SCORE;
+                }
+            }
+        }
+    }
+
     std::string resolveIconPath(const std::string& iconName) {
         if (iconName.empty())
             return "";
@@ -736,48 +808,20 @@ namespace AppSearch {
         if (iconName.starts_with('/'))
             return std::filesystem::exists(iconName, ec) ? iconName : "";
 
-        std::vector<std::string> roots;
-        for (const auto& THEME : themeChain(iconThemeName())) {
-            for (const auto& BASE : iconBases())
-                roots.emplace_back(BASE + "/" + THEME);
-        }
-        roots.emplace_back("/usr/share/pixmaps");
+        warmIconIndex();
 
-        std::string best;
-        int         bestScore = -1;
-
-        for (const auto& ROOT : roots) {
-            if (!std::filesystem::is_directory(ROOT, ec))
-                continue;
-
-            for (auto it = std::filesystem::recursive_directory_iterator(ROOT, std::filesystem::directory_options::skip_permission_denied, ec);
-                 it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
-                if (ec)
-                    break;
-
-                const auto& PATH = it->path();
-                if (PATH.stem() != iconName)
-                    continue;
-
-                const int SCORE = iconCandidateScore(PATH);
-                if (SCORE > bestScore) {
-                    bestScore = SCORE;
-                    best      = PATH.string();
-                }
-            }
-
-            // Roots are in priority order, so stop at the first that answers.
-            if (bestScore >= 0)
-                break;
-        }
+        if (const auto IT = g_iconIndex.find(iconName); IT != g_iconIndex.end())
+            return IT->second.path;
 
         // Named icons from another desktop's theme (breeze's
         // utilities-system-monitor) simply are not present here. A generic tile
         // is the honest answer, and it is what GNOME shows too.
-        if (best.empty() && iconName != GENERIC_ICON)
-            return resolveIconPath(GENERIC_ICON);
+        if (iconName != GENERIC_ICON) {
+            if (const auto IT = g_iconIndex.find(GENERIC_ICON); IT != g_iconIndex.end())
+                return IT->second.path;
+        }
 
-        return best;
+        return "";
     }
 
     bool launch(const SEntry& entry, const std::string& terminalCmd) {

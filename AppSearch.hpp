@@ -40,6 +40,12 @@ namespace AppSearch {
     // shows windows, not a list of every installed app.
     std::vector<const SEntry*> search(const std::string& query, size_t limit);
 
+    // OVERVIEW_CPP_SPEC §13.12 X51/X52. Build the `stem -> path` icon index up
+    // front, so the first search does not pay for it. Idempotent, and a no-op
+    // once built; call it wherever a stall is invisible (plugin load), never
+    // from a frame that is already late.
+    void warmIconIndex();
+
     // Absolute path to the best icon file for an Icon= value, or "" if none.
     // Pure filesystem: decode and texture upload belong to the render layer.
     // Falls back to a generic application icon when the named one is missing

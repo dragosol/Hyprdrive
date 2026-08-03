@@ -25,6 +25,7 @@
 using namespace Hyprutils::String;
 
 #include "globals.hpp"
+#include "AppSearch.hpp"
 #include "Config.hpp"
 #include "Dock.hpp"
 #include "LauncherEntry.hpp"
@@ -967,6 +968,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
     registerTapSuper();
+
+    // X51/X52. Build the icon index at LOAD, where a one-off ~10ms pass is
+    // invisible, rather than letting the first search pay for it inside a frame
+    // that is already trying to paint results.
+    AppSearch::warmIconIndex();
 
     return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", SCROLLOVERVIEW_VERSION};
 }
