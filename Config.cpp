@@ -451,6 +451,24 @@ static void registerConfigValues() {
                                                           "hyprgnomedock: seconds the number overlay stays up (D2D shortcut-timeout)", 2.F,
                                                           SFloatValueOptions{.min = 0.F, .max = 10.F}));
 
+    // X35. The dock's non-app items. `show_mounts` is the MASTER switch in the
+    // reference -- `_ensureLocations` never constructs `Removables` while it is
+    // off, so the two keys under it are read by nothing -- and it is false in the
+    // target config. The trash is therefore the only location the rice draws.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_trash", "hyprgnomedock: a Trash item at the end of the dock (D2D show-trash)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_mounts", "hyprgnomedock: mounted volumes as dock items (D2D show-mounts)", false));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_mounts_network",
+                                                         "hyprgnomedock: include network shares among the mounts (D2D show-mounts-network)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:show_mounts_only_mounted",
+                                                         "hyprgnomedock: only volumes that are mounted, not every one present (D2D show-mounts-only-mounted)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:isolate_locations",
+                                                         "hyprgnomedock: a location's running state is its own, not the file manager's (D2D isolate-locations)", true));
+
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
                                                           (Hyprlang::INT)0xFFC0BFBC));

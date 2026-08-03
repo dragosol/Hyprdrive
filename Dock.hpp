@@ -23,6 +23,17 @@ struct SItem {
     std::string desktopId;
     bool        favorite = false;
     bool        running  = false;
+
+    // X35. A LOCATION -- the trash, or a mount -- rather than an app. Dash to
+    // Dock wraps these as fake ShellApps so its dash can hold them; here they
+    // keep their own identity, because every app lookup in Dock.cpp keys on a
+    // WINDOW CLASS and a location has none. A non-empty `uri` IS the
+    // discriminator, and it is also what activating the item opens.
+    std::string uri;
+    std::string locationName;
+    bool        mount      = false; // so its menu unmounts rather than empties
+    bool        canEject   = false;
+    bool        trashEmpty = true;  // no `Empty Trash` row while it is
 };
 
 // X25. One minimized window, drawn in the pill as the REAL window, live.

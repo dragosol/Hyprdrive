@@ -4,6 +4,7 @@
 #include "Config.hpp"
 #include "IOverview.hpp"
 #include "LauncherEntry.hpp"
+#include "Locations.hpp"
 #include "Minimize.hpp"
 #include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
@@ -207,6 +208,7 @@ constexpr const char* KEY_SCROLL_ACTION = "plugin:scrolloverview:dock:scroll_act
 constexpr const char* KEY_MIDDLE_CLICK  = "plugin:scrolloverview:dock:middle_click_action";
 constexpr const char* KEY_SHIFT_MIDDLE  = "plugin:scrolloverview:dock:shift_middle_click_action";
 constexpr const char* KEY_ISOLATE_WS    = "plugin:scrolloverview:dock:isolate_workspaces";
+constexpr const char* KEY_ISOLATE_LOCATIONS = "plugin:scrolloverview:dock:isolate_locations";
 constexpr const char* KEY_AGNOSTIC_URG  = "plugin:scrolloverview:dock:workspace_agnostic_urgent";
 
 // X34, one key per reference setting: `hot-keys`, `hotkeys-overlay`,
@@ -536,6 +538,28 @@ std::vector<SItem> dockItems() {
         });
     }
 
+    // X35. Locations come after every app, which is where `Locations.getApps()`
+    // puts them once `shellAppCompare` has sorted the running ones to the front.
+    //
+    // `isolate_locations` TRUE is what makes this a plain append: a location's
+    // running state is ITS OWN, so it is asked of the file manager's open
+    // windows rather than inherited from whether Nautilus happens to be up. With
+    // the key off, a location is drawn but never marked running -- the reference
+    // reaches for the file manager's own AppIcon there, and this dock has no
+    // second icon to hand the state to.
+    const bool ISOLATE = Config::getValue<bool>(KEY_ISOLATE_LOCATIONS);
+    for (const auto& LOCATION : Locations::items()) {
+        out.emplace_back(SItem{
+            .icon         = LOCATION.icon,
+            .running      = ISOLATE && Locations::openWindows(LOCATION.uri),
+            .uri          = LOCATION.uri,
+            .locationName = LOCATION.name,
+            .mount        = LOCATION.mount,
+            .canEject     = LOCATION.canEject,
+            .trashEmpty   = LOCATION.empty,
+        });
+    }
+
     return out;
 }
 
@@ -674,7 +698,8 @@ long long badgeCount(const std::string& wmClass) {
 bool anyUrgent(const std::vector<SItem>& items) {
     // X32: a pinned app with no window has no class, and classUrgent keyed on ""
     // would ask LauncherEntry about the empty id once per item per frame.
-    return std::ranges::any_of(items, [](const SItem& item) { return item.running && classUrgent(item.wmClass); });
+    // X35: and a location has no class either, nor any way to go urgent.
+    return std::ranges::any_of(items, [](const SItem& item) { return item.running && item.uri.empty() && classUrgent(item.wmClass); });
 }
 
 // Radians, because CBox::rot is; the reference's degrees are converted at the
@@ -981,6 +1006,9 @@ std::string badgeText(long long count) {
 }
 
 void renderBadge(PHLMONITOR monitor, const SItem& item) {
+    if (!item.uri.empty()) // X35: a location has no class to key a LauncherEntry on
+        return;
+
     const auto COUNT = badgeCount(item.wmClass);
     if (COUNT <= 0)
         return;
@@ -1075,6 +1103,11 @@ void renderNumberOverlay(PHLMONITOR monitor, const SItem& item, int index) {
 // is the only source. Ordered so a running app is still named by its class,
 // which is what X27 measured.
 std::string itemName(const SItem& item) {
+    // X35. A location's name is its own -- no class to look it up by, and the
+    // desktop-entry fallback below would answer "Files" for every one of them.
+    if (!item.uri.empty())
+        return item.locationName;
+
     if (const auto FROMCLASS = AppSearch::appNameForClass(item.wmClass); !FROMCLASS.empty())
         return FROMCLASS;
 
@@ -1254,6 +1287,17 @@ void cycleOrActivate(const std::string& wmClass, bool reversed) {
 // app middle-clicked for a new window owns a class but need not own a favourite,
 // so `desktopId` can be empty where `idForClass` still answers.
 void launchApp(PHLMONITOR monitor, const SItem& item) {
+    // X35. `new-window` on a location is opening it -- the reference's fake
+    // ShellApp answers `open_new_window` with the same `launch` either way.
+    if (!item.uri.empty()) {
+        Locations::activate(item.uri);
+
+        if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
+            OVERVIEW->close();
+
+        return;
+    }
+
     const auto  ID    = item.desktopId.empty() ? AppSearch::idForClass(item.wmClass) : item.desktopId;
     const auto* ENTRY = AppSearch::entryForId(ID);
     if (!ENTRY)
@@ -1266,6 +1310,14 @@ void launchApp(PHLMONITOR monitor, const SItem& item) {
 }
 
 void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
+    // X35. A location has no windows to minimize: it is opened. Nautilus raises
+    // the window it already has for a location rather than opening a second
+    // one, so this is the reference's "focus it" too.
+    if (!item.uri.empty()) {
+        launchApp(monitor, item);
+        return;
+    }
+
     const auto windows = classWindows(item.wmClass);
 
     // X32. Nothing to minimize, so this is a launch.
@@ -1323,6 +1375,14 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
 // apart -- it is the left button's action, and a user who sets middle to
 // `minimize` means that one.
 void applyClickAction(PHLMONITOR monitor, const SItem& item, const std::string& action, bool shift) {
+    // X35. Every one of the reference's five actions is about an app's windows,
+    // and a location has none -- `launch` is the only one it can answer, and
+    // opening it is what that means here.
+    if (!item.uri.empty()) {
+        activateItem(monitor, item, shift);
+        return;
+    }
+
     const auto WINDOWS = classWindows(item.wmClass);
 
     if (WINDOWS.empty()) {
@@ -1345,7 +1405,7 @@ void applyClickAction(PHLMONITOR monitor, const SItem& item, const std::string& 
 
 // ---------------------------------------------------------------- X28 menu --
 
-enum class ERow : uint8_t { Separator, Action, Window, Details, Favorite, Quit };
+enum class ERow : uint8_t { Separator, Action, Window, Details, Favorite, Quit, EmptyTrash, Unmount, Eject };
 
 struct SRow {
     ERow         kind = ERow::Separator;
@@ -1356,8 +1416,11 @@ struct SRow {
 };
 
 struct SMenu {
-    MONITORID         monitor = MONITOR_INVALID;
-    std::string       wmClass;
+    MONITORID monitor = MONITOR_INVALID;
+
+    // X35. The whole item, not just its class: a location has no class, and the
+    // rows it opens are decided by its uri/mount/trashEmpty instead.
+    SItem             item;
     CBox              anchor; // the icon cell the menu hangs off
     CBox              box;    // the whole plate, filled by renderMenu
     std::vector<SRow> rows;
@@ -1380,8 +1443,25 @@ std::string elide(const std::string& text) {
 
 // Spec §13.9 X28, in the order the spec lists them: .desktop Actions, window
 // list, Show Details, Add/Remove from Favorites, Quit.
-std::vector<SRow> buildRows(const std::string& wmClass) {
+std::vector<SRow> buildRows(const SItem& item) {
     std::vector<SRow> rows;
+
+    // X35. A location's menu is its `list_actions()` and nothing else -- no
+    // window list, no favourite, no Quit: none of those has an answer for a
+    // thing that is not an app. An empty trash lists no action at all, so its
+    // menu is a bare plate, which is what the reference shows too.
+    if (!item.uri.empty()) {
+        if (item.mount) {
+            rows.emplace_back(SRow{.kind = ERow::Unmount, .label = "Unmount"});
+            if (item.canEject)
+                rows.emplace_back(SRow{.kind = ERow::Eject, .label = "Eject"});
+        } else if (!item.trashEmpty)
+            rows.emplace_back(SRow{.kind = ERow::EmptyTrash, .label = "Empty Trash"});
+
+        return rows;
+    }
+
+    const auto& wmClass = item.wmClass;
 
     for (const auto& ACTION : AppSearch::actionsForClass(wmClass))
         rows.emplace_back(SRow{.kind = ERow::Action, .label = ACTION.name, .exec = ACTION.exec});
@@ -1412,9 +1492,15 @@ std::vector<SRow> buildRows(const std::string& wmClass) {
     return rows;
 }
 
-void activateRow(PHLMONITOR monitor, const std::string& wmClass, const SRow& row) {
+void activateRow(PHLMONITOR monitor, const SItem& item, const SRow& row) {
+    const auto& wmClass = item.wmClass;
+
     switch (row.kind) {
         case ERow::Separator: return;
+
+        case ERow::EmptyTrash: Locations::emptyTrash(); return;
+        case ERow::Unmount: Locations::unmount(item.uri, false); return;
+        case ERow::Eject: Locations::unmount(item.uri, true); return;
 
         case ERow::Action: AppSearch::launchExec(row.exec); return;
 
@@ -1992,7 +2078,7 @@ bool openMenu(PHLMONITOR monitor, const Vector2D& point) {
     if (ITEM == LAYOUT.items.end())
         return false;
 
-    g_menu = SMenu{.monitor = monitor->m_id, .wmClass = ITEM->wmClass, .anchor = ITEM->iconBox, .box = {}, .rows = buildRows(ITEM->wmClass)};
+    g_menu = SMenu{.monitor = monitor->m_id, .item = *ITEM, .anchor = ITEM->iconBox, .box = {}, .rows = buildRows(*ITEM)};
     return true;
 }
 
@@ -2018,11 +2104,11 @@ bool menuClick(PHLMONITOR monitor, const Vector2D& point) {
 
     // Copied before the menu goes away: activating a row can close the overview,
     // and g_menu must not be read through after that.
-    const auto CLASS = g_menu->wmClass;
-    const auto PICK  = *ROW;
+    const auto ITEM = g_menu->item;
+    const auto PICK = *ROW;
     closeMenu();
 
-    activateRow(monitor, CLASS, PICK);
+    activateRow(monitor, ITEM, PICK);
     return true;
 }
 
@@ -2069,9 +2155,15 @@ bool damageIfChanged(PHLMONITOR monitor) {
             // pinned favourite HAS no class: without it, launching a pinned app
             // -- or pinning one while another is already pinned -- leaves the
             // signature identical and the dot never appears.
-            signature += "|" + ITEM.desktopId + "/" + ITEM.wmClass + (ITEM.running ? "+" : "-");
+            // X35. The icon NAME, because the trash swaps `user-trash` for
+            // `user-trash-full` without moving a box. Ceiling: the swap is seen
+            // when the poll next runs AND something asks for a frame, so on a
+            // wholly idle desktop the new icon can lag the deletion by a beat.
+            signature += "|" + ITEM.desktopId + "/" + ITEM.wmClass + ITEM.uri + ITEM.icon + (ITEM.running ? "+" : "-");
 
-            if (!ITEM.running)
+            // A location has no class, so every badge lookup below would key on
+            // the empty string -- and a location has no notifications anyway.
+            if (!ITEM.running || !ITEM.uri.empty())
                 continue;
 
             // X31. A badge arriving, or an app going urgent, changes what the
@@ -2113,7 +2205,7 @@ bool damageIfChanged(PHLMONITOR monitor) {
         // X28. The menu is part of what the dock looks like, and its hovered row
         // moves with a bare pointer move exactly as the icon highlight does.
         if (g_menu && g_menu->monitor == monitor->m_id) {
-            signature += "@" + g_menu->wmClass;
+            signature += "@" + g_menu->item.wmClass + g_menu->item.uri;
             for (size_t i = 0; i < g_menu->rows.size(); ++i) {
                 if (!g_menu->rows[i].box.empty() && g_menu->rows[i].box.containsPoint(MOUSE)) {
                     signature += "/" + std::to_string(i);
@@ -2211,7 +2303,7 @@ void render(PHLMONITOR monitor) {
             // X31 `dance-urgent-applications`. CBox::rot is radians about the
             // box's own centre, which is the reference's pivot (0.5, 0.5) --
             // so the wiggle is one assignment, not a transform stack.
-            if (ITEM.running && Config::getValue<bool>(KEY_DANCE_URGENT) && classUrgent(ITEM.wmClass))
+            if (ITEM.running && ITEM.uri.empty() && Config::getValue<bool>(KEY_DANCE_URGENT) && classUrgent(ITEM.wmClass))
                 data.box.rot = wiggleRadians();
 
             data.a = 1.F;
