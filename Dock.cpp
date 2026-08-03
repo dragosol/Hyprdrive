@@ -693,6 +693,10 @@ std::unordered_map<MONITORID, SReveal> g_reveal;
 // a clamp can leave it a pixel short, so the band is not exactly one row.
 constexpr float EDGE_BAND = 2.F;
 
+// The band that opens the dock on POSITION alone, deliberately a little wider
+// than EDGE_BAND -- "on or near the bottom edge".
+constexpr float REVEAL_BAND = 4.F;
+
 float elapsedMs(const Time::steady_tp& since) {
     return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count());
 }
@@ -920,8 +924,25 @@ void updateAutohide(PHLMONITOR monitor) {
             reach.height += EDGE_MARGIN * monitor->m_scale; // the margin under the pill still counts as on it
             want = reach.containsPoint((g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale);
         }
-    } else
-        want = R.pressure >= Config::getValue<float>(KEY_PRESSURE); // `require-pressure-to-show`
+    } else {
+        // `require-pressure-to-show`, plus a POSITION test that every pointer
+        // can satisfy.
+        //
+        // The pressure barrier alone was measured dead on this guest, and the
+        // reason generalises: its feed hooks `CInputManager::onMouseMoved`,
+        // which is the RELATIVE motion path, while the pointer here is a
+        // `qemu-qemu-usb-tablet` -- an ABSOLUTE device. No relative event ever
+        // arrives, so pressure never accumulates and the dock never comes out.
+        // (An earlier test "passed" only because ydotool synthesised relative
+        // deltas, which is not how the user's pointer moves.) Position is the
+        // one thing every device agrees on; `show_delay_ms` is what keeps it
+        // from being twitchy, and pressure still works for a relative mouse.
+        const auto BOX   = monitor->logicalBox();
+        const auto POINT = g_pInputManager->getMouseCoordsInternal();
+        const bool ATEDGE = BOX.containsPoint(POINT) && POINT.y >= BOX.y + BOX.h - REVEAL_BAND;
+
+        want = ATEDGE || R.pressure >= Config::getValue<float>(KEY_PRESSURE);
+    }
 
     // X34 `hotkeys-show-dock`, ORed in beside URGENT for the same reason: it has
     // to HOLD the pill up as well as bring it out, or the pointer sitting
