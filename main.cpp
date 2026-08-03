@@ -16,6 +16,7 @@
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
+#include <hyprland/src/devices/IPointer.hpp>
 #include <xkbcommon/xkbcommon.h>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
@@ -40,6 +41,7 @@ static CFunctionHook* g_pScrollDamageSurfaceHook   = nullptr;
 static CFunctionHook* g_pScrollScheduleFrameHook   = nullptr;
 static CFunctionHook* g_pScrollSendFrameEventsHook = nullptr;
 static CFunctionHook* g_pScrollSurfaceFrameHook    = nullptr;
+static CFunctionHook* g_pScrollMouseMovedHook      = nullptr;
 typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
 typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
@@ -47,6 +49,7 @@ typedef void (*origDamageSurface)(void*, SP<CWLSurfaceResource>, double, double,
 typedef void (*origScheduleFrame)(void*, Aquamarine::IOutput::scheduleFrameReason);
 typedef void (*origSendFrameEventsToWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&);
 typedef void (*origSurfaceFrame)(void*, const Time::steady_tp&);
+typedef void (*origOnMouseMoved)(void*, IPointer::SMotionEvent);
 
 static bool g_unloading = false;
 
@@ -101,6 +104,16 @@ void disableScrollOverviewHooks() {
         g_pScrollRenderWorkspaceHook->unhook();
 
     g_scrollOverviewHooksActive = false;
+}
+
+// X30. The autohide barrier needs the RELATIVE motion, which only this call
+// carries: the bus's mouse.move gives the absolute position, and at the bottom
+// edge the cursor is clamped, so the position stops changing while the user is
+// still pushing. Fed AFTER the original, so the position the barrier tests
+// against is the one this motion produced.
+static void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e) {
+    rc<origOnMouseMoved>(g_pScrollMouseMovedHook->m_original)(thisptr, e);
+    ScrollOverview::Dock::feedPointerMotion(e.delta);
 }
 
 static void hkScheduleFrame(void* thisptr, Aquamarine::IOutput::scheduleFrameReason reason) {
@@ -725,6 +738,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         findFnOrThrow("_ZN7Monitor8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", {""}),
         rc<void*>(hkAddDamageA));
 
+    // X30. Hooked HERE and not through ensureScrollOverviewHooks(): those go on
+    // and off with the overview, and the autohide barrier lives on the plain
+    // desktop, which is exactly where they are not installed.
+    g_pScrollMouseMovedHook = HyprlandAPI::createFunctionHook(
+        SCROLLOVERVIEW_HANDLE,
+        findFnOrThrow("onMouseMoved", {"CInputManager::onMouseMoved("}),
+        rc<void*>(hkOnMouseMoved));
+    g_pScrollMouseMovedHook->hook();
+
     static auto P = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
         if (const auto overview = scrollOverviewForMonitor(monitor))
             overview->onPreRender();
@@ -747,6 +769,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // frame is already happening, so on an idle desktop a pointer move over the
     // pill damages nothing and the highlight never appears. The overview has its
     // own mouse hook and calls this from there.
+    // X30. Flipping dock-fixed at runtime damages nothing by itself: with the
+    // pointer still and no window repainting, there is no frame for the dock to
+    // be drawn into and the change would not show until something else moved.
+    static auto DOCKCONFIG = Event::bus()->m_events.config.reloaded.listen([] {
+        for (const auto& MONITOR : State::monitorState()->monitors())
+            ScrollOverview::Dock::damageIfChanged(MONITOR);
+    });
+
     static auto DOCKHOVER = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo&) {
         const auto POINT = g_pInputManager->getMouseCoordsInternal();
         for (const auto& MONITOR : State::monitorState()->monitors()) {

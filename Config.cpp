@@ -335,6 +335,23 @@ static void registerConfigValues() {
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:dock:minimize_ms", "hyprgnomedock: shrink-into-the-dock duration, 0 to teleport", 220,
                                                         SIntValueOptions{.min = 0, .max = 2000}));
+    // X30. The reference's autohide numbers, verbatim. `intellihide` is false
+    // there and inert while off, so it is not a key here.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:autohide", "hyprgnomedock: hide the dock until the bottom edge is pressed (D2D autohide)", true));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:dock:pressure_threshold",
+                                                          "hyprgnomedock: px of motion pushed into the bottom edge before the dock reveals (D2D pressure-threshold)", 100.F,
+                                                          SFloatValueOptions{.min = 0.F, .max = 2000.F}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:show_delay_ms", "hyprgnomedock: delay from the barrier trigger to the reveal (D2D show-delay)", 250,
+                                                        SIntValueOptions{.min = 0, .max = 5000}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:hide_delay_ms", "hyprgnomedock: delay from the pointer leaving to the hide (D2D hide-delay)", 200,
+                                                        SIntValueOptions{.min = 0, .max = 5000}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:autohide_ms", "hyprgnomedock: slide duration (D2D animation-time)", 200,
+                                                        SIntValueOptions{.min = 0, .max = 2000}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CColorValue>("plugin:scrolloverview:dock:background_color", "hyprgnomedock: pill hue (alpha comes from background_opacity)",
                                                           (Hyprlang::INT)0xFFC0BFBC));

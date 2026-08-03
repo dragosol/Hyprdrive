@@ -37,6 +37,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 #undef protected
 #undef private
 
@@ -118,6 +119,15 @@ constexpr const char* KEY_BLUR_NOISE  = "plugin:scrolloverview:dock:blur_noise";
 constexpr const char* KEY_BLUR_CONTR  = "plugin:scrolloverview:dock:blur_contrast";
 constexpr const char* KEY_BLUR_VIBR   = "plugin:scrolloverview:dock:blur_vibrancy";
 constexpr const char* KEY_MINIMIZE_MS = "plugin:scrolloverview:dock:minimize_ms";
+
+// X30, all four read off the reference: `autohide` true / `dock-fixed` false,
+// `require-pressure-to-show` true at `pressure-threshold` 100.0, `show-delay`
+// 0.25, `hide-delay` 0.20, `animation-time` 0.20.
+constexpr const char* KEY_AUTOHIDE     = "plugin:scrolloverview:dock:autohide";
+constexpr const char* KEY_PRESSURE     = "plugin:scrolloverview:dock:pressure_threshold";
+constexpr const char* KEY_SHOW_DELAY   = "plugin:scrolloverview:dock:show_delay_ms";
+constexpr const char* KEY_HIDE_DELAY   = "plugin:scrolloverview:dock:hide_delay_ms";
+constexpr const char* KEY_AUTOHIDE_MS  = "plugin:scrolloverview:dock:autohide_ms";
 
 // X24, the last piece: the shrink INTO the dock.
 //
@@ -280,9 +290,67 @@ void presentPreview(const PHLWINDOW& window, PHLMONITOR monitor, const Time::ste
 
 std::unordered_map<MONITORID, std::string> g_signatures;
 
+// X30. AUTOHIDE. The pill is away by default (`autohide` true, `dock-fixed`
+// false) and is revealed by pushing the pointer into the bottom edge until the
+// barrier's pressure passes `pressure-threshold`. Once up it stays up while the
+// pointer is on it, and the overview pins it out the way clause 6 requires.
+//
+// `intellihide` is FALSE in the reference and its mode is inert while off, so
+// there is deliberately no window-overlap hiding here -- that is the setting
+// being honoured, not a gap.
+//
+// `autohide-in-fullscreen` is TRUE, and that is why there is no fullscreen
+// branch either: the barrier keeps working under a fullscreen window instead of
+// the dock locking itself away, and the pill is drawn at RENDER_POST_WINDOWS so
+// a revealed dock lands over the fullscreen window. The behaviour is the
+// absence of a special case; the test is what proves it.
+struct SReveal {
+    bool            shown        = false;
+    Time::steady_tp changedAt    = Time::steadyNow(); // start of the slide toward `shown`
+    bool            pending      = false;             // a flip is waiting out its delay
+    Time::steady_tp pendingSince = Time::steadyNow();
+    float           pressure     = 0.F;               // px pushed into the bottom edge
+};
+
+std::unordered_map<MONITORID, SReveal> g_reveal;
+
+// The barrier is the monitor's last row, and the cursor is clamped there -- but
+// a clamp can leave it a pixel short, so the band is not exactly one row.
+constexpr float EDGE_BAND = 2.F;
+
+float elapsedMs(const Time::steady_tp& since) {
+    return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count());
 }
 
-SLayout layout(PHLMONITOR monitor) {
+// The standing Apple-motion rule again: entrances decelerate, exits accelerate.
+// The DURATION stays the reference's `animation-time` in BOTH directions -- the
+// rule shapes the curve, the reference pins the number.
+float revealEase(float t, bool showing) {
+    const float T = std::clamp(t, 0.F, 1.F);
+    return showing ? 1.F - (1.F - T) * (1.F - T) * (1.F - T) : T * T * T;
+}
+
+// 0 = fully out, 1 = fully tucked below the bottom edge.
+float hiddenFraction(PHLMONITOR monitor) {
+    if (!monitor)
+        return 0.F;
+
+    const auto& R  = g_reveal[monitor->m_id];
+    const int   MS = std::max(1, Config::getValue<int>(KEY_AUTOHIDE_MS));
+    const float E  = revealEase(std::clamp(elapsedMs(R.changedAt) / sc<float>(MS), 0.F, 1.F), R.shown);
+
+    return R.shown ? 1.F - E : E;
+}
+
+bool autohideAnimating(PHLMONITOR monitor) {
+    if (!monitor)
+        return false;
+
+    const auto& R = g_reveal[monitor->m_id];
+    return R.pending || elapsedMs(R.changedAt) < sc<float>(std::max(1, Config::getValue<int>(KEY_AUTOHIDE_MS)));
+}
+
+SLayout baseLayout(PHLMONITOR monitor) {
     SLayout out;
 
     if (!monitor || !Config::getValue<bool>(KEY_ENABLED) || monitor->m_size.x < 1 || monitor->m_size.y < 1)
@@ -342,6 +410,92 @@ SLayout layout(PHLMONITOR monitor) {
 
         cursor += WIDTH + 2.F * ITEM_MARGIN_X;
     }
+
+    return out;
+}
+
+// X30's state machine. Runs from damageIfChanged, so it advances on every frame
+// the dock asks for and on every pointer motion, which is every moment either
+// timer can expire.
+void updateAutohide(PHLMONITOR monitor) {
+    if (!monitor)
+        return;
+
+    auto& R = g_reveal[monitor->m_id];
+
+    // Pinned: autohide switched off, or the overview is open over this monitor.
+    // Neither waits out `show-delay` -- that delay belongs to the pressure
+    // barrier, and making the overview's own dock crawl in behind it would be
+    // reading the reference wrong.
+    if (!Config::getValue<bool>(KEY_AUTOHIDE) || scrollOverviewForMonitor(monitor)) {
+        if (!R.shown) {
+            R.shown     = true;
+            R.changedAt = Time::steadyNow();
+        }
+        R.pending  = false;
+        R.pressure = 0.F;
+        return;
+    }
+
+    bool want = false;
+    if (R.shown) {
+        // Up already: it stays up while the pointer is on it, or while its
+        // right-click menu is -- the menu floats ABOVE the pill, so reaching for
+        // a row takes the pointer off the pill and would otherwise slide the
+        // dock out from under the menu the user is aiming at.
+        const auto BASE = baseLayout(monitor);
+        if (menuOpen())
+            want = true;
+        else if (!BASE.pill.empty()) {
+            CBox reach = BASE.pill;
+            reach.height += EDGE_MARGIN * monitor->m_scale; // the margin under the pill still counts as on it
+            want = reach.containsPoint((g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale);
+        }
+    } else
+        want = R.pressure >= Config::getValue<float>(KEY_PRESSURE); // `require-pressure-to-show`
+
+    if (want == R.shown) {
+        R.pending = false;
+        return;
+    }
+
+    if (!R.pending) {
+        R.pending      = true;
+        R.pendingSince = Time::steadyNow();
+    }
+
+    if (elapsedMs(R.pendingSince) < sc<float>(std::max(0, Config::getValue<int>(want ? KEY_SHOW_DELAY : KEY_HIDE_DELAY))))
+        return;
+
+    R.shown     = want;
+    R.changedAt = Time::steadyNow();
+    R.pending   = false;
+    R.pressure  = 0.F;
+}
+
+}
+
+SLayout layout(PHLMONITOR monitor) {
+    SLayout out = baseLayout(monitor);
+    if (out.pill.empty())
+        return out;
+
+    const float F = hiddenFraction(monitor);
+    if (F <= 0.F)
+        return out;
+
+    // Fully away: no pill and, because everything else asks this function, no
+    // hit area either -- so a click lands on the window underneath instead of
+    // being swallowed by a dock that is not on screen.
+    if (F >= 1.F)
+        return SLayout{};
+
+    const double DY = std::round((out.pill.height + EDGE_MARGIN * monitor->m_scale) * F);
+    out.pill.y += DY;
+    for (auto& item : out.items)
+        item.iconBox.y += DY;
+    for (auto& preview : out.previews)
+        preview.box.y += DY;
 
     return out;
 }
@@ -765,6 +919,29 @@ void renderMenu(PHLMONITOR monitor, const SLayout& layout) {
 
 } // namespace
 
+void feedPointerMotion(const Vector2D& delta) {
+    const auto POINT = g_pInputManager->getMouseCoordsInternal();
+
+    for (const auto& MONITOR : State::monitorState()->monitors()) {
+        if (!MONITOR)
+            continue;
+
+        auto&      R   = g_reveal[MONITOR->m_id];
+        const auto BOX = MONITOR->logicalBox();
+
+        // Pressure does not carry: leave the barrier, or the monitor, and the
+        // push starts again from zero.
+        if (!BOX.containsPoint(POINT) || POINT.y < BOX.y + BOX.h - EDGE_BAND)
+            R.pressure = 0.F;
+        else
+            R.pressure += sc<float>(std::max(0.0, delta.y)); // only DOWNWARD motion presses a bottom edge
+
+        // Not updateAutohide: this must also pump the frame that the flip it may
+        // have just armed needs, and damageIfChanged is where that lives.
+        damageIfChanged(MONITOR);
+    }
+}
+
 bool pillContains(PHLMONITOR monitor, const Vector2D& point) {
     if (!monitor)
         return false;
@@ -855,10 +1032,26 @@ bool damageIfChanged(PHLMONITOR monitor) {
     if (!monitor)
         return false;
 
+    updateAutohide(monitor);
+
+    // X30. A flip waiting out its delay looks EXACTLY like the frame before it,
+    // so the signature check below would stop the chain of frames dead and the
+    // dock would freeze half-way -- or never start. render.pre only fires when a
+    // frame is already happening, so the next one has to be asked for here, and
+    // after the current frame (doLater) for the same reason the live previews
+    // are: damage asked for during the pass is cleared with the pass.
+    if (autohideAnimating(monitor))
+        g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
+            if (MONITOR)
+                g_pHyprRenderer->damageMonitor(MONITOR.lock());
+        });
+
     const auto  LAYOUT = layout(monitor);
     std::string signature;
     if (!LAYOUT.pill.empty()) {
-        signature = std::to_string(sc<int>(LAYOUT.pill.x)) + "," + std::to_string(sc<int>(LAYOUT.pill.width));
+        // pill.y is in the signature because during the slide it is the ONLY
+        // thing that changes.
+        signature = std::to_string(sc<int>(LAYOUT.pill.x)) + "," + std::to_string(sc<int>(LAYOUT.pill.y)) + "," + std::to_string(sc<int>(LAYOUT.pill.width));
         for (const auto& ITEM : LAYOUT.items)
             signature += "|" + ITEM.wmClass;
 

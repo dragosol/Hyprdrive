@@ -71,4 +71,11 @@ bool menuClick(PHLMONITOR monitor, const Vector2D& point);
 // -- it has to answer with requestInputFrame() instead, and this is how it knows.
 bool damageIfChanged(PHLMONITOR monitor);
 
+// X30. Feed the autohide pressure barrier with RELATIVE pointer motion. The
+// bus's mouse.move carries the absolute position, and at the bottom edge the
+// cursor is clamped -- so its position stops changing while the user is still
+// pushing into the barrier, and pressure derived from it would read every push
+// as zero.
+void feedPointerMotion(const Vector2D& delta);
+
 }
