@@ -736,12 +736,34 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // ensureScrollOverviewHooks() and dropped again by removeOverview(), so it
     // does not exist on a plain desktop -- which is exactly where a dock lives.
     // POST_WINDOWS also puts the dock above windows and below the bar's top
-    // layer. It does NOT survive the overview: measured, the overview covers the
-    // pill completely, so §10 clause 6's pinned-in-overview dock is still open
-    // and lands with X29 (unblur-in-overview) rather than here.
+    // layer.
+    //
+    // §10 clause 6, pinned-in-overview: this stage fires far below the overview's
+    // own pass, so the pill was buried under it. The overview now draws the dock
+    // itself at the end of its render, and this hook stands down for that monitor
+    // -- otherwise the pill is drawn twice and its translucent background blends
+    // over itself.
+    // The dock's hover highlight on a PLAIN desktop. render.pre only fires when a
+    // frame is already happening, so on an idle desktop a pointer move over the
+    // pill damages nothing and the highlight never appears. The overview has its
+    // own mouse hook and calls this from there.
+    static auto DOCKHOVER = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo&) {
+        const auto POINT = g_pInputManager->getMouseCoordsInternal();
+        for (const auto& MONITOR : State::monitorState()->monitors()) {
+            if (MONITOR && !scrollOverviewForMonitor(MONITOR) && MONITOR->logicalBox().containsPoint(POINT))
+                ScrollOverview::Dock::damageIfChanged(MONITOR);
+        }
+    });
+
     static auto DOCK = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (stage == RENDER_POST_WINDOWS)
-            ScrollOverview::Dock::render(g_pHyprRenderer->m_renderData.pMonitor.lock());
+        if (stage != RENDER_POST_WINDOWS)
+            return;
+
+        const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
+        if (scrollOverviewForMonitor(MONITOR))
+            return;
+
+        ScrollOverview::Dock::render(MONITOR);
     });
 
     ScrollOverview::Config::registerDispatcher("overview", ::onOverviewDispatcher);

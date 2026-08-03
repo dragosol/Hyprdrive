@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -21,10 +22,13 @@
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/pass/BorderPassElement.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #undef protected
@@ -48,11 +52,23 @@ namespace {
 // rules that zero padding-left/right match every item, and the 2px container
 // margin is what actually spaces the icons ("we handle them here", per the
 // stylesheet's own comment).
-constexpr float ITEM_PAD_TOP    = 10.F;
-constexpr float ITEM_PAD_BOTTOM = 14.F;
+//
+// (user, 2026-08-03): D2D's 10/14 split is NOT symmetric -- it reserves the extra
+// 4px at the bottom for the running dot -- and the icons read as sitting high in
+// the pill. Split the same 24px evenly instead, so the icon is equidistant from
+// the pill's top and bottom. The total is unchanged, so every X27 proportion
+// still measures the same; only the icon's y moves. X31's dot overlays the
+// bottom padding when it lands rather than owning it.
+constexpr float ITEM_PAD_TOP    = 12.F;
+constexpr float ITEM_PAD_BOTTOM = 12.F;
 constexpr float ITEM_MARGIN_X   = 2.F;
 constexpr float CONTAINER_PAD_X = 10.F;
 constexpr float EDGE_MARGIN     = 4.F;
+
+// The check for the above, and it costs nothing at runtime. Horizontally the
+// icon is already CONTAINER_PAD_X + ITEM_MARGIN_X clear of both ends by
+// construction, so top/bottom is the only pair that can drift.
+static_assert(ITEM_PAD_TOP == ITEM_PAD_BOTTOM, "dock icons must sit equidistant from the pill's top and bottom");
 
 // X25. A preview is as TALL as an icon -- it shares the icon row -- and as wide
 // as the window's own aspect makes it. The clamp is what stops one ultrawide or
@@ -60,6 +76,17 @@ constexpr float EDGE_MARGIN     = 4.F;
 // bound, which is why it is a constant and not a config key.
 constexpr float PREVIEW_MIN_ASPECT = 0.60F;
 constexpr float PREVIEW_MAX_ASPECT = 2.20F;
+
+// (user, 2026-08-03) hover highlight and tooltip, read off the GNOME shell the
+// user showed: a rounded cell slightly larger than the icon, and a dark plate
+// above the dock carrying the app's name.
+constexpr float HOVER_PAD      = 6.F;
+constexpr float HOVER_RADIUS   = 12.F;
+constexpr float TOOLTIP_FONT   = 13.F;
+constexpr float TOOLTIP_PAD_X  = 10.F;
+constexpr float TOOLTIP_PAD_Y  = 6.F;
+constexpr float TOOLTIP_RADIUS = 8.F;
+constexpr float TOOLTIP_GAP    = 8.F;
 
 constexpr const char* KEY_ENABLED    = "plugin:scrolloverview:dock:enabled";
 constexpr const char* KEY_ICON_SIZE  = "plugin:scrolloverview:dock:icon_size";
@@ -252,9 +279,70 @@ SLayout layout(PHLMONITOR monitor) {
     return out;
 }
 
-void damageIfChanged(PHLMONITOR monitor) {
-    if (!monitor)
+namespace {
+
+// The hovered cell, not the icon: GNOME's highlight is the .app-well-app box,
+// which is the icon plus its padding. Symmetric now that the vertical padding is.
+CBox hoverBox(const CBox& iconBox, float scale) {
+    return iconBox.copy().expand(HOVER_PAD * std::max(scale, 0.01F)).round();
+}
+
+// The app's display name, over a dark rounded plate, centred on the icon and
+// sitting above the pill.
+// ponytail: no delay and no fade -- it appears with the highlight it belongs to.
+// GNOME staggers it by ~500ms; add that if sweeping the dock reads as noisy.
+void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const SItem& item) {
+    const auto NAME = [&] {
+        const auto FROMENTRY = AppSearch::appNameForClass(item.wmClass);
+        return FROMENTRY.empty() ? item.wmClass : FROMENTRY;
+    }();
+
+    if (NAME.empty())
         return;
+
+    const float SCALE = std::max(monitor->m_scale, 0.01F);
+    const auto  TEX   = g_pHyprRenderer->renderText(NAME, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(TOOLTIP_FONT * SCALE))), false, "", 0, 500);
+    if (!TEX || !TEX->ok())
+        return;
+
+    const float PADX  = TOOLTIP_PAD_X * SCALE;
+    const float PADY  = TOOLTIP_PAD_Y * SCALE;
+    const float W     = sc<float>(TEX->m_size.x) + 2.F * PADX;
+    const float H     = sc<float>(TEX->m_size.y) + 2.F * PADY;
+    const float CX    = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) / 2.F;
+
+    CBox plate{std::round(CX - W / 2.F), std::round(sc<float>(layout.pill.y) - TOOLTIP_GAP * SCALE - H), std::round(W), std::round(H)};
+
+    // Keep it on screen when the hovered icon is at either end of a wide pill.
+    plate.x = std::clamp(plate.x, 0.0, std::max(0.0, monitor->m_size.x * SCALE - plate.width));
+
+    CRectPassElement::SRectData bg;
+    bg.box           = plate;
+    bg.color         = CHyprColor{0.F, 0.F, 0.F, 0.80F};
+    bg.round         = sc<int>(std::round(TOOLTIP_RADIUS * SCALE));
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+
+    CTexPassElement::SRenderData text;
+    text.tex = TEX;
+    text.box = CBox{std::round(plate.x + PADX), std::round(plate.y + PADY), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
+    text.a   = 1.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+}
+
+} // namespace
+
+bool pillContains(PHLMONITOR monitor, const Vector2D& point) {
+    if (!monitor)
+        return false;
+
+    const auto PILL = layout(monitor).pill;
+    return PILL.width >= 1 && PILL.height >= 1 && PILL.containsPoint(point);
+}
+
+bool damageIfChanged(PHLMONITOR monitor) {
+    if (!monitor)
+        return false;
 
     const auto  LAYOUT = layout(monitor);
     std::string signature;
@@ -262,14 +350,26 @@ void damageIfChanged(PHLMONITOR monitor) {
         signature = std::to_string(sc<int>(LAYOUT.pill.x)) + "," + std::to_string(sc<int>(LAYOUT.pill.width));
         for (const auto& ITEM : LAYOUT.items)
             signature += "|" + ITEM.wmClass;
+
+        // The hovered cell is part of what the pill LOOKS like, so a bare pointer
+        // move over an otherwise idle dock has to repaint it -- nothing else on
+        // the desktop damages the monitor for a motion event.
+        const auto MOUSE = (g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale;
+        for (size_t i = 0; i < LAYOUT.items.size(); ++i) {
+            if (hoverBox(LAYOUT.items[i].iconBox, monitor->m_scale).containsPoint(MOUSE)) {
+                signature += "#" + std::to_string(i);
+                break;
+            }
+        }
     }
 
     auto& LAST = g_signatures[monitor->m_id];
     if (LAST == signature)
-        return;
+        return false;
 
     LAST = signature;
     g_pHyprRenderer->damageMonitor(monitor);
+    return true;
 }
 
 void render(PHLMONITOR monitor) {
@@ -288,6 +388,34 @@ void render(PHLMONITOR monitor) {
     bg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
 
+    // (user, 2026-08-03): GNOME lights the hovered app cell with a translucent
+    // lighter fill and a slightly stronger outline, and labels it. Mouse coords
+    // are global logical; the layout is monitor-local RENDER px.
+    const auto MOUSE       = (g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale;
+    const auto HOVEREDITEM = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return hoverBox(item.iconBox, monitor->m_scale).containsPoint(MOUSE); });
+    const bool HASHOVER    = HOVEREDITEM != LAYOUT.items.end();
+
+    if (HASHOVER) {
+        const auto BOX   = hoverBox(HOVEREDITEM->iconBox, monitor->m_scale);
+        const int  ROUND = sc<int>(std::round(HOVER_RADIUS * monitor->m_scale));
+
+        CRectPassElement::SRectData fill;
+        fill.box           = BOX;
+        fill.color         = CHyprColor{1.F, 1.F, 1.F, 0.10F};
+        fill.round         = ROUND;
+        fill.roundingPower = 2.F;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(fill));
+
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(CBorderPassElement::SBorderData{
+            .box           = BOX,
+            .grad1         = ::Config::CGradientValueData{CHyprColor{1.F, 1.F, 1.F, 0.22F}},
+            .a             = 1.F,
+            .round         = ROUND,
+            .borderSize    = std::max(1, sc<int>(std::round(monitor->m_scale))),
+            .roundingPower = 2.F,
+        }));
+    }
+
     for (const auto& ITEM : LAYOUT.items) {
         const auto TEX = OverviewRender::appIcon(ITEM.icon);
         if (!TEX)
@@ -299,6 +427,9 @@ void render(PHLMONITOR monitor) {
         data.a   = 1.F;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
     }
+
+    if (HASHOVER)
+        renderTooltip(monitor, LAYOUT, *HOVEREDITEM);
 
     if (LAYOUT.previews.empty())
         return;

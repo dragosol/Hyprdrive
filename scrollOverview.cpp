@@ -75,8 +75,10 @@ namespace TileChrome = ScrollOverview::TileChrome;
 #undef protected
 #undef private
 #include "Config.hpp"
+#include "Dock.hpp"
 #include "DropIndicator.hpp"
 #include "OverviewPassElement.hpp"
+#include "Minimize.hpp"
 #include "OverviewRender.hpp"
 #include "Window.hpp"
 #include "SearchProviders.hpp"
@@ -1628,6 +1630,18 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
 
         updateTileHover();
 
+        // The dock's hover highlight is the only thing on screen that changes on
+        // a bare pointer move over an otherwise idle overview: no tile hover
+        // changes there, so nothing else asks for a frame and the highlight would
+        // simply never appear (measured -- the two captures differed by 490 px,
+        // all of them the cursor plane). A plain damageMonitor is not enough
+        // either: hkScheduleFrame throttles AQ_SCHEDULE_DAMAGE for as long as an
+        // overview is open, so the frame has to be asked for the overview's way.
+        if (ScrollOverview::Dock::damageIfChanged(pMonitor.lock())) {
+            damage();
+            requestInputFrame();
+        }
+
         const auto beginScrollingPanAtPoint = [&](const Vector2D& point) {
             auto WORKSPACE = workspaceAtOverviewPoint(point);
             if (!WORKSPACE) {
@@ -3167,6 +3181,13 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
     if (!MONITOR)
         return nullptr;
 
+    // X26: the dock is not a workspace, so it answers nullptr here -- and it
+    // answers FIRST, because the pill floats over the main area and the card
+    // underneath would otherwise claim the drop. Saying it once here is what
+    // keeps the drop indicator, the mini shrink and endWindowDrag agreeing.
+    if (ScrollOverview::Dock::pillContains(MONITOR, point))
+        return nullptr;
+
     const auto ACTIVEIDX       = activeWorkspaceIndex();
     const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(MONITOR, scale->value(), layout);
 
@@ -3641,8 +3662,14 @@ void CScrollOverview::updateWindowDrag() {
     // the drag's origin — for a D6 strip grab the origin is foreign by
     // definition, and keying off it would keep the proxy shrunk all the way
     // into the main area. Identical for a main-grid grab, where the two agree.
+    // X26: the dock takes the same shrink the strip gets, which is the spec's
+    // "not a new animation" -- the proxy is already thumbnail-sized by the time
+    // the button comes up, so the minimize continues a motion instead of
+    // starting one.
+    const bool OVERDOCK = ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal);
+
     const auto VIEWPORTWORKSPACE = viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
-    if (const bool OVERFOREIGN = DROPWORKSPACE && DROPWORKSPACE != VIEWPORTWORKSPACE; OVERFOREIGN != dragMiniOver) {
+    if (const bool OVERFOREIGN = OVERDOCK || (DROPWORKSPACE && DROPWORKSPACE != VIEWPORTWORKSPACE); OVERFOREIGN != dragMiniOver) {
         dragMiniFrom      = dragMiniProgress(); // from where it actually is, not from the end
         dragMiniOver      = OVERFOREIGN;
         dragMiniChangedAt = Time::steadyNow();
@@ -3650,7 +3677,7 @@ void CScrollOverview::updateWindowDrag() {
 
     // X3 delta 6. Any drop target, own workspace included -- the reference's
     // "tiles" DropArea spans the whole main area (WindowTiles.qml:444-452).
-    if (const bool OVERTARGET = DROPWORKSPACE != nullptr; OVERTARGET != dragRecentreOver) {
+    if (const bool OVERTARGET = OVERDOCK || DROPWORKSPACE != nullptr; OVERTARGET != dragRecentreOver) {
         dragRecentreFrom      = dragRecentreProgress(); // from where it actually is
         dragRecentreOver      = OVERTARGET;
         dragRecentreChangedAt = Time::steadyNow();
@@ -3995,6 +4022,20 @@ void CScrollOverview::endWindowDrag() {
 
     const auto          DROPMONITOR       = dropOverview ? dropOverview->pMonitor.lock() : PHLMONITOR{};
     const auto          DROPPOINTLOCAL    = getOverviewMousePosLocal(DROPMONITOR);
+
+    // OVERVIEW_CPP_SPEC X26. Released on the dock: minimize, and nothing below
+    // runs -- the window must not also be moved to whatever card the pill floats
+    // over. Everything else about a missed drop is unchanged, because
+    // workspaceAtOverviewDropPoint already answers nullptr over the pill.
+    if (WINDOW && ScrollOverview::Dock::pillContains(DROPMONITOR, DROPPOINTLOCAL)) {
+        ScrollOverview::Minimize::minimize(WINDOW);
+        clearDragPending();
+        damage();
+        if (dropOverview && dropOverview != this)
+            dropOverview->damage();
+        return;
+    }
+
     const bool          RETILEONEND       = dragStartedTiled && TARGET && SPACE && ALGO;
     size_t              dropWorkspaceIdx  = 0;
     const auto          DROPWORKSPACE     = dropOverview ? dropOverview->workspaceAtOverviewDropPoint(DROPPOINTLOCAL, &dropWorkspaceIdx, WINDOW) : PHLWORKSPACE{};
@@ -6879,6 +6920,15 @@ void CScrollOverview::render() {
     }
 
     blockOverviewLayerBlurOptimization(FIRSTLAYERELEMENT);
+
+    // OVERVIEW_CPP_SPEC §10 clause 6, the pinned-in-overview half X27 left open:
+    // the dock stays on screen with the overview over it. Its RENDER_POST_WINDOWS
+    // hook fires far below this, so the overview buried it -- and X26 cannot ask
+    // the user to drop a window on a target that is not drawn. Last, so it is
+    // above the cards, the strip and the search field, which is where a dock the
+    // user is dropping onto belongs. main.cpp skips the desktop hook while an
+    // overview owns the monitor, so the pill is still drawn exactly once.
+    ScrollOverview::Dock::render(MONITOR);
 
     sendOverviewFrameCallbacks(NOW);
 }

@@ -34,10 +34,19 @@ struct SLayout {
 SLayout layout(PHLMONITOR monitor);
 void    render(PHLMONITOR monitor);
 
+// X26. Is a monitor-local RENDER px point inside the pill? The overview's drop
+// handling asks this before it asks any workspace: the pill floats over the main
+// area, so the card underneath would otherwise claim the drop.
+bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
+
 // Damage the monitor when the pill's shape changes -- an app opening or closing,
-// or the dock being switched off -- and every frame while a live preview is in
-// it. MUST be called before the frame is rendered: damage asked for during the
-// pass is cleared with the rest of the frame's ring.
-void damageIfChanged(PHLMONITOR monitor);
+// the dock being switched off, the hovered icon moving -- and every frame while a
+// live preview is in it. MUST be called before the frame is rendered: damage
+// asked for during the pass is cleared with the rest of the frame's ring.
+//
+// Returns whether the pill's appearance actually changed. The overview throttles
+// scheduleFrame while it is open, so a plain damageMonitor from here is swallowed
+// -- it has to answer with requestInputFrame() instead, and this is how it knows.
+bool damageIfChanged(PHLMONITOR monitor);
 
 }
