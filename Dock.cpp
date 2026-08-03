@@ -71,53 +71,41 @@ namespace {
 // the pill's top and bottom. The total is unchanged, so every X27 proportion
 // still measures the same; only the icon's y moves. X31's dot overlays the
 // bottom padding when it lands rather than owning it.
-// X53. 1:1 WITH THE HOST'S DASH-TO-DOCK, and every number below is MEASURED
-// off a screen recording of the two docks side by side -- not derived from a
-// rule of mine. The earlier passes at this invented a self-consistent rule
-// ("every gap equal") and then a halved one, and neither matched the host.
+// X53. Icon spacing, measured off the host's dash-to-dock -- with ONE
+// deliberate divergence, requested directly: the icon sits the SAME distance
+// from every pill edge.
 //
-// Ratios are what make the comparison scale-agnostic (the VM is a scaled window
-// in that recording), so each value is given against the 54px icon both docks
-// use:
+// The host does NOT do this. Measured off the user's recording, its icon is 18
+// from the top, 20 from the bottom and 16 from the sides, because its item
+// padding is 10 left / 12 top / 14 bottom and the extra band at the bottom is
+// room for the running dot. The user looked at that, correctly saw the icon
+// sitting low, and asked for 18 on all four edges instead. So:
 //
-//   icon                       54     both, dash-max-icon-size
-//   halo (highlight-icon)/2     6     highlight 66 = 54 + 2*6      0.111 icon
-//   gap between highlights      4     pitch 70 - highlight 66      0.074 icon
-//   icon edge to icon edge     16     pitch 70 - icon 54           0.296 icon
-//   highlight -> pill L/R      10                                  0.185 icon
-//   highlight -> pill top      12                                  0.222 icon
-//   highlight -> pill bottom   14                                  0.259 icon
-//   pill height                92     = 12 + 66 + 14
+//   KEPT from the host   icon 54, halo 6 (highlight 66), icon gap 16,
+//                        and therefore 4px between adjacent highlights
+//   DIVERGES             icon-to-pill is ICON_PAD on every edge, not 10/12/14
 //
-// The vertical padding is ASYMMETRIC on purpose: the host's stylesheet says
-// padding-top 10 / padding-bottom 14, the extra band being room for the running
-// dot, and the recording measures 12/14. So the old
-// `ITEM_PAD_TOP == ITEM_PAD_BOTTOM` assert is GONE -- it encoded a symmetry the
-// reference does not have. `ITEM_PAD_TOP == CONTAINER_PAD_X + ITEM_MARGIN_X` is
-// gone for the same reason: the host is 10px from the left edge and 12px from
-// the top, so the icon is NOT equidistant from every pill edge and pretending
-// otherwise is what kept this from matching.
-constexpr float HOVER_PAD  = 6.F;   // the halo the highlight adds around an icon
-constexpr float ICON_GAP   = 16.F;  // icon edge to icon edge, at rest
-constexpr float HL_PAD_L   = 10.F;  // highlight to pill, left and right
-constexpr float HL_PAD_TOP = 12.F;  // highlight to pill, top
-constexpr float HL_PAD_BOT = 14.F;  // highlight to pill, bottom
+// Do not "restore parity" here: the asymmetry is the thing that was rejected.
+constexpr float HOVER_PAD = 6.F;   // the halo the highlight adds around an icon
+constexpr float ICON_GAP  = 16.F;  // icon edge to icon edge, at rest (host's)
+constexpr float ICON_PAD  = 18.F;  // icon to pill, EVERY edge (the divergence)
 
-// Derived, so the measurements above stay the only things anyone edits.
+// Derived, so the three numbers above stay the only things anyone edits.
 constexpr float HIGHLIGHT_GAP   = ICON_GAP - 2.F * HOVER_PAD;
+constexpr float HL_PAD          = ICON_PAD - HOVER_PAD; // highlight to pill, every edge
 constexpr float ITEM_MARGIN_X   = ICON_GAP / 2.F;
-constexpr float CONTAINER_PAD_X = HL_PAD_L + HOVER_PAD - ITEM_MARGIN_X;
-constexpr float ITEM_PAD_TOP    = HL_PAD_TOP + HOVER_PAD;
-constexpr float ITEM_PAD_BOTTOM = HL_PAD_BOT + HOVER_PAD;
+constexpr float CONTAINER_PAD_X = ICON_PAD - ITEM_MARGIN_X;
+constexpr float ITEM_PAD_TOP    = ICON_PAD;
+constexpr float ITEM_PAD_BOTTOM = ICON_PAD;
 constexpr float EDGE_MARGIN     = 4.F;
 
-// The measurements restated as arithmetic, so a build that stops matching the
-// host cannot compile.
+// The rule as arithmetic, so a build that breaks it cannot compile.
 static_assert(HIGHLIGHT_GAP > 0.F, "X53: a hover highlight must not reach into the icon next to it");
 static_assert(2.F * ITEM_MARGIN_X == ICON_GAP, "X53: icon edge to icon edge must be ICON_GAP");
-static_assert(CONTAINER_PAD_X + ITEM_MARGIN_X - HOVER_PAD == HL_PAD_L, "X53: the first highlight must sit HL_PAD_L from the pill's left edge");
-static_assert(ITEM_PAD_TOP - HOVER_PAD == HL_PAD_TOP, "X53: a highlight must sit HL_PAD_TOP from the pill's top");
-static_assert(ITEM_PAD_BOTTOM - HOVER_PAD == HL_PAD_BOT, "X53: a highlight must sit HL_PAD_BOT from the pill's bottom");
+static_assert(CONTAINER_PAD_X + ITEM_MARGIN_X == ICON_PAD, "X53: the outer icons must sit ICON_PAD from the pill's sides");
+static_assert(ITEM_PAD_TOP == ICON_PAD && ITEM_PAD_BOTTOM == ICON_PAD, "X53: the icon must sit ICON_PAD from the pill's top and bottom");
+static_assert(ITEM_PAD_TOP == ITEM_PAD_BOTTOM, "X53: equidistant top and bottom -- this is the divergence the user asked for");
+static_assert(CONTAINER_PAD_X + ITEM_MARGIN_X - HOVER_PAD == HL_PAD, "X53: the highlight therefore clears every pill edge by HL_PAD");
 
 // X25. A preview is as TALL as an icon -- it shares the icon row -- and as wide
 // as the window's own aspect makes it. The clamp is what stops one ultrawide or
