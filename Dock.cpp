@@ -320,7 +320,8 @@ constexpr float CYCLE_MEMORY_MS = 3000.F;
 // as the previews and the overview's own tiles, not a second one.
 struct SFlight {
     PHLWINDOWREF window;
-    CBox         from; // monitor-local RENDER px
+    CBox         from;             // the WINDOW's box, monitor-local RENDER px
+    bool         restoring = false; // icon -> window, instead of window -> icon
     Time::steady_tp startedAt;
 };
 
@@ -787,7 +788,9 @@ bool autohideAnimating(PHLMONITOR monitor) {
         return false;
 
     const auto& R = g_reveal[monitor->m_id];
-    return R.pending || elapsedMs(R.changedAt) < sc<float>(std::max(1, Config::getValue<int>(KEY_AUTOHIDE_MS)));
+    // X54. A flight counts as animating: the window is mid-air toward the icon
+    // and nothing else on an idle desktop would ask for the frames it needs.
+    return R.pending || g_flight.has_value() || elapsedMs(R.changedAt) < sc<float>(std::max(1, Config::getValue<int>(KEY_AUTOHIDE_MS)));
 }
 
 SLayout baseLayout(PHLMONITOR monitor) {
@@ -955,7 +958,12 @@ void updateAutohide(PHLMONITOR monitor) {
     // X34 `hotkeys-show-dock`, ORed in beside URGENT for the same reason: it has
     // to HOLD the pill up as well as bring it out, or the pointer sitting
     // anywhere else would slide it away under the numbers the press just drew.
-    want = want || URGENT || overlayHoldsDock();
+    // X54. A flight HOLDS the dock out, for the same reason X34's hotkey overlay
+    // does: outside the overview the pill is normally hidden, so a minimize had
+    // no icon to fly to -- the target lookup failed and the flight was dropped
+    // on its first frame, which is why it teleported. The dock now comes out for
+    // the flight and slides away after it.
+    want = want || URGENT || overlayHoldsDock() || g_flight.has_value();
 
     if (want == R.shown) {
         R.pending = false;
@@ -1256,24 +1264,85 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
 // X24. Stash first, then fly. Order matters: minimize() is what stops the
 // compositor drawing the real window, so doing it up front is what keeps the
 // flight from being a second copy of a window that is still on screen.
+// X54. Bring the pill out NOW, skipping show_delay. A flight is 180ms and the
+// delay alone is 250, so "ask nicely and wait" meant the animation was over
+// before the dock arrived -- and Dock::render returns early on an empty pill, so
+// the flight was never drawn at all. The autohide slide still plays; the flight
+// simply targets the icon while it moves, which is the right look anyway.
+void revealNow(PHLMONITOR monitor) {
+    if (!monitor)
+        return;
+
+    auto& R = g_reveal[monitor->m_id];
+    if (R.shown)
+        return;
+
+    R.shown     = true;
+    R.pending   = false;
+    R.changedAt = Time::steadyNow();
+}
+
+// The window as it sits on screen, in the monitor-local RENDER px the flight
+// works in.
+CBox windowRenderBox(PHLMONITOR monitor, const PHLWINDOW& window) {
+    if (!monitor || !window)
+        return {};
+
+    const auto POS   = window->m_realPosition->value();
+    const auto SIZE  = window->m_realSize->value();
+    const auto SCALE = std::max(monitor->m_scale, 0.01F);
+
+    return CBox{(POS.x - monitor->m_position.x) * SCALE, (POS.y - monitor->m_position.y) * SCALE, SIZE.x * SCALE, SIZE.y * SCALE};
+}
+
 void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
     const int  DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
     const bool ANIMATE  = monitor && window && DURATION > 0 && !Minimize::isMinimized(window);
 
-    // The overview tile, not the window's real box: while the dock is on screen
-    // the overview is too, and the tile is what the user is watching. Must be
-    // read before the stash, which moves the window off the tiled workspace.
+    // X54. Prefer the overview TILE -- while the overview is up that is what the
+    // user is watching -- but fall back to the window's REAL box, which is what
+    // they are watching when it is not. Reading only the tile is why a minimize
+    // outside the overview teleported: there was no source rectangle at all, so
+    // ANIMATE was true and the flight was still never armed.
+    // Must be read before the stash, which moves the window off its workspace.
     CBox from;
     if (ANIMATE) {
-        const auto OVERVIEW = scrollOverviewForMonitor(monitor);
-        if (OVERVIEW)
+        if (const auto OVERVIEW = scrollOverviewForMonitor(monitor))
             from = OVERVIEW->tileBox(window);
+
+        if (from.width < 1 || from.height < 1)
+            from = windowRenderBox(monitor, window);
     }
 
     Minimize::minimize(window);
 
-    if (ANIMATE && from.width >= 1 && from.height >= 1)
+    if (ANIMATE && from.width >= 1 && from.height >= 1) {
+        revealNow(monitor);
         g_flight = SFlight{.window = window, .from = from, .startedAt = Time::steadyNow()};
+    }
+}
+
+// X54. The mirror of the minimize, and it has to keep the window STASHED for
+// the length of the flight: restoring first would put the real window on screen
+// instantly and the proxy would be a second copy of it. The actual restore
+// happens when the flight lands -- see the render loop.
+void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window) {
+    const int DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
+
+    if (!monitor || !window || DURATION <= 0 || !Minimize::isMinimized(window)) {
+        Minimize::restore(window);
+        return;
+    }
+
+    // Still stashed, so this is the box it will land back in.
+    const CBox TO = windowRenderBox(monitor, window);
+    if (TO.width < 1 || TO.height < 1) {
+        Minimize::restore(window);
+        return;
+    }
+
+    revealNow(monitor);
+    g_flight = SFlight{.window = window, .from = TO, .restoring = true, .startedAt = Time::steadyNow()};
 }
 
 // X24's click policy, straight off the reference config: `click-action`
@@ -1439,7 +1508,7 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
 
         if (visible.empty()) {
             for (const auto& WINDOW : windows)
-                Minimize::restore(WINDOW);
+                restoreWithFlight(monitor, WINDOW);
             return;
         }
 
@@ -1468,7 +1537,7 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift) {
     // 2026-08-03, two clicks and nothing minimized either time.
     const auto& WINDOW = windows.front();
     if (Minimize::isMinimized(WINDOW))
-        Minimize::restore(WINDOW);
+        restoreWithFlight(monitor, WINDOW);
     else
         minimizeWithFlight(monitor, WINDOW);
 }
@@ -2507,12 +2576,20 @@ void render(PHLMONITOR monitor) {
     // the honest target. Ends when the clock runs out, or immediately if the
     // icon went away (app closed mid-flight).
     if (g_flight) {
-        const auto WINDOW = g_flight->window.lock();
-        const float T     = flightLinearProgress();
-        const auto  ITEM  = WINDOW ? std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return item.wmClass == WINDOW->m_class; }) : LAYOUT.items.end();
+        const auto  WINDOW = g_flight->window.lock();
+        const float T      = flightLinearProgress();
+        const auto  ITEM   = WINDOW ? std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return item.wmClass == WINDOW->m_class; }) : LAYOUT.items.end();
 
-        if (!WINDOW || T >= 1.F || ITEM == LAYOUT.items.end())
+        if (!WINDOW || T >= 1.F || ITEM == LAYOUT.items.end()) {
+            // X54. A restore that reaches its end -- or loses its icon -- is
+            // where the window actually comes back, because it stayed stashed
+            // for the whole flight.
+            if (g_flight && g_flight->restoring && WINDOW)
+                Minimize::restore(WINDOW);
             g_flight.reset();
+        } else if (g_flight->restoring)
+            // An arrival, so it DECELERATES: the house entrance curve.
+            drawWindowAt(WINDOW, lerpBox(ITEM->iconBox, g_flight->from, houseEase(true, T)));
         else
             drawWindowAt(WINDOW, lerpBox(g_flight->from, ITEM->iconBox, exitEase(T)));
     }
