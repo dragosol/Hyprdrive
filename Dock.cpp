@@ -71,15 +71,37 @@ namespace {
 // the pill's top and bottom. The total is unchanged, so every X27 proportion
 // still measures the same; only the icon's y moves. X31's dot overlays the
 // bottom padding when it lands rather than owning it.
-constexpr float ITEM_PAD_TOP    = 12.F;
-constexpr float ITEM_PAD_BOTTOM = 12.F;
-constexpr float ITEM_MARGIN_X   = 2.F;
-constexpr float CONTAINER_PAD_X = 10.F;
+// X53 (user, 2026-08-03). THE HOVER HIGHLIGHT SETS THE SPACING, not the icon.
+// Verbatim: "each icon should be spaced such that when mousing over the icon,
+// the distance between highlights on each icon is the same as from the edge of
+// the highlight and the edge of the dock (on the first icon) or the distance
+// between the top and bottom of the highlight and the top and bottom of the
+// dock (for any icon)".
+//
+// So there is ONE free number -- the gap every highlight keeps from its
+// neighbours and from the pill -- and the other three constants are DERIVED
+// from it. Written as derivations rather than four independent values because
+// that is what stops the identity drifting the next time one is nudged; the
+// asserts below are the same rule stated as arithmetic.
+//
+// The old values satisfied two thirds of it by accident: top/bottom and the
+// left edge were both 6px, but the between-highlights gap was
+// 2*(2 - 6) = -8px, i.e. adjacent highlights OVERLAPPED. That was the defect.
+constexpr float HOVER_PAD = 6.F;  // the highlight grows the icon box by this
+constexpr float HOVER_GAP = 10.F; // ...and keeps this much clear on every side
+
+constexpr float CONTAINER_PAD_X = HOVER_GAP / 2.F;
+constexpr float ITEM_MARGIN_X   = HOVER_PAD + HOVER_GAP / 2.F;
+constexpr float ITEM_PAD_TOP    = HOVER_PAD + HOVER_GAP;
+constexpr float ITEM_PAD_BOTTOM = ITEM_PAD_TOP;
 constexpr float EDGE_MARGIN     = 4.F;
 
-// The check for the above, and it costs nothing at runtime. Horizontally the
-// icon is already CONTAINER_PAD_X + ITEM_MARGIN_X clear of both ends by
-// construction, so top/bottom is the only pair that can drift.
+// The user's rule as compile-time equalities. A build that breaks the spacing
+// cannot compile, which is the cheapest runnable check this constraint can
+// have -- there is no frame in which to measure a compile-time identity.
+static_assert(2.F * (ITEM_MARGIN_X - HOVER_PAD) == HOVER_GAP, "X53: the gap BETWEEN two hover highlights must equal HOVER_GAP");
+static_assert(CONTAINER_PAD_X + ITEM_MARGIN_X - HOVER_PAD == HOVER_GAP, "X53: the first highlight must sit HOVER_GAP from the pill's left edge");
+static_assert(ITEM_PAD_TOP - HOVER_PAD == HOVER_GAP, "X53: a highlight must sit HOVER_GAP from the pill's top and bottom");
 static_assert(ITEM_PAD_TOP == ITEM_PAD_BOTTOM, "dock icons must sit equidistant from the pill's top and bottom");
 static_assert(ITEM_PAD_TOP == CONTAINER_PAD_X + ITEM_MARGIN_X, "hoverInset() assumes the icon is the same distance from every pill edge");
 
@@ -93,7 +115,6 @@ constexpr float PREVIEW_MAX_ASPECT = 2.20F;
 // (user, 2026-08-03) hover highlight and tooltip, read off the GNOME shell the
 // user showed: a rounded cell slightly larger than the icon, and a dark plate
 // above the dock carrying the app's name.
-constexpr float HOVER_PAD      = 6.F;
 constexpr float TOOLTIP_FONT   = 13.F;
 constexpr float TOOLTIP_PAD_X  = 10.F;
 constexpr float TOOLTIP_PAD_Y  = 6.F;

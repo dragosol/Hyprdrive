@@ -14,8 +14,8 @@ import json
 import sys
 
 # Dock.cpp constants -- keep in step with it.
-ITEM_PAD_TOP = 12.0
-ITEM_MARGIN_X, CONTAINER_PAD_X, EDGE_MARGIN = 2.0, 10.0, 4.0
+ITEM_PAD_TOP = 16.0
+ITEM_MARGIN_X, CONTAINER_PAD_X, EDGE_MARGIN = 11.0, 5.0, 4.0
 ICON_MAX, FRACTION = 54.0, 0.90
 STASH = "special:minimized"
 
