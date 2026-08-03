@@ -88,7 +88,7 @@ namespace {
 // Do not "restore parity" here: the asymmetry is the thing that was rejected.
 constexpr float HOVER_PAD = 6.F;   // the halo the highlight adds around an icon
 constexpr float ICON_GAP  = 16.F;  // icon edge to icon edge, at rest (host's)
-constexpr float ICON_PAD  = 18.F;  // icon to pill, EVERY edge (the divergence)
+constexpr float ICON_PAD  = 14.F;  // icon to pill, EVERY edge (the divergence)
 
 // Derived, so the three numbers above stay the only things anyone edits.
 constexpr float HIGHLIGHT_GAP   = ICON_GAP - 2.F * HOVER_PAD;
