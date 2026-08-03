@@ -892,9 +892,33 @@ namespace AppSearch {
         if (id.empty())
             return nullptr;
 
+        // Indexed, like entryIndexForClass beside it. The dock calls this once
+        // per favourite while building its layout, and the layout is built more
+        // than once a frame -- as a linear scan over the whole inventory that
+        // was thousands of string compares per frame for an answer that only
+        // changes when the inventory is rebuilt.
+        static std::unordered_map<std::string, size_t> cache;
+        static const void*                             cachedFor = nullptr;
+
         const auto& INV = inventory();
-        const auto  IT  = std::ranges::find_if(INV, [&](const SEntry& entry) { return entry.id == id; });
-        return IT == INV.end() ? nullptr : &*IT;
+        if (cachedFor != &INV) {
+            cache.clear();
+            cachedFor = &INV;
+        }
+
+        if (const auto IT = cache.find(id); IT != cache.end())
+            return IT->second == std::string::npos ? nullptr : &INV[IT->second];
+
+        size_t found = std::string::npos;
+        for (size_t i = 0; i < INV.size(); ++i) {
+            if (INV[i].id == id) {
+                found = i;
+                break;
+            }
+        }
+
+        cache[id] = found;
+        return found == std::string::npos ? nullptr : &INV[found];
     }
 
     std::vector<SAction> actionsForClass(const std::string& wmClass) {

@@ -753,7 +753,7 @@ static void renderOverviewGroupTabTitles(PHLMONITOR monitor, const PHLWINDOW& wi
 
         const int maxWidth = std::max(1, sc<int>(std::round(box.width - textPadding * 2.F)));
         auto      titleTex =
-            g_pHyprRenderer->renderText(member->m_title, textColor, fontSizePx, false, FONTFAMILY, maxWidth, isCurrent ? FONTWEIGHTACTIVE->m_value : FONTWEIGHTINACTIVE->m_value);
+            OverviewRender::text(member->m_title, textColor, fontSizePx, false, FONTFAMILY, maxWidth, isCurrent ? FONTWEIGHTACTIVE->m_value : FONTWEIGHTINACTIVE->m_value);
         if (!titleTex || !titleTex->ok())
             continue;
 

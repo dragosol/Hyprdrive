@@ -1023,7 +1023,7 @@ void renderBadge(PHLMONITOR monitor, const SItem& item) {
     const float MULT = ICON < BADGE_DEFAULT_ICON ? std::max(24.F, std::min(ICON + ICON * 0.3F, BADGE_DEFAULT_ICON)) / BADGE_DEFAULT_ICON : ICON / BADGE_DEFAULT_ICON;
     const float FONT = std::max(1.F, std::round(MULT * (BADGE_FONT_PT * BADGE_FONT_RATIO / 0.75F)));
 
-    const auto  TEX = g_pHyprRenderer->renderText(badgeText(COUNT), CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(FONT * SCALE))), false, "", 0, BADGE_WEIGHT);
+    const auto  TEX = OverviewRender::text(badgeText(COUNT), CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(FONT * SCALE))), false, "", 0, BADGE_WEIGHT);
     if (!TEX || !TEX->ok())
         return;
 
@@ -1072,7 +1072,7 @@ void renderNumberOverlay(PHLMONITOR monitor, const SItem& item, int index) {
     const float FONT  = std::round(std::max(NUMBER_FONT_MIN, NUMBER_FONT_RATIO * ICON));
     const float SIZE  = std::round(FONT * NUMBER_BOX_RATIO * SCALE);
 
-    const auto  TEX = g_pHyprRenderer->renderText(std::to_string(DIGIT), CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(FONT * SCALE))));
+    const auto  TEX = OverviewRender::text(std::to_string(DIGIT), CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(FONT * SCALE))));
     if (!TEX || !TEX->ok())
         return;
 
@@ -1123,7 +1123,7 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
         return;
 
     const float SCALE = std::max(monitor->m_scale, 0.01F);
-    const auto  TEX   = g_pHyprRenderer->renderText(NAME, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(TOOLTIP_FONT * SCALE))), false, "", 0, 500);
+    const auto  TEX   = OverviewRender::text(NAME, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(TOOLTIP_FONT * SCALE))), false, "", 0, 500);
     if (!TEX || !TEX->ok())
         return;
 
@@ -1571,7 +1571,7 @@ void renderMenu(PHLMONITOR monitor, const SLayout& layout) {
             continue;
         }
 
-        auto tex = g_pHyprRenderer->renderText(ROW.label, CHyprColor{1.F, 1.F, 1.F, 0.95F}, FONTPX, false, "", 0, 500);
+        auto tex = OverviewRender::text(ROW.label, CHyprColor{1.F, 1.F, 1.F, 0.95F}, FONTPX, false, "", 0, 500);
         if (!tex || !tex->ok()) {
             textures.emplace_back(nullptr);
             height += MENU_SEP_H * SCALE;
@@ -2140,7 +2140,14 @@ bool damageIfChanged(PHLMONITOR monitor) {
     // ponytail: this pumps frames for the 2500ms of every 3000ms the urgent icon
     // is deliberately STILL, as well as the 500 it moves. Waking on a timer for
     // the next burst instead would save them; measure it before building it.
-    const bool WIGGLING = Config::getValue<bool>(KEY_DANCE_URGENT) && anyUrgent(layout(monitor).items);
+    // One layout, used by both the wiggle test and the signature below.
+    // layout() rebuilds the whole item model -- a scan of every window, a set of
+    // running classes, and a fresh vector of SItems carrying several strings
+    // each -- and this function runs on every frame AND on every pointer motion
+    // event, which arrive far faster than frames do. It was being built twice.
+    const auto LAYOUT = layout(monitor);
+
+    const bool WIGGLING = Config::getValue<bool>(KEY_DANCE_URGENT) && anyUrgent(LAYOUT.items);
 
     if (autohideAnimating(monitor) || WIGGLING || overlayUp())
         g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
@@ -2148,7 +2155,6 @@ bool damageIfChanged(PHLMONITOR monitor) {
                 g_pHyprRenderer->damageMonitor(MONITOR.lock());
         });
 
-    const auto  LAYOUT = layout(monitor);
     std::string signature;
     if (!LAYOUT.pill.empty()) {
         // pill.y is in the signature because during the slide it is the ONLY

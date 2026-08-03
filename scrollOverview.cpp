@@ -1546,6 +1546,7 @@ static void moveOverviewTargetNextToWindow(const SP<Layout::ITarget>& target, co
 
 CScrollOverview::~CScrollOverview() {
     TileChrome::forget();
+    OverviewRender::clearTextCache();
     g_dragReflowExcluded = nullptr;
     if (g_pointerGrabOverview == this)
         g_pointerGrabOverview = nullptr;
@@ -5705,7 +5706,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         // the strip cell so it tracks the strip instead of a fixed pixel size.
         // ponytail: white is the colour source. Hyprland exposes no foreground
         // text colour to inherit -- the same gap renderSearch's FG lives with.
-        const auto NUMTEX = g_pHyprRenderer->renderText(std::to_string(wimg->pWorkspace->m_id), CHyprColor{1.F, 1.F, 1.F, 0.20F},
+        const auto NUMTEX = OverviewRender::text(std::to_string(wimg->pWorkspace->m_id), CHyprColor{1.F, 1.F, 1.F, 0.20F},
                                                         std::max(1, sc<int>(std::round(sc<float>(CELL.height) * 0.156F))), false, "", 0, 600);
         if (NUMTEX && NUMTEX->ok()) {
             CBox numBox = {
@@ -5880,7 +5881,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // U+E8B6 is the Material Symbols "search" glyph. The codepoint is used
     // directly rather than the "search" ligature, which needs font shaping the
     // text renderer does not promise.
-    const auto GLYPHTEX = g_pHyprRenderer->renderText("\uE8B6", CHyprColor{1.F, 1.F, 1.F, 0.92F}, std::max(1, sc<int>(std::round(22.F * SCALE))), false,
+    const auto GLYPHTEX = OverviewRender::text("\uE8B6", CHyprColor{1.F, 1.F, 1.F, 0.92F}, std::max(1, sc<int>(std::round(22.F * SCALE))), false,
                                                       "Material Symbols Rounded", 0);
     if (GLYPHTEX && GLYPHTEX->ok()) {
         CBox glyphBox = {
@@ -5978,7 +5979,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     textIndent += ICOND + std::round(10.F * SCALE);
                 }
 
-                const auto ROWTEX = g_pHyprRenderer->renderText(RESULTS[i].name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
+                const auto ROWTEX = OverviewRender::text(RESULTS[i].name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
                                                                std::max(1, sc<int>(std::round(14.F * SCALE))), false, "",
                                                                std::max(1, sc<int>(row.width - textIndent) - ROWPAD));
                 if (ROWTEX && ROWTEX->ok()) {
@@ -5998,7 +5999,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const CHyprColor  FG    = !QUERIED ? CHyprColor{1.F, 1.F, 1.F, 0.55F} : (EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F});
 
     const int  FONTPX = std::max(1, sc<int>(std::round(15.F * SCALE)));
-    const auto TEX    = g_pHyprRenderer->renderText(LABEL, FG, FONTPX, false, "", sc<int>(FIELDW));
+    const auto TEX    = OverviewRender::text(LABEL, FG, FONTPX, false, "", sc<int>(FIELDW));
     if (!TEX || !TEX->ok())
         return;
 

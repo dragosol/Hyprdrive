@@ -59,6 +59,65 @@ SP<Render::ITexture> appIcon(const std::string& iconName) {
 }
 
 
+// Everything renderText() varies its output on. Colour is in here because the
+// same label is drawn selected and unselected, and those are different pixels.
+struct STextKey {
+    std::string str;
+    std::string fontFamily;
+    uint32_t    color  = 0;
+    int         fontSize = 0;
+    int         maxWidth = 0;
+    int         weight   = 0;
+    bool        italic   = false;
+
+    bool        operator==(const STextKey&) const = default;
+};
+
+struct STextKeyHash {
+    size_t operator()(const STextKey& k) const {
+        size_t h = std::hash<std::string>{}(k.str);
+        for (const size_t PART : {std::hash<std::string>{}(k.fontFamily), sc<size_t>(k.color), sc<size_t>(k.fontSize), sc<size_t>(k.maxWidth), sc<size_t>(k.weight),
+                                  sc<size_t>(k.italic)})
+            h ^= PART + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+static std::unordered_map<STextKey, SP<Render::ITexture>, STextKeyHash> g_textCache;
+
+// A clock counts up, a search box fills a character at a time, a badge counts
+// windows: the strings asked for are open-ended, so the cache needs a ceiling.
+// Clearing wholesale rather than evicting by age keeps this to one branch --
+// the entries are cheap to rebuild and the cap is far above a frame's worth.
+static constexpr size_t TEXT_CACHE_MAX = 256;
+
+SP<Render::ITexture> text(const std::string& str, const CHyprColor& color, int fontSize, bool italic, const std::string& fontFamily, int maxWidth, int weight) {
+    if (str.empty())
+        return nullptr;
+
+    const STextKey KEY{.str        = str,
+                       .fontFamily = fontFamily,
+                       .color      = color.getAsHex(),
+                       .fontSize   = fontSize,
+                       .maxWidth   = maxWidth,
+                       .weight     = weight,
+                       .italic     = italic};
+
+    if (const auto IT = g_textCache.find(KEY); IT != g_textCache.end())
+        return IT->second;
+
+    if (g_textCache.size() >= TEXT_CACHE_MAX)
+        g_textCache.clear();
+
+    auto texture = g_pHyprRenderer->renderText(str, color, fontSize, italic, fontFamily, maxWidth, weight);
+    g_textCache.emplace(KEY, texture);
+    return texture;
+}
+
+void clearTextCache() {
+    g_textCache.clear();
+}
+
 void flushPass(PHLMONITOR monitor) {
     if (!monitor || g_pHyprRenderer->m_renderPass.empty())
         return;
