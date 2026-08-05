@@ -321,6 +321,10 @@ struct SSearchRowHit {
     CBox        box;
     std::string desktopId; // "" for a provider row: those are not draggable
     std::string icon;
+    // X62. Which result this box belongs to. The hit-test existed only to
+    // reject drops before; answering the mouse means the hit has to say WHICH
+    // result was hit, in the same index space the keyboard selection uses.
+    int         index = -1;
 };
 static std::vector<SSearchRowHit> g_searchRowHits;
 
@@ -333,6 +337,7 @@ struct SResultDrag {
     Vector2D        start;
     Time::steady_tp startedAt;
     bool            live = false;
+    int             index = -1; // X62: the row the PRESS landed on
 };
 static std::optional<SResultDrag> g_resultDrag;
 
@@ -341,6 +346,25 @@ static constexpr float G12_HOLD_MS = 200.F;
 static const SSearchRowHit* searchRowAt(const Vector2D& point) {
     const auto IT = std::ranges::find_if(g_searchRowHits, [&](const SSearchRowHit& row) { return row.box.containsPoint(point); });
     return IT == g_searchRowHits.end() ? nullptr : &*IT;
+}
+
+// X62. Activating a result is ONE act however it was chosen -- Return on the
+// keyboard selection, or a plain click on the row. Sharing the helper is the
+// point: G12 built the drag and left the click undefined, and a second copy of
+// "launch or activate" is how the mouse and the keyboard end up disagreeing
+// about what the selected row does.
+static bool activateSearchResult(int index) {
+    const auto RESULTS = overviewSearchRows();
+    if (index < 0 || index >= sc<int>(RESULTS.size()))
+        return false;
+
+    const auto& ROW = RESULTS[index];
+    if (ROW.app)
+        AppSearch::launch(*ROW.app, ScrollOverview::Config::getTerminal());
+    else
+        SearchProviders::activate(ROW.provider, g_overviewSearch);
+
+    return true;
 }
 
 // OVERVIEW_CPP_SPEC §5 F2, and §13.7 X18's open-window half.
@@ -627,19 +651,6 @@ static float overviewResultsLogicalHeight(PHLMONITOR monitor) {
     return monitor ? std::max(0.F, g_overviewResultsBandH) : 0.F;
 }
 
-// X48: the dock floats over the bottom edge, so the results band stops above it
-// rather than sliding underneath. Logical px the dock reserves at the bottom.
-static float overviewDockLogicalInset(PHLMONITOR monitor) {
-    if (!monitor || monitor->m_scale <= 0.01F)
-        return 0.F;
-
-    const auto PILL = ScrollOverview::Dock::layout(monitor).pill;
-    if (PILL.width < 1 || PILL.height < 1)
-        return 0.F;
-
-    return std::clamp(sc<float>(monitor->m_size.y) - sc<float>(PILL.y) / sc<float>(monitor->m_scale), 0.F, sc<float>(monitor->m_size.y) / 4.F);
-}
-
 // The width the result cards span: the monitor inset by the mission-control
 // gap, which is the same span the grid tiles get (X49). The band maths and the
 // render pass both need it, and a grid's height depends on it.
@@ -674,9 +685,10 @@ static float overviewResultsSectionHeight(const SSearchSection& section, float s
 }
 
 // The height the band is easing TOWARD -- X49 sums the SECTION CARDS rather
-// than a flat row count -- still capped by X48's BUDGET: the results own the
-// bottom half and never more, so the desktop cards and the window tiles stay
-// visible above them however many rows the query matches (DoD clause 23).
+// than a flat row count -- still capped by a BUDGET so that however many rows
+// the query matches, the desktop strip and the window tiles stay on screen
+// (DoD clause 23, whose PLACEMENT half X60 rewrote and whose "the overview
+// stays visible" half is unchanged).
 static float overviewResultsBandTarget(PHLMONITOR monitor, const std::vector<SSearchSection>& sections) {
     if (sections.empty() || !monitor)
         return 0.F;
@@ -687,7 +699,12 @@ static float overviewResultsBandTarget(PHLMONITOR monitor, const std::vector<SSe
     for (const auto& SECTION : sections)
         panelH += overviewResultsSectionHeight(SECTION, SPANWL);
 
-    const float BUDGET = std::max(0.F, sc<float>(monitor->m_size.y) / 2.F - overviewDockLogicalInset(monitor));
+    // X60: the band now sits UNDER the search row and above the strip, so the
+    // ceiling is what is left of the top half once the search row has taken its
+    // share -- not the bottom half above the dock. X48's constraint is the one
+    // that survives and it is the reason this cap exists at all: however many
+    // results match, the strip and the tiles stay on screen.
+    const float BUDGET = std::max(0.F, sc<float>(monitor->m_size.y) / 2.F - overviewSearchLogicalHeight(monitor));
 
     return std::min(panelH + (OVERVIEW_RESULT_PANELGAPL * 2.F), BUDGET);
 }
@@ -724,19 +741,17 @@ static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor
     // Grid tiles must not slide under the strip band or the search row (X10) --
     // shrinking `usable` here is what makes the tiles compact to give the space
     // back.
-    if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor); TOPCHROME > 0.F) {
+    //
+    // X60 SUPERSEDES X48's placement: the results are part of the TOP chrome
+    // now, between the search row and the strip, so the whole stack below them
+    // moves down and the tiles give their space back from the top. X21's reflow
+    // is untouched -- the tiles still shrink and compact off the same eased
+    // band, only the direction changed. X48's real constraint survives in
+    // overviewResultsBandTarget's budget: the band may never grow so tall that
+    // the strip and the tiles are pushed off the screen.
+    if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor) + overviewResultsLogicalHeight(monitor); TOPCHROME > 0.F) {
         usable.y += TOPCHROME;
         usable.h -= TOPCHROME;
-        if (usable.h <= 1)
-            return false;
-    }
-
-    // X48: the results panel is anchored to the BOTTOM half, so it eats the
-    // bottom of the grid instead of pushing the whole stack down. X21's reflow
-    // is unchanged -- the tiles still shrink and compact off the same eased
-    // band, they just give the space back downwards.
-    if (const float BOTTOMCHROME = overviewResultsLogicalHeight(monitor); BOTTOMCHROME > 0.F) {
-        usable.h -= BOTTOMCHROME;
         if (usable.h <= 1)
             return false;
     }
@@ -2185,7 +2200,17 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                         ScrollOverview::Dock::unpin(DRAG.desktopId);
                     else if (const int INDEX = ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal); INDEX >= 0)
                         ScrollOverview::Dock::pinAt(DRAG.desktopId, INDEX);
+                    return;
                 }
+
+                // X62. The hold never completed, so this was a CLICK. Released
+                // over the row it was pressed on, it activates exactly as Return
+                // on that selection would; released anywhere else it is the
+                // user changing their mind, which is a no-op. G12's hold stays
+                // the drag gate -- a click is simply what happens without it.
+                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW && ROW->index == DRAG.index && activateSearchResult(ROW->index))
+                    close();
+
                 return;
             }
 
@@ -2224,7 +2249,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             // panel's to define.
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
                 if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
-                    g_resultDrag = SResultDrag{.desktopId = ROW->desktopId, .icon = ROW->icon, .start = lastMousePosLocal, .startedAt = Time::steadyNow()};
+                    g_resultDrag =
+                        SResultDrag{.desktopId = ROW->desktopId, .icon = ROW->icon, .start = lastMousePosLocal, .startedAt = Time::steadyNow(), .index = ROW->index};
                     return;
                 }
             }
@@ -2544,14 +2570,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 else if (!RESULTS.empty() && matchingWindowCount() == 0)
                     launchIdx = 0;
 
-                if (launchIdx >= 0) {
-                    const auto& ROW = RESULTS[launchIdx];
-                    if (ROW.app)
-                        AppSearch::launch(*ROW.app, ScrollOverview::Config::getTerminal());
-                    else
-                        SearchProviders::activate(ROW.provider, g_overviewSearch);
-                }
-
+                activateSearchResult(launchIdx);
                 close();
                 break;
             }
@@ -3254,6 +3273,20 @@ CBox CScrollOverview::tileCloseButtonBox(const PHLWINDOW& window) const {
 void CScrollOverview::updateTileHover() {
     if (closing || dragActiveWindow || resizeActiveWindow || scrollingPanPointerDown) {
         TileChrome::setHovered(PHLWINDOW{});
+        return;
+    }
+
+    // X62. A result under the cursor takes the selection, so pointing at a row
+    // and arrowing onto it land on the SAME highlight -- there is only one
+    // selection and both devices move it. It also swallows the tile hover: the
+    // panel is drawn over the grid while the band eases, and a tile lighting up
+    // through it would be hovering something the user cannot click.
+    if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
+        TileChrome::setHovered(PHLWINDOW{});
+        if (g_overviewAppSelection != ROW->index) {
+            g_overviewAppSelection = ROW->index;
+            damage();
+        }
         return;
     }
 
@@ -5589,10 +5622,12 @@ CBox CScrollOverview::stripCellLogicalBox(size_t workspaceIdx) const {
 
     const float X = sc<float>(MONITOR->m_position.x) + (sc<float>(MONITOR->m_size.x) - total) / 2.F + sc<float>(workspaceIdx) * (cellW + GAP);
     // X10: the search row owns the very top; the band starts under it.
-    // X48: the results panel no longer pushes the strip down -- it is anchored
-    // to the bottom half instead, so the strip keeps its place through a query
-    // as well as through a pan (DoD clause 18).
-    const float Y = sc<float>(MONITOR->m_position.y) + overviewSearchLogicalHeight(MONITOR) + PAD + (BAND - 2.F * PAD - cellH) / 2.F;
+    // X60: and the RESULTS sit between the two, so a growing result list pushes
+    // the strip down rather than being anchored to the bottom half. This
+    // reverses X48's arrangement (and with it DoD 18's "the strip never moves
+    // under a query") on the user's instruction of 2026-08-05.
+    const float Y = sc<float>(MONITOR->m_position.y) + overviewSearchLogicalHeight(MONITOR) + overviewResultsLogicalHeight(MONITOR) + PAD +
+        (BAND - 2.F * PAD - cellH) / 2.F;
 
     return CBox{X, Y, cellW, cellH};
 }
@@ -6080,11 +6115,11 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
         // X21: the stack fills the band it was allocated, so its height is the
         // ANIMATED band minus the gaps.
-        // X48: bottom-anchored. The stack's FOOT sits a gap above the dock and
-        // it grows UPWARD into the bottom half, which is what keeps the desktop
-        // cards and the window tiles visible above it.
+        // X60: TOP-anchored, directly under the search row. The stack's HEAD is
+        // pinned there and it grows DOWNWARD, pushing the strip and the tiles
+        // ahead of it -- the reverse of X48, on the user's instruction.
         const float PANELHL = overviewResultsLogicalHeight(monitor) - (OVERVIEW_RESULT_PANELGAPL * 2.F);
-        const float PANELYL = sc<float>(monitor->m_position.y) + sc<float>(monitor->m_size.y) - overviewDockLogicalInset(monitor) - OVERVIEW_RESULT_PANELGAPL - PANELHL;
+        const float PANELYL = sc<float>(monitor->m_position.y) + overviewSearchLogicalHeight(monitor) + OVERVIEW_RESULT_PANELGAPL;
 
         const int PANELROUND = std::max(1, sc<int>(std::round(16.F * SCALE)));
         const int ROWPAD     = sc<int>(std::round(12.F * SCALE));
@@ -6136,7 +6171,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     cell.round();
 
                     // G12, same contract as a list row: recorded as DRAWN.
-                    g_searchRowHits.emplace_back(SSearchRowHit{.box = cell, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon});
+                    g_searchRowHits.emplace_back(SSearchRowHit{.box = cell, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon, .index = sc<int>(I)});
 
                     const bool SELECTED = sc<int>(I) == g_overviewAppSelection;
                     if (SELECTED) {
@@ -6205,7 +6240,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 // G12. Recorded as DRAWN, including the rows that are not
                 // draggable: a drop onto one of those still has to be rejected,
                 // and it can only be rejected by something that knows it is there.
-                g_searchRowHits.emplace_back(SSearchRowHit{.box = row, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon});
+                g_searchRowHits.emplace_back(SSearchRowHit{.box = row, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon, .index = sc<int>(I)});
 
                 const bool SELECTED = sc<int>(I) == g_overviewAppSelection;
                 if (SELECTED) {
