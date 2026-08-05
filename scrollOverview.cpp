@@ -219,9 +219,13 @@ static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     return window;
 }
 
-// OVERVIEW_CPP_SPEC §13.2 F3. How many app results the panel lists. GNOME shows
-// a handful; a long list under the pill would cover the grid it is filtering.
-static constexpr size_t OVERVIEW_APP_RESULT_LIMIT = 5;
+// OVERVIEW_CPP_SPEC §13.4 G5. TWO LAYOUTS, TWO CAPS, and the caps are PER
+// PROVIDER. Apps are a grid and cap at 6; every other provider is a list and
+// caps at 5 ROWS EACH, not 5 shared. A shared cap is what made X49's section
+// cards invisible: a query matching 5 apps starved every provider, so there was
+// only ever one card to categorise.
+static constexpr size_t OVERVIEW_APP_RESULT_LIMIT      = 6;
+static constexpr size_t OVERVIEW_PROVIDER_ROW_LIMIT    = 5;
 
 // X19: the panel shows ONE ordered list. Local app entries first -- they are an
 // in-memory scan and always instant -- then whatever the SearchProvider2
@@ -245,12 +249,13 @@ static std::vector<SSearchRow> overviewSearchRows() {
     for (const auto* E : AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT))
         rows.push_back({E->name, E->icon, E, {}});
 
+    // G5: each provider gets its OWN five rows. Providers arrive in whatever
+    // order they answer, so the count is kept per id rather than by assuming
+    // results() is grouped.
+    std::unordered_map<std::string, size_t> perProvider;
     for (const auto& R : SearchProviders::results()) {
-        // ponytail: one shared cap, apps first, so the panel keeps the row count
-        // its layout was measured against. X21 reflows the panel and is where a
-        // real per-source allocation belongs.
-        if (rows.size() >= OVERVIEW_APP_RESULT_LIMIT)
-            break;
+        if (perProvider[R.providerDesktopId]++ >= OVERVIEW_PROVIDER_ROW_LIMIT)
+            continue;
         // The provider for an app we already list is the same row twice.
         if (std::ranges::any_of(rows, [&](const SSearchRow& X) { return X.app && X.app->id == R.providerDesktopId; }))
             continue;
@@ -267,6 +272,9 @@ struct SSearchSection {
     std::string         title;
     std::string         icon;
     std::vector<size_t> rows; // indices into the overviewSearchRows() vector
+    // G5: which of the two layouts this section draws in. Apps are the GRID of
+    // icons; every other provider is a LIST of rows under a G6 header.
+    bool                grid = false;
 };
 
 static std::vector<SSearchSection> overviewSearchSections(const std::vector<SSearchRow>& rows) {
@@ -289,7 +297,7 @@ static std::vector<SSearchSection> overviewSearchSections(const std::vector<SSea
         // which is a different app from the one the row itself points at.
         // entryForId is the only way to reach it, and a provider whose .desktop
         // is missing keeps its bare id rather than drawing a headerless card.
-        SSearchSection section{.title = "Applications", .icon = "applications-other", .rows = {i}};
+        SSearchSection section{.title = "Applications", .icon = "applications-other", .rows = {i}, .grid = KEY.empty()};
         if (!KEY.empty()) {
             section.title = KEY;
             section.icon  = KEY;
@@ -610,6 +618,10 @@ static constexpr float OVERVIEW_RESULT_ROWHL = 34.F, OVERVIEW_RESULT_ROWGAPL = 6
 // of the width. HEADERWL is that leading column; HEADERHL is the floor a card
 // gets, so a one-row section still has room for a 32px provider icon.
 static constexpr float OVERVIEW_RESULT_SECTIONGAPL = 8.F, OVERVIEW_RESULT_HEADERWL = 168.F, OVERVIEW_RESULT_HEADERHL = 44.F;
+// G5's OTHER layout. Apps are a grid of icon cells, not rows: a 48px icon with
+// its name under it. CELLWL is the widest a cell gets -- the grid caps at 6 AND
+// at whatever fits, so a narrow monitor wraps instead of overflowing.
+static constexpr float OVERVIEW_RESULT_CELLWL = 132.F, OVERVIEW_RESULT_CELLHL = 78.F, OVERVIEW_RESULT_CELLICONL = 48.F;
 
 static float overviewResultsLogicalHeight(PHLMONITOR monitor) {
     return monitor ? std::max(0.F, g_overviewResultsBandH) : 0.F;
@@ -628,10 +640,36 @@ static float overviewDockLogicalInset(PHLMONITOR monitor) {
     return std::clamp(sc<float>(monitor->m_size.y) - sc<float>(PILL.y) / sc<float>(monitor->m_scale), 0.F, sc<float>(monitor->m_size.y) / 4.F);
 }
 
-// The logical height one card needs: its rows, its padding, and a floor so the
-// provider icon on the leading edge always fits a one-row section.
-static float overviewResultsSectionHeight(size_t rows) {
-    const float BODY = (sc<float>(rows) * OVERVIEW_RESULT_ROWHL) + ((sc<float>(rows) - 1.F) * OVERVIEW_RESULT_ROWGAPL);
+// The width the result cards span: the monitor inset by the mission-control
+// gap, which is the same span the grid tiles get (X49). The band maths and the
+// render pass both need it, and a grid's height depends on it.
+static float overviewResultsSpanW(PHLMONITOR monitor) {
+    if (!monitor)
+        return 1.F;
+
+    const float GAPL = sc<float>(ScrollOverview::Config::getMissionControlGap());
+    return std::max(1.F, sc<float>(monitor->m_size.x) - (GAPL * 2.F));
+}
+
+// G5: the grid "caps at 6 and at whatever fits the width". The 6 is applied
+// when the rows are gathered; this is the width half.
+static size_t overviewResultsGridCols(size_t cells, float spanWL) {
+    const float INNER = std::max(1.F, spanWL - (OVERVIEW_RESULT_PANELPADL * 2.F));
+    const auto  FITS  = sc<size_t>(std::max(1.F, std::floor(INNER / OVERVIEW_RESULT_CELLWL)));
+    return std::max(sc<size_t>(1), std::min(cells, FITS));
+}
+
+// The logical height one card needs. A LIST card is its rows, its padding, and
+// a floor so the G6 provider icon on the leading edge always fits a one-row
+// section. A GRID card is however many cell rows the width forced it into.
+static float overviewResultsSectionHeight(const SSearchSection& section, float spanWL) {
+    if (section.grid) {
+        const float ROWS = std::ceil(sc<float>(section.rows.size()) / sc<float>(overviewResultsGridCols(section.rows.size(), spanWL)));
+        return (OVERVIEW_RESULT_PANELPADL * 2.F) + (ROWS * OVERVIEW_RESULT_CELLHL) + ((ROWS - 1.F) * OVERVIEW_RESULT_ROWGAPL);
+    }
+
+    const float N    = sc<float>(section.rows.size());
+    const float BODY = (N * OVERVIEW_RESULT_ROWHL) + ((N - 1.F) * OVERVIEW_RESULT_ROWGAPL);
     return (OVERVIEW_RESULT_PANELPADL * 2.F) + std::max(BODY, OVERVIEW_RESULT_HEADERHL);
 }
 
@@ -643,9 +681,11 @@ static float overviewResultsBandTarget(PHLMONITOR monitor, const std::vector<SSe
     if (sections.empty() || !monitor)
         return 0.F;
 
+    const float SPANWL = overviewResultsSpanW(monitor);
+
     float panelH = sc<float>(sections.size() - 1) * OVERVIEW_RESULT_SECTIONGAPL;
     for (const auto& SECTION : sections)
-        panelH += overviewResultsSectionHeight(SECTION.rows.size());
+        panelH += overviewResultsSectionHeight(SECTION, SPANWL);
 
     const float BUDGET = std::max(0.F, sc<float>(monitor->m_size.y) / 2.F - overviewDockLogicalInset(monitor));
 
@@ -6036,7 +6076,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         // stay aligned if either moves.
         const float SPANGAPL = sc<float>(ScrollOverview::Config::getMissionControlGap());
         const float SPANXL   = sc<float>(monitor->m_position.x) + SPANGAPL;
-        const float SPANWL   = std::max(1.F, sc<float>(monitor->m_size.x) - (SPANGAPL * 2.F));
+        const float SPANWL   = overviewResultsSpanW(monitor);
 
         // X21: the stack fills the band it was allocated, so its height is the
         // ANIMATED band minus the gaps.
@@ -6051,7 +6091,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
         float cardYL = PANELYL;
         for (const auto& SECTION : SECTIONS) {
-            const float CARDHL = overviewResultsSectionHeight(SECTION.rows.size());
+            const float CARDHL = overviewResultsSectionHeight(SECTION, SPANWL);
 
             // While the band is still easing open the stack is shorter than the
             // full list; a card that would spill past the foot is not drawn
@@ -6076,6 +6116,58 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             cardBg.round         = PANELROUND;
             cardBg.roundingPower = 2.F;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(cardBg));
+
+            // G5's GRID layout. Apps are icon cells, not rows, and they carry no
+            // G6 header -- the header names a PROVIDER application, and the app
+            // results have none. Centred across the card the way the reference
+            // is, so two matches do not stretch into two half-screen cells.
+            if (SECTION.grid) {
+                const size_t COLS   = overviewResultsGridCols(SECTION.rows.size(), SPANWL);
+                const float  GRIDWL = sc<float>(COLS) * OVERVIEW_RESULT_CELLWL;
+                const float  GRIDXL = CARDLOGICAL.x + ((sc<float>(CARDLOGICAL.w) - GRIDWL) / 2.F);
+
+                for (size_t n = 0; n < SECTION.rows.size(); ++n) {
+                    const size_t I    = SECTION.rows[n];
+                    const CBox   CELLLOGICAL{GRIDXL + (sc<float>(n % COLS) * OVERVIEW_RESULT_CELLWL),
+                                           sc<float>(CARDLOGICAL.y) + PANELPADL + (sc<float>(n / COLS) * (OVERVIEW_RESULT_CELLHL + ROWGAPL)), OVERVIEW_RESULT_CELLWL,
+                                           OVERVIEW_RESULT_CELLHL};
+
+                    CBox cell = getOverviewGlobalBox(CELLLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
+                    cell.round();
+
+                    // G12, same contract as a list row: recorded as DRAWN.
+                    g_searchRowHits.emplace_back(SSearchRowHit{.box = cell, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon});
+
+                    const bool SELECTED = sc<int>(I) == g_overviewAppSelection;
+                    if (SELECTED) {
+                        CRectPassElement::SRectData sel;
+                        sel.box           = cell;
+                        // Opaque for the same reason the list's selection is.
+                        sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F} : ACCENT.m_colors[0].modifyA(1.F);
+                        sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
+                        sel.roundingPower = 2.F;
+                        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
+                    }
+
+                    const float ICOND = std::round(OVERVIEW_RESULT_CELLICONL * SCALE);
+                    const float PADG  = std::round(6.F * SCALE);
+
+                    const auto ICONTEX = OverviewRender::appIcon(RESULTS[I].icon);
+                    if (ICONTEX && ICONTEX->ok()) {
+                        CBox iconBox{cell.x + std::round((cell.width - ICOND) / 2.F), cell.y + PADG, ICOND, ICOND};
+                        ADDTEX(ICONTEX, iconBox.round());
+                    }
+
+                    const auto CELLTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F}, std::max(1, sc<int>(std::round(13.F * SCALE))),
+                                                              false, "", std::max(1, sc<int>(cell.width - (PADG * 2.F))));
+                    if (CELLTEX && CELLTEX->ok()) {
+                        CBox cellText{cell.x + std::round((cell.width - sc<float>(CELLTEX->m_size.x)) / 2.F), cell.y + PADG + ICOND + std::round(4.F * SCALE),
+                                      sc<float>(CELLTEX->m_size.x), sc<float>(CELLTEX->m_size.y)};
+                        ADDTEX(CELLTEX, cellText.round());
+                    }
+                }
+                continue;
+            }
 
             // G6's header, on the leading edge: the provider's icon at ~32px
             // and its name beside it, centred against the card's rows.

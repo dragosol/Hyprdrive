@@ -83,18 +83,33 @@ def selected_row(frame, base):
 
     m = near & (np.abs(frame - base).max(axis=2) > 10)
 
-    # A full-width run of opaque accent IS the row; anything thinner is a speck
-    # of wallpaper that happens to match. Rows are contiguous, so the extent of
-    # the dense scanlines is the box -- no labelling needed, and no chance of
-    # the 4x downsample bridging the row to a neighbouring blob.
-    dense = np.where(m.sum(axis=1) > 150)[0]
+    # The LONGEST CONTIGUOUS RUN per scanline, not the extent of all matching
+    # pixels, and not a fixed 150px floor. G5 gave the apps a GRID: a selected
+    # CELL is ~110px wide with its own 39px icon drawn over it, so a 150px floor
+    # cannot see it at all and the extent of what is left stretches to whatever
+    # stray pixel also matched. This gate went blind to exactly the boundary its
+    # SECTIONS check exists to find -- it read a constant 33px step on a build
+    # with two cards, because the frames that crossed the boundary returned None.
+    runs = []
+    for y in range(m.shape[0]):
+        xs = np.where(m[y])[0]
+        if xs.size == 0:
+            runs.append((0, 0))
+            continue
+        brk = np.where(np.diff(xs) > 1)[0]
+        st = np.concatenate(([0], brk + 1))
+        en = np.concatenate((brk, [xs.size - 1]))
+        i = int(np.argmax(en - st + 1))
+        runs.append((int(xs[st[i]]), int(en[i] - st[i] + 1)))
+
+    dense = np.where(np.array([r[1] for r in runs]) > 50)[0]
     if dense.size == 0:
         return None
     y0, y1 = int(dense[0]), int(dense[-1])
-    if not (18 <= y1 - y0 + 1 <= 44):   # one row, not a merged stack
+    if not (18 <= y1 - y0 + 1 <= 100):  # one row or one cell, not a merged stack
         return None
-    xs = np.where(m[y0:y1 + 1].any(axis=0))[0]
-    return (int(xs[0]), y0, int(xs[-1] - xs[0] + 1), y1 - y0 + 1, int(m.sum()))
+    best = max(runs[y0:y1 + 1], key=lambda r: r[1])
+    return (best[0], y0, best[1], y1 - y0 + 1, int(m.sum()))
 
 
 def main(tag):
