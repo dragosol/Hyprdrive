@@ -565,13 +565,31 @@ static float overviewResultsLogicalHeight(PHLMONITOR monitor) {
     return monitor ? std::max(0.F, g_overviewResultsBandH) : 0.F;
 }
 
-// The height the band is easing TOWARD, from the row count alone.
-static float overviewResultsBandTarget(size_t rows) {
-    if (rows == 0)
+// X48: the dock floats over the bottom edge, so the results band stops above it
+// rather than sliding underneath. Logical px the dock reserves at the bottom.
+static float overviewDockLogicalInset(PHLMONITOR monitor) {
+    if (!monitor || monitor->m_scale <= 0.01F)
+        return 0.F;
+
+    const auto PILL = ScrollOverview::Dock::layout(monitor).pill;
+    if (PILL.width < 1 || PILL.height < 1)
+        return 0.F;
+
+    return std::clamp(sc<float>(monitor->m_size.y) - sc<float>(PILL.y) / sc<float>(monitor->m_scale), 0.F, sc<float>(monitor->m_size.y) / 4.F);
+}
+
+// The height the band is easing TOWARD, from the row count alone -- now capped
+// by X48's BUDGET: the results own the bottom half and never more, so the
+// desktop cards and the window tiles stay visible above them however many rows
+// the query matches (DoD clause 23).
+static float overviewResultsBandTarget(PHLMONITOR monitor, size_t rows) {
+    if (rows == 0 || !monitor)
         return 0.F;
 
     const float PANELH = (OVERVIEW_RESULT_PANELPADL * 2.F) + (sc<float>(rows) * OVERVIEW_RESULT_ROWHL) + ((sc<float>(rows) - 1.F) * OVERVIEW_RESULT_ROWGAPL);
-    return PANELH + (OVERVIEW_RESULT_PANELGAPL * 2.F);
+    const float BUDGET = std::max(0.F, sc<float>(monitor->m_size.y) / 2.F - overviewDockLogicalInset(monitor));
+
+    return std::min(PANELH + (OVERVIEW_RESULT_PANELGAPL * 2.F), BUDGET);
 }
 
 // The tile currently being dragged. It gives up its grid slot for the duration
@@ -603,12 +621,22 @@ static bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor
     }
 
 
-    // Grid tiles must not slide under the strip band or the search row (X10),
-    // nor under the results panel (X21) -- shrinking `usable` here is what makes
-    // the tiles compact to give the space back.
-    if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor) + overviewResultsLogicalHeight(monitor); TOPCHROME > 0.F) {
+    // Grid tiles must not slide under the strip band or the search row (X10) --
+    // shrinking `usable` here is what makes the tiles compact to give the space
+    // back.
+    if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor); TOPCHROME > 0.F) {
         usable.y += TOPCHROME;
         usable.h -= TOPCHROME;
+        if (usable.h <= 1)
+            return false;
+    }
+
+    // X48: the results panel is anchored to the BOTTOM half, so it eats the
+    // bottom of the grid instead of pushing the whole stack down. X21's reflow
+    // is unchanged -- the tiles still shrink and compact off the same eased
+    // band, they just give the space back downwards.
+    if (const float BOTTOMCHROME = overviewResultsLogicalHeight(monitor); BOTTOMCHROME > 0.F) {
+        usable.h -= BOTTOMCHROME;
         if (usable.h <= 1)
             return false;
     }
@@ -5461,9 +5489,10 @@ CBox CScrollOverview::stripCellLogicalBox(size_t workspaceIdx) const {
 
     const float X = sc<float>(MONITOR->m_position.x) + (sc<float>(MONITOR->m_size.x) - total) / 2.F + sc<float>(workspaceIdx) * (cellW + GAP);
     // X10: the search row owns the very top; the band starts under it.
-    // X21: and under the results panel, which pushes the strip down as it grows.
-    const float Y = sc<float>(MONITOR->m_position.y) + overviewSearchLogicalHeight(MONITOR) + overviewResultsLogicalHeight(MONITOR) + PAD +
-        (BAND - 2.F * PAD - cellH) / 2.F;
+    // X48: the results panel no longer pushes the strip down -- it is anchored
+    // to the bottom half instead, so the strip keeps its place through a query
+    // as well as through a pan (DoD clause 18).
+    const float Y = sc<float>(MONITOR->m_position.y) + overviewSearchLogicalHeight(MONITOR) + PAD + (BAND - 2.F * PAD - cellH) / 2.F;
 
     return CBox{X, Y, cellW, cellH};
 }
@@ -5841,7 +5870,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // X21: the layout band is driven from the row count HERE, ahead of the pill
     // culling return below -- the strip and grid reflow off it even on frames
     // where the pill itself is scrolled off screen.
-    if (const float TARGET = overviewResultsBandTarget(RESULTS.size()); std::abs(resultsBand->goal() - TARGET) > 0.5F)
+    if (const float TARGET = overviewResultsBandTarget(monitor, RESULTS.size()); std::abs(resultsBand->goal() - TARGET) > 0.5F)
         *resultsBand = TARGET;
 
     g_overviewResultsBandH = resultsBand->value();
@@ -5936,8 +5965,12 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         // search row, not off the pill, because it is a layout row now.
         constexpr float ROWHL = OVERVIEW_RESULT_ROWHL, ROWGAPL = OVERVIEW_RESULT_ROWGAPL, PANELPADL = OVERVIEW_RESULT_PANELPADL;
         const float     PANELHL = overviewResultsLogicalHeight(monitor) - (OVERVIEW_RESULT_PANELGAPL * 2.F);
-        const CBox      PANELLOGICAL{PILLLOGICAL.x, sc<float>(monitor->m_position.y) + overviewSearchLogicalHeight(monitor) + OVERVIEW_RESULT_PANELGAPL, PILLWL,
-                                     PANELHL};
+        // X48: bottom-anchored. The panel's FOOT sits a gap above the dock and
+        // it grows UPWARD into the bottom half, which is what keeps the desktop
+        // cards and the window tiles visible above it.
+        const CBox      PANELLOGICAL{PILLLOGICAL.x,
+                                     sc<float>(monitor->m_position.y) + sc<float>(monitor->m_size.y) - overviewDockLogicalInset(monitor) - OVERVIEW_RESULT_PANELGAPL - PANELHL,
+                                     PILLWL, PANELHL};
 
         CBox panel = getOverviewGlobalBox(PANELLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
         if (panel.width > 1.F && overviewBoxIntersectsMonitor(panel, monitor)) {
