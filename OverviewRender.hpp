@@ -9,7 +9,7 @@
 namespace OverviewRender {
 
 void flushPass(PHLMONITOR monitor);
-void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur);
+void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur, int blurPasses = -1);
 
 // X92. Stable dual-kawase of the overview main FB for strip/result chrome.
 // blurMainFramebuffer() returns a TEMPORARY texture that window live-blurs

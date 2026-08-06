@@ -2,6 +2,7 @@
 #include "OverviewRender.hpp"
 #include "OverviewPassElement.hpp"
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <hyprland/src/render/Renderer.hpp>
@@ -57,6 +58,16 @@ void captureFrameChromeBlur(PHLMONITOR monitor) {
     g_chromeBlurFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
 
     CRegion fullDamage{CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y}};
+    // X99. Strip + search-result chrome is ONE pass weaker than window frost.
+    // This private FB is only sampled by those surfaces (pill/dock are live at
+    // full decoration:blur:passes). Kawase a=1 still; only pass count drops.
+    const int PREV_PASSES   = ScrollOverview::Config::getValue<int>("decoration:blur:passes");
+    const int CHROME_PASSES = std::max(1, PREV_PASSES - 1);
+    ScrollOverview::Config::setValue("decoration:blur:passes", CHROME_PASSES);
+    auto restorePasses = Hyprutils::Utils::CScopeGuard([PREV_PASSES] {
+        ScrollOverview::Config::setValue("decoration:blur:passes", PREV_PASSES);
+    });
+
     // Dual-kawase the CURRENT overview main FB (cards + tiles if already drawn).
     const auto BLURRED = g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage);
     if (!BLURRED || !BLURRED->ok())
@@ -244,7 +255,7 @@ void flushPass(PHLMONITOR monitor) {
     g_pHyprRenderer->m_renderPass.clear();
 }
 
-void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur) {
+void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur, int blurPasses) {
     if (alpha <= 0.F)
         return;
 
@@ -262,6 +273,9 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     // usePrecomputedBlur means "sample frameChromeBlur()" (overview), not
     // Hyprland xray/m_blurFB (desktop wallpaper). See X88.
     data.xray          = usePrecomputedBlur;
+    // X99: strip/results pass decoration:blur:passes-1 here so live fallback
+    // matches the weaker capture (sample path ignores this; capture bakes it).
+    data.blurPasses    = blurPasses;
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(data));
 }
 

@@ -2541,13 +2541,31 @@ namespace {
 // callbacks, and hover is the natural on-demand signal.
 //
 // X25's drawing path, lifted out of render()'s lambda so the panel can use it
-// too. `forcePreviewVisible` is gated on MINIMIZED: a window that is already on
-// screen needs none of it, and asserting its alpha would stomp whatever the
-// compositor is animating.
+// too. Force visibility for anything NOT currently shown on this monitor's
+// active desktop: minimized (special stash workspace) AND windows on other
+// workspaces. On-screen active-desktop windows need none of it — asserting
+// their alpha would stomp compositor animations. X99: other-desktop previews
+// went blank after X91 because only minimized was forced.
 void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now) {
     const bool STASHED = Minimize::isMinimized(window);
-    if (STASHED)
+    const bool OFF_ACTIVE =
+        !window->m_workspace || !monitor || window->m_workspace != monitor->m_activeWorkspace;
+    // Minimized always; otherwise any window not on this monitor's active ws.
+    const bool NEED_FORCE = STASHED || OFF_ACTIVE;
+
+    bool       wasWsVisible = false;
+    bool       wasWsForce   = false;
+    PHLWORKSPACE ws;
+    if (NEED_FORCE) {
         forcePreviewVisible(window);
+        ws = window->m_workspace;
+        if (ws) {
+            wasWsVisible         = ws->m_visible;
+            wasWsForce           = ws->m_forceRendering;
+            ws->m_visible        = true;
+            ws->m_forceRendering = true;
+        }
+    }
 
     const auto  SIZE        = window->m_realSize->value();
     const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(box.height / (SIZE.y * monitor->m_scale)) : 1.F;
@@ -2564,7 +2582,13 @@ void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& 
         .dockLivePreview         = true,
     });
 
-    if (STASHED)
+    if (ws) {
+        ws->m_visible        = wasWsVisible;
+        ws->m_forceRendering = wasWsForce;
+    }
+
+    // Frame callbacks for anything that would otherwise freeze (hidden ws).
+    if (NEED_FORCE)
         presentPreview(window, monitor, now);
 }
 
