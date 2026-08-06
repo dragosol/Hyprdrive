@@ -658,8 +658,13 @@ static float overviewResultsSpanW(PHLMONITOR monitor) {
     if (!monitor)
         return 1.F;
 
+    // X65 (user, 2026-08-05): "results blur should not take up 80% of the
+    // screen width, maybe something like 50%". A result is an icon, a name and
+    // a description -- it never needed the tile grid's full span, and at 86%
+    // the frosted card was the largest thing on screen. Clamped so a narrow
+    // monitor still leaves room for the G6 header column plus a usable row.
     const float GAPL = sc<float>(ScrollOverview::Config::getMissionControlGap());
-    return std::max(1.F, sc<float>(monitor->m_size.x) - (GAPL * 2.F));
+    return std::clamp(sc<float>(monitor->m_size.x) * 0.5F, 1.F, std::max(1.F, sc<float>(monitor->m_size.x) - (GAPL * 2.F)));
 }
 
 // G5: the grid "caps at 6 and at whatever fits the width". The 6 is applied
@@ -689,6 +694,44 @@ static float overviewResultsSectionHeight(const SSearchSection& section, float s
 // the query matches, the desktop strip and the window tiles stay on screen
 // (DoD clause 23, whose PLACEMENT half X60 rewrote and whose "the overview
 // stays visible" half is unchanged).
+// X64. USER-REPORTED: "it should show just like gnome with results in
+// categories" -- against a build that showed the apps icons and nothing else.
+//
+// renderSearch() drops any card that will not fit the band, and the apps grid is
+// drawn FIRST, so an overflowing stack loses the PROVIDER categories entirely.
+// G5 turned that from a latent ceiling into a daily one by raising the caps from
+// 5 SHARED to 6 apps + 5 rows PER PROVIDER.
+//
+// So the stack is made to FIT before anything measures it: rows are given up
+// from the tallest section first, and no section is ever taken below one row.
+// Every category survives; the rows given up are what G6's "%d more" reports.
+// Dropping a whole category to fit a box is never the answer -- the categories
+// ARE the feature.
+static void overviewTrimSectionsToFit(std::vector<SSearchSection>& sections, PHLMONITOR monitor) {
+    if (sections.empty() || !monitor)
+        return;
+
+    const float SPANWL = overviewResultsSpanW(monitor);
+    // The same ceiling the band target uses, less the gaps it adds back, so the
+    // two cannot disagree about what "fits" means.
+    const float BUDGET = std::max(0.F, (sc<float>(monitor->m_size.y) / 2.F) - overviewSearchLogicalHeight(monitor) - (OVERVIEW_RESULT_PANELGAPL * 2.F));
+
+    const auto stackHeight = [&] {
+        float h = sc<float>(sections.size() - 1) * OVERVIEW_RESULT_SECTIONGAPL;
+        for (const auto& SECTION : sections)
+            h += overviewResultsSectionHeight(SECTION, SPANWL);
+        return h;
+    };
+
+    while (stackHeight() > BUDGET) {
+        const auto TALLEST = std::ranges::max_element(sections, {}, [&](const SSearchSection& SECTION) { return overviewResultsSectionHeight(SECTION, SPANWL); });
+        if (TALLEST == sections.end() || TALLEST->rows.size() <= 1)
+            break; // every category keeps a row, even if the stack still overflows
+
+        TALLEST->rows.pop_back();
+    }
+}
+
 static float overviewResultsBandTarget(PHLMONITOR monitor, const std::vector<SSearchSection>& sections) {
     if (sections.empty() || !monitor)
         return 0.F;
@@ -6069,7 +6112,10 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // culling return below -- the strip and grid reflow off it even on frames
     // where the pill itself is scrolled off screen.
     // X49: the band is sized from the SECTION CARDS now, not a flat row count.
-    const auto SECTIONS = overviewSearchSections(RESULTS);
+    auto SECTIONS = overviewSearchSections(RESULTS);
+    // X64, and BEFORE the band target below: the band maths and the render pass
+    // must see the same trimmed set. Deriving it twice is the X49 mistake.
+    overviewTrimSectionsToFit(SECTIONS, monitor);
 
     if (const float TARGET = overviewResultsBandTarget(monitor, SECTIONS); std::abs(resultsBand->goal() - TARGET) > 0.5F)
         *resultsBand = TARGET;
@@ -6172,9 +6218,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         // inset by the mission-control gap -- instead of the search pill's
         // 436px. Taken from the grid's own inset rather than picked, so the two
         // stay aligned if either moves.
-        const float SPANGAPL = sc<float>(ScrollOverview::Config::getMissionControlGap());
-        const float SPANXL   = sc<float>(monitor->m_position.x) + SPANGAPL;
-        const float SPANWL   = overviewResultsSpanW(monitor);
+        const float SPANWL = overviewResultsSpanW(monitor);
+        const float SPANXL = sc<float>(monitor->m_position.x) + ((sc<float>(monitor->m_size.x) - SPANWL) / 2.F);
 
         // X21: the stack fills the band it was allocated, so its height is the
         // ANIMATED band minus the gaps.
