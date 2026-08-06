@@ -141,13 +141,15 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
 
     if (!boxDamage.empty()) {
         if (data.xray) {
-            // X88: sample the overview chrome blur (live dual-kawase of the
-            // overview FB after tiles). NEVER Monitor::m_blurFB -- that buffer
-            // is Hyprland's desktop wallpaper xray and made the strip/results
-            // frost the wallpaper instead of the overview under them.
+            // Result cards: sample the private overview chrome FB (X92).
             blurred = OverviewRender::frameChromeBlur();
         } else {
-            blurred = g_pHyprRenderer->blurMainFramebuffer(data.alpha, &boxDamage);
+            // X93. LIVE path (strip panel, pill, dock): dual-kawase the whole
+            // main FB with decoration:blur:*, then sample into this box.
+            // Box-only damage under-blurs thin chrome (strip); windows get a
+            // full-strength kawase — match that strength for the strip panel.
+            CRegion fullDamage{CBox{{}, MONITOR->m_transformedSize}};
+            blurred = g_pHyprRenderer->blurMainFramebuffer(data.alpha, &fullDamage);
         }
     }
 
