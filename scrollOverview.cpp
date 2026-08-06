@@ -6029,12 +6029,12 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // cells under a panel more opaque than they are.
                 const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
 
-                // X96. Strip PANEL samples the private full-monitor chrome blur
-                // (captureFrameChromeBlur: decoration:blur:* × a=1 over the whole
-                // FB — same dual-kawase work windows get). LIVE thin-region blur
-                // looked weaker in practice. Frost alpha 1; open/close fade is on
-                // the tint only. Mini strip windows unchanged.
-                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, 1.F, true);
+                // X96/X98. Strip PANEL samples private full-mon chrome blur
+                // (decoration:blur:* × kawase a=1). Composite alpha is FADE —
+                // same open/close progress as the tint and minis — so Super spam
+                // does not leave a full-strength frost ghost. Kawase radius is
+                // never multiplied by FADE (OverviewPassElement always blurs at 1).
+                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, true);
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
