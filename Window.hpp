@@ -25,6 +25,11 @@ struct SRenderParams {
     // blur FB cannot be rebuilt at the temporary strength. Dock previews set
     // false -- they must never touch global blur state.
     bool                  scaleBlurToRenderScale = true;
+    // Dock hover panel: render a scaled copy via renderModif WITHOUT rewriting
+    // m_realPosition/m_realSize. Mutating geometry left a mini rounded outline
+    // at the real window's top-left (tiled position ignores the temp position
+    // write; size still shrank).
+    bool                  dockLivePreview        = false;
 };
 
 void renderOverviewWindow(const SRenderParams& params);

@@ -2560,6 +2560,8 @@ void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& 
         .now                     = now,
         // X90: dock previews must not touch decoration:blur:size / m_blurFB.
         .scaleBlurToRenderScale  = false,
+        // X91: do not rewrite real window geometry (ghost mini outline).
+        .dockLivePreview         = true,
     });
 
     if (STASHED)

@@ -904,6 +904,65 @@ void renderOverviewWindow(const SRenderParams& params) {
     if (!params.window)
         return;
 
+    // X91. Dock live previews: scale+translate the real window into the cell
+    // without rewriting geometry. Rewriting size (and not reliably position for
+    // tiled windows) drew a mini rounded surface at the real window's top-left.
+    if (params.dockLivePreview && params.monitor) {
+        const auto MONITOR = params.monitor;
+        const auto WINDOW  = params.window;
+
+        const auto REALPOS  = WINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto REALSIZE = WINDOW->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        if (REALSIZE.x < 1.0 || REALSIZE.y < 1.0)
+            return;
+
+        // Real window in monitor-local pixels (same space as params.windowBox).
+        const CBox REALPX{
+            (REALPOS - MONITOR->m_position) * MONITOR->m_scale,
+            REALSIZE * MONITOR->m_scale,
+        };
+        if (REALPX.width < 1.0 || REALPX.height < 1.0 || params.windowBox.width < 1.0 || params.windowBox.height < 1.0)
+            return;
+
+        // Match prior height-based preview scale; letterbox if aspects differ.
+        const float S = std::min(sc<float>(params.windowBox.width) / sc<float>(REALPX.width), sc<float>(params.windowBox.height) / sc<float>(REALPX.height));
+        if (S <= 0.F)
+            return;
+
+        // SCALE from monitor origin, then TRANSLATE so the scaled real box lands
+        // on the preview cell (centered if letterboxed).
+        const float SCALEDW = sc<float>(REALPX.width) * S;
+        const float SCALEDH = sc<float>(REALPX.height) * S;
+        const float OFFX    = sc<float>(params.windowBox.x) + (sc<float>(params.windowBox.width) - SCALEDW) / 2.F - sc<float>(REALPX.x) * S;
+        const float OFFY    = sc<float>(params.windowBox.y) + (sc<float>(params.windowBox.height) - SCALEDH) / 2.F - sc<float>(REALPX.y) * S;
+
+        Render::SRenderModifData modif;
+        modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, S);
+        modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, Vector2D{OFFX, OFFY});
+
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
+
+        const size_t firstElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
+        // standalone: no decorate path side effects; content only. Rounding is
+        // forced below so the cell still reads as a rounded thumbnail.
+        g_pHyprRenderer->renderWindow(WINDOW, MONITOR, params.now, false, Render::RENDER_PASS_MAIN, false, true);
+        roundStandaloneWindowPassElements(WINDOW, MONITOR, S, firstElement);
+        // Clip every surface of this window to the preview cell so nothing bleeds.
+        {
+            auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+            for (size_t i = firstElement; i < passElements.size(); ++i) {
+                auto* surface = dc<CSurfacePassElement*>(passElements[i].element.get());
+                if (!surface || surface->m_data.pWindow != WINDOW)
+                    continue;
+                surface->m_data.clipBox = params.windowBox;
+            }
+        }
+
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
+        OverviewRender::flushPass(MONITOR);
+        return;
+    }
+
     const bool                   fullscreen   = Fullscreen::controller()->isFullscreen(params.window);
     const SOverviewWindowMetrics metrics      = getOverviewWindowMetrics(params.monitor, params.window, params.renderScale);
 
