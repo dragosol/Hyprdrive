@@ -5,6 +5,7 @@
 #include <cmath>
 #include <sstream>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/helpers/math/Math.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/gl/GLTexture.hpp>
 #include <drm_fourcc.h>
@@ -13,18 +14,18 @@
 #include "Config.hpp"
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
+#include <hyprland/src/render/pass/ClearPassElement.hpp>
 #include "globals.hpp"
 #include <string>
 #include <unordered_map>
 
 namespace OverviewRender {
 
-// X88. Per-frame behind-chrome blur of the overview (see setFrameChromeBlur).
-static SP<Render::ITexture> g_frameChromeBlur;
-
-void setFrameChromeBlur(SP<Render::ITexture> tex) {
-    g_frameChromeBlur = std::move(tex);
-}
+// X92. Private FB holding the overview chrome blur for the rest of the frame.
+// g_frameChromeBlur is always chromeBlurFB->getTexture() when valid — never a
+// transient blurMainFramebuffer() result.
+static SP<Render::IFramebuffer> g_chromeBlurFB;
+static SP<Render::ITexture>     g_frameChromeBlur;
 
 SP<Render::ITexture> frameChromeBlur() {
     return g_frameChromeBlur;
@@ -32,6 +33,62 @@ SP<Render::ITexture> frameChromeBlur() {
 
 void clearFrameChromeBlur() {
     g_frameChromeBlur.reset();
+}
+
+void captureFrameChromeBlur(PHLMONITOR monitor) {
+    g_frameChromeBlur.reset();
+    if (!monitor || !g_pHyprRenderer || !g_pHyprRenderer->m_renderData.currentFB)
+        return;
+
+    const auto FBSIZE     = monitor->m_pixelSize;
+    const auto RENDERSIZE = monitor->m_transformedSize;
+    const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
+
+    if (!g_chromeBlurFB)
+        g_chromeBlurFB = g_pHyprRenderer->createFB("scrolloverview_chrome_blur");
+
+    if (!g_chromeBlurFB || !g_chromeBlurFB->isAllocated() || g_chromeBlurFB->m_size != FBSIZE || g_chromeBlurFB->m_drmFormat != FBFORMAT) {
+        if (g_chromeBlurFB)
+            g_chromeBlurFB->release();
+        if (!g_chromeBlurFB || !g_chromeBlurFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), FBFORMAT))
+            return;
+    }
+
+    g_chromeBlurFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
+
+    CRegion fullDamage{CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y}};
+    // Dual-kawase the CURRENT overview main FB (cards + tiles if already drawn).
+    const auto BLURRED = g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage);
+    if (!BLURRED || !BLURRED->ok())
+        return;
+
+    // COPY into our FB so later window/dock live blurs cannot stomp it.
+    {
+        auto bindChrome = g_pHyprRenderer->bindTempFB(g_chromeBlurFB);
+
+        const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
+        g_pHyprRenderer->m_renderData.damage = fullDamage;
+        auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
+
+        g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 0.F}}, fullDamage);
+
+        const auto SAVEDTRANSFORM = BLURRED->m_transform;
+        BLURRED->m_transform      = Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform));
+        auto restoreTransform     = Hyprutils::Utils::CScopeGuard([BLURRED, SAVEDTRANSFORM] { BLURRED->m_transform = SAVEDTRANSFORM; });
+
+        g_pHyprRenderer->pushMonitorTransformEnabled(true);
+        auto restoreXform = Hyprutils::Utils::CScopeGuard([] { g_pHyprRenderer->popMonitorTransformEnabled(); });
+
+        g_pHyprRenderer->draw(
+            CTexPassElement::SRenderData{
+                .tex    = BLURRED,
+                .box    = CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y},
+                .damage = fullDamage,
+            },
+            fullDamage);
+    }
+
+    g_frameChromeBlur = g_chromeBlurFB->getTexture();
 }
 
 

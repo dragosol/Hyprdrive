@@ -6029,8 +6029,8 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // cells under a panel more opaque than they are.
                 const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
 
-                // X11 / X88: frosted strip. Samples the overview chrome blur
-                // (live dual-kawase of the overview FB after tiles).
+                // X11 / X92: frosted strip. Samples captureFrameChromeBlur() —
+                // a private copy of the overview (cards+tiles), not a temp blur.
                 OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, true);
 
                 CRectPassElement::SRectData panel;
@@ -6466,7 +6466,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 continue;
             card.round();
 
-            // §10 clause 3 / X88: result frost samples the overview chrome blur.
+            // §10 clause 3 / X92: result frost samples the private overview chrome blur.
             OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, true);
 
             CRectPassElement::SRectData cardBg;
@@ -7783,22 +7783,6 @@ void CScrollOverview::render() {
     if (NEEDS_PRECOMPUTED_BLUR)
         overviewBlurDirty = false;
 
-    // X89. Capture behind-chrome blur BEFORE live windows.
-    //
-    // The strip (and result cards) sample this texture. Capturing AFTER
-    // renderWorkspaceLive made the glass depend on whether any tiles ran:
-    // each tile temporarily scales decoration:blur:size by renderScale and may
-    // live-blur the main FB (blockBlurOptimization). With windows present the
-    // strip looked different; with none (e.g. search filtered them all out) it
-    // looked "correct". That is the empty-vs-results symptom -- it was really
-    // windows-vs-no-windows. Snapshot the overview backdrop once here so chrome
-    // frost is independent of the tile pass.
-    OverviewRender::clearFrameChromeBlur();
-    if (ScrollOverview::Config::getBlur()) {
-        CRegion fullDamage{CBox{{}, MONITOR->m_transformedSize}};
-        OverviewRender::setFrameChromeBlur(g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage));
-    }
-
     {
         Prof::Timer PROFLIVE{Prof::liveNs, Prof::liveCalls};
         for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
@@ -7807,6 +7791,16 @@ void CScrollOverview::render() {
     }
 
     OverviewRender::flushPass(MONITOR);
+
+    // X92. Blur the overview main FB (cards + tiles) into a PRIVATE framebuffer.
+    // Storing blurMainFramebuffer()'s return value alone was wrong: that texture
+    // is reused by the next live blur (window tiles, search pill, dock), so the
+    // strip sampled stomped/wrong content whenever windows had run. Copy into
+    // chromeBlurFB once here; strip/results sample that stable texture.
+    if (ScrollOverview::Config::getBlur())
+        OverviewRender::captureFrameChromeBlur(MONITOR);
+    else
+        OverviewRender::clearFrameChromeBlur();
 
     {
         Prof::Timer PROFSTRIP{Prof::stripNs, Prof::stripCalls};

@@ -11,11 +11,11 @@ namespace OverviewRender {
 void flushPass(PHLMONITOR monitor);
 void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur);
 
-// X88. One live dual-kawase of the overview's main FB (after tiles), sampled by
-// strip/result chrome. NOT Monitor::m_blurFB -- that is Hyprland's desktop
-// wallpaper xray buffer and is why the strip frosted the wallpaper instead of
-// the overview scene.
-void                 setFrameChromeBlur(SP<Render::ITexture> tex);
+// X92. Stable dual-kawase of the overview main FB for strip/result chrome.
+// blurMainFramebuffer() returns a TEMPORARY texture that window live-blurs
+// overwrite in the same frame — storing only that pointer made the strip frost
+// depend on whether tiles ran. captureFrameChromeBlur copies into a private FB.
+void                 captureFrameChromeBlur(PHLMONITOR monitor);
 SP<Render::ITexture> frameChromeBlur();
 void                 clearFrameChromeBlur();
 
