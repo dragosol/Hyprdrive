@@ -30,12 +30,23 @@ namespace {
 // hover "is still bouncy and non-apple like". Zero overshoot now, both ways.
 // Do NOT restore easeOutBack here as an X7 regression fix.
 //
-// Hover is a micro-interaction, so it sits in the rice's FAST family (150ms)
-// rather than the 260ms entrance band; the exit is 27% quicker again.
+// X73 (user, 2026-08-06): "in gnome the mouseover animation is smoother and
+// different curves, can you adopt the same animation".
+//
+// GNOME's hover is a CSS transition on the tile: ONE timing function both ways
+// and ONE duration both ways, on an ease-out. That is deliberately NOT this
+// rice's house rule -- entrances decelerate, exits accelerate and run ~25%
+// shorter -- and the difference is exactly what the user is hearing as "less
+// smooth": an exit that is quicker than its entrance reads as a snap-back on an
+// interaction the pointer is still inside.
+//
+// So the HOVER, and only the hover, moves to GNOME's shape. The press keeps the
+// house curves (it is a discrete acknowledgement, not a hover state) and
+// houseEase is untouched for everything else in the rice.
 constexpr float HOVER_GROW    = 0.05F;
 constexpr float PRESS_SHRINK  = 0.04F;
-constexpr float HOVER_IN_MS   = 150.F;
-constexpr float HOVER_OUT_MS  = 110.F;
+constexpr float HOVER_IN_MS   = 200.F;
+constexpr float HOVER_OUT_MS  = 200.F;
 
 // User, 2026-08-06: a tile the cursor has left stays blown up for a beat, "that
 // way it gives me time to decide whether to press the x button or not". Only
@@ -145,11 +156,23 @@ SState* stateFor(const PHLWINDOW& window, bool create) {
 
 // Growing is an entrance and shrinking back is an exit, so the direction of the
 // retarget picks the curve -- the same two the compositor and the shell use.
+// Used by the PRESS. The hover has its own curve; see easedHover.
 float eased(const SEase& ease) {
     const float PROGRESS = std::clamp(std::chrono::duration<float, std::milli>(Time::steadyNow() - ease.start).count() / ease.ms, 0.F, 1.F);
     const float CURVE    = houseEase(ease.to > ease.from, PROGRESS);
 
     return ease.from + (ease.to - ease.from) * CURVE;
+}
+
+// X73. Clutter's EASE_OUT_QUAD, which is what GNOME Shell puts on its overview
+// and dash hover: 1 - (1-t)^2. Symmetric -- the same curve and the same duration
+// in both directions -- because that is what a CSS transition does, and the
+// symmetry is most of why GNOME's hover feels smoother than an accelerated exit.
+float easedHover(const SEase& ease) {
+    const float T   = std::clamp(std::chrono::duration<float, std::milli>(Time::steadyNow() - ease.start).count() / ease.ms, 0.F, 1.F);
+    const float INV = 1.F - T;
+
+    return ease.from + (ease.to - ease.from) * (1.F - INV * INV);
 }
 
 float shortSide(const CBox& box) {
@@ -234,14 +257,25 @@ CBox scaledBox(const PHLWINDOW& window, const CBox& base) {
     if (!STATE || base.w < 1 || base.h < 1)
         return base;
 
-    const float FACTOR = (1.F + HOVER_GROW * eased(STATE->hover)) * (1.F - PRESS_SHRINK * std::clamp(eased(STATE->press), 0.F, 1.F));
+    const float FACTOR = (1.F + HOVER_GROW * easedHover(STATE->hover)) * (1.F - PRESS_SHRINK * std::clamp(eased(STATE->press), 0.F, 1.F));
     if (std::abs(FACTOR - 1.F) < 0.0005F)
         return base;
 
     const float DW = sc<float>(base.w) * (FACTOR - 1.F);
     const float DH = sc<float>(base.h) * (FACTOR - 1.F);
 
-    return CBox{base.x - DW / 2.F, base.y - DH / 2.F, base.w + DW, base.h + DH};
+    // X73 (user: "when mousedover, some of that outline disappears, the bottom
+    // is missing"). ROUNDED, and that is a correctness fix rather than tidiness.
+    // The grow is a fraction of the tile, so an un-rounded box lands on
+    // fractional coordinates, and the border is drawn in the annulus between the
+    // box and the box grown by borderSize: at 20px that annulus survives the
+    // fractional edges, at 1px the RIGHT and BOTTOM sides round away to nothing
+    // while left and top keep theirs. Measured -- top 356px and left 344px of
+    // ring against bottom 0 and right 1. Whole pixels in, four edges out.
+    CBox grown{base.x - DW / 2.F, base.y - DH / 2.F, base.w + DW, base.h + DH};
+    grown.round();
+
+    return grown;
 }
 
 // The button's HIT area, as opposed to what is drawn.
@@ -270,7 +304,7 @@ CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorS
     if (!STATE || tileBox.w < 1 || tileBox.h < 1)
         return {};
 
-    if (std::clamp(eased(STATE->hover), 0.F, 1.F) < CLOSE_VISIBLE_AT)
+    if (std::clamp(easedHover(STATE->hover), 0.F, 1.F) < CLOSE_VISIBLE_AT)
         return {};
 
     const float SCALE = std::max(monitorScale, 0.01F);
@@ -309,7 +343,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // the tile rather than popping. Below the tile, clear of X8's app icon,
     // which straddles the bottom edge.
     if (const auto* const HSTATE = stateFor(window, false)) {
-        const float A = std::clamp(eased(HSTATE->hover), 0.F, 1.F);
+        const float A = std::clamp(easedHover(HSTATE->hover), 0.F, 1.F);
         if (A > 0.01F) {
             const float ICONSIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE);
             const float BOTTOM   = sc<float>(tileBox.y + tileBox.h) + ICONSIDE / 2.F + CAPTION_GAP * SCALE;
@@ -325,7 +359,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // 100ms. Driven off the hover ramp above CLOSE_VISIBLE_AT, so it needs no
     // state of its own and cannot disagree with the threshold the hit-test uses.
     const auto* const CSTATE = stateFor(window, false);
-    const float       ALPHA  = CSTATE ? std::clamp((eased(CSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F;
+    const float       ALPHA  = CSTATE ? std::clamp((easedHover(CSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F;
     if (ALPHA <= 0.F)
         return;
 
