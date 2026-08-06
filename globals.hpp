@@ -47,6 +47,17 @@ enum class EOverviewNavZone : uint8_t {
 };
 inline EOverviewNavZone g_overviewNavZone = EOverviewNavZone::Tile;
 
+// X74 (user, 2026-08-06): the ring is the POINTER's, except while the keyboard
+// is the thing actually driving. The tile zone is seeded to the active window
+// on every open, so keying the ring on the zone alone drew a permanent ring
+// around the active window that the user never asked for.
+//
+// X61 is why this is a flag and not a deletion: arrowing between tiles has to
+// keep its visual, and that was itself a user complaint. Set by an arrow
+// landing on a tile, cleared by the overview opening and by ANY pointer motion
+// -- whichever device moved last owns the ring.
+inline bool g_overviewKeyboardTile = false;
+
 // STANDING UX RULE (RICE_PROGRESS.md): the rice has exactly TWO motion curves,
 // mirrored in hyprland/general.lua as `appleDecel`/`appleAccel` and in the
 // quickshell Appearance.qml. Registered once with Hyprland's animation manager

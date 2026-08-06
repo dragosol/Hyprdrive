@@ -283,7 +283,8 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
     g_searchActive = false;
     resetCompose(); // a sequence abandoned last time must not eat the first key
     // X61: and on the tiles, which is where the remembered selection lives.
-    g_overviewNavZone = EOverviewNavZone::Tile;
+    g_overviewNavZone       = EOverviewNavZone::Tile;
+    g_overviewKeyboardTile  = false;
     SearchProviders::query("");
     g_overviewAppSelection      = -1;
     g_overviewSelectFirstPending = false;

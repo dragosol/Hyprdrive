@@ -245,7 +245,20 @@ PHLWINDOW hovered() {
     if (const auto LIVE = g_hovered.lock())
         return LIVE;
 
-    return g_lingering.lock();
+    // ...but only while the linger is actually still running. g_lingering is
+    // only ever reassigned when ANOTHER tile takes the hover, so without this
+    // the last tile the cursor touched answered as hovered forever: its ring and
+    // its close button survived the shrink and sat there until the overview
+    // closed. Measured 2026-08-06 -- 3.2s after the cursor left, the ring was
+    // still drawn, at the UNGROWN box size, which is what gave it away.
+    if (const auto LINGERING = g_lingering.lock()) {
+        if (const auto* const STATE = stateFor(LINGERING, false); STATE && easedHover(STATE->hover) > 0.001F)
+            return LINGERING;
+
+        g_lingering.reset();
+    }
+
+    return {};
 }
 
 bool animating() {

@@ -3429,6 +3429,11 @@ CBox CScrollOverview::tileCloseButtonBox(const PHLWINDOW& window) const {
 // pokes a few px past the slot, and without this the hover (and the button with
 // it) would vanish exactly as the cursor arrived on it.
 void CScrollOverview::updateTileHover() {
+    // The pointer moved, so the pointer owns the ring again. Whatever the
+    // arrows had selected keeps its role for Return and for close(); it just
+    // stops being the thing drawn.
+    g_overviewKeyboardTile = false;
+
     if (closing || dragActiveWindow || resizeActiveWindow || scrollingPanPointerDown) {
         TileChrome::setHovered(PHLWINDOW{});
         return;
@@ -5264,6 +5269,7 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
             g_overviewNavZone      = EOverviewNavZone::Tile;
             g_overviewAppSelection = -1;
             closeOnWindow          = best->window;
+            g_overviewKeyboardTile = true;
             break;
     }
 
@@ -6797,7 +6803,7 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         // appears under the cursor. TileChrome::hovered() answers for the
         // post-hover linger too, so the ring holds exactly as long as the
         // blow-up and the close button do.
-        .selected             = (g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window) || TileChrome::hovered() == window,
+        .selected             = (g_overviewKeyboardTile && g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window) || TileChrome::hovered() == window,
         .dragged              = dragged,
     });
 
