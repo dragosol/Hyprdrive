@@ -406,11 +406,41 @@ static bool activateSearchResult(int index) {
 // Haystack is the extension's own, `${wsIndex + 1}: ${title} ${appName}`, plus
 // the window class -- dropping the class would regress the F2 behaviour that
 // shipped long before X18.
+// Counts RENDERED frames, which is the only clock this code actually advances
+// on: an idle overview renders nothing, so a wall-clock "last touched" measures
+// how long the user sat still rather than whether the tile was drawn.
+// ponytail: one counter for all monitors, so a second output would advance it
+// twice per frame and every tile would read as skipped; make it per-monitor if
+// this ever runs on more than one.
+static uint64_t g_overviewFrame = 0;
+
 static bool overviewSearchMatches(const PHLWINDOW& window) {
     if (g_overviewSearch.empty())
         return true;
 
     Prof::Timer PROF{Prof::matchNs, Prof::matchCalls};
+
+    // X52 secondary. ~40 call sites consult this gate, so one frame asks the
+    // same question about the same window dozens of times -- measured 617-1041
+    // calls per frame over a 16-window fixture on the broad query `x`, each one
+    // rebuilding the haystack from scratch. The answer cannot change within a
+    // frame, so cache it for the frame.
+    //
+    // The key carries the QUERY as well as the frame counter, not a generation
+    // number someone has to remember to bump: a keystroke lands between frames,
+    // and the query is 1-3 characters, so comparing it is cheaper than the
+    // allocation this skips. Liveness (validMapped) stays OUTSIDE the memo, in
+    // shouldShowOverviewWindow, so an unmapped window is never served from here.
+    static uint64_t                                                memoFrame = ~0ULL;
+    static std::string                                             memoQuery;
+    static std::unordered_map<Desktop::View::CWindow*, bool>       memo;
+
+    if (memoFrame != g_overviewFrame || memoQuery != g_overviewSearch) {
+        memo.clear();
+        memoFrame = g_overviewFrame;
+        memoQuery = g_overviewSearch;
+    } else if (const auto IT = memo.find(window.get()); IT != memo.end())
+        return IT->second;
 
     // Hyprland numbers regular workspaces from 1, which is what the extension
     // renders as `wsIndex + 1`, so typing "2:" finds desktop 2 on both.
@@ -420,7 +450,9 @@ static bool overviewSearchMatches(const PHLWINDOW& window) {
     if (const auto APPNAME = AppSearch::appNameForClass(window->m_class); !APPNAME.empty())
         haystack += " " + APPNAME;
 
-    return AppSearch::strictMatch(g_overviewSearch, haystack);
+    const bool MATCHED = AppSearch::strictMatch(g_overviewSearch, haystack);
+    memo[window.get()] = MATCHED;
+    return MATCHED;
 }
 
 // The search filter hangs off this gate rather than off the grid builder: every
@@ -982,14 +1014,6 @@ struct SGridReflow {
     uint64_t        lastFrame    = 0;
     bool            promotedLast = false;
 };
-
-// Counts RENDERED frames, which is the only clock this code actually advances
-// on: an idle overview renders nothing, so a wall-clock "last touched" measures
-// how long the user sat still rather than whether the tile was drawn.
-// ponytail: one counter for all monitors, so a second output would advance it
-// twice per frame and every tile would read as skipped; make it per-monitor if
-// this ever runs on more than one.
-static uint64_t g_overviewFrame = 0;
 
 static std::unordered_map<Desktop::View::CWindow*, SGridReflow> g_gridReflows;
 static bool                                      g_gridReflowActive = false;
@@ -7626,8 +7650,11 @@ void CScrollOverview::render() {
     OverviewRender::flushPass(MONITOR);
     updateCardWallpaperFB(MONITOR, NOW);
 
-    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
-        renderWorkspaceBackground(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
+    {
+        Prof::Timer PROFBG{Prof::bgNs, Prof::bgCalls};
+        for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+            renderWorkspaceBackground(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
+        }
     }
 
     if (workspaceInsertTransition.active && !workspaceInsertTransition.transitionFadeIn) {
@@ -7654,11 +7681,17 @@ void CScrollOverview::render() {
     if (NEEDS_PRECOMPUTED_BLUR)
         overviewBlurDirty = false;
 
-    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
-        renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
+    {
+        Prof::Timer PROFLIVE{Prof::liveNs, Prof::liveCalls};
+        for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+            renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
+        }
     }
 
-    renderStrip(MONITOR, SCALE, NOW);
+    {
+        Prof::Timer PROFSTRIP{Prof::stripNs, Prof::stripCalls};
+        renderStrip(MONITOR, SCALE, NOW);
+    }
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
     renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
     renderSearch(MONITOR, SCALE);
@@ -7691,9 +7724,9 @@ void CScrollOverview::render() {
         ++Prof::frames;
         const auto SINCEKEY = std::chrono::duration<double, std::milli>(Prof::clock::now() - Prof::keyAt).count();
         if (FILE* const F = std::fopen("/tmp/scrolloverview-prof.log", "a")) {
-            std::fprintf(F, "q=%-6s f=%llu sinceKey=%7.2fms  FRAME=%6.2fms  renderSearch=%6.2fms  match=%5.2fms/%llu  rows=%5.2fms  app=%5.2fms  scan=%5.2fms/%llu  TEXT[cold=%llu %6.2fms]  ICON[cold=%llu resolve=%6.2f decode=%6.2f upload=%6.2f]\n",
+            std::fprintf(F, "q=%-6s f=%llu sinceKey=%7.2fms  FRAME=%6.2fms  bg=%6.2fms  live=%6.2fms  strip=%6.2fms  renderSearch=%6.2fms  match=%5.2fms/%llu  rows=%5.2fms  app=%5.2fms  scan=%5.2fms/%llu  TEXT[cold=%llu %6.2fms]  ICON[cold=%llu resolve=%6.2f decode=%6.2f upload=%6.2f]\n",
                          g_overviewSearch.c_str(), (unsigned long long)Prof::frames, SINCEKEY,
-                         Prof::frameNs / 1e6, Prof::srchNs / 1e6,
+                         Prof::frameNs / 1e6, Prof::bgNs / 1e6, Prof::liveNs / 1e6, Prof::stripNs / 1e6, Prof::srchNs / 1e6,
                          Prof::matchNs / 1e6, (unsigned long long)Prof::matchCalls,
                          Prof::rowsNs / 1e6, Prof::appNs / 1e6, Prof::scanNs / 1e6, (unsigned long long)Prof::scanCalls,
                          (unsigned long long)Prof::txtCold, Prof::txtNs / 1e6, (unsigned long long)Prof::icoCold, Prof::icoResolveNs / 1e6, Prof::icoDecodeNs / 1e6, Prof::icoUploadNs / 1e6);
