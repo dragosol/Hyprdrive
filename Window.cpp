@@ -942,15 +942,35 @@ void renderOverviewWindow(const SRenderParams& params) {
             WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
     });
 
-    // ponytail: blur radius is applied in screen space, so a shrunk tile keeps the
-    // full desktop radius and reads ~1/renderScale too soft. Scale it for this pass.
+    // X90. Mini renders used to scale decoration:blur:size by renderScale for the
+    // whole compositor. Dock live previews call this path with renderScale ~0.05
+    // (size collapses to 1). Hyprland rebuilds Monitor::m_blurFB from that value
+    // when a window takes the precomputed path; restoring the config int does
+    // NOT rebuild the FB, so every real desktop window kept the weak frost
+    // until something else dirtied it. Overview tiles with windows present
+    // hit the same leak relative to chrome that blurred after them.
+    //
+    // Rules:
+    // 1. Only scale blur when scaleBlurToRenderScale (overview tiles, not dock).
+    // 2. While scaled, force LIVE blur (block optimization) so m_blurFB is never
+    //    rewritten at the temporary strength.
+    // 3. On restore, still mark m_blurFBDirty in case anything else sampled it.
     const auto u3PrevBlurSize = ScrollOverview::Config::getValue<int>("decoration:blur:size");
     const auto u3BlurSize     = std::max(1, sc<int>(std::round(u3PrevBlurSize * params.renderScale)));
-    ScrollOverview::Config::setValue("decoration:blur:size", u3BlurSize);
-    auto restoreBlurSize = Hyprutils::Utils::CScopeGuard([&] { ScrollOverview::Config::setValue("decoration:blur:size", u3PrevBlurSize); });
+    const bool scaleBlur      = params.scaleBlurToRenderScale && u3BlurSize != u3PrevBlurSize && u3PrevBlurSize > 0;
+    if (scaleBlur)
+        ScrollOverview::Config::setValue("decoration:blur:size", u3BlurSize);
+    auto restoreBlurSize = Hyprutils::Utils::CScopeGuard([&] {
+        if (!scaleBlur)
+            return;
+        ScrollOverview::Config::setValue("decoration:blur:size", u3PrevBlurSize);
+        if (params.monitor)
+            params.monitor->m_blurFBDirty = true;
+    });
 
     const size_t firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
-    const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
+    // Never rebuild m_blurFB under a temporary blur size.
+    const bool   usePrecomputedBlur     = !scaleBlur && shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
     g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
     scaleOverviewSubsurfaceOffsets(params.window, params.window->sizeAnimation()->value(), firstWindowPassElement);
     prefilterOverviewWindowTextures(params.window, params.monitor,

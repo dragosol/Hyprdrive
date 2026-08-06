@@ -20,6 +20,11 @@ struct SRenderParams {
     const CBox*           workspaceBox         = nullptr;
     bool                  selected             = false;
     bool                  dragged              = false;
+    // When true (overview tiles), decoration:blur:size is scaled by renderScale
+    // for this draw only, and precomputed m_blurFB is NOT used so the desktop
+    // blur FB cannot be rebuilt at the temporary strength. Dock previews set
+    // false -- they must never touch global blur state.
+    bool                  scaleBlurToRenderScale = true;
 };
 
 void renderOverviewWindow(const SRenderParams& params);

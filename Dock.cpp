@@ -2553,11 +2553,13 @@ void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& 
     const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(box.height / (SIZE.y * monitor->m_scale)) : 1.F;
 
     OverviewWindow::renderOverviewWindow({
-        .monitor     = monitor,
-        .window      = window,
-        .windowBox   = box,
-        .renderScale = RENDERSCALE,
-        .now         = now,
+        .monitor                 = monitor,
+        .window                  = window,
+        .windowBox               = box,
+        .renderScale             = RENDERSCALE,
+        .now                     = now,
+        // X90: dock previews must not touch decoration:blur:size / m_blurFB.
+        .scaleBlurToRenderScale  = false,
     });
 
     if (STASHED)
