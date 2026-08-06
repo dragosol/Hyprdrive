@@ -469,6 +469,20 @@ static bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     if (WINDOW->m_pinned && WINDOW->m_isFloating)
         return false;
 
+    // Y9 REVISED (user, 2026-08-06): a minimized window belongs in the overview
+    // ONLY while a query is active. With an empty query it stays put away --
+    // which is what minimizing it meant -- and this is X58(a)'s original wording
+    // restored: "filtering needs to work even on minimized windows".
+    //
+    // The gate goes HERE and nowhere else on purpose. This function is the one
+    // thing every overview path consults (see the note above it), so putting the
+    // rule in it keeps render, hit-test, drag and grid from ever disagreeing
+    // about whether a stashed window exists. The workspace-home plumbing in
+    // overviewGridWindows and addOverviewWindow stays: it is what puts the
+    // window on the RIGHT desktop once a query does bring it back.
+    if (g_overviewSearch.empty() && ScrollOverview::Minimize::isMinimized(WINDOW))
+        return false;
+
     if (!overviewSearchMatches(WINDOW))
         return false;
 
