@@ -6020,17 +6020,11 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 
                 // X4: hue from the theme, the same general:col.inactive_border the
                 // cell backdrop below reads.
-                // X80 (user, 2026-08-06: "the desktop strip blur is somehow less
-                // intense than the rest"). It was never the BLUR -- every surface in
-                // this plugin goes through one queueBlur onto the same global
-                // decoration:blur:* (X71). It was the TINT over it: this panel sat at
-                // 0.25 against the search pill's 0.60 and the result cards' 0.55, so
-                // the strip alone read as barely frosted.
-                //
-                // Now 0.55, the cards' value, so the overview's surfaces are one
-                // material. The cells still read as more prominent than the panel --
-                // they are drawn OVER it, so their 0.38 stacks to ~0.72 -- which
-                // keeps the reference's ordering the old 0.25 was chosen to protect.
+                // ponytail: alpha 0.25, not the reference's 0.65. The cell backdrop's
+                // tuned 0.38 is this build's fixed point, and the reference keeps its
+                // panel LESS prominent than its cells (0.65 panel under opaque cells);
+                // 0.38 / (1 / 0.65) preserves that ordering instead of burying the
+                // cells under a panel more opaque than they are.
                 const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
 
                 // X11 (user, 2026-08-01): the strip is FROSTED. Live rounded
@@ -6040,7 +6034,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
-                panel.color = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.55F * FADE} : INACTIVE.m_colors[0].modifyA(0.55F * FADE);
+                panel.color = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.25F * FADE} : INACTIVE.m_colors[0].modifyA(0.25F * FADE);
                 panel.round         = PANELROUND;
                 panel.roundingPower = CARDROUND.power;
                 g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(panel));
