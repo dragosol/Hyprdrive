@@ -502,19 +502,28 @@ static void registerConfigValues() {
     // real backdrop (share/x29/x29_gate.py). 15/2 fits 30.0 just as closely and
     // was passed over because more passes is the better gaussian approximation,
     // which is what the reference actually applies.
+    //
+    // (user, 2026-08-06): those measurements are KEPT as documentation but are no
+    // longer the DEFAULT. "All of those blur configs for those different elements
+    // need to be just inherited from hyprland settings" -- the dock was the only
+    // surface in the plugin carrying its own blur, which is why it read as a
+    // different material from the strip and the cards beside it. Every key below
+    // now defaults to -1 = follow decoration:blur:*, and setting any of them back
+    // to the numbers above restores the blur-my-shell match for anyone who wants
+    // GNOME's dock rather than their own theme's.
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:dock:blur_size", "hyprgnomedock: blur size (-1 = follow decoration:blur:size)", 7,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:blur_size", "hyprgnomedock: blur size (-1 = follow decoration:blur:size)", -1,
                                                         SIntValueOptions{.min = -1, .max = 64}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:dock:blur_passes", "hyprgnomedock: blur passes (-1 = follow decoration:blur:passes)", 3,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:blur_passes", "hyprgnomedock: blur passes (-1 = follow decoration:blur:passes)", -1,
                                                         SIntValueOptions{.min = -1, .max = 10}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_brightness",
-                                                          "hyprgnomedock: blur brightness (blur-my-shell brightness; -1 = follow decoration:blur:brightness)", 0.60F,
+                                                          "hyprgnomedock: blur brightness (blur-my-shell brightness; -1 = follow decoration:blur:brightness)", -1.F,
                                                           SFloatValueOptions{.min = -1.F, .max = 2.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_noise",
-                                                          "hyprgnomedock: blur grain; the reference has none (-1 = follow decoration:blur:noise)", 0.F,
+                                                          "hyprgnomedock: blur grain; the reference has none (-1 = follow decoration:blur:noise)", -1.F,
                                                           SFloatValueOptions{.min = -1.F, .max = 1.F}));
     // blur-my-shell applies a gaussian and a brightness and nothing else. Leaving
     // Hyprland's contrast at 0.89 and vibrancy at 0.5 in place put an affine term
@@ -522,11 +531,11 @@ static void registerConfigValues() {
     // made the measured brightness unrecoverable (it fitted 1.26 with a -51 offset).
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_contrast",
-                                                          "hyprgnomedock: blur contrast; the reference applies none (-1 = follow decoration:blur:contrast)", 1.F,
+                                                          "hyprgnomedock: blur contrast; the reference applies none (-1 = follow decoration:blur:contrast)", -1.F,
                                                           SFloatValueOptions{.min = -1.F, .max = 2.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:dock:blur_vibrancy",
-                                                          "hyprgnomedock: blur vibrancy; the reference applies none (-1 = follow decoration:blur:vibrancy)", 0.F,
+                                                          "hyprgnomedock: blur vibrancy; the reference applies none (-1 = follow decoration:blur:vibrancy)", -1.F,
                                                           SFloatValueOptions{.min = -1.F, .max = 1.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:live_layer_frost",
