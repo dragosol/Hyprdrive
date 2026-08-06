@@ -7773,14 +7773,44 @@ void CScrollOverview::render() {
         }
     }
 
-    const bool NEEDS_PRECOMPUTED_BLUR = hasVisiblePrecomputedBlurWindow(MONITOR, ACTIVEIDX, PITCH, SCALE);
-    if (NEEDS_PRECOMPUTED_BLUR && overviewBlurDirty)
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
+    // X81 (user, 2026-08-06): "the desktop strip renders blur correctly ONLY when
+    // search results pop up from the overview search - before that it's still the
+    // weaker blur".
+    //
+    // That observation is the whole diagnosis. The pre-blur was gated on a
+    // WINDOW needing precomputed blur, and hasVisiblePrecomputedBlurWindow culls
+    // off-screen workspaces UNLESS a query is typed (see its
+    // `g_overviewSearch.empty()` clause). So typing turned the gate on, the blur
+    // framebuffer got rebuilt, and the strip's frost snapped to full strength --
+    // which is exactly the reported behaviour, and it is why this looked like a
+    // weaker blur RADIUS for two fires running. It was a STALE blur buffer.
+    //
+    // The strip, the search pill and the result cards are frosted on EVERY frame
+    // the overview draws, so the blur framebuffer has to be rebuilt on every
+    // frame too.
+    //
+    // X82 corrects X81, which kept `overviewBlurDirty` as the gate. That flag
+    // CLEARS after one frame, so the buffer went stale again immediately -- the
+    // pre-blur ran once at open and never again, and the search-results case
+    // LOST the correct blur it used to have. X81 propagated the wrong level in
+    // the wrong direction, which is precisely what the user reported.
+    //
+    // The old gate accidentally worked for search because when it was CLOSED the
+    // dirty flag was never cleared either: it accumulated until a typed query
+    // opened the gate, and the pre-blur then ran against a fully drawn backdrop.
+    // The lesson is that this buffer is not a cache of a static thing -- the
+    // backdrop is the overview's own live output, so a "dirty" flag can only
+    // ever be wrong about it.
+    //
+    // ponytail: a full-screen pre-blur per overview frame. That is what a live
+    // frost costs; the overview already redraws continuously while open. If this
+    // ever shows up in a profile, the fix is to blur only the union of the
+    // frosted boxes, not to reintroduce a staleness flag.
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
 
     OverviewRender::flushPass(MONITOR);
 
-    if (NEEDS_PRECOMPUTED_BLUR)
-        overviewBlurDirty = false;
+    overviewBlurDirty = false;
 
     {
         Prof::Timer PROFLIVE{Prof::liveNs, Prof::liveCalls};
