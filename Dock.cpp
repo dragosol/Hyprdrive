@@ -1127,6 +1127,34 @@ CBox hoverBox(const CBox& iconBox, float scale) {
 // bottom 176, dot 178-182, so the dot's own bottom lands flush with the bottom
 // of the hover highlight. Anchoring to the pill put it ITEM_PAD_BOTTOM -
 // HOVER_PAD = 8px too low, and that gap is what read as "not 1:1".
+
+// X86. Desktop dock: one live frost of what is behind the pill (fine -- single
+// surface). Overview: sample the behind-chrome theme blur already built for the
+// strip so the dock does not re-blur the world and reintroduce compounding.
+static bool dockSamplesOverviewChromeBlur(PHLMONITOR monitor) {
+    return monitor && scrollOverviewForMonitor(monitor) != nullptr;
+}
+
+static void queueDockFrost(PHLMONITOR monitor, const CBox& box, int rounding, float alpha) {
+    if (box.empty() || alpha <= 0.F)
+        return;
+
+    COverviewBlurPassElement::SData blur;
+    blur.box            = box;
+    blur.rounding       = rounding;
+    blur.roundingPower  = 2.F;
+    blur.alpha          = alpha;
+    blur.xray           = dockSamplesOverviewChromeBlur(monitor);
+    // -1 on these keys means leave decoration:blur:* alone (X71).
+    blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
+    blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);
+    blur.blurBrightness = Config::getValue<float>(KEY_BLUR_BRIGHT);
+    blur.blurNoise      = Config::getValue<float>(KEY_BLUR_NOISE);
+    blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
+    blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
+}
+
 void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& item) {
     const float SCALE = std::max(monitor->m_scale, 0.01F);
     const float SIZE  = std::max(1.F, sc<float>(Config::getValue<int>(KEY_DOT_SIZE)) * SCALE);
@@ -1856,20 +1884,8 @@ void renderMenu(PHLMONITOR monitor, const SLayout& layout) {
 
     g_menu->box = plate;
 
-    // X13/X29: frost is on for every surface, so the menu gets the pill's own.
-    COverviewBlurPassElement::SData blur;
-    blur.box            = plate;
-    blur.rounding       = sc<int>(std::round(MENU_RADIUS * SCALE));
-    blur.roundingPower  = 2.F;
-    blur.alpha          = 1.F;
-    blur.xray           = false;
-    blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
-    blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);
-    blur.blurBrightness = Config::getValue<float>(KEY_BLUR_BRIGHT);
-    blur.blurNoise      = Config::getValue<float>(KEY_BLUR_NOISE);
-    blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
-    blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
+    // X13/X29/X86: menu frost -- shared chrome sample in overview, live on desktop.
+    queueDockFrost(monitor, plate, sc<int>(std::round(MENU_RADIUS * SCALE)), 1.F);
 
     CRectPassElement::SRectData bg;
     bg.box           = plate;
@@ -2686,21 +2702,8 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
     const float ALPHA   = g_panel->out ? 1.F - houseEase(false, T) : houseEase(true, T);
     const int   ROUNDED = sc<int>(std::round(PANEL_RADIUS * SCALE));
 
-    // X13/X29 frost, the dock's own -- the panel is part of the dock, not a
-    // second surface with a taste of its own.
-    COverviewBlurPassElement::SData blur;
-    blur.box            = DRAWN;
-    blur.rounding       = ROUNDED;
-    blur.roundingPower  = 2.F;
-    blur.alpha          = ALPHA;
-    blur.xray           = false;
-    blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
-    blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);
-    blur.blurBrightness = Config::getValue<float>(KEY_BLUR_BRIGHT);
-    blur.blurNoise      = Config::getValue<float>(KEY_BLUR_NOISE);
-    blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
-    blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
+    // X13/X29/X86: panel frost shares overview chrome blur when Super is open.
+    queueDockFrost(monitor, DRAWN, ROUNDED, ALPHA);
 
     auto                        colour = background();
     CRectPassElement::SRectData bg;
@@ -2749,28 +2752,10 @@ void render(PHLMONITOR monitor) {
     if (LAYOUT.pill.empty())
         return;
 
-    // X13/X29: frost is always on, and it is the REFERENCE's frost --
-    // blur-my-shell's `[dash-to-dock]` sigma 30 / brightness 0.60 / no grain,
-    // not the desktop's window blur. `static-blur` is false there, so this stays
-    // live. Queued directly rather than through OverviewRender::queueBlur: the
-    // overrides ride on the element because the blur runs inside draw(), long
-    // after this function has returned.
-    //
-    // `unblur-in-overview` is false in the reference, and the overview now draws
-    // this same call, so the pill keeps its frost there instead of losing it.
-    COverviewBlurPassElement::SData blur;
-    blur.box            = LAYOUT.pill;
-    blur.rounding       = LAYOUT.rounding;
-    blur.roundingPower  = 2.F;
-    blur.alpha          = 1.F;
-    blur.xray           = false;
-    blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
-    blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);
-    blur.blurBrightness = Config::getValue<float>(KEY_BLUR_BRIGHT);
-    blur.blurNoise      = Config::getValue<float>(KEY_BLUR_NOISE);
-    blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
-    blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
+    // X13/X29/X86: dock pill. Live on the desktop (single surface). In overview
+    // it samples the same decoration:blur:* behind-chrome buffer as the strip
+    // so strength cannot drift with search-result count.
+    queueDockFrost(monitor, LAYOUT.pill, LAYOUT.rounding, 1.F);
 
     CRectPassElement::SRectData bg;
     bg.box           = LAYOUT.pill;

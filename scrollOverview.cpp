@@ -5661,10 +5661,12 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
 
     renderOverviewWorkspaceShadow(monitor, WORKSPACEBOX, renderScale, wallpaperMode == 0, WORKSPACEALPHA);
 
-    if (ScrollOverview::Config::getBlur() && wallpaperMode != 1 && WORKSPACEALPHA > 0.001F) {
-        const auto CARDROUND = getOverviewCardRounding(monitor, renderScale);
-        OverviewRender::queueBlur(WORKSPACEBOX, CARDROUND.rounding, CARDROUND.power, WORKSPACEALPHA, false);
-    }
+    // X86: workspace cards do NOT get their own live COverviewBlurPassElement.
+    // Windows on the card use the same renderWindow live frost path as main tiles
+    // (decoration:blur:*, blockBlurOptimization when needed). A whole-card live
+    // blur was a different technique and compounded once per visible desktop,
+    // so empty-search (many cards) frosted harder than search mode for free.
+    // Wallpaper stays the card fill; glass comes from the windows themselves.
 
     if (wallpaperMode != 0 && WORKSPACEALPHA > 0.001F)
         renderWallpaperLayers(monitor, WORKSPACEBOX, renderScale, now, WORKSPACEALPHA);
@@ -6027,10 +6029,9 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // cells under a panel more opaque than they are.
                 const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
 
-                // X11 (user, 2026-08-01): the strip is FROSTED. Live rounded
-                // blur of what is behind the panel, drawn under the tint. The
-                // global backdrop stays sharp -- do not confuse the two.
-                // X85: SAMPLE the single pre-blur above; do not add another pass.
+                // X11 / X86: frosted strip. Samples the single behind-chrome
+                // theme blur queued above (decoration:blur:*). Not another live
+                // pass -- that is how empty vs search used to differ.
                 OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, true);
 
                 CRectPassElement::SRectData panel;
@@ -6351,8 +6352,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const float PILLFOOTL = PILLLOGICAL.y + 48.F + ((sc<float>(pill.y) - PILLUNDOCKEDY) / std::max(0.001F, SCALE));
     g_overviewSearchRowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
 
-    // X11: frosted pill -- live rounded blur of whatever is behind it.
-    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, true); // X85: sample, don't re-blur
+    // X11 / X86: frosted pill -- sample the behind-chrome theme blur.
+    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, true);
 
     // X4: hue inherited from the theme, alpha kept at the tuned value. The
     // resting surface reads col.inactive_border and the badge the accent -- the
@@ -6466,8 +6467,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 continue;
             card.round();
 
-            // §10 clause 3: the expanded search surface is frosted, like the pill.
-            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, true); // X85: sample, don't re-blur
+            // §10 clause 3 / X86: search result frost samples the same theme blur.
+            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, true);
 
             CRectPassElement::SRectData cardBg;
             cardBg.box           = card;
@@ -7790,27 +7791,26 @@ void CScrollOverview::render() {
         }
     }
 
-    // X85. ONE BLUR, MANY SAMPLERS.
+    // X86. BEHIND-CHROME THEME BLUR (not the window path).
     //
-    // Hyprland re-blurs the framebuffer once per LIVE-blur element and each blur
-    // compounds on the last, so the overview's frost used to be a function of how
-    // many surfaces happened to be frosted this frame: 2 elements with no query,
-    // ~7 once the result cards appeared, and a visibly stronger frost in the
-    // second case from identical parameters. X84 answered that by pinning
-    // explicit strength, which fixed the inconsistency and broke the point of the
-    // exercise -- the overview stopped following decoration:blur:* at all.
+    // Main tiles / card windows already live-frosted via renderWindow +
+    // decoration:blur:* above. Multi-rect chrome (strip, search pill, result
+    // cards, dock-in-overview) cannot each live-blur without compounding:
+    // Hyprland re-blurs the main FB once per live-blur element, so empty search
+    // (2 elements) looked weaker than results (~7). That was an accident, not a
+    // setting.
     //
-    // Instead: blur the framebuffer EXACTLY ONCE here, with the global settings
-    // and nothing overridden, and have every frosted surface SAMPLE that buffer
-    // rather than blur again. One pass means the result is whatever the user's
-    // theme asks for -- no blur configured gives no blur, a soft blur gives a
-    // soft one -- and it can no longer drift with the number of surfaces.
-    //
-    // It sits AFTER the live-window loop and its flush on purpose: the tiles have
-    // to be in the framebuffer, or the strip would frost the wallpaper alone and
-    // the windows behind it would vanish from the frost.
+    // So after tiles: blur the current FB EXACTLY ONCE with the live
+    // decoration:blur:* values, then every chrome surface samples that buffer
+    // (xray). No plugin strength override -- change Hyprland blur prefs and the
+    // strip follows. Cards no longer contribute their own live blurs (see
+    // renderWorkspaceBackground).
     OverviewRender::flushPass(MONITOR);
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
+    if (ScrollOverview::Config::getBlur() && ScrollOverview::Config::getValue<bool>("decoration:blur:enabled")) {
+        MONITOR->m_blurFBDirty        = true;
+        MONITOR->m_blurFBShouldRender = true;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
+    }
 
     {
         Prof::Timer PROFSTRIP{Prof::stripNs, Prof::stripCalls};
