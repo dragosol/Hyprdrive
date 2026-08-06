@@ -7783,6 +7783,22 @@ void CScrollOverview::render() {
     if (NEEDS_PRECOMPUTED_BLUR)
         overviewBlurDirty = false;
 
+    // X89. Capture behind-chrome blur BEFORE live windows.
+    //
+    // The strip (and result cards) sample this texture. Capturing AFTER
+    // renderWorkspaceLive made the glass depend on whether any tiles ran:
+    // each tile temporarily scales decoration:blur:size by renderScale and may
+    // live-blur the main FB (blockBlurOptimization). With windows present the
+    // strip looked different; with none (e.g. search filtered them all out) it
+    // looked "correct". That is the empty-vs-results symptom -- it was really
+    // windows-vs-no-windows. Snapshot the overview backdrop once here so chrome
+    // frost is independent of the tile pass.
+    OverviewRender::clearFrameChromeBlur();
+    if (ScrollOverview::Config::getBlur()) {
+        CRegion fullDamage{CBox{{}, MONITOR->m_transformedSize}};
+        OverviewRender::setFrameChromeBlur(g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage));
+    }
+
     {
         Prof::Timer PROFLIVE{Prof::liveNs, Prof::liveCalls};
         for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
@@ -7790,24 +7806,7 @@ void CScrollOverview::render() {
         }
     }
 
-    // X88. BEHIND-CHROME OVERVIEW BLUR (not the window path, not m_blurFB).
-    //
-    // Main tiles already live-frost via renderWindow. Multi-rect chrome (strip +
-    // result cards) cannot each live-blur without compounding. So after tiles:
-    // one dual-kawase of the overview main FB (decoration:blur:*), then strip
-    // and result cards sample that texture. Not Monitor::m_blurFB (desktop
-    // wallpaper xray) -- that made the strip frost the wallpaper instead of the
-    // overview. Search pill and dock stay live (single surfaces).
     OverviewRender::flushPass(MONITOR);
-    // X88. Blur the OVERVIEW main FB once (tiles + cards already flushed), and
-    // hand that texture to strip/result chrome. Do NOT use CPreBlurElement /
-    // m_blurFB: that is Hyprland's desktop wallpaper xray buffer, which is why
-    // the strip frosted the wallpaper instead of the overview under it.
-    OverviewRender::clearFrameChromeBlur();
-    if (ScrollOverview::Config::getBlur()) {
-        CRegion fullDamage{CBox{{}, MONITOR->m_transformedSize}};
-        OverviewRender::setFrameChromeBlur(g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage));
-    }
 
     {
         Prof::Timer PROFSTRIP{Prof::stripNs, Prof::stripCalls};
