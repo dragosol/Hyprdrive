@@ -286,6 +286,16 @@ static void registerConfigValues() {
 
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:gesture_distance", "gesture distance in pixels", 200, SIntValueOptions{.min = 1}));
+    // X84. -1 on either follows decoration:blur:*, which is what produced the
+    // state-dependent frost; the defaults here are deliberate overrides.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:frost_blur_size",
+                                                        "blur size for the overview's own frosted surfaces (-1 = follow decoration:blur:size)", 14,
+                                                        SIntValueOptions{.min = -1, .max = 64}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CIntValue>("plugin:scrolloverview:frost_blur_passes",
+                                                        "blur passes for the overview's own frosted surfaces (-1 = follow decoration:blur:passes)", 4,
+                                                        SIntValueOptions{.min = -1, .max = 10}));
     // Default alpha 0 = unset; highlightColor() then falls back to the theme's
     // border accent, which is what every build before this one used.
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
@@ -580,6 +590,14 @@ void registerConfig() {
 
 int getGestureDistance() {
     return std::max<int>(1, getValue<int>("plugin:scrolloverview:gesture_distance"));
+}
+
+int frostBlurSize() {
+    return getValue<int>("plugin:scrolloverview:frost_blur_size");
+}
+
+int frostBlurPasses() {
+    return getValue<int>("plugin:scrolloverview:frost_blur_passes");
 }
 
 CHyprColor highlightColor() {
