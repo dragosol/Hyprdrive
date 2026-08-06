@@ -61,14 +61,16 @@ namespace Prof {
     inline uint64_t    matchNs = 0, matchCalls = 0;   // overviewSearchMatches
     inline uint64_t    appNs   = 0, appCalls   = 0;   // AppSearch::search
     inline uint64_t    rowsNs  = 0, rowsCalls  = 0;   // overviewSearchRows
+    inline uint64_t    scanNs  = 0, scanCalls  = 0;   // AppSearch corpus scan (.desktop walk)
     inline uint64_t    srchNs  = 0, srchCalls  = 0;   // renderSearch (layout + text + icons)
+    inline uint64_t    txtNs   = 0, txtCold    = 0;   // cold renderText (pango layout + raster + upload)
     inline uint64_t    icoResolveNs = 0, icoDecodeNs = 0, icoUploadNs = 0, icoCold = 0;
     inline uint64_t    frameNs = 0, frameCalls = 0;   // the whole overview render pass
     inline clock::time_point keyAt{};
     inline bool        pending = false;
     inline uint64_t    frames  = 0;                   // frames since the keystroke
 
-    inline void reset() { matchNs = matchCalls = appNs = appCalls = rowsNs = rowsCalls = srchNs = srchCalls = frameNs = frameCalls = frames = 0; icoResolveNs = icoDecodeNs = icoUploadNs = icoCold = 0; }
+    inline void reset() { txtNs = txtCold = scanNs = scanCalls = matchNs = matchCalls = appNs = appCalls = rowsNs = rowsCalls = srchNs = srchCalls = frameNs = frameCalls = frames = 0; icoResolveNs = icoDecodeNs = icoUploadNs = icoCold = 0; }
 
     // Accumulates into a counter pair. Reads the clock only while profiling.
     struct Timer {

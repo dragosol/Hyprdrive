@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "OverviewRender.hpp"
 #include "OverviewPassElement.hpp"
 #include <chrono>
@@ -128,7 +129,10 @@ SP<Render::ITexture> text(const std::string& str, const CHyprColor& color, int f
     if (g_textCache.size() >= TEXT_CACHE_MAX)
         g_textCache.clear();
 
-    auto texture = g_pHyprRenderer->renderText(str, color, fontSize, italic, fontFamily, maxWidth, weight);
+    const auto T0      = Prof::clock::now();
+    auto       texture = g_pHyprRenderer->renderText(str, color, fontSize, italic, fontFamily, maxWidth, weight);
+    Prof::txtNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Prof::clock::now() - T0).count();
+    ++Prof::txtCold;
     g_textCache.emplace(KEY, texture);
     return texture;
 }

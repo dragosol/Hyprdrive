@@ -263,6 +263,7 @@ namespace AppSearch {
         }
 
         void scan() {
+            Prof::Timer PROF{Prof::scanNs, Prof::scanCalls};
             g_entries.clear();
 
             std::unordered_set<std::string> seen;

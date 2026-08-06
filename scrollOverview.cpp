@@ -1820,7 +1820,13 @@ static void moveOverviewTargetNextToWindow(const SP<Layout::ITarget>& target, co
 
 CScrollOverview::~CScrollOverview() {
     TileChrome::forget();
-    OverviewRender::clearTextCache();
+    // X51: the cache used to be dropped here, which meant every open re-rendered
+    // the same strings -- measured 14 cold pango renders per open, forever,
+    // because a rice draws the SAME labels every time. The sizes ride the open
+    // animation, so an open samples one string at a dozen sizes; keeping them is
+    // what lets the second open hit. Bounded by TEXT_CACHE_MAX, and the icon
+    // texture cache beside it already lives for the life of the plugin.
+    
     g_dragReflowExcluded = nullptr;
     if (g_pointerGrabOverview == this)
         g_pointerGrabOverview = nullptr;
@@ -7685,12 +7691,12 @@ void CScrollOverview::render() {
         ++Prof::frames;
         const auto SINCEKEY = std::chrono::duration<double, std::milli>(Prof::clock::now() - Prof::keyAt).count();
         if (FILE* const F = std::fopen("/tmp/scrolloverview-prof.log", "a")) {
-            std::fprintf(F, "q=%-6s f=%llu sinceKey=%7.2fms  FRAME=%6.2fms  renderSearch=%6.2fms  match=%5.2fms/%llu  rows=%5.2fms  app=%5.2fms  ICON[cold=%llu resolve=%6.2f decode=%6.2f upload=%6.2f]\n",
+            std::fprintf(F, "q=%-6s f=%llu sinceKey=%7.2fms  FRAME=%6.2fms  renderSearch=%6.2fms  match=%5.2fms/%llu  rows=%5.2fms  app=%5.2fms  scan=%5.2fms/%llu  TEXT[cold=%llu %6.2fms]  ICON[cold=%llu resolve=%6.2f decode=%6.2f upload=%6.2f]\n",
                          g_overviewSearch.c_str(), (unsigned long long)Prof::frames, SINCEKEY,
                          Prof::frameNs / 1e6, Prof::srchNs / 1e6,
                          Prof::matchNs / 1e6, (unsigned long long)Prof::matchCalls,
-                         Prof::rowsNs / 1e6, Prof::appNs / 1e6,
-                         (unsigned long long)Prof::icoCold, Prof::icoResolveNs / 1e6, Prof::icoDecodeNs / 1e6, Prof::icoUploadNs / 1e6);
+                         Prof::rowsNs / 1e6, Prof::appNs / 1e6, Prof::scanNs / 1e6, (unsigned long long)Prof::scanCalls,
+                         (unsigned long long)Prof::txtCold, Prof::txtNs / 1e6, (unsigned long long)Prof::icoCold, Prof::icoResolveNs / 1e6, Prof::icoDecodeNs / 1e6, Prof::icoUploadNs / 1e6);
             std::fclose(F);
         }
         if (Prof::frames >= 3)

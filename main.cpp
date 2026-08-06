@@ -33,6 +33,7 @@ using namespace Hyprutils::String;
 #include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
 #include "OverviewGesture.hpp"
+#include "OverviewRender.hpp"
 #include "SearchProviders.hpp"
 
 // Methods
@@ -326,6 +327,14 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
                 overview->close();
         }
         return {};
+    }
+
+    // X51. The open pays for whatever the first keystroke no longer does, so it
+    // is armed exactly like a keystroke -- same counters, same three frames.
+    if (Prof::enabled()) {
+        Prof::reset();
+        Prof::keyAt   = Prof::clock::now();
+        Prof::pending = true;
     }
 
     for (const auto& monitor : MONITORS) {
@@ -987,6 +996,10 @@ APICALL EXPORT void PLUGIN_EXIT() {
     SearchProviders::shutdown();
     ScrollOverview::LauncherEntry::stop();
     clearScrollOverviews();
+    // The text textures outlive a close now (X51), so unload is where they go --
+    // same moment the last overview's destructor used to drop them, and hyprpm
+    // reloads this plugin in-process.
+    OverviewRender::clearTextCache();
     disableScrollOverviewHooks();
 
     if (g_pTrackpadGestures)
