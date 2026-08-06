@@ -44,6 +44,11 @@ namespace SearchProviders {
     // flight, returns immediately. Empty query clears.
     void query(const std::string& text);
 
+    // Launches every provider's D-Bus service without searching. Call at
+    // overview open: providers go cold after under a minute of idle, so
+    // otherwise the first keystroke pays ~700ms of app startup.
+    void warm();
+
     // Snapshot of whatever has answered so far for the newest query, ordered by
     // provider then by the provider's own ranking. Safe to call every frame.
     std::vector<SResult> results();

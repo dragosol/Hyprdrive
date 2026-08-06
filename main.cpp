@@ -337,6 +337,14 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
         Prof::pending = true;
     }
 
+    // X54. Search providers are D-Bus activated and go cold again after well
+    // under a minute of idle, so without this the first keystroke waits on a
+    // GTK app starting: median settle 1085ms cold vs 342ms warmed (9 samples
+    // each, 45s idle between). Launching them here overlaps the open animation
+    // and the reach for the keyboard. Costs a respawn per open-after-idle;
+    // that is the price of the results being up when the user looks at them.
+    SearchProviders::warm();
+
     for (const auto& monitor : MONITORS) {
         if (!openOverview(monitor))
             return {.success = false, .error = "failed enabling overview hooks (is other overview plugin enabled?)"};

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -12,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 
 #include <fcntl.h>
 #include <poll.h>
@@ -41,6 +43,19 @@ namespace SearchProviders {
         // GNOME shows a handful per provider; asking for metas on 200 character
         // glyphs would cost more than the panel can ever show.
         constexpr size_t MAX_PER_PROVIDER = 6;
+
+        // X54 trace. Where the wall clock between a keystroke and a filled row
+        // actually goes: this protocol is two round trips per provider, and a
+        // static read of the code cannot say which of the two is the slow one.
+        using SPClock = std::chrono::steady_clock;
+        SPClock::time_point w_genStart;
+        bool spTrace() {
+            static const bool ON = std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr;
+            return ON;
+        }
+        double sinceGen() {
+            return std::chrono::duration<double, std::milli>(SPClock::now() - w_genStart).count();
+        }
 
         std::string trim(const std::string& s) {
             const auto B = s.find_first_not_of(" \t\r\n");
@@ -217,10 +232,29 @@ namespace SearchProviders {
         // ---- worker-only state --------------------------------------------
 
         struct SCall {
-            uint64_t gen         = 0;
-            size_t   providerIdx = 0;
-            bool     metas       = false;
+            uint64_t                 gen         = 0;
+            size_t                   providerIdx = 0;
+            bool                     metas       = false;
+            // The full id list this generation wants shown, in the provider's
+            // own ranking. A metas reply only carries the ids that were MISSING
+            // from the cache, so the order has to be remembered here or a
+            // partly-cached answer comes back shuffled.
+            std::vector<std::string> ids;
+            // The subset actually asked for, same order as the reply.
+            std::vector<std::string> asked;
         };
+
+        // X54. GNOME Shell fetches metas only for ids it has never displayed
+        // (SearchResultsBase._ensureResultActors); we refetched every id on
+        // every keystroke. Measured on this guest: the metas round trip is
+        // ~20ms warm and ~200ms cold PER PROVIDER, paid again for "dis",
+        // "disp", "displa", "display" even though the id set barely moves.
+        // Keyed by bus + id because ids are only unique within a provider.
+        constexpr size_t                                  META_CACHE_MAX = 512;
+        std::unordered_map<std::string, SResult>          g_metaCache;
+        std::string metaKey(const std::string& bus, const std::string& id) {
+            return bus + "\x1f" + id;
+        }
 
         uint64_t                             w_gen = 0;
         std::vector<sd_bus_slot*>            w_slots;
@@ -348,6 +382,33 @@ namespace SearchProviders {
             return !out.id.empty();
         }
 
+        // The rows for one provider, in its ranking, for whatever the cache has.
+        std::vector<SResult> collect(size_t providerIdx, const std::vector<std::string>& ids) {
+            const auto&          PROV = g_providers[providerIdx];
+            std::vector<SResult> out;
+            out.reserve(ids.size());
+            for (const auto& ID : ids) {
+                const auto IT = g_metaCache.find(metaKey(PROV.busName, ID));
+                if (IT == g_metaCache.end())
+                    continue;
+                SResult r      = IT->second;
+                r.providerRank = providerIdx;
+                r.stale        = false;
+                out.push_back(std::move(r));
+            }
+            return out;
+        }
+
+        // Replace one provider's rows with the given batch, newest generation only.
+        void publish(uint64_t gen, const std::string& busName, std::vector<SResult>& batch) {
+            std::lock_guard lock(g_mutex);
+            if (gen != g_wantGen)
+                return;
+            std::erase_if(g_results, [&](const SResult& R) { return R.providerBus == busName; });
+            g_results.insert(g_results.end(), batch.begin(), batch.end());
+            std::ranges::stable_sort(g_results, {}, &SResult::providerRank);
+        }
+
         int onMetas(sd_bus_message* m, void* userdata, sd_bus_error*) {
             auto* call = static_cast<SCall*>(userdata);
             if (call->gen != w_gen || sd_bus_message_is_method_error(m, nullptr))
@@ -355,30 +416,34 @@ namespace SearchProviders {
 
             const auto& PROV = g_providers[call->providerIdx];
 
-            std::vector<SResult> batch;
+            // Keyed by the id we ASKED for, taken positionally from the reply,
+            // not by the id the provider echoes back. gnome-clocks ids are
+            // serialized GVariants and do not survive the round trip verbatim;
+            // keying on the echo silently lost every one of its rows. The
+            // requested id is also the one ActivateResult has to be given.
             if (sd_bus_message_enter_container(m, 'a', "a{sv}") > 0) {
-                while (true) {
+                for (size_t i = 0; i < call->asked.size(); ++i) {
                     SResult r;
                     r.providerBus       = PROV.busName;
                     r.providerDesktopId = PROV.desktopId;
                     r.providerRank      = call->providerIdx;
                     if (!readMeta(m, r))
                         break;
-                    batch.push_back(std::move(r));
+                    r.id = call->asked[i];
+                    if (g_metaCache.size() >= META_CACHE_MAX)
+                        g_metaCache.clear();
+                    g_metaCache[metaKey(PROV.busName, r.id)] = std::move(r);
                 }
                 sd_bus_message_exit_container(m);
             }
+
+            auto batch = collect(call->providerIdx, call->ids);
+            if (spTrace())
+                std::fprintf(stderr, "[sp] %-34s META +%7.1fms n=%zu\n", PROV.desktopId.c_str(), sinceGen(), batch.size());
             if (batch.empty())
                 return dropStaleFor(call->providerIdx);
 
-            {
-                std::lock_guard lock(g_mutex);
-                if (call->gen != g_wantGen)
-                    return 0;
-                std::erase_if(g_results, [&](const SResult& R) { return R.providerBus == PROV.busName; });
-                g_results.insert(g_results.end(), batch.begin(), batch.end());
-                std::ranges::stable_sort(g_results, {}, &SResult::providerRank);
-            }
+            publish(call->gen, PROV.busName, batch);
             return 0;
         }
 
@@ -403,19 +468,38 @@ namespace SearchProviders {
             free(ids);
 
             w_prevIds[call->providerIdx] = kept;
+            if (spTrace())
+                std::fprintf(stderr, "[sp] %-34s ids  +%7.1fms n=%zu\n", g_providers[call->providerIdx].desktopId.c_str(), sinceGen(), kept.size());
             if (kept.empty())
                 return dropStaleFor(call->providerIdx);
 
             sd_bus*     bus  = sd_bus_message_get_bus(m);
             const auto& PROV = g_providers[call->providerIdx];
 
+            std::vector<std::string> missing;
+            for (const auto& ID : kept)
+                if (!g_metaCache.contains(metaKey(PROV.busName, ID)))
+                    missing.push_back(ID);
+
+            // Everything already known: the rows go up on this reply, one round
+            // trip instead of two. This is the refine case, which is most of them.
+            if (missing.empty()) {
+                auto batch = collect(call->providerIdx, kept);
+                if (spTrace())
+                    std::fprintf(stderr, "[sp] %-34s HIT  +%7.1fms n=%zu\n", PROV.desktopId.c_str(), sinceGen(), batch.size());
+                if (batch.empty())
+                    return dropStaleFor(call->providerIdx);
+                publish(call->gen, PROV.busName, batch);
+                return 0;
+            }
+
             sd_bus_message* req = nullptr;
             if (sd_bus_message_new_method_call(bus, &req, PROV.busName.c_str(), PROV.objectPath.c_str(), IFACE, "GetResultMetas") < 0)
                 return 0;
-            auto ARGV = cstrv(kept);
+            auto ARGV = cstrv(missing);
             sd_bus_message_append_strv(req, ARGV.data());
 
-            auto next  = std::make_unique<SCall>(SCall{call->gen, call->providerIdx, true});
+            auto next  = std::make_unique<SCall>(SCall{call->gen, call->providerIdx, true, kept, missing});
             auto* raw  = next.get();
             sd_bus_slot* slot = nullptr;
             if (sd_bus_call_async(bus, &slot, req, onMetas, raw, CALL_TIMEOUT_US) >= 0) {
@@ -426,7 +510,39 @@ namespace SearchProviders {
             return 0;
         }
 
+        // X54. A search provider is a D-BUS ACTIVATED service, so if nothing has
+        // talked to it lately it is not running and the first keystroke pays
+        // for launching a whole GTK app. Measured on this guest: 3 rounds of
+        // the same query with 45s of idle between them cost 928/885/887ms --
+        // it goes cold again every time, so this is not a first-search cost,
+        // it is the cost of EVERY search. StartServiceByName does the launch
+        // and nothing else; called at overview open it runs while the open
+        // animation plays and the user is still reaching for the keyboard.
+        std::vector<sd_bus_slot*> w_warmSlots;
+
+        int onWarmed(sd_bus_message*, void*, sd_bus_error*) {
+            return 0;
+        }
+
+        void warmProviders(sd_bus* bus) {
+            for (auto* S : w_warmSlots)
+                sd_bus_slot_unref(S);
+            w_warmSlots.clear();
+
+            for (const auto& PROV : g_providers) {
+                sd_bus_message* req = nullptr;
+                if (sd_bus_message_new_method_call(bus, &req, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "StartServiceByName") < 0)
+                    continue;
+                sd_bus_message_append(req, "su", PROV.busName.c_str(), 0U);
+                sd_bus_slot* slot = nullptr;
+                if (sd_bus_call_async(bus, &slot, req, onWarmed, nullptr, CALL_TIMEOUT_US) >= 0)
+                    w_warmSlots.push_back(slot);
+                sd_bus_message_unref(req);
+            }
+        }
+
         void startGeneration(sd_bus* bus) {
+            w_genStart = SPClock::now();
             dropInFlight();
             auto prev = std::move(w_prevIds);
             w_prevIds.assign(g_providers.size(), {});
@@ -578,6 +694,16 @@ namespace SearchProviders {
         wake();
     }
 
+    void warm() {
+        providers();
+        ensureWorker();
+        {
+            std::lock_guard lock(g_mutex);
+            g_actions.emplace_back([](sd_bus* bus) { warmProviders(bus); });
+        }
+        wake();
+    }
+
     std::vector<SResult> results() {
         std::lock_guard lock(g_mutex);
         return g_results;
@@ -663,6 +789,36 @@ namespace {
 
 int main() {
     using namespace SearchProviders;
+
+    // X54 bench. Does a provider go COLD again after an idle gap? If it does,
+    // every keystroke-after-a-pause pays D-Bus activation of a whole GTK app,
+    // and that -- not matching, not layout -- is the wait the user sees.
+    // SP_BENCH=<idle seconds>.
+    if (const char* IDLE = std::getenv("SP_BENCH")) {
+        providers();
+        const int GAP = std::atoi(IDLE);
+        const bool DO_WARM = std::getenv("SP_WARM") != nullptr;
+        for (int round = 0; round < 3; ++round) {
+            query("");
+            usleep(50'000);
+            // The overview open, then the human reaching for the keyboard.
+            if (DO_WARM) {
+                warm();
+                usleep(300'000);
+            }
+            query("heart");
+            const long MS = waitFor([] { return fresh().size() >= 4; }, 9000);
+            std::printf("round %d: settle %ld ms, %zu fresh\n", round, MS, fresh().size());
+            std::fflush(stdout);
+            if (round < 2) {
+                std::printf("--- idle %ds ---\n", GAP);
+                std::fflush(stdout);
+                sleep(GAP);
+            }
+        }
+        shutdown();
+        return 0;
+    }
 
     assert(splitTerms("  two  words ").size() == 2);
     assert(splitTerms("").empty());
