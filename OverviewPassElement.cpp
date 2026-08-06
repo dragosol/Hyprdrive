@@ -132,38 +132,50 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
     if (data.blurVibrancy >= 0.F)
         ScrollOverview::Config::setValue("decoration:blur:vibrancy", data.blurVibrancy);
 
-    // X87b. Prefer drawing the blurred buffer INTO our box with UV + shader
-    // rounding (AA). Upstream renderRectWithBlur draws a MONITOR-sized quad and
-    // only the damage region bounds it -- that is the pixelated-arc path (X14).
-    // Fall back to X14 if the buffer is missing so we never paint black glass.
-    SP<Render::ITexture> blurred;
-    CRegion              boxDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.box.copy().round());
+    // X94. LIVE chrome (strip panel, pill, dock): native Hyprland rect+blur at
+    // full decoration:blur:* strength. Kawase radius is size * blurA — always
+    // blurA=1 so intensity matches windows. Open/close fade stays on the tint.
+    // Different technique from the window surface path; same config knobs.
+    if (!data.xray) {
+        CRegion paint{data.box.copy().round()};
+        if (paint.empty())
+            return {};
 
-    if (!boxDamage.empty()) {
-        if (data.xray) {
-            // Result cards: sample the private overview chrome FB (X92).
-            blurred = OverviewRender::frameChromeBlur();
-        } else {
-            // X93. LIVE path (strip panel, pill, dock): dual-kawase the whole
-            // main FB with decoration:blur:*, then sample into this box.
-            // Box-only damage under-blurs thin chrome (strip); windows get a
-            // full-strength kawase — match that strength for the strip panel.
-            CRegion fullDamage{CBox{{}, MONITOR->m_transformedSize}};
-            blurred = g_pHyprRenderer->blurMainFramebuffer(data.alpha, &fullDamage);
-        }
+        const int BLURSIZE   = std::max(1, ScrollOverview::Config::getValue<int>("decoration:blur:size"));
+        const int BLURPASSES = std::clamp(ScrollOverview::Config::getValue<int>("decoration:blur:passes"), 1, 8);
+        paint.expand(sc<int>(std::lround(BLURSIZE * std::pow(2.0, BLURPASSES))));
+
+        const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
+        g_pHyprRenderer->m_renderData.damage = paint;
+        auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
+
+        Render::GL::g_pHyprOpenGL->renderRect(data.box, CHyprColor{0.F, 0.F, 0.F, 0.F},
+                                              Render::GL::CHyprOpenGLImpl::SRectRenderData{
+                                                  .damage        = &paint,
+                                                  .round         = data.rounding,
+                                                  .roundingPower = data.roundingPower,
+                                                  .blur          = true,
+                                                  .blurA         = 1.F,
+                                                  .xray          = false,
+                                              });
+        return {};
     }
 
+    // Result cards: sample the private overview chrome FB (X92).
+    SP<Render::ITexture> blurred = OverviewRender::frameChromeBlur();
+    CRegion boxDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.box.copy().round());
     if (blurred && blurred->ok() && !boxDamage.empty()) {
         const Vector2D MONSIZE = MONITOR->m_transformedSize;
         if (MONSIZE.x >= 1.0 && MONSIZE.y >= 1.0) {
             const CBox BOX = data.box;
+            CRegion    paintDamage{BOX.copy().round()};
             g_pHyprRenderer->pushMonitorTransformEnabled(true);
             auto restoreXform = Hyprutils::Utils::CScopeGuard([] { g_pHyprRenderer->popMonitorTransformEnabled(); });
 
             Render::GL::g_pHyprOpenGL->renderTexture(
                 blurred, BOX,
                 Render::GL::CHyprOpenGLImpl::STextureRenderData{
-                    .damage                      = &boxDamage,
+                    .damage                      = &paintDamage,
                     .a                           = data.alpha,
                     .round                       = data.rounding,
                     .roundingPower               = data.roundingPower,
@@ -176,29 +188,9 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
         }
     }
 
-    // X14 fallback: pixel-quantised rounded damage + renderRectWithBlur.
-    CRegion clipped = g_pHyprRenderer->m_renderData.damage.copy().intersect(roundedRectRegion(data.box, data.rounding, data.roundingPower));
-    if (clipped.empty())
-        return {};
-
-    const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
-    g_pHyprRenderer->m_renderData.damage = clipped;
-    auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
-
-    // Fallback must not use Hyprland xray/m_blurFB (desktop wallpaper). Live
-    // blur of the current main FB is the overview (or whatever is on screen).
-    Render::GL::g_pHyprOpenGL->renderRect(data.box, CHyprColor{0.F, 0.F, 0.F, 0.F},
-                                          Render::GL::CHyprOpenGLImpl::SRectRenderData{
-                                              .damage        = &clipped,
-                                              .round         = data.rounding,
-                                              .roundingPower = data.roundingPower,
-                                              .blur          = true,
-                                              .blurA         = data.alpha,
-                                              .xray          = false,
-                                          });
-
     return {};
 }
+
 
 bool COverviewBlurPassElement::needsLiveBlur() {
     return !data.xray && data.alpha > 0.F;

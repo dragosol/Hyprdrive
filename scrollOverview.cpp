@@ -6029,13 +6029,12 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // cells under a panel more opaque than they are.
                 const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
 
-                // X93. Strip PANEL frost is LIVE dual-kawase of the overview main
-                // FB at draw time (decoration:blur:* — same settings as windows).
-                // Not the window path, not m_blurFB, not a pre-captured chrome
-                // texture: one panel, one live blur of whatever is already on
-                // screen under the strip (cards + tiles flushed before we queue).
-                // Mini previews on the strip are unchanged (real windows, separate).
-                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, false);
+                // X94. Strip PANEL: LIVE dual-kawase of the overview under it at
+                // full decoration:blur:* strength (kawase a=1 — see OverviewPassElement).
+                // Frost layer is opaque (alpha 1); open/close fade is on the tint
+                // only so we never shrink blur radius with FADE. Mini strip windows
+                // unchanged.
+                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, 1.F, false);
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
