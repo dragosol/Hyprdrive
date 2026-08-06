@@ -13,6 +13,12 @@ inline HANDLE SCROLLOVERVIEW_HANDLE = nullptr;
 // main.cpp, read by the window gate in scrollOverview.cpp.
 inline std::string g_overviewSearch;
 
+// G1 (spec 13.11): "compose/dead keys must START a search" only means something
+// if a search can be ACTIVE while the query is still empty -- Compose alone
+// types nothing. Every "is a search running" test reads this, not
+// g_overviewSearch.empty(), which cannot represent that state.
+inline bool g_searchActive = false;
+
 // OVERVIEW_CPP_SPEC §13.2 F3. Index into the ranked app results, -1 meaning
 // "no app selected, the grid owns Return". Paired with the query above: any
 // edit to the query resets it.

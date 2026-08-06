@@ -18,6 +18,8 @@
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-compose.h>
+#include <unordered_set>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
 
@@ -274,8 +276,12 @@ bool openScrollOverview(PHLMONITOR monitor) {
     return openOverview(monitor);
 }
 
+static void resetCompose();
+
 static SDispatchResult onOverviewDispatcher(std::string arg) {
     g_overviewSearch.clear(); // every open starts unfiltered
+    g_searchActive = false;
+    resetCompose(); // a sequence abandoned last time must not eat the first key
     // X61: and on the tiles, which is where the remembered selection lives.
     g_overviewNavZone = EOverviewNavZone::Tile;
     SearchProviders::query("");
@@ -412,70 +418,118 @@ static bool isGuardModifierKeycode(uint32_t keycode) {
 
 static int g_heldGuardModifiers = 0;
 
-// The character this keycode would type, or 0 if it types nothing. Returns 0
-// whenever a guard modifier is held so SUPER+Q stays a keybind instead of
-// becoming the letter q.
-static char searchCharFor(uint32_t keycode) {
+// G1: the compose sequence table, built once from the locale. A guest with no
+// Compose file leaves this null and every path below falls through to the plain
+// utf8 one, so compose is a bonus rather than a dependency.
+// ponytail: context and table are deliberately never unref'd -- they live as
+// long as the plugin does, and freeing them at unload would race the key hook.
+static xkb_compose_state* composeState() {
+    static xkb_compose_state* STATE = []() -> xkb_compose_state* {
+        const char* LOCALE = nullptr;
+        for (const char* VAR : {"LC_ALL", "LC_CTYPE", "LANG"}) {
+            if (const char* V = getenv(VAR); V && *V) {
+                LOCALE = V;
+                break;
+            }
+        }
+        if (!LOCALE)
+            LOCALE = "C";
+
+        xkb_context* CTX = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+        if (!CTX)
+            return nullptr;
+
+        xkb_compose_table* TABLE = xkb_compose_table_new_from_locale(CTX, LOCALE, XKB_COMPOSE_COMPILE_NO_FLAGS);
+        if (!TABLE)
+            return nullptr;
+
+        xkb_compose_state* S = xkb_compose_state_new(TABLE, XKB_COMPOSE_STATE_NO_FLAGS);
+        xkb_compose_table_unref(TABLE);
+        return S;
+    }();
+
+    return STATE;
+}
+
+// A sequence half-typed when the overview closes, or when ESC/BACKSPACE cuts it
+// short, must not swallow the first key of the next one.
+static void resetCompose() {
+    if (auto* C = composeState(); C)
+        xkb_compose_state_reset(C);
+}
+
+// The query is UTF-8 now (it has to be -- a composed 'e' is two bytes), so
+// BACKSPACE removes a CODEPOINT. pop_back() would leave a severed lead byte and
+// hand the providers a string that is not valid UTF-8.
+static void popCodepoint(std::string& s) {
+    size_t n = s.size();
+    while (n > 0 && (static_cast<unsigned char>(s[n - 1]) & 0xC0) == 0x80)
+        --n;
+    s.resize(n > 0 ? n - 1 : 0);
+}
+
+struct SSearchKey {
+    bool        consume = false; // ours: cancel the event so it cannot reach the window below
+    bool        starts  = false; // counts as starting/continuing a search, even with no text
+    std::string text;            // what to append; EMPTY while a compose sequence is mid-flight
+};
+
+// What this keycode contributes to the query. Returns nothing whenever a guard
+// modifier is held, so SUPER+Q stays a keybind instead of becoming the letter q.
+static SSearchKey searchKeyFor(uint32_t keycode) {
     if (g_heldGuardModifiers > 0)
-        return 0;
+        return {};
 
     const auto STATE = activeXkbState();
     if (!STATE)
-        return 0;
+        return {};
 
-    char buf[8] = {};
-    // ponytail: ASCII only. Anything wider is an input-method problem, not a
-    // filter problem; revisit if the rice ever needs non-Latin search.
-    if (xkb_state_key_get_utf8(STATE, keycode + 8, buf, sizeof(buf)) != 1)
-        return 0;
+    const xkb_keysym_t SYM = xkb_state_key_get_one_sym(STATE, keycode + 8);
 
-    return buf[0] >= 0x20 && buf[0] < 0x7F ? buf[0] : 0;
-}
+    // G1 last clause: Compose and dead keys START a search. xkb_compose_state_feed
+    // IGNOREs modifier keysyms itself, so a SHIFT held for the second character of
+    // `Compose " o` does not cancel the sequence -- do not pre-filter them here and
+    // do not feed a key we are not going to consume.
+    if (auto* COMPOSE = composeState(); COMPOSE && SYM != XKB_KEY_NoSymbol && xkb_compose_state_feed(COMPOSE, SYM) == XKB_COMPOSE_FEED_ACCEPTED) {
+        switch (xkb_compose_state_get_status(COMPOSE)) {
+            case XKB_COMPOSE_COMPOSING:
+                // Mid-sequence. Types nothing YET, but the bar is live from the
+                // Compose press onward -- that is the whole requirement.
+                return {.consume = true, .starts = true};
 
-// OVERVIEW_CPP_SPEC §5 F5. The overview is not a wayland client and takes no
-// keyboard focus, so the query is assembled from the raw key stream and those
-// events are cancelled to keep them out of the focused window underneath.
-// Decided from keycode and modifier state alone so a press and its release
-// always agree, and no half-consumed key leaks a stray release downstream.
-static bool isSearchKey(uint32_t keycode) {
-    if (!activeScrollOverview())
-        return false;
+            case XKB_COMPOSE_COMPOSED: {
+                char      buf[64] = {};
+                const int N       = xkb_compose_state_get_utf8(COMPOSE, buf, sizeof(buf));
+                resetCompose();
+                return {.consume = true, .starts = true, .text = N > 0 ? std::string(buf, N) : std::string()};
+            }
 
-    // X5: ESC is always ours while the overview is open -- it either clears the
-    // query or exits -- so it must never fall through to the window underneath.
-    if (keycode == EVDEV_KEY_ESC)
-        return true;
+            case XKB_COMPOSE_CANCELLED:
+                // An invalid sequence types nothing at all, GNOME included. The
+                // keys are still ours -- they were typed AT the search bar.
+                resetCompose();
+                return {.consume = true, .starts = true};
 
-    if (keycode == EVDEV_KEY_BACKSPACE)
-        return !g_overviewSearch.empty();
-
-    return searchCharFor(keycode) != 0;
-}
-
-static void applySearchKey(uint32_t keycode) {
-    // X5, GNOME-style: the first ESC drops the filter, the next one leaves.
-    if (keycode == EVDEV_KEY_ESC) {
-        if (g_overviewSearch.empty()) {
-            for (const auto& overview : scrollOverviews())
-                if (overview)
-                    overview->close();
-            return;
+            case XKB_COMPOSE_NOTHING: break; // ordinary key, fall through
         }
-        g_overviewSearch.clear();
     }
-    else if (keycode == EVDEV_KEY_BACKSPACE)
-        g_overviewSearch.pop_back();
-    else if (const char C = searchCharFor(keycode); C != 0) {
-        // G1: whitespace must never START a search -- GNOME's trigger test
-        // rejects a keysym whose value is pure whitespace -- but it types
-        // normally once one is running. The key stays CONSUMED either way: the
-        // overview holds the keyboard, so falling through would type a space
-        // into a window the user cannot see.
-        if (C == ' ' && g_overviewSearch.empty())
-            return;
 
-        g_overviewSearch.push_back(C);
-    }
+    char      buf[8] = {};
+    const int N      = xkb_state_key_get_utf8(STATE, keycode + 8, buf, sizeof(buf));
+    if (N <= 0)
+        return {};
+
+    // ENTER, TAB, ESC and friends all yield exactly one control byte and type
+    // nothing. Anything wider is a real character from the layout and is now
+    // allowed in -- the query stopped being ASCII the moment compose landed.
+    if (N == 1 && (buf[0] < 0x20 || buf[0] == 0x7F))
+        return {};
+
+    return {.consume = true, .starts = true, .text = std::string(buf, N)};
+}
+
+// The trailing work every edit to the query owes, whatever made the edit.
+static void afterQueryEdit() {
 
     // X52. The moment being complained about starts HERE, not at the frame.
     if (Prof::enabled()) {
@@ -504,6 +558,68 @@ static void applySearchKey(uint32_t keycode) {
             overview->damage();
 }
 
+// OVERVIEW_CPP_SPEC 5 F5. The overview is not a wayland client and takes no
+// keyboard focus, so the query is assembled from the raw key stream and those
+// events are cancelled to keep them out of the focused window underneath.
+//
+// This used to be a pure isSearchKey(keycode) predicate, consulted separately
+// for the press and the release on the promise that both would agree. COMPOSE
+// IS STATEFUL AND BREAKS THAT PROMISE: a sequence can complete between a press
+// and its release, so the predicate flips underneath and leaks a stray release
+// into the window below. The decision is made ONCE, on the press, and the
+// release is consumed iff that press was.
+static std::unordered_set<uint32_t> g_consumedPresses;
+
+static bool handleSearchPress(uint32_t keycode) {
+    if (!activeScrollOverview())
+        return false;
+
+    // X5: ESC is always ours while the overview is open -- it either clears the
+    // query or exits -- so it must never fall through to the window underneath.
+    if (keycode == EVDEV_KEY_ESC) {
+        resetCompose();
+        // X5, GNOME-style: the first ESC drops the filter, the next one leaves.
+        if (!g_searchActive) {
+            for (const auto& overview : scrollOverviews())
+                if (overview)
+                    overview->close();
+            return true;
+        }
+        g_overviewSearch.clear();
+        g_searchActive = false;
+        afterQueryEdit();
+        return true;
+    }
+
+    if (keycode == EVDEV_KEY_BACKSPACE) {
+        if (!g_searchActive)
+            return false;
+        resetCompose();
+        popCodepoint(g_overviewSearch);
+        afterQueryEdit();
+        return true;
+    }
+
+    const SSearchKey KEY = searchKeyFor(keycode);
+    if (!KEY.consume)
+        return false;
+
+    // G1: whitespace must never START a search -- GNOME's trigger test rejects a
+    // keysym whose value is pure whitespace -- but it types normally once one is
+    // running. The key stays CONSUMED either way: the overview holds the
+    // keyboard, so falling through would type a space into a window the user
+    // cannot see.
+    if (KEY.text == " " && !g_searchActive)
+        return true;
+
+    if (KEY.starts)
+        g_searchActive = true;
+
+    g_overviewSearch += KEY.text;
+    afterQueryEdit();
+    return true;
+}
+
 static CHyprSignalListener g_pTapSuperKeyHook;
 static CHyprSignalListener g_pTapSuperButtonHook;
 static bool                g_tapSuperCandidate = false;
@@ -521,11 +637,18 @@ static void                registerTapSuper() {
             g_heldGuardModifiers = std::max(0, g_heldGuardModifiers + (PRESSED ? 1 : -1));
         }
 
-        if (!ISSUPER && isSearchKey(event.keycode)) {
-            info.cancelled = true;
-            if (PRESSED)
-                applySearchKey(event.keycode);
-            return;
+        if (!ISSUPER) {
+            if (PRESSED) {
+                if (handleSearchPress(event.keycode)) {
+                    g_consumedPresses.insert(event.keycode);
+                    info.cancelled = true;
+                    return;
+                }
+            }
+            else if (g_consumedPresses.erase(event.keycode) > 0) {
+                info.cancelled = true;
+                return;
+            }
         }
 
         if (!ISSUPER) {
