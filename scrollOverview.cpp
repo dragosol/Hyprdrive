@@ -5753,8 +5753,11 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     };
 
     const auto renderTileChrome = [&] {
+        // The same progress the pill, the strip and the result cards fade on,
+        // so the whole overview arrives and leaves as one thing.
+        const float CHROMEFADE = overviewGridProgress(renderScale);
         for (const auto& [window, box] : tileChrome)
-            TileChrome::render(monitor, window, box, monitor->m_scale);
+            TileChrome::render(monitor, window, box, monitor->m_scale, CHROMEFADE);
     };
 
     const auto fullscreenWindow = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(workspace));

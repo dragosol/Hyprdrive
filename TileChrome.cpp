@@ -330,8 +330,17 @@ CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorS
     return CBox{CX - D / 2.F, CY - D / 2.F, D, D};
 }
 
-void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float monitorScale) {
+void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float monitorScale, float alpha) {
     if (!monitor || !window || tileBox.w < 1 || tileBox.h < 1)
+        return;
+
+    // X79 (user, 2026-08-06: "app icons from windows sometimes don't disappear
+    // until animation/transition is complete"). Everything this function draws
+    // is chrome laid OVER the tile, so the tile's own fade does not touch it.
+    // One multiplier on all three, at the top, so a new piece of chrome cannot
+    // be added later and quietly miss it.
+    const float FADE = std::clamp(alpha, 0.F, 1.F);
+    if (FADE <= 0.01F)
         return;
 
     const float SCALE = std::max(monitorScale, 0.01F);
@@ -347,7 +356,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
         icon.tex = TEX;
         icon.box = CBox{sc<float>(tileBox.x + tileBox.w / 2.0) - SIDE / 2.F, sc<float>(tileBox.y + tileBox.h) - SIDE / 2.F, SIDE, SIDE};
         icon.box.round();
-        icon.a = 1.F;
+        icon.a = FADE;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(icon));
     }
 
@@ -356,7 +365,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // the tile rather than popping. Below the tile, clear of X8's app icon,
     // which straddles the bottom edge.
     if (const auto* const HSTATE = stateFor(window, false)) {
-        const float A = std::clamp(easedHover(HSTATE->hover), 0.F, 1.F);
+        const float A = std::clamp(easedHover(HSTATE->hover), 0.F, 1.F) * FADE;
         if (A > 0.01F) {
             const float ICONSIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE);
             const float BOTTOM   = sc<float>(tileBox.y + tileBox.h) + ICONSIDE / 2.F + CAPTION_GAP * SCALE;
@@ -372,7 +381,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // 100ms. Driven off the hover ramp above CLOSE_VISIBLE_AT, so it needs no
     // state of its own and cannot disagree with the threshold the hit-test uses.
     const auto* const CSTATE = stateFor(window, false);
-    const float       ALPHA  = CSTATE ? std::clamp((easedHover(CSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F;
+    const float       ALPHA  = (CSTATE ? std::clamp((easedHover(CSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F) * FADE;
     if (ALPHA <= 0.F)
         return;
 

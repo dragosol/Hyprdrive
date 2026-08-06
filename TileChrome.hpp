@@ -47,6 +47,11 @@ CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorS
 CBox closeButtonHitBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale);
 
 // App icon (X8) + close button, drawn over an already-rendered tile.
-void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float monitorScale);
+//
+// `alpha` is the OVERVIEW's own open/close progress. The chrome is not part of
+// the tile texture, so nothing else fades it: without this the icons hold full
+// opacity for the whole transition and pop out at the end of it, which is very
+// visible when the overview is toggled quickly.
+void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float monitorScale, float alpha = 1.F);
 
 }
