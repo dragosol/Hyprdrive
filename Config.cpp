@@ -1,5 +1,7 @@
 #include "Config.hpp"
 
+#include <chrono>
+
 #include <algorithm>
 #include <config/shared/complex/ComplexDataType.hpp>
 #include <config/shared/complex/ComplexDataTypes.hpp>
@@ -294,6 +296,13 @@ static void registerConfigValues() {
                                                              CHyprColor{0.F, 0.F, 0.F, 0.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:scale", "overview scale", 0.82F, SFloatValueOptions{.min = 0.1F, .max = 0.9F}));
+    // GLOBAL ANIMATION SPEED. 1 = shipped timings, higher = slower, and it
+    // reaches EVERYTHING through animElapsedMs: the overview's open/close, the
+    // dock's hover panel, the minimize flight, tooltips, the bounce, the launch
+    // zoom. For watching a frame at a time, and for the stress rig.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CFloatValue>("plugin:scrolloverview:anim_scale", "global animation slowdown; 1 = normal, 10 = ten times slower", 1.F,
+                                                          SFloatValueOptions{.min = 0.05F, .max = 100.F}));
 
     // The overview used to borrow `windowsMove` for its own open and close,
     // which meant one curve for both directions and no way to shape either
@@ -645,6 +654,17 @@ int getDragMode() {
 
 int getDragThreshold() {
     return std::max<int>(0, getValue<int>("plugin:scrolloverview:input:drag_threshold"));
+}
+
+float animScale() {
+    return std::max(0.05F, getValue<float>("plugin:scrolloverview:anim_scale"));
+}
+
+// The ONE place the plugin's clock is read. Dividing here is what makes a single
+// slider stretch every animation at once while every duration constant keeps its
+// real value -- see the note in Config.hpp.
+float animElapsedMs(const Time::steady_tp& since) {
+    return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count()) / animScale();
 }
 
 float getTouchpadScrollFactor() {

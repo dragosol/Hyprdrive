@@ -646,7 +646,7 @@ static bool overviewGridReleasing(const PHLWINDOW& window, PHLMONITOR monitor) {
         IT->second.start   = NOW; // the match died on THIS frame, whenever it is
     }
 
-    if (std::chrono::duration<float, std::milli>(NOW - IT->second.start).count() > sc<float>(DURATION) + GRID_RELEASE_GRACE_MS) {
+    if (ScrollOverview::Config::animElapsedMs(IT->second.start) > sc<float>(DURATION) + GRID_RELEASE_GRACE_MS) {
         g_gridReleases.erase(IT);
         return false;
     }
@@ -1082,7 +1082,7 @@ static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox*
     // on frames where that culls the whole workspace, its pass is skipped and
     // this function is not called at all. Reseeding then would throw away an
     // ease that is still running and draw the tile at its destination.
-    const bool INFLIGHT = KNOWN && std::chrono::duration<float, std::milli>(NOW - entry.start).count() < sc<float>(DURATION);
+    const bool INFLIGHT = KNOWN && ScrollOverview::Config::animElapsedMs(entry.start) < sc<float>(DURATION);
     // Genuinely absent: a tile that stopped being drawn entirely, stayed gone
     // long enough to finish whatever it was doing, and is coming back.
     const bool UNDRAWN = KNOWN && !INFLIGHT && g_overviewFrame - entry.lastFrame > 1;
@@ -1101,7 +1101,7 @@ static CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox*
     entry.lastFrame    = g_overviewFrame;
     entry.promotedLast = promoted;
 
-    const float ELAPSED = std::chrono::duration<float, std::milli>(NOW - entry.start).count();
+    const float ELAPSED = ScrollOverview::Config::animElapsedMs(entry.start);
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
     const CBox  CURRENT = overviewGridLerpBox(entry.from, entry.to, T);
 
@@ -2056,7 +2056,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         // G12. The hold has to pass BEFORE the distance is even looked at.
         if (g_resultDrag && !g_resultDrag->desktopId.empty()) {
             if (!g_resultDrag->live) {
-                const float HELDMS = std::chrono::duration<float, std::milli>(Time::steadyNow() - g_resultDrag->startedAt).count();
+                const float HELDMS = ScrollOverview::Config::animElapsedMs(g_resultDrag->startedAt);
                 if (HELDMS >= G12_HOLD_MS && g_resultDrag->start.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
                     g_resultDrag->live = true;
             }
@@ -3979,7 +3979,7 @@ float CScrollOverview::dragMiniProgress() const {
     if (DURATION <= 0)
         return TARGET;
 
-    const float ELAPSED = std::chrono::duration<float, std::milli>(Time::steadyNow() - dragMiniChangedAt).count();
+    const float ELAPSED = ScrollOverview::Config::animElapsedMs(dragMiniChangedAt);
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
     if (T < 1.F)
         g_gridReflowActive = true; // rides the overview's existing next-frame request
@@ -4006,7 +4006,7 @@ float CScrollOverview::dragRecentreProgress() const {
     if (DURATION <= 0)
         return TARGET;
 
-    const float ELAPSED = std::chrono::duration<float, std::milli>(Time::steadyNow() - dragRecentreChangedAt).count();
+    const float ELAPSED = ScrollOverview::Config::animElapsedMs(dragRecentreChangedAt);
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
     if (T < 1.F)
         g_gridReflowActive = true; // rides the overview's existing next-frame request

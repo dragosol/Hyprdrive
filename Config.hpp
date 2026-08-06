@@ -1,6 +1,7 @@
 #pragma once
 
 #include "globals.hpp"
+#include <hyprland/src/helpers/time/Time.hpp>
 
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
@@ -119,6 +120,20 @@ int           getScrollEventDelay();
 bool          getLeftHanded();
 int           getDragMode();
 int           getDragThreshold();
+
+// GLOBAL ANIMATION SPEED (user, 2026-08-06). One multiplier over every timed
+// thing in the plugin. 1.0 is the shipped feel; 10.0 runs everything at a tenth
+// speed so a single frame can be looked at properly.
+//
+// Deliberately applied at the ONE place elapsed time is measured, not by editing
+// durations: every constant in the codebase keeps its real, meaningful value
+// (GNOME's 400ms minimize stays the number 400 and can still be checked against
+// the host), and nothing has to be un-edited afterwards.
+float         animScale();
+
+// Milliseconds since `since`, DIVIDED by animScale -- so a clock that runs slow
+// makes every duration comparison downstream stretch, with no other changes.
+float         animElapsedMs(const Time::steady_tp& since);
 float         getDragMiniScale();
 int           getDragMiniMs();
 int           getDragRecentreMs();

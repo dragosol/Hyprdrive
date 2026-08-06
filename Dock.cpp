@@ -429,7 +429,7 @@ float flightProgress(const SFlight& flight) {
     if (DURATION <= 0)
         return 1.F;
 
-    return std::clamp(sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - flight.startedAt).count()) / sc<float>(DURATION), 0.F, 1.F);
+    return std::clamp(ScrollOverview::Config::animElapsedMs(flight.startedAt) / sc<float>(DURATION), 0.F, 1.F);
 }
 
 CBox lerpBox(const CBox& a, const CBox& b, float t) {
@@ -798,7 +798,11 @@ constexpr float EDGE_BAND = 2.F;
 constexpr float REVEAL_BAND = 4.F;
 
 float elapsedMs(const Time::steady_tp& since) {
-    return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count());
+    // Every timed thing in the dock already funnels through here -- the hover
+    // panel, the tooltip fade, the bounce, the launch zoom, the autohide slide
+    // and the hotkey overlay -- so routing it through the global scale is the
+    // whole of the slider on this side. Constants keep their real values.
+    return ScrollOverview::Config::animElapsedMs(since);
 }
 
 // ---- X31 -------------------------------------------------------------------
@@ -2435,6 +2439,23 @@ bool dragEnd(PHLMONITOR monitor, const Vector2D& point) {
     g_drag.reset();
 
     if (!DRAG.live)
+        return false;
+
+    // USER-REPORTED P0 2026-08-06: "I cant use the dock clicking it does
+    // nothing". This is X16's lesson arriving on the dock, and it is why the
+    // scripted rig could not see it -- that rig jitters 4px, under the 10px
+    // getDragThreshold, so it never went down this path at all.
+    //
+    // A drag goes live the moment the pointer passes that threshold, and a real
+    // hand wobbles 10-20px between press and release. The release then landed
+    // HERE, reordered the favourite, and returned true -- which swallowed the
+    // click, so the app never minimized or launched. To the user that is a dead
+    // dock, and Y4 made it worse by making the click the primary gesture.
+    //
+    // A release that lands near where the press did is a CLICK, whatever the
+    // pointer did in between. Same 3x tolerance X16 settled on for window tiles.
+    const float CLICKTOL = 3.F * dragThresholdPx(monitor);
+    if (DRAG.start.distanceSq(point) <= CLICKTOL * CLICKTOL)
         return false;
 
     // A drop that leaves the pill is a CANCEL, not an unpin. Losing a favourite
