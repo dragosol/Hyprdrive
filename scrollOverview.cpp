@@ -6030,7 +6030,8 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // X11 (user, 2026-08-01): the strip is FROSTED. Live rounded
                 // blur of what is behind the panel, drawn under the tint. The
                 // global backdrop stays sharp -- do not confuse the two.
-                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, false);
+                // X85: SAMPLE the single pre-blur above; do not add another pass.
+                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, true);
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
@@ -6351,7 +6352,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     g_overviewSearchRowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
 
     // X11: frosted pill -- live rounded blur of whatever is behind it.
-    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, false);
+    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, true); // X85: sample, don't re-blur
 
     // X4: hue inherited from the theme, alpha kept at the tuned value. The
     // resting surface reads col.inactive_border and the badge the accent -- the
@@ -6466,7 +6467,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             card.round();
 
             // §10 clause 3: the expanded search surface is frosted, like the pill.
-            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, false);
+            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, true); // X85: sample, don't re-blur
 
             CRectPassElement::SRectData cardBg;
             cardBg.box           = card;
@@ -7788,6 +7789,28 @@ void CScrollOverview::render() {
             renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
         }
     }
+
+    // X85. ONE BLUR, MANY SAMPLERS.
+    //
+    // Hyprland re-blurs the framebuffer once per LIVE-blur element and each blur
+    // compounds on the last, so the overview's frost used to be a function of how
+    // many surfaces happened to be frosted this frame: 2 elements with no query,
+    // ~7 once the result cards appeared, and a visibly stronger frost in the
+    // second case from identical parameters. X84 answered that by pinning
+    // explicit strength, which fixed the inconsistency and broke the point of the
+    // exercise -- the overview stopped following decoration:blur:* at all.
+    //
+    // Instead: blur the framebuffer EXACTLY ONCE here, with the global settings
+    // and nothing overridden, and have every frosted surface SAMPLE that buffer
+    // rather than blur again. One pass means the result is whatever the user's
+    // theme asks for -- no blur configured gives no blur, a soft blur gives a
+    // soft one -- and it can no longer drift with the number of surfaces.
+    //
+    // It sits AFTER the live-window loop and its flush on purpose: the tiles have
+    // to be in the framebuffer, or the strip would frost the wallpaper alone and
+    // the windows behind it would vanish from the frost.
+    OverviewRender::flushPass(MONITOR);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
 
     {
         Prof::Timer PROFSTRIP{Prof::stripNs, Prof::stripCalls};
