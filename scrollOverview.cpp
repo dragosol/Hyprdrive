@@ -6688,10 +6688,16 @@ void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, 
     if (GLOBALBOX.empty() || MONITORBOX.empty() || GLOBALBOX.intersection(MONITORBOX).empty())
         return;
 
-    const auto windowBox = CBox{
+    // ROUNDED, for X73's reason: the box follows the cursor and is scaled, so it
+    // lands on fractional coordinates, and a 1px border drawn in the annulus
+    // outside a fractional box keeps only its top and left edges. Measured on
+    // the drag path exactly as on the hover path -- one ring row, one ring
+    // column -- once the dragged window started drawing a ring at all.
+    auto windowBox = CBox{
         (GLOBALBOX.pos() - monitor->m_position) * monitor->m_scale,
         GLOBALBOX.size() * monitor->m_scale,
     };
+    windowBox.round();
 
     renderWindowLive(monitor, WINDOW, windowBox, dragOwner->scale->value(), now, nullptr, true);
 }
@@ -6807,11 +6813,18 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         .renderScale          = renderScale,
         .now                  = now,
         .workspaceBox         = workspaceBox,
-        // User, 2026-08-06: the ring the keyboard and a drag already draw also
-        // appears under the cursor. TileChrome::hovered() answers for the
-        // post-hover linger too, so the ring holds exactly as long as the
-        // blow-up and the close button do.
-        .selected             = (g_overviewKeyboardTile && g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window) || TileChrome::hovered() == window,
+        // The ring has three owners, and DRAGGED has to be one of them in its
+        // own right. It used to ride the keyboard clause by accident -- a drag
+        // leaves closeOnWindow on the window it picked up -- and X74 gating that
+        // clause behind g_overviewKeyboardTile took the ring off the dragged
+        // window with it, because a drag is pointer input and clears the flag.
+        //
+        // It cannot come from hovered() either: updateTileHover drops the hover
+        // outright while a drag is live, so the tile under the cursor is not
+        // reported as hovered and the window being carried is not under the
+        // cursor anyway once it has left its slot.
+        .selected             = (g_overviewKeyboardTile && g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window) ||
+            TileChrome::hovered() == window || dragged,
         .dragged              = dragged,
     });
 
