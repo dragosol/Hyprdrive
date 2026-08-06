@@ -651,8 +651,43 @@ static float overviewStripLogicalHeight(PHLMONITOR monitor) {
 
 // X10: the search row above the strip. ponytail: constant 64 logical px
 // (48px pill + 8px margins); make it a config knob if anyone ever asks.
+static constexpr float OVERVIEW_SEARCH_ROWHL = 64.F, OVERVIEW_SEARCH_DOCKPADL = 8.F;
+
 static float overviewSearchLogicalHeight(PHLMONITOR monitor) {
-    return monitor ? 64.F : 0.F;
+    return monitor ? OVERVIEW_SEARCH_ROWHL : 0.F;
+}
+
+// X50: how far down the monitor the top chrome reaches, in logical global px.
+// The WORK AREA is no help: measured 2026-08-06, the rice's bar sets no
+// exclusive zone -- `hyprctl monitors` reports reserved [0,0,0,0] while
+// `quickshell:bar` occupies the top 63px -- so a dock target read from
+// workArea() puts the pill UNDER the bar, which this pass draws after the whole
+// overview. That is X10's occlusion finding reached from the other side, and it
+// is what the first X50 build did.
+// Only WIDE surfaces pinned to the monitor's top edge count: the same rice puts
+// 250px screenCorners up there, and docking below one of those is a 23px move.
+static float overviewTopChromeBottomL(PHLMONITOR monitor) {
+    if (!monitor)
+        return 0.F;
+
+    float bottom = sc<float>(monitor->m_position.y);
+    for (const auto LEVEL : {ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
+        for (auto const& lsRef : monitor->m_layerSurfaceLayers[LEVEL]) {
+            const auto LS = lsRef.lock();
+            if (!Desktop::View::validMapped(LS))
+                continue;
+
+            const auto& GEOM = LS->m_geometry;
+            if (sc<float>(GEOM.w) < sc<float>(monitor->m_size.x) * 0.5F || sc<float>(GEOM.h) > sc<float>(monitor->m_size.y) / 3.F)
+                continue;
+            if (sc<float>(GEOM.y) > sc<float>(monitor->m_position.y) + 1.F)
+                continue;
+
+            bottom = std::max(bottom, sc<float>(GEOM.y + GEOM.h));
+        }
+    }
+
+    return bottom;
 }
 
 // X21: the results panel is part of the LAYOUT STACK, not an overlay. Its band
@@ -1886,6 +1921,9 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     Animation::mgr()->createAnimation(1.F, workspaceInsertFadeProgress, workspaceInsertFadeConfig, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, reflowPacer, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(0.F, resultsBand, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
+    // X50 rides the same config as the band it travels with: the pill lifting on
+    // one curve while the panel it uncovers grows on another reads as two events.
+    Animation::mgr()->createAnimation(0.F, searchDock, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
 
     scale->setUpdateCallback([this](auto) { damage(); });
     viewOffset->setUpdateCallback([this](auto) { damage(); });
@@ -1896,6 +1934,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         g_overviewResultsBandH = resultsBand->value();
         damage();
     });
+    searchDock->setUpdateCallback([this](auto) { damage(); });
 
     // A previous overview's band must not open the next one already pushed.
     g_overviewResultsBandH = 0.F;
@@ -6147,6 +6186,12 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
     g_overviewResultsBandH = resultsBand->value();
 
+    // X50. The trigger is "results begin to populate", not the first keystroke:
+    // EMPTYRESULT is exactly "typed, and nothing matched anywhere", so a query
+    // that hits nothing leaves the pill at rest.
+    if (const float DOCKGOAL = QUERIED && !EMPTYRESULT ? 1.F : 0.F; std::abs(searchDock->goal() - DOCKGOAL) > 0.01F)
+        *searchDock = DOCKGOAL;
+
     // The pill is laid out in the SAME logical space as the strip it sits above.
     // That placement is load-bearing and is NOT the part X22 changed: laid out
     // at the monitor's true top edge it landed underneath the layer-shell bar,
@@ -6164,6 +6209,30 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     };
 
     CBox pill = getOverviewGlobalBox(PILLLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
+
+    // X50: docked, the pill leaves the card's inset behind and sits just under
+    // the layer-shell bar, which is what the work area's top edge means. Only y
+    // moves -- the card scales about the viewport centre, so a logically centred
+    // box is still centred after the transform. getOverviewBox works in
+    // monitor-local RENDERED px, hence the m_scale on the way in.
+    if (const float DOCK = std::clamp(searchDock->value(), 0.F, 1.F); DOCK > 0.001F) {
+        float dockTopL = overviewTopChromeBottomL(monitor);
+        if (const auto WS = monitor->m_activeWorkspace; WS && WS->m_space) {
+            if (const auto WA = WS->m_space->workArea(); WA.w > 1 && WA.h > 1)
+                dockTopL = std::max(dockTopL, sc<float>(WA.y)); // a bar that DOES reserve
+        }
+
+        const float DOCKY = (dockTopL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL) * sc<float>(monitor->m_scale);
+        pill.y += (DOCKY - sc<float>(pill.y)) * DOCK;
+    }
+
+    // ponytail: the 64px row the pill vacates is NOT reclaimed by the layout.
+    // Collapsing it (tried, r1) moves the results up to the card's top edge at
+    // screen y ~97 while the docked pill's foot lands at ~110, so the panel
+    // slides under the pill. Reclaiming it properly means solving the row height
+    // that puts the card's content below the DOCKED pill, which needs the open
+    // scale inside the free layout helpers. Worth ~32px; do it if the user asks.
+
     if (pill.width <= 1.F || !overviewBoxIntersectsMonitor(pill, monitor))
         return;
     pill.round();
@@ -6726,7 +6795,8 @@ bool CScrollOverview::shouldAllowRealtimePreviewSchedule() {
     if (closing)
         return true;
 
-    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated() || reflowPacer->isBeingAnimated() || resultsBand->isBeingAnimated())
+    if (scale->isBeingAnimated() || viewOffset->isBeingAnimated() || reflowPacer->isBeingAnimated() || resultsBand->isBeingAnimated() ||
+        searchDock->isBeingAnimated())
         return true;
 
     if (realtimePreviewFrameQueued) {
