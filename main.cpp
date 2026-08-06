@@ -1029,14 +1029,31 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 }
 
                 if (ScrollOverview::Dock::menuOpen()) {
-                    info.cancelled = true;
-                    if (PRESSED) {
-                        if (!ScrollOverview::Dock::menuContains(MONITOR, LOCAL))
-                            ScrollOverview::Dock::closeMenu();
-                        else
-                            ScrollOverview::Dock::menuClick(MONITOR, LOCAL);
+                    if (!PRESSED) {
+                        info.cancelled = true;
+                        return;
                     }
-                    return;
+
+                    if (ScrollOverview::Dock::menuContains(MONITOR, LOCAL)) {
+                        ScrollOverview::Dock::menuClick(MONITOR, LOCAL);
+                        info.cancelled = true;
+                        return;
+                    }
+
+                    // FAIL-SAFE, and it is not theoretical: menuContains answers
+                    // against the LAST FRAME's row geometry, which only render()
+                    // fills in. On a desktop where the pill is not being drawn
+                    // the menu has no geometry at all, so it can be opened and
+                    // then never dismissed -- and swallowing here made every
+                    // press on every window disappear until the session was
+                    // restarted. Measured 2026-08-06: after one right-click on
+                    // the dock icon, focus went to none and `focuswindow` could
+                    // not get it back; a fresh session was unaffected.
+                    //
+                    // So a press that misses the menu closes it and is LET
+                    // THROUGH. The overview swallows the same press, which is
+                    // nicer, and it can afford to: it is always drawing.
+                    ScrollOverview::Dock::closeMenu();
                 }
 
                 break;
