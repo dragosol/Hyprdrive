@@ -279,7 +279,8 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
     // X61: and on the tiles, which is where the remembered selection lives.
     g_overviewNavZone = EOverviewNavZone::Tile;
     SearchProviders::query("");
-    g_overviewAppSelection = -1;
+    g_overviewAppSelection      = -1;
+    g_overviewSelectFirstPending = false;
     const auto [ACTION, TARGET] = splitOverviewArg(arg);
     const auto ACTIVE           = activeScrollOverview();
 
@@ -490,6 +491,13 @@ static void applySearchKey(uint32_t keycode) {
     // The ranking changes under any edit, so a held index would point at a
     // different app than the one the user saw highlighted.
     g_overviewAppSelection = -1;
+
+    // ...and the new ranking's TOP result takes the selection instead of the
+    // desktops. Deferred to renderSearch because the providers have not
+    // answered yet; emptying the query hands the selection back to the tiles.
+    g_overviewSelectFirstPending = !g_overviewSearch.empty();
+    if (g_overviewSearch.empty())
+        g_overviewNavZone = EOverviewNavZone::Tile;
 
     for (const auto& overview : scrollOverviews())
         if (overview)

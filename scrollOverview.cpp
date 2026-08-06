@@ -3449,8 +3449,15 @@ void CScrollOverview::updateTileHover() {
         return;
     }
 
-    if (const auto HOVERED = TileChrome::hovered(); HOVERED && tileCloseButtonBox(HOVERED).containsPoint(lastMousePosLocal))
+    // The button is drawn on the GROWN box so it pokes a few px past the slot,
+    // and during the post-hover linger it belongs to a tile the hover test no
+    // longer reports at all. Both cases RE-ARM rather than just bail: bailing
+    // left the linger counting down under a cursor that had arrived on the
+    // button, so the tile could shrink away mid-aim.
+    if (const auto HOVERED = TileChrome::hovered(); HOVERED && tileCloseButtonBox(HOVERED).containsPoint(lastMousePosLocal)) {
+        TileChrome::setHovered(HOVERED);
         return;
+    }
 
     TileChrome::setHovered(windowAtOverviewPoint(lastMousePosLocal));
 }
@@ -6072,9 +6079,14 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     // the fill does, and COverviewSplitBorderPassElement draws the asymmetric
     // case as two damage-clipped halves.
     // (user, 2026-08-03): the stroke sits on the cell's INNER edge, not around
-    // its outside, and it is the search placeholder's white rather than the
-    // accent -- renderSearch's FG for the un-queried state.
+    // its outside.
+    // X56 (user, 2026-08-06): and it is the THEME's accent again, not the flat
+    // white that instruction had also asked for -- the strip outline, the dock
+    // highlight and the tile ring now all read general:col.active_border, so a
+    // theme switch moves them together. The 2026-08-03 white is superseded
+    // here deliberately; do not restore it as a regression fix.
     auto addCellBorder = [&](const CBox& cell, bool largeLeft, bool largeRight) {
+        const auto OUTLINE = ScrollOverview::Config::highlightColor();
         const int BORDER = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
         // Inset by the full stroke width: renderBorder centres nothing, it grows
         // outward from the box, so the box has to be the INNER rectangle for the
@@ -6084,7 +6096,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 
         g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewSplitBorderPassElement>(COverviewSplitBorderPassElement::SData{
             .box           = INNER,
-            .color         = ::Config::CGradientValueData{CHyprColor{1.F, 1.F, 1.F, 0.55F}},
+            .color         = ::Config::CGradientValueData{OUTLINE.modifyA(1.F)},
             .roundLeft     = std::max(0, (largeLeft ? ROUND : INNERROUND) - BORDER),
             .roundRight    = std::max(0, (largeRight ? ROUND : INNERROUND) - BORDER),
             .roundingPower = CARDROUND.power,
@@ -6157,9 +6169,9 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             // X4: the hover tint is themed, from the same general:col.active_border
             // that DropIndicator already reads. White is only the fallback for a
             // theme that defines no gradient.
-            const auto ACCENT = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
+            const auto ACCENT = ScrollOverview::Config::highlightColor();
 
-            addCellRect(CELL, ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F * FADE} : ACCENT.m_colors[0].modifyA(0.22F * FADE), ATLEFT, ATRIGHT);
+            addCellRect(CELL, ACCENT.modifyA(0.22F * FADE), ATLEFT, ATRIGHT);
 
             // X3 delta 3: the reference borders the hovered cell as well as
             // tinting it. Drawn after the tint and after the minis, so the drop
@@ -6229,6 +6241,17 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
     // An app hit is a hit: "no matches" must not contradict a listed result.
     const bool EMPTYRESULT = QUERIED && MATCHES == 0 && RESULTS.empty();
+
+    // User, 2026-08-06: the first result is what a query selects, not the
+    // desktops. The keyboard hook could not do this itself -- at the keystroke
+    // the providers have not answered and RESULTS is empty -- so it arms the
+    // flag and this spends it on the first frame that actually has a result.
+    // Spending it once is what leaves a deliberate Tab back to the grid alone.
+    if (g_overviewSelectFirstPending && QUERIED && !RESULTS.empty()) {
+        g_overviewAppSelection       = 0;
+        g_overviewNavZone            = EOverviewNavZone::Result;
+        g_overviewSelectFirstPending = false;
+    }
 
     // X21: the layout band is driven from the row count HERE, ahead of the pill
     // culling return below -- the strip and grid reflow off it even on frames
@@ -6317,7 +6340,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // resting surface reads col.inactive_border and the badge the accent -- the
     // same pairing renderStrip already uses for its cells.
     const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
-    const auto ACCENT   = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
+    const auto ACCENT   = ScrollOverview::Config::highlightColor();
 
     CRectPassElement::SRectData bg;
     bg.box           = pill;
@@ -6331,7 +6354,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
     CRectPassElement::SRectData badgeBg;
     badgeBg.box           = badge;
-    badgeBg.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F * FADE} : ACCENT.m_colors[0].modifyA(0.30F * FADE);
+    badgeBg.color         = ACCENT.modifyA(0.30F * FADE);
     badgeBg.round         = sc<int>(std::round(BADGED / 2.F));
     badgeBg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(badgeBg));
@@ -6461,7 +6484,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         CRectPassElement::SRectData sel;
                         sel.box           = cell;
                         // Opaque for the same reason the list's selection is.
-                        sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE * CARDA} : ACCENT.m_colors[0].modifyA(FADE * CARDA);
+                        sel.color         = ACCENT.modifyA(FADE * CARDA);
                         sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
                         sel.roundingPower = 2.F;
                         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
@@ -6509,7 +6532,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             const int   HEADPX  = std::max(1, sc<int>(std::round(14.F * SCALE)));
             const auto  HEADTEX = OverviewRender::text(SECTION.title, CHyprColor{1.F, 1.F, 1.F, 0.95F}, HEADPX, false, "", std::max(1, sc<int>(HEADWG - headIndent) - ROWPAD), 500);
             const auto  MORETEX = MORE == 0 ? nullptr :
-                                              OverviewRender::text(std::to_string(MORE) + " more", CHyprColor{1.F, 1.F, 1.F, 0.55F}, std::max(1, sc<int>(std::round(12.F * SCALE))), false, "",
+                                              OverviewRender::text(std::to_string(MORE) + " more", CHyprColor{1.F, 1.F, 1.F, 0.78F}, std::max(1, sc<int>(std::round(12.F * SCALE))), false, "",
                                                                    std::max(1, sc<int>(HEADWG - headIndent) - ROWPAD));
 
             // Both lines centre as one block, so a section without a count does
@@ -6563,7 +6586,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     // rows are frosted and carry the wallpaper's blurred
                     // STRUCTURE; the selected one is flat. That difference holds
                     // against any wallpaper, which a colour delta does not.
-                    sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE * CARDA} : ACCENT.m_colors[0].modifyA(FADE * CARDA);
+                    sel.color         = ACCENT.modifyA(FADE * CARDA);
                     sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
                     sel.roundingPower = 2.F;
                     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
@@ -6602,7 +6625,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         const float DESCX = rowText.x + rowText.width + std::round(10.F * SCALE);
                         const int   DESCW = sc<int>((row.x + row.width - sc<float>(ROWPAD)) - DESCX);
                         if (DESCW > sc<int>(std::round(24.F * SCALE))) {
-                            if (const auto DESCTEX = OverviewRender::text(RESULTS[I].description, CHyprColor{1.F, 1.F, 1.F, 0.62F}, ROWPX, false, "", DESCW);
+                            if (const auto DESCTEX = OverviewRender::text(RESULTS[I].description, CHyprColor{1.F, 1.F, 1.F, 0.85F}, ROWPX, false, "", DESCW);
                                 DESCTEX && DESCTEX->ok()) {
                                 CBox descText{DESCX, row.y + std::round((row.height - sc<float>(DESCTEX->m_size.y)) / 2.F), sc<float>(DESCTEX->m_size.x), sc<float>(DESCTEX->m_size.y)};
                                 ADDTEX(DESCTEX, descText.round());
@@ -6765,7 +6788,11 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         .renderScale          = renderScale,
         .now                  = now,
         .workspaceBox         = workspaceBox,
-        .selected             = g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window,
+        // User, 2026-08-06: the ring the keyboard and a drag already draw also
+        // appears under the cursor. TileChrome::hovered() answers for the
+        // post-hover linger too, so the ring holds exactly as long as the
+        // blow-up and the close button do.
+        .selected             = (g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window) || TileChrome::hovered() == window,
         .dragged              = dragged,
     });
 

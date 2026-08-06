@@ -1836,9 +1836,12 @@ void renderMenu(PHLMONITOR monitor, const SLayout& layout) {
         row.box          = CBox{plate.x, std::round(y), plate.width, std::round(ROWH)};
 
         if (row.box.containsPoint(MOUSE)) {
+            // X56: the context menu's row highlight follows the theme too.
+            const auto ROWACCENT = ScrollOverview::Config::highlightColor();
+
             CRectPassElement::SRectData fill;
             fill.box           = row.box;
-            fill.color         = CHyprColor{1.F, 1.F, 1.F, 0.12F};
+            fill.color         = ROWACCENT.modifyA(0.26F);
             fill.round         = 0;
             fill.roundingPower = 2.F;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(fill));
@@ -2726,9 +2729,14 @@ void render(PHLMONITOR monitor) {
         // with the pill rather than a constant: the cell is inset from the pill
         // by the same amount on every side, so its curve only reads as parallel
         // to the dock's if the radius drops by that inset too.
+        // X56 (user, 2026-08-06): themed, so the dock re-colours with
+        // everything else when the Hyprland theme changes. The alpha is the
+        // tuned value and stays -- only the hue comes from the config.
+        const auto ACCENT = ScrollOverview::Config::highlightColor();
+
         CRectPassElement::SRectData fill;
         fill.box           = hoverBox(HASHOVER ? HOVEREDITEM->iconBox : LAYOUT.showApps, monitor->m_scale);
-        fill.color         = CHyprColor{1.F, 1.F, 1.F, 0.10F};
+        fill.color         = ACCENT.modifyA(0.22F);
         fill.round         = std::max(0, LAYOUT.rounding - sc<int>(std::round(hoverInset() * monitor->m_scale)));
         fill.roundingPower = 2.F;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(fill));

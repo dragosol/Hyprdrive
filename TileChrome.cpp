@@ -36,6 +36,12 @@ constexpr float HOVER_GROW    = 0.05F;
 constexpr float PRESS_SHRINK  = 0.04F;
 constexpr float HOVER_IN_MS   = 150.F;
 constexpr float HOVER_OUT_MS  = 110.F;
+
+// User, 2026-08-06: a tile the cursor has left stays blown up for a beat, "that
+// way it gives me time to decide whether to press the x button or not". Only
+// the tile the cursor left into EMPTY SPACE lingers -- moving to another tile
+// shrinks the old one at once, so two tiles are never big together.
+constexpr float HOVER_LINGER_MS = 2000.F;
 constexpr float PRESS_MS      = 90.F;
 
 // X8 / close button proportions, as fractions of the tile's SHORT side so they
@@ -84,19 +90,31 @@ struct SEase {
 
     float value() const {
         const float ELAPSED = std::chrono::duration<float, std::milli>(Time::steadyNow() - start).count();
+        // A start in the FUTURE is a delayed ease: hold at `from` until it is due.
+        if (ELAPSED <= 0.F)
+            return from;
         return ELAPSED >= ms ? to : from + (to - from) * (ELAPSED / ms);
     }
 
     bool running() const { return std::chrono::duration<float, std::milli>(Time::steadyNow() - start).count() < ms; }
 
-    void retarget(float target, float durationMs) {
+    void retarget(float target, float durationMs, float delayMs = 0.F) {
         if (std::abs(to - target) < 0.001F)
             return;
 
         from  = value();
         to    = target;
         ms    = std::max(1.F, durationMs);
-        start = Time::steadyNow();
+        start = Time::steadyNow() + std::chrono::milliseconds(sc<int64_t>(std::max(0.F, delayMs)));
+    }
+
+    // Drop a delay that has not started yet, keeping the same target. Used when
+    // a new tile takes the hover and the old one must not sit there waiting.
+    void hurry() {
+        if (Time::steadyNow() < start) {
+            from  = value();
+            start = Time::steadyNow();
+        }
     }
 };
 
@@ -108,6 +126,9 @@ struct SState {
 std::unordered_map<Desktop::View::CWindow*, SState> g_states;
 PHLWINDOWREF                                        g_hovered;
 PHLWINDOWREF                                        g_pressed;
+// The tile serving out its post-hover linger. Not the same thing as g_hovered:
+// the cursor is no longer on it.
+PHLWINDOWREF                                        g_lingering;
 
 SState* stateFor(const PHLWINDOW& window, bool create) {
     if (!window)
@@ -141,8 +162,26 @@ void setHovered(const PHLWINDOW& window) {
     if (g_hovered.lock() == window)
         return;
 
-    if (auto* const PREV = stateFor(g_hovered.lock(), false))
-        PREV->hover.retarget(0.F, HOVER_OUT_MS);
+    // Arming a new tile ends any linger immediately, so only one tile is ever
+    // grown. Re-arming the LINGERING tile is not a cancel -- that is the cursor
+    // coming back, and the retarget below carries it.
+    if (window) {
+        if (const auto LINGERING = g_lingering.lock(); LINGERING && LINGERING != window) {
+            if (auto* const LINGER = stateFor(LINGERING, false))
+                LINGER->hover.hurry();
+        }
+        g_lingering.reset();
+    }
+
+    if (const auto PREVWINDOW = g_hovered.lock()) {
+        if (auto* const PREV = stateFor(PREVWINDOW, false)) {
+            // Leaving for empty space holds the blow-up; leaving for another
+            // tile does not.
+            PREV->hover.retarget(0.F, HOVER_OUT_MS, window ? 0.F : HOVER_LINGER_MS);
+            if (!window)
+                g_lingering = PREVWINDOW;
+        }
+    }
 
     g_hovered = window;
 
@@ -171,10 +210,19 @@ void forget() {
     g_states.clear();
     g_hovered.reset();
     g_pressed.reset();
+    g_lingering.reset();
 }
 
 PHLWINDOW hovered() {
-    return g_hovered.lock();
+    // A LINGERING tile answers as hovered. It is still grown and still carrying
+    // its close button, so everything that asks "which tile is the cursor
+    // working with" -- the button's hit test, the click handler, the selection
+    // ring -- has to keep getting the same answer. Drawing a button that is not
+    // clickable would be the exact opposite of what the linger is for.
+    if (const auto LIVE = g_hovered.lock())
+        return LIVE;
+
+    return g_lingering.lock();
 }
 
 bool animating() {
@@ -288,15 +336,12 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // indicator read, so the button re-themes with everything else.
     const int BORDER = std::max(0, ScrollOverview::Config::getValue<int>("general:border_size"));
     if (BORDER > 0) {
-        if (auto* const ACTIVE = sc<::Config::CGradientValueData*>(ScrollOverview::Config::valueRef<::Config::IComplexConfigValue>("general:col.active_border").ptr());
-            ACTIVE && !ACTIVE->m_colors.empty()) {
-            CRectPassElement::SRectData ring;
-            ring.box           = BUTTON.copy().expand(sc<double>(BORDER) * SCALE);
-            ring.color         = ACTIVE->m_colors[0].modifyA(ALPHA);
-            ring.round         = ROUND + sc<int>(std::round(sc<float>(BORDER) * SCALE));
-            ring.roundingPower = 2.F;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(ring));
-        }
+        CRectPassElement::SRectData ring;
+        ring.box           = BUTTON.copy().expand(sc<double>(BORDER) * SCALE);
+        ring.color         = ScrollOverview::Config::highlightColor().modifyA(ALPHA);
+        ring.round         = ROUND + sc<int>(std::round(sc<float>(BORDER) * SCALE));
+        ring.roundingPower = 2.F;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(ring));
     }
 
     // The DISC stays light, and that is a legibility constraint rather than a

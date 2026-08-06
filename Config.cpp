@@ -286,6 +286,12 @@ static void registerConfigValues() {
 
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CIntValue>("plugin:scrolloverview:gesture_distance", "gesture distance in pixels", 200, SIntValueOptions{.min = 1}));
+    // Default alpha 0 = unset; highlightColor() then falls back to the theme's
+    // border accent, which is what every build before this one used.
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CGradientValue>("plugin:scrolloverview:col_highlight",
+                                                             "colour of the selection/hover highlights; unset falls back to general:col.active_border",
+                                                             CHyprColor{0.F, 0.F, 0.F, 0.F}));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:scrolloverview:scale", "overview scale", 0.82F, SFloatValueOptions{.min = 0.1F, .max = 0.9F}));
 
@@ -565,6 +571,15 @@ void registerConfig() {
 
 int getGestureDistance() {
     return std::max<int>(1, getValue<int>("plugin:scrolloverview:gesture_distance"));
+}
+
+CHyprColor highlightColor() {
+    if (const auto HIGHLIGHT = getValue<::Config::CGradientValueData>("plugin:scrolloverview:col_highlight");
+        !HIGHLIGHT.m_colors.empty() && HIGHLIGHT.m_colors[0].a > 0.001F)
+        return HIGHLIGHT.m_colors[0];
+
+    const auto ACCENT = getValue<::Config::CGradientValueData>("general:col.active_border");
+    return ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 1.F} : ACCENT.m_colors[0];
 }
 
 float getScale() {

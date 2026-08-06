@@ -84,6 +84,24 @@ void setValue(const std::string& name, const T& value) {
 }
 
 int           getGestureDistance();
+// X56 (user, 2026-08-06): "pick a different colour from the hyprland theme
+// colours, something brighter and easier to see".
+//
+// general:col.active_border is NOT the theme's accent on this rice -- matugen
+// fills it from `outline_variant`, which is a dark warm brown that sits within
+// a few units of the blurred wallpaper. X61 already had to draw the selection
+// ring OPAQUE and 4px thick just to make it visible against that.
+//
+// So the highlight reads its own key, `plugin:scrolloverview:col_highlight`,
+// which the matugen template fills from `primary` -- the same bright colour the
+// pinned-window rule already uses. It regenerates with every theme change, so
+// the highlights follow the theme without the plugin having to read quickshell's
+// palette behind Hyprland's back.
+//
+// Alpha 0 means UNSET: fall back to col.active_border, so a machine without the
+// template line behaves exactly as before.
+CHyprColor    highlightColor();
+
 float         getScale();
 float         getOpenSpeed();
 float         getCloseSpeed();

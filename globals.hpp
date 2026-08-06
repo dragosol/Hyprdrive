@@ -18,6 +18,14 @@ inline std::string g_overviewSearch;
 // edit to the query resets it.
 inline int g_overviewAppSelection = -1;
 
+// User, 2026-08-06: "make the first search result the first thing that is
+// selected, rather than the desktops". Typing ARMS that, but the results are
+// not known at the keystroke -- the providers answer over the next frames -- so
+// the keyboard hook sets this and renderSearch spends it once there is a result
+// to select. Cleared by the spend, so a deliberate Tab back to the grid (-1) is
+// never overridden.
+inline bool g_overviewSelectFirstPending = false;
+
 // X61. Which ZONE the keyboard selection is in. The overview has three surfaces
 // the user can land on and they keep their selection in three different places
 // -- the strip in viewportCurrentWorkspace, the results in

@@ -601,8 +601,10 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
     // blurred wallpaper, so a tinted border is present but invisible. Alpha
     // cannot carry this signal; a flat ring can.
     if (selected) {
-        const auto ACCENT = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
-        data.grad1.reset(ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 1.F} : ACCENT.m_colors[0].modifyA(1.F));
+        // X56: the bright highlight key, not the border accent -- see
+        // Config::highlightColor for why those are not the same colour here.
+        const auto ACCENT = ScrollOverview::Config::highlightColor();
+        data.grad1.reset(ACCENT.modifyA(1.F));
         data.a            = 1.F;
         data.borderSize   = std::max(4.F, metrics.borderSize * 4.F);
         data.hasGrad2     = false;
