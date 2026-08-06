@@ -30,6 +30,12 @@ struct SRenderParams {
     // at the real window's top-left (tiled position ignores the temp position
     // write; size still shrank).
     bool                  dockLivePreview        = false;
+    // Y5. The minimize/restore fade, applied AT RENDER TIME. It deliberately
+    // does NOT touch the window's own alpha animation: warping that mutates
+    // real compositor state, which outlives the draw and leaks a half-faded
+    // window if the flight is ever interrupted. fadeAlpha is the same lever
+    // Hyprland's own window fades use.
+    float                 alpha                  = 1.F;
 };
 
 void renderOverviewWindow(const SRenderParams& params);

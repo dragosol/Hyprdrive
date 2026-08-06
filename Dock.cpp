@@ -2670,7 +2670,15 @@ namespace {
 // Y5. `alpha` is the flight's fade. It is applied AFTER forcePreviewVisible,
 // which warps the window's alpha to 1 as part of making a stashed window
 // drawable at all -- setting it before would simply be overwritten.
-void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now, float alpha = 1.F) {
+// `asOverviewTile` picks WHICH real-window path this draws through, and it
+// matters more than it looks. Both render the ACTUAL window -- neither is a
+// screenshot -- but the dock path (X91) early-returns after a scale+translate
+// modif, BEFORE the block that scales blur to the render scale and forces LIVE
+// blur. That is right for a 130px thumbnail and wrong for the flight, which is
+// a full-size window shrinking across the screen: on the dock path its frost is
+// neither scaled nor live, so it carries stale blur for the whole animation.
+// The flight therefore goes through the OVERVIEW path, exactly as a tile does.
+void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now, float alpha = 1.F, bool asOverviewTile = false) {
     const bool STASHED = Minimize::isMinimized(window);
     const bool OFF_ACTIVE =
         !window->m_workspace || !monitor || window->m_workspace != monitor->m_activeWorkspace;
@@ -2691,9 +2699,6 @@ void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& 
         }
     }
 
-    if (alpha < 1.F)
-        window->alpha(Desktop::View::WINDOW_ALPHA_FULLSCREEN)->setValueAndWarp(std::max(0.F, alpha));
-
     const auto  SIZE        = window->m_realSize->value();
     const float RENDERSCALE = SIZE.y >= 1.0 ? sc<float>(box.height / (SIZE.y * monitor->m_scale)) : 1.F;
 
@@ -2703,10 +2708,13 @@ void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& 
         .windowBox               = box,
         .renderScale             = RENDERSCALE,
         .now                     = now,
-        // X90: dock previews must not touch decoration:blur:size / m_blurFB.
-        .scaleBlurToRenderScale  = false,
+        // X90: dock THUMBNAILS must not touch decoration:blur:size / m_blurFB.
+        // The flight is not a thumbnail and takes the overview path instead, so
+        // its blur scales and stays live like every other real window.
+        .scaleBlurToRenderScale  = asOverviewTile,
         // X91: do not rewrite real window geometry (ghost mini outline).
-        .dockLivePreview         = true,
+        .dockLivePreview         = !asOverviewTile,
+        .alpha                   = alpha,
     });
 
     if (ws) {
@@ -3176,7 +3184,21 @@ void render(PHLMONITOR monitor) {
     // X25. The REAL window, through the same path the overview tiles use --
     // which is the point of rebuilding the dock in C++ at all. An icon or a
     // cached screenshot here would be the defect the spec names.
-    const auto drawWindowAt = [&](const PHLWINDOW& window, const CBox& box, float alpha = 1.F) { renderLivePreview(monitor, window, box, NOW, alpha); };
+    const auto drawWindowAt = [&](const PHLWINDOW& window, const CBox& box) { renderLivePreview(monitor, window, box, NOW); };
+
+    // Y5. The flight is a real window at real SIZE, not a thumbnail, so where it
+    // is legal it draws the way the overview draws a tile -- live blur, frost
+    // scaled to the render scale, real decorations.
+    //
+    // ONLY INSIDE THE OVERVIEW, and this is measured rather than cautious: the
+    // overview path calls OverviewRender::flushPass and the rest of the
+    // overview's own pass machinery, which on a plain desktop wedges the render
+    // pass. A restore then never gets another frame, its flight never reaches
+    // T>=1, and the window stays stashed FOREVER -- reproduced on 2026-08-06,
+    // where `minimize restore` left the window on special:minimized while the
+    // same build restored it correctly with the overview open.
+    const bool OVERVIEWQUALITY = scrollOverviewForMonitor(monitor) != nullptr;
+    const auto drawFlightAt    = [&](const PHLWINDOW& window, const CBox& box, float alpha) { renderLivePreview(monitor, window, box, NOW, alpha, OVERVIEWQUALITY); };
 
     // X47. Over the pill, under the flight -- a window on its way into an icon
     // must not disappear behind the panel it flies past. Suppressed while the
@@ -3263,11 +3285,6 @@ void render(PHLMONITOR monitor) {
                 // drop: macOS bounces what lands, not what was let go of.
                 else if (it->bounceOnLand && ITEM != LAYOUT.items.end())
                     g_bounces.emplace_back(SBounce{.wmClass = WINDOW->m_class, .startedAt = Time::steadyNow()});
-
-                // The fade is a WARP on the window's own alpha, so it has to be
-                // put back -- otherwise a restored window returns invisible and
-                // stays that way, since nothing else writes this value.
-                WINDOW->alpha(Desktop::View::WINDOW_ALPHA_FULLSCREEN)->setValueAndWarp(1.F);
             }
 
             it = g_flights.erase(it);
@@ -3280,9 +3297,9 @@ void render(PHLMONITOR monitor) {
             // Y5 divergence, recorded in the spec: GNOME does NOT fade a window
             // back in (its opacity is already 255 on this path). The user asked
             // for "fade out/in", so this one is ours.
-            drawWindowAt(WINDOW, lerpBox(ITEM->iconBox, it->from, E), E);
+            drawFlightAt(WINDOW, lerpBox(ITEM->iconBox, it->from, E), E);
         else
-            drawWindowAt(WINDOW, lerpBox(it->from, ITEM->iconBox, E), 1.F - E);
+            drawFlightAt(WINDOW, lerpBox(it->from, ITEM->iconBox, E), 1.F - E);
 
         ++it;
     }

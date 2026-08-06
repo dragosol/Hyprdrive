@@ -963,8 +963,14 @@ void renderOverviewWindow(const SRenderParams& params) {
         return;
     }
 
-    const bool                   fullscreen   = Fullscreen::controller()->isFullscreen(params.window);
-    const SOverviewWindowMetrics metrics      = getOverviewWindowMetrics(params.monitor, params.window, params.renderScale);
+    const bool             fullscreen = Fullscreen::controller()->isFullscreen(params.window);
+    SOverviewWindowMetrics metrics    = getOverviewWindowMetrics(params.monitor, params.window, params.renderScale);
+
+    // Y5. Fold the flight's fade into the metrics so the shadow, the border and
+    // every decoration fade WITH the content instead of staying solid around a
+    // vanishing window. The content itself is faded after renderWindow, below --
+    // renderWindow reads the window's own alpha, which this must not touch.
+    metrics.targetOpacity *= std::clamp(params.alpha, 0.F, 1.F);
 
     if (!fullscreen)
         renderOverviewWindowShadow(params.monitor, params.window, params.windowBox, metrics, params.selected);
@@ -1037,6 +1043,18 @@ void renderOverviewWindow(const SRenderParams& params) {
                                     firstWindowPassElement);
     if (!usePrecomputedBlur)
         blockOverviewWindowBlurOptimization(params.window, firstWindowPassElement);
+
+    // Y5. The content's half of the fade. fadeAlpha is what Hyprland multiplies
+    // a window's own fade in/out by, so this rides the existing plumbing rather
+    // than adding a second notion of opacity.
+    if (params.alpha < 1.F) {
+        auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+        for (size_t i = firstWindowPassElement; i < passElements.size(); ++i) {
+            auto* surface = dc<CSurfacePassElement*>(passElements[i].element.get());
+            if (surface && surface->m_data.pWindow == params.window)
+                surface->m_data.fadeAlpha *= std::clamp(params.alpha, 0.F, 1.F);
+        }
+    }
     roundStandaloneWindowPassElements(params.window, params.monitor, params.renderScale, firstWindowPassElement);
 
     renderOverviewCustomDecorations(params.monitor, params.window, params.workspaceBox ? *params.workspaceBox : CBox{}, params.windowBox, metrics, DECORATION_LAYER_OVER);
