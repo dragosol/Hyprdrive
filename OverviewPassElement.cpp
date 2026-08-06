@@ -23,6 +23,7 @@
 #undef private
 #include <hyprutils/utils/ScopeGuard.hpp>
 #include "Config.hpp"
+#include "OverviewRender.hpp"
 #include "IOverview.hpp"
 
 static CRegion roundedRectRegion(const CBox& box, int rounding, float roundingPower) {
@@ -140,8 +141,11 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
 
     if (!boxDamage.empty()) {
         if (data.xray) {
-            if (const auto RES = MONITOR->resources(); RES && RES->m_blurFB && RES->m_blurFB->isAllocated())
-                blurred = RES->m_blurFB->getTexture();
+            // X88: sample the overview chrome blur (live dual-kawase of the
+            // overview FB after tiles). NEVER Monitor::m_blurFB -- that buffer
+            // is Hyprland's desktop wallpaper xray and made the strip/results
+            // frost the wallpaper instead of the overview under them.
+            blurred = OverviewRender::frameChromeBlur();
         } else {
             blurred = g_pHyprRenderer->blurMainFramebuffer(data.alpha, &boxDamage);
         }
@@ -179,6 +183,8 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
     g_pHyprRenderer->m_renderData.damage = clipped;
     auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
 
+    // Fallback must not use Hyprland xray/m_blurFB (desktop wallpaper). Live
+    // blur of the current main FB is the overview (or whatever is on screen).
     Render::GL::g_pHyprOpenGL->renderRect(data.box, CHyprColor{0.F, 0.F, 0.F, 0.F},
                                           Render::GL::CHyprOpenGLImpl::SRectRenderData{
                                               .damage        = &clipped,
@@ -186,7 +192,7 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
                                               .roundingPower = data.roundingPower,
                                               .blur          = true,
                                               .blurA         = data.alpha,
-                                              .xray          = data.xray,
+                                              .xray          = false,
                                           });
 
     return {};
@@ -197,7 +203,9 @@ bool COverviewBlurPassElement::needsLiveBlur() {
 }
 
 bool COverviewBlurPassElement::needsPrecomputeBlur() {
-    return data.xray && data.alpha > 0.F;
+    // X88: we sample OverviewRender::frameChromeBlur(), not m_blurFB. Advertising
+    // needsPrecomputeBlur would only make Hyprland maintain the desktop xray FB.
+    return false;
 }
 
 std::optional<CBox> COverviewBlurPassElement::boundingBox() {

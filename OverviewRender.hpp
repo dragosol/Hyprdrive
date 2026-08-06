@@ -11,6 +11,14 @@ namespace OverviewRender {
 void flushPass(PHLMONITOR monitor);
 void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur);
 
+// X88. One live dual-kawase of the overview's main FB (after tiles), sampled by
+// strip/result chrome. NOT Monitor::m_blurFB -- that is Hyprland's desktop
+// wallpaper xray buffer and is why the strip frosted the wallpaper instead of
+// the overview scene.
+void                 setFrameChromeBlur(SP<Render::ITexture> tex);
+SP<Render::ITexture> frameChromeBlur();
+void                 clearFrameChromeBlur();
+
 // The texture for a desktop-entry Icon= value, decoded and uploaded once.
 // AppSearch deliberately stops at the file path; the upload is render's job,
 // and both the overview's result rows and the dock need the same cache.

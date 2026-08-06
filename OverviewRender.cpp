@@ -19,6 +19,22 @@
 
 namespace OverviewRender {
 
+// X88. Per-frame behind-chrome blur of the overview (see setFrameChromeBlur).
+static SP<Render::ITexture> g_frameChromeBlur;
+
+void setFrameChromeBlur(SP<Render::ITexture> tex) {
+    g_frameChromeBlur = std::move(tex);
+}
+
+SP<Render::ITexture> frameChromeBlur() {
+    return g_frameChromeBlur;
+}
+
+void clearFrameChromeBlur() {
+    g_frameChromeBlur.reset();
+}
+
+
 // Decode size for app icons. SVG rasterises at whatever size it is asked for,
 // so this is picked once, generously, and scaled down when drawn -- the row
 // height changes with the card transform and re-decoding per frame would be
@@ -186,6 +202,8 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     data.rounding      = rounding;
     data.roundingPower = roundingPower;
     data.alpha         = alpha;
+    // usePrecomputedBlur means "sample frameChromeBlur()" (overview), not
+    // Hyprland xray/m_blurFB (desktop wallpaper). See X88.
     data.xray          = usePrecomputedBlur;
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(data));
 }

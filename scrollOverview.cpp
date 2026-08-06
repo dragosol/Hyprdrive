@@ -6029,9 +6029,8 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // cells under a panel more opaque than they are.
                 const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
 
-                // X11 / X86: frosted strip. Samples the single behind-chrome
-                // theme blur queued above (decoration:blur:*). Not another live
-                // pass -- that is how empty vs search used to differ.
+                // X11 / X88: frosted strip. Samples the overview chrome blur
+                // (live dual-kawase of the overview FB after tiles).
                 OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, true);
 
                 CRectPassElement::SRectData panel;
@@ -6467,7 +6466,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 continue;
             card.round();
 
-            // §10 clause 3 / X86: search result frost samples the same theme blur.
+            // §10 clause 3 / X88: result frost samples the overview chrome blur.
             OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, true);
 
             CRectPassElement::SRectData cardBg;
@@ -7791,29 +7790,23 @@ void CScrollOverview::render() {
         }
     }
 
-    // X86. BEHIND-CHROME THEME BLUR (not the window path).
+    // X88. BEHIND-CHROME OVERVIEW BLUR (not the window path, not m_blurFB).
     //
-    // Main tiles / card windows already live-frosted via renderWindow +
-    // decoration:blur:* above. Multi-rect chrome (strip, search pill, result
-    // cards, dock-in-overview) cannot each live-blur without compounding:
-    // Hyprland re-blurs the main FB once per live-blur element, so empty search
-    // (2 elements) looked weaker than results (~7). That was an accident, not a
-    // setting.
-    //
-    // So after tiles: blur the current FB EXACTLY ONCE with the live
-    // decoration:blur:* values, then every chrome surface samples that buffer
-    // (xray). No plugin strength override -- change Hyprland blur prefs and the
-    // strip follows. Cards no longer contribute their own live blurs (see
-    // renderWorkspaceBackground).
+    // Main tiles already live-frost via renderWindow. Multi-rect chrome (strip +
+    // result cards) cannot each live-blur without compounding. So after tiles:
+    // one dual-kawase of the overview main FB (decoration:blur:*), then strip
+    // and result cards sample that texture. Not Monitor::m_blurFB (desktop
+    // wallpaper xray) -- that made the strip frost the wallpaper instead of the
+    // overview. Search pill and dock stay live (single surfaces).
     OverviewRender::flushPass(MONITOR);
+    // X88. Blur the OVERVIEW main FB once (tiles + cards already flushed), and
+    // hand that texture to strip/result chrome. Do NOT use CPreBlurElement /
+    // m_blurFB: that is Hyprland's desktop wallpaper xray buffer, which is why
+    // the strip frosted the wallpaper instead of the overview under it.
+    OverviewRender::clearFrameChromeBlur();
     if (ScrollOverview::Config::getBlur()) {
-        // Always rebuild the behind-chrome buffer from the live FB. Strength is
-        // whatever decoration:blur:* says at draw time inside preBlurForCurrentMonitor
-        // (inherits dynamically). Do not gate on a separate enabled lookup here:
-        // a false negative left chrome sampling an empty m_blurFB (black glass).
-        MONITOR->m_blurFBDirty        = true;
-        MONITOR->m_blurFBShouldRender = true;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
+        CRegion fullDamage{CBox{{}, MONITOR->m_transformedSize}};
+        OverviewRender::setFrameChromeBlur(g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage));
     }
 
     {
