@@ -5893,6 +5893,15 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     if (!monitor || overviewStripLogicalHeight(monitor) <= 0.F)
         return;
 
+    // User, 2026-08-06: the strip FADES in, and a toggle halfway through
+    // reverses the fade. Driven off the open scale the overview already
+    // animates, so the reversal is not a second state that could disagree with
+    // the first -- the close retargets that scale from wherever it is and this
+    // follows. Everything the strip draws is multiplied by it, minis included.
+    const float FADE = overviewGridProgress(renderScale);
+    if (FADE < 0.01F)
+        return;
+
     auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
     const auto DRAGGED     = getOverviewWindowToShow(dragContext->dragActiveWindow.lock());
 
@@ -5955,11 +5964,11 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // X11 (user, 2026-08-01): the strip is FROSTED. Live rounded
                 // blur of what is behind the panel, drawn under the tint. The
                 // global backdrop stays sharp -- do not confuse the two.
-                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, 1.F, false);
+                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, false);
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
-                panel.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.25F} : INACTIVE.m_colors[0].modifyA(0.25F);
+                panel.color = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.25F * FADE} : INACTIVE.m_colors[0].modifyA(0.25F * FADE);
                 panel.round         = PANELROUND;
                 panel.roundingPower = CARDROUND.power;
                 g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(panel));
@@ -6038,7 +6047,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             .roundRight    = std::max(0, (largeRight ? ROUND : INNERROUND) - BORDER),
             .roundingPower = CARDROUND.power,
             .borderSize    = BORDER,
-            .a             = 1.F,
+            .a             = FADE,
         }));
     };
 
@@ -6051,7 +6060,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         if (CELL.width <= 1 || !overviewBoxIntersectsMonitor(CELL, monitor))
             continue;
 
-        renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false);
+        renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false, FADE);
 
         // X4: the cell backdrop is themed from general:col.inactive_border, the
         // mirror of the hover tint's col.active_border below. Only the hue is
@@ -6061,7 +6070,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         const bool ATLEFT  = workspaceIdx == 0;
         const bool ATRIGHT = workspaceIdx + 1 == images.size();
 
-        addCellRect(CELL, INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.38F} : INACTIVE.m_colors[0].modifyA(0.38F), ATLEFT, ATRIGHT);
+        addCellRect(CELL, INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.38F * FADE} : INACTIVE.m_colors[0].modifyA(0.38F * FADE), ATLEFT, ATRIGHT);
 
         // X3: the deprecated overview centres a large, faint workspace number in
         // every cell (ii/modules/ii/overview/OverviewWidget.qml:182-193): 250px
@@ -6083,7 +6092,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             CTexPassElement::SRenderData num;
             num.tex = NUMTEX;
             num.box = numBox.round();
-            num.a   = 1.F;
+            num.a   = FADE;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(num));
         }
 
@@ -6099,7 +6108,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             if (MINI.width < 2 || MINI.height < 2 || MINI.intersection(CELL).empty())
                 continue;
 
-            renderWindowLive(monitor, WINDOW, MINI.copy().round(), MINIRENDERSCALE, now, &CELL);
+            renderWindowLive(monitor, WINDOW, MINI.copy().round(), MINIRENDERSCALE, now, &CELL, false, FADE);
         }
 
         if (workspaceIdx == hoveredIdx) {
@@ -6108,7 +6117,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
             // theme that defines no gradient.
             const auto ACCENT = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
 
-            addCellRect(CELL, ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F} : ACCENT.m_colors[0].modifyA(0.22F), ATLEFT, ATRIGHT);
+            addCellRect(CELL, ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F * FADE} : ACCENT.m_colors[0].modifyA(0.22F * FADE), ATLEFT, ATRIGHT);
 
             // X3 delta 3: the reference borders the hovered cell as well as
             // tinting it. Drawn after the tint and after the minis, so the drop
@@ -6163,6 +6172,13 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // return below is a frame with no rows on it, and a stale box would hand
     // the next press a result that is no longer on screen.
     g_searchRowHits.clear();
+
+    // User, 2026-08-06: the pill fades in with the overview, and reverses if
+    // the overview is toggled off mid-flight. See renderStrip for why the open
+    // scale is the driver rather than a fade var of its own.
+    const float FADE = overviewGridProgress(renderScale);
+    if (FADE < 0.01F)
+        return;
 
     const bool QUERIED = !g_overviewSearch.empty();
 
@@ -6246,7 +6262,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const float FIELDW = std::round(FIELDWL * SCALE);
 
     // X11: frosted pill -- live rounded blur of whatever is behind it.
-    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, 1.F, false);
+    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, false);
 
     // X4: hue inherited from the theme, alpha kept at the tuned value. The
     // resting surface reads col.inactive_border and the badge the accent -- the
@@ -6256,7 +6272,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
     CRectPassElement::SRectData bg;
     bg.box           = pill;
-    bg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.60F} : INACTIVE.m_colors[0].modifyA(0.60F);
+    bg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.60F * FADE} : INACTIVE.m_colors[0].modifyA(0.60F * FADE);
     bg.round         = sc<int>(std::round(pill.height / 2.F));
     bg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
@@ -6266,7 +6282,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
     CRectPassElement::SRectData badgeBg;
     badgeBg.box           = badge;
-    badgeBg.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F} : ACCENT.m_colors[0].modifyA(0.30F);
+    badgeBg.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.22F * FADE} : ACCENT.m_colors[0].modifyA(0.30F * FADE);
     badgeBg.round         = sc<int>(std::round(BADGED / 2.F));
     badgeBg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(badgeBg));
@@ -6275,7 +6291,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         CTexPassElement::SRenderData data;
         data.tex = tex;
         data.box = box;
-        data.a   = 1.F;
+        data.a   = FADE;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
     };
 
@@ -6345,11 +6361,11 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             card.round();
 
             // §10 clause 3: the expanded search surface is frosted, like the pill.
-            OverviewRender::queueBlur(card, PANELROUND, 2.F, 1.F, false);
+            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE, false);
 
             CRectPassElement::SRectData cardBg;
             cardBg.box           = card;
-            cardBg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.55F} : INACTIVE.m_colors[0].modifyA(0.55F);
+            cardBg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.55F * FADE} : INACTIVE.m_colors[0].modifyA(0.55F * FADE);
             cardBg.round         = PANELROUND;
             cardBg.roundingPower = 2.F;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(cardBg));
@@ -6380,7 +6396,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         CRectPassElement::SRectData sel;
                         sel.box           = cell;
                         // Opaque for the same reason the list's selection is.
-                        sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F} : ACCENT.m_colors[0].modifyA(1.F);
+                        sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE} : ACCENT.m_colors[0].modifyA(FADE);
                         sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
                         sel.roundingPower = 2.F;
                         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
@@ -6482,7 +6498,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     // rows are frosted and carry the wallpaper's blurred
                     // STRUCTURE; the selected one is flat. That difference holds
                     // against any wallpaper, which a colour delta does not.
-                    sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F} : ACCENT.m_colors[0].modifyA(1.F);
+                    sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE} : ACCENT.m_colors[0].modifyA(FADE);
                     sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
                     sel.roundingPower = 2.F;
                     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
@@ -6649,7 +6665,7 @@ void CScrollOverview::renderPinnedFloatingWindows(PHLMONITOR monitor, float over
 }
 
 void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox,
-                                       bool dragged) {
+                                       bool dragged, float alphaMul) {
     if (!window)
         return;
 
@@ -6662,6 +6678,17 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
     // overview was reopened -- which was the user's workaround, not a fix.
     forceWorkspaceAlphaVisible(window->m_workspace);
 
+    // alphaMul is the strip's fade. It has to be applied AFTER the forces
+    // above, which exist to pin this very channel at 1 (E8-f), and restored
+    // immediately -- same set/render/restore shape renderOverviewLayerLevel
+    // uses for layer surfaces, and it works for the same reason: the pass
+    // elements read the alpha as they are built, not at draw time.
+    const bool  MODULATE = alphaMul < 0.999F;
+    const auto& WALPHA   = window->alpha(Desktop::View::WINDOW_ALPHA_FULLSCREEN);
+    const float PREVA    = WALPHA ? WALPHA->value() : 1.F;
+    if (MODULATE && WALPHA)
+        WALPHA->setValueAndWarp(PREVA * std::clamp(alphaMul, 0.F, 1.F));
+
     OverviewWindow::renderOverviewWindow({
         .monitor              = monitor,
         .window               = window,
@@ -6672,6 +6699,9 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         .selected             = g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window,
         .dragged              = dragged,
     });
+
+    if (MODULATE && WALPHA)
+        WALPHA->setValueAndWarp(PREVA);
 }
 
 void CScrollOverview::redrawAll(bool forcelowres) {
