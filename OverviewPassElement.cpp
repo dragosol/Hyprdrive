@@ -132,60 +132,49 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
     if (data.blurVibrancy >= 0.F)
         ScrollOverview::Config::setValue("decoration:blur:vibrancy", data.blurVibrancy);
 
-    // X94/X95. LIVE chrome (strip panel, pill, dock): native rect+blur at full
-    // decoration:blur:* strength (blurA=1). Kawase expands damage internally;
-    // the DRAW scissor must be the ROUNDED panel shape (X14) or blur is a square
-    // under rounded chrome — dock corners were the obvious case.
-    if (!data.xray) {
-        CRegion paint = roundedRectRegion(data.box, data.rounding, data.roundingPower);
-        if (paint.empty())
-            return {};
-
-        const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
-        g_pHyprRenderer->m_renderData.damage = paint;
-        auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
-
-        Render::GL::g_pHyprOpenGL->renderRect(data.box, CHyprColor{0.F, 0.F, 0.F, 0.F},
-                                              Render::GL::CHyprOpenGLImpl::SRectRenderData{
-                                                  .damage        = &paint,
-                                                  .round         = data.rounding,
-                                                  .roundingPower = data.roundingPower,
-                                                  .blur          = true,
-                                                  .blurA         = 1.F,
-                                                  .xray          = false,
-                                              });
+    // X96. Always full-monitor dual-kawase at decoration:blur:* with a=1, then
+    // UV-sample into the rounded panel. Thin damage + native renderRect blur
+    // (X95) under-delivers the pass pyramid on a strip/dock/pill vs large window
+    // surfaces even when size/passes match on paper. Fade is data.alpha on the
+    // sample only — never the kawase radius.
+    //
+    // xray=true  → private chrome FB (X92 capture: full mon, a=1).
+    // xray=false → live blurMainFramebuffer(1, full mon) right now.
+    const Vector2D MONSIZE = MONITOR->m_transformedSize;
+    if (MONSIZE.x < 1.0 || MONSIZE.y < 1.0)
         return {};
+
+    SP<Render::ITexture> blurred;
+    if (data.xray) {
+        blurred = OverviewRender::frameChromeBlur();
+    } else {
+        CRegion fullDamage{CBox{0, 0, MONSIZE.x, MONSIZE.y}};
+        blurred = g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage);
     }
 
-    // Result cards: sample the private overview chrome FB (X92).
-    SP<Render::ITexture> blurred = OverviewRender::frameChromeBlur();
-    CRegion boxDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.box.copy().round());
-    if (blurred && blurred->ok() && !boxDamage.empty()) {
-        const Vector2D MONSIZE = MONITOR->m_transformedSize;
-        if (MONSIZE.x >= 1.0 && MONSIZE.y >= 1.0) {
-            const CBox BOX = data.box;
-            CRegion    paintDamage = roundedRectRegion(BOX, data.rounding, data.roundingPower);
-            if (paintDamage.empty())
-                paintDamage = CRegion{BOX.copy().round()};
-            g_pHyprRenderer->pushMonitorTransformEnabled(true);
-            auto restoreXform = Hyprutils::Utils::CScopeGuard([] { g_pHyprRenderer->popMonitorTransformEnabled(); });
+    if (!blurred || !blurred->ok())
+        return {};
 
-            Render::GL::g_pHyprOpenGL->renderTexture(
-                blurred, BOX,
-                Render::GL::CHyprOpenGLImpl::STextureRenderData{
-                    .damage                      = &paintDamage,
-                    .a                           = data.alpha,
-                    .round                       = data.rounding,
-                    .roundingPower               = data.roundingPower,
-                    .allowCustomUV               = true,
-                    .allowDim                    = false,
-                    .primarySurfaceUVTopLeft     = BOX.pos() / MONSIZE,
-                    .primarySurfaceUVBottomRight = (BOX.pos() + BOX.size()) / MONSIZE,
-                });
-            return {};
-        }
-    }
+    const CBox BOX = data.box;
+    CRegion    paintDamage = roundedRectRegion(BOX, data.rounding, data.roundingPower);
+    if (paintDamage.empty())
+        paintDamage = CRegion{BOX.copy().round()};
 
+    g_pHyprRenderer->pushMonitorTransformEnabled(true);
+    auto restoreXform = Hyprutils::Utils::CScopeGuard([] { g_pHyprRenderer->popMonitorTransformEnabled(); });
+
+    Render::GL::g_pHyprOpenGL->renderTexture(
+        blurred, BOX,
+        Render::GL::CHyprOpenGLImpl::STextureRenderData{
+            .damage                      = &paintDamage,
+            .a                           = data.alpha,
+            .round                       = data.rounding,
+            .roundingPower               = data.roundingPower,
+            .allowCustomUV               = true,
+            .allowDim                    = false,
+            .primarySurfaceUVTopLeft     = BOX.pos() / MONSIZE,
+            .primarySurfaceUVBottomRight = (BOX.pos() + BOX.size()) / MONSIZE,
+        });
     return {};
 }
 
