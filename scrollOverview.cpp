@@ -6905,7 +6905,19 @@ void CScrollOverview::redrawAll(bool forcelowres) {
         if (std::ranges::find(addedWindows, overviewWindow) != addedWindows.end())
             return;
 
-        const auto imageIt = imagesByWorkspace.find(overviewWindow->m_workspace->m_id);
+        // Y9, and THIS is the site that mattered. `aae900b` taught the grid
+        // LAYOUT that a minimized window belongs to the desktop it came from, so
+        // it got a slot -- but the render walks `workspaceImage->windows`, and
+        // membership of that list is decided here by workspace id. A stashed
+        // window's m_workspace is the stash, the stash owns no card, this lookup
+        // missed, and the window was never added to anything and so never drawn.
+        // One lookup, not the twenty scattered `m_workspace ==` comparisons a
+        // first reading suggested.
+        WORKSPACEID homeId = ScrollOverview::Minimize::originalWorkspace(overviewWindow);
+        if (homeId == WORKSPACE_INVALID)
+            homeId = overviewWindow->m_workspace->m_id;
+
+        const auto imageIt = imagesByWorkspace.find(homeId);
         if (imageIt == imagesByWorkspace.end())
             return;
 
