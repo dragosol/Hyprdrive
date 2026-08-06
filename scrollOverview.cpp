@@ -6030,8 +6030,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // X11 (user, 2026-08-01): the strip is FROSTED. Live rounded
                 // blur of what is behind the panel, drawn under the tint. The
                 // global backdrop stays sharp -- do not confuse the two.
-                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, false, ScrollOverview::Config::frostBlurSize(),
-                                          ScrollOverview::Config::frostBlurPasses());
+                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, false);
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
@@ -6352,8 +6351,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     g_overviewSearchRowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
 
     // X11: frosted pill -- live rounded blur of whatever is behind it.
-    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, false, ScrollOverview::Config::frostBlurSize(),
-                              ScrollOverview::Config::frostBlurPasses());
+    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, false);
 
     // X4: hue inherited from the theme, alpha kept at the tuned value. The
     // resting surface reads col.inactive_border and the badge the accent -- the
@@ -6468,8 +6466,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             card.round();
 
             // §10 clause 3: the expanded search surface is frosted, like the pill.
-            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, false, ScrollOverview::Config::frostBlurSize(),
-                                      ScrollOverview::Config::frostBlurPasses());
+            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, false);
 
             CRectPassElement::SRectData cardBg;
             cardBg.box           = card;

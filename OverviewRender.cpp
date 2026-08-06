@@ -171,7 +171,7 @@ void flushPass(PHLMONITOR monitor) {
     g_pHyprRenderer->m_renderPass.clear();
 }
 
-void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur, int size, int passes) {
+void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur) {
     if (alpha <= 0.F)
         return;
 
@@ -187,8 +187,6 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     data.roundingPower = roundingPower;
     data.alpha         = alpha;
     data.xray          = usePrecomputedBlur;
-    data.blurSize      = size;
-    data.blurPasses    = passes;
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(data));
 }
 

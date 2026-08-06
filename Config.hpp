@@ -100,11 +100,6 @@ int           getGestureDistance();
 //
 // Alpha 0 means UNSET: fall back to col.active_border, so a machine without the
 // template line behaves exactly as before.
-// X84. The plugin's own frost strength. See OverviewRender::queueBlur for why
-// this cannot be left to decoration:blur:*.
-int           frostBlurSize();
-int           frostBlurPasses();
-
 CHyprColor    highlightColor();
 
 // Type to put ON the highlight. The selection fill is OPAQUE (X2: a selection

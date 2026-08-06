@@ -9,15 +9,7 @@
 namespace OverviewRender {
 
 void flushPass(PHLMONITOR monitor);
-// X84. `size`/`passes` override decoration:blur:* for THIS surface. Negative
-// means follow the global, which is what non-frost callers want.
-//
-// The plugin's frost cannot rely on the global values, because Hyprland re-blurs
-// the framebuffer once per live-blur element: the strip drawn with 2 elements in
-// the pass came out visibly sharper than the same strip with 7, purely because
-// the search results happened to add five more. Blur strength that depends on
-// how many OTHER things are frosted is not a setting, it is an accident.
-void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur, int size = -1, int passes = -1);
+void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, bool usePrecomputedBlur);
 
 // The texture for a desktop-entry Icon= value, decoded and uploaded once.
 // AppSearch deliberately stops at the file path; the upload is render's job,
