@@ -1956,6 +1956,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     closeAnimConfig->internalStyle   = "";
     closeAnimConfig->pValues         = closeAnimConfig;
 
+    reverseAnimConfig                  = makeShared<Hyprutils::Animation::SAnimationPropertyConfig>();
+    reverseAnimConfig->overridden      = true;
+    reverseAnimConfig->internalBezier  = OVERVIEW_OPEN_BEZIER; // ease-OUT: maximum slope at t=0
+    reverseAnimConfig->internalSpeed   = ScrollOverview::Config::getCloseSpeed();
+    reverseAnimConfig->internalEnabled = WINDOWSMOVEVALUES ? WINDOWSMOVEVALUES->internalEnabled : 1;
+    reverseAnimConfig->internalStyle   = "";
+    reverseAnimConfig->pValues         = reverseAnimConfig;
+
     Animation::mgr()->createAnimation(1.F, scale, openAnimConfig, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation({}, viewOffset, openAnimConfig, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, workspaceInsertProgress, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
@@ -7873,6 +7881,36 @@ bool CScrollOverview::isClosing() const {
 // config when it is re-aimed, so setting it afterwards would shape the next
 // transition rather than this one.
 void CScrollOverview::useAnimDirection(bool opening) {
+    // X75 (user, 2026-08-06): spamming Super "seems to have a decel+reverse
+    // thing going on, I want it to immediately reverse at the same inverse
+    // momentum it was going at".
+    //
+    // A REVERSAL is neither an entrance nor an exit. The variable already
+    // carries speed, and the exit curve is an ease-IN -- zero slope at t=0 --
+    // so re-aiming with it stalls the motion dead and then builds back up. That
+    // stall IS the decel the user is describing; the value was always
+    // continuous, the VELOCITY was not.
+    //
+    // The ease-out curve starts at maximum slope, so the turn happens at the
+    // speed the motion already had. The duration is scaled by how far is
+    // actually left to travel, or a reversal caught at 90% open would spend a
+    // full close on the last 10% and feel slower than no animation at all.
+    if (scale && scale->isBeingAnimated() && reverseAnimConfig) {
+        const float OPEN   = ScrollOverview::Config::getScale();
+        const float TARGET = opening ? OPEN : 1.F;
+        const float RANGE  = std::max(0.01F, std::abs(1.F - OPEN));
+        const float LEFT   = std::clamp(std::abs(TARGET - scale->value()) / RANGE, 0.F, 1.F);
+        const float BASE   = opening ? ScrollOverview::Config::getOpenSpeed() : ScrollOverview::Config::getCloseSpeed();
+
+        // Floor it: a hair of travel still deserves a frame or two of motion
+        // rather than a teleport.
+        reverseAnimConfig->internalSpeed = std::max(0.3F, BASE * LEFT);
+
+        scale->setConfig(reverseAnimConfig);
+        viewOffset->setConfig(reverseAnimConfig);
+        return;
+    }
+
     const auto CONFIG = opening ? openAnimConfig : closeAnimConfig;
     if (!CONFIG)
         return;

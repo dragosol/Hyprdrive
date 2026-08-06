@@ -299,6 +299,9 @@ class CScrollOverview : public IOverview {
     SP<Hyprutils::Animation::SAnimationPropertyConfig> workspaceRemoveFadeConfig;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> openAnimConfig;
     SP<Hyprutils::Animation::SAnimationPropertyConfig> closeAnimConfig;
+    // X75. Used when a toggle catches the previous one mid-flight; see
+    // useAnimDirection for why a reversal cannot use either directional curve.
+    SP<Hyprutils::Animation::SAnimationPropertyConfig> reverseAnimConfig;
     Time::steady_tp                  lastRealtimePreviewFrame = {};
     Time::steady_tp                  realtimePreviewTimerDue = {};
     wl_event_source*                 realtimePreviewTimer = nullptr;

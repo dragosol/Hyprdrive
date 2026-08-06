@@ -713,6 +713,13 @@ struct SReveal {
     bool            pending      = false;             // a flip is waiting out its delay
     Time::steady_tp pendingSince = Time::steadyNow();
     float           pressure     = 0.F;               // px pushed into the bottom edge
+    // X75. The hidden fraction AT THE MOMENT OF THE FLIP. The slide used to be
+    // computed from elapsed time alone, so reversing mid-slide restarted the
+    // curve at the far end and the pill JUMPED there before travelling back.
+    // dash-to-dock has no such seam: `_animateIn`/`_animateOut` are Clutter
+    // eases on the slider, and an ease always departs from wherever the value
+    // currently is.
+    float           from         = 1.F;
 };
 
 std::unordered_map<MONITORID, SReveal> g_reveal;
@@ -781,13 +788,17 @@ float wiggleRadians() {
 
 // ----------------------------------------------------------------------------
 
-// The standing Apple-motion rule again: entrances decelerate, exits accelerate.
-// The DURATION stays the reference's `animation-time` in BOTH directions -- the
-// rule shapes the curve, the reference pins the number.
-// Revealing is an entrance, hiding an exit. Same two house curves, so the dock
-// slide matches every other transition in the rice.
-float revealEase(float t, bool showing) {
-    return houseEase(showing, t);
+// X75 (user, 2026-08-06: "behave exactly like the autohide behavior in the
+// dash to dock gnome extension"). dash-to-dock eases the slider with
+// Clutter's EASE_OUT_QUAD in BOTH directions -- `_animateIn` and `_animateOut`
+// pass the same mode -- so the hide does NOT accelerate away the way this
+// rice's house exit curve does. Matching the reference means dropping the
+// house asymmetry here; that is the instruction, not an oversight.
+//
+// Direction is no longer a parameter, because the curve no longer depends on it.
+float revealEase(float t) {
+    const float INV = 1.F - std::clamp(t, 0.F, 1.F);
+    return 1.F - (INV * INV);
 }
 
 // 0 = fully out, 1 = fully tucked below the bottom edge.
@@ -797,9 +808,11 @@ float hiddenFraction(PHLMONITOR monitor) {
 
     const auto& R  = g_reveal[monitor->m_id];
     const int   MS = std::max(1, Config::getValue<int>(KEY_AUTOHIDE_MS));
-    const float E  = revealEase(std::clamp(elapsedMs(R.changedAt) / sc<float>(MS), 0.F, 1.F), R.shown);
+    const float E  = revealEase(std::clamp(elapsedMs(R.changedAt) / sc<float>(MS), 0.F, 1.F));
 
-    return R.shown ? 1.F - E : E;
+    // From wherever it WAS to wherever it is going, which is what makes a
+    // reversal continuous instead of a jump to the far end.
+    return R.from + ((R.shown ? 0.F : 1.F) - R.from) * E;
 }
 
 bool autohideAnimating(PHLMONITOR monitor) {
@@ -926,6 +939,7 @@ void updateAutohide(PHLMONITOR monitor) {
     // reading the reference wrong.
     if (!Config::getValue<bool>(KEY_AUTOHIDE) || scrollOverviewForMonitor(monitor)) {
         if (!R.shown) {
+            R.from      = hiddenFraction(monitor);
             R.shown     = true;
             R.changedAt = Time::steadyNow();
         }
@@ -997,6 +1011,7 @@ void updateAutohide(PHLMONITOR monitor) {
     if (elapsedMs(R.pendingSince) < sc<float>(std::max(0, Config::getValue<int>(want ? KEY_SHOW_DELAY : KEY_HIDE_DELAY))))
         return;
 
+    R.from      = hiddenFraction(monitor);
     R.shown     = want;
     R.changedAt = Time::steadyNow();
     R.pending   = false;
