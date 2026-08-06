@@ -2561,13 +2561,22 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             case XKB_KEY_KP_Enter: {
                 const auto RESULTS = overviewSearchRows();
 
-                // An explicit Tab selection wins. Otherwise the top app is only
-                // taken when no window matched at all -- with windows on screen,
-                // Return keeps its measured meaning of "focus the selection".
+                // X61. Return means "activate what is selected", and WHAT that is
+                // depends on the zone. A desktop needs nothing done to it:
+                // arrowing onto a strip cell already switched the viewport, so
+                // closing simply lands there. A tile needs nothing either --
+                // closeOnWindow is exactly what close() focuses. Only a result
+                // has to be run, which is why this is the only branch here.
+                //
+                // The fallback is unchanged: with no explicit selection and no
+                // window matching the query, Return takes the top result. It is
+                // suppressed in the Desktop zone, where the user has said where
+                // they want to go and launching an app instead would be a
+                // surprise.
                 int launchIdx = -1;
-                if (g_overviewAppSelection >= 0 && g_overviewAppSelection < sc<int>(RESULTS.size()))
+                if (g_overviewNavZone == EOverviewNavZone::Result && g_overviewAppSelection >= 0 && g_overviewAppSelection < sc<int>(RESULTS.size()))
                     launchIdx = g_overviewAppSelection;
-                else if (!RESULTS.empty() && matchingWindowCount() == 0)
+                else if (g_overviewNavZone != EOverviewNavZone::Desktop && !RESULTS.empty() && matchingWindowCount() == 0)
                     launchIdx = 0;
 
                 activateSearchResult(launchIdx);
@@ -3283,6 +3292,7 @@ void CScrollOverview::updateTileHover() {
     // through it would be hovering something the user cannot click.
     if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
         TileChrome::setHovered(PHLWINDOW{});
+        g_overviewNavZone = EOverviewNavZone::Result;
         if (g_overviewAppSelection != ROW->index) {
             g_overviewAppSelection = ROW->index;
             damage();
@@ -3688,6 +3698,7 @@ void CScrollOverview::performPrimaryClickAction() {
     }
 
     selectHoveredWorkspace();
+    g_overviewNavZone = EOverviewNavZone::Tile;
     selectWindowAtOverviewCursor(true);
     close();
 }
@@ -4917,141 +4928,193 @@ size_t CScrollOverview::dragWorkspaceIndex(PHLWINDOW window) const {
     return images.size();
 }
 
+// X61. ONE selection, moved by what is actually DRAWN ON SCREEN.
+//
+// What was here before was upstream's SCROLLING-LAYOUT walk, and it could not
+// see this product at all: it skipped every candidate with `m_isFloating` and
+// navigated by the window's REAL `middle()`. In this rice every window floats
+// and the tiles are laid out in a mission-control GRID with no relation to real
+// geometry, so the arrow keys were dead by construction -- and would have
+// pointed the wrong way even if they had not been.
+//
+// Everything the user can see is collected as a box: strip cells, result rows
+// and grid cells, window tiles. An arrow then picks the nearest box in that
+// direction. Crossing from one surface to the next costs nothing because it is
+// the same geometry either way, which is what "arrow through everything" means.
 bool CScrollOverview::moveSelection(const std::string& direction) {
-    const bool MOVINGLEFT  = direction == "left";
-    const bool MOVINGRIGHT = direction == "right";
-    const bool MOVINGUP    = direction == "up";
-    const bool MOVINGDOWN  = direction == "down";
-
-    if (!MOVINGLEFT && !MOVINGRIGHT && !MOVINGUP && !MOVINGDOWN)
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
         return false;
 
-    bool shouldMoveWorkspace = images.empty() || viewportCurrentWorkspace >= images.size();
+    const bool LEFT = direction == "left", RIGHT = direction == "right", UP = direction == "up", DOWN = direction == "down";
+    if (!LEFT && !RIGHT && !UP && !DOWN)
+        return false;
 
-    const auto WORKSPACEIMAGE = shouldMoveWorkspace ? SP<SWorkspaceImage>{} : images[viewportCurrentWorkspace];
-    if (!WORKSPACEIMAGE || !WORKSPACEIMAGE->pWorkspace)
-        shouldMoveWorkspace = true;
+    struct SNavTarget {
+        CBox             box;
+        EOverviewNavZone zone;
+        int              index = -1; // Desktop: workspace index. Result: result index.
+        PHLWINDOW        window;     // Tile
+    };
 
-    if (!shouldMoveWorkspace && (!closeOnWindow || closeOnWindow->m_workspace != WORKSPACEIMAGE->pWorkspace || !shouldShowOverviewWindow(closeOnWindow.lock()) || closeOnWindow->m_isFloating)) {
-        syncSelectionToViewport();
-        if (!closeOnWindow || closeOnWindow->m_workspace != WORKSPACEIMAGE->pWorkspace || !shouldShowOverviewWindow(closeOnWindow.lock()) || closeOnWindow->m_isFloating)
-            shouldMoveWorkspace = true;
+    std::vector<SNavTarget> targets;
+
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (!images[i] || !images[i]->pWorkspace)
+            continue;
+
+        if (const CBox BOX = stripCellBox(i, MONITOR, scale->value()); BOX.width > 1.F && BOX.height > 1.F)
+            targets.push_back({BOX, EOverviewNavZone::Desktop, sc<int>(i), {}});
     }
 
-    const auto CURRENT = getOverviewWindowToShow(closeOnWindow.lock());
-    if (!CURRENT)
-        shouldMoveWorkspace = true;
+    // The results as the last frame DREW them -- the same boxes the mouse
+    // hit-tests against, so the two devices cannot disagree about where a row
+    // is. G5's grid cells and the list rows are both in here already.
+    for (const auto& HIT : g_searchRowHits)
+        targets.push_back({HIT.box, EOverviewNavZone::Result, HIT.index, {}});
 
-    if (!shouldMoveWorkspace)
-        closeOnWindow = CURRENT;
-
-    if (!shouldMoveWorkspace) {
-        const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACEIMAGE->pWorkspace);
-        if (ALGO && ALGO->m_scrollingData && ALGO->m_scrollingData->controller) {
-            const bool PRIMARYHORIZONTAL = ALGO->m_scrollingData->controller->isPrimaryHorizontal();
-            const bool MOVINGPRIMARY     = PRIMARYHORIZONTAL ? MOVINGLEFT || MOVINGRIGHT : MOVINGUP || MOVINGDOWN;
-            const bool MOVINGSTACK       = PRIMARYHORIZONTAL ? MOVINGUP || MOVINGDOWN : MOVINGLEFT || MOVINGRIGHT;
-            const bool NEXT              = MOVINGRIGHT || MOVINGDOWN;
-
-            if (MOVINGPRIMARY || MOVINGSTACK) {
-                if (MOVINGPRIMARY ? moveScrollingColumnSelection(NEXT) : moveScrollingStackSelection(NEXT))
-                    return true;
-
-                shouldMoveWorkspace = true;
-            }
-        }
-    }
-
-    const auto CURRENTCENTER = shouldMoveWorkspace ? Vector2D{} : CURRENT->middle();
-
-    PHLWINDOW bestCandidate;
-    float     bestPrimaryDistance   = std::numeric_limits<float>::max();
-    float     bestSecondaryDistance = std::numeric_limits<float>::max();
-    float     bestOverlap           = -1.F;
-    bool      bestHasOverlap         = false;
-
-    for (const auto& windowRef : shouldMoveWorkspace ? std::vector<PHLWINDOWREF>{} : WORKSPACEIMAGE->windows) {
-        const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
-        if (!shouldShowOverviewWindow(WINDOW) || WINDOW == CURRENT || WINDOW->m_isFloating)
+    // Every workspace's tiles, filtered to the ones actually ON the monitor.
+    // Asking only images[viewportCurrentWorkspace] made the tiles unreachable:
+    // that index is the VIEWPORT's, and a tile's box already carries its
+    // workspace offset, so the honest test for "can the user see this" is
+    // whether the drawn box lands on the monitor -- the same test the render
+    // pass uses. Measured 2026-08-05: with the current-workspace filter, arrows
+    // produced a byte-identical frame on a desktop with two visible tiles.
+    for (const auto& IMAGE : images) {
+        if (!IMAGE || !IMAGE->pWorkspace)
             continue;
 
-        if (WINDOW->m_workspace != WORKSPACEIMAGE->pWorkspace || WINDOW->m_monitor != pMonitor)
-            continue;
-
-        const auto WINDOWCENTER = WINDOW->middle();
-
-        const float PRIMARYDISTANCE =
-            MOVINGRIGHT ? WINDOWCENTER.x - CURRENTCENTER.x : MOVINGLEFT ? CURRENTCENTER.x - WINDOWCENTER.x : MOVINGDOWN ? WINDOWCENTER.y - CURRENTCENTER.y : CURRENTCENTER.y - WINDOWCENTER.y;
-
-        if (PRIMARYDISTANCE <= 0.F)
-            continue;
-
-        const float OVERLAP = MOVINGLEFT || MOVINGRIGHT ? getWindowVerticalOverlap(CURRENT, WINDOW) : getWindowHorizontalOverlap(CURRENT, WINDOW);
-        const bool  HASOVERLAP       = OVERLAP > 0.F;
-        const float SECONDARYDISTANCE =
-            MOVINGLEFT || MOVINGRIGHT ? std::abs(WINDOWCENTER.y - CURRENTCENTER.y) : std::abs(WINDOWCENTER.x - CURRENTCENTER.x);
-
-        if ((MOVINGUP || MOVINGDOWN) && !HASOVERLAP)
-            continue;
-
-        if (!bestCandidate) {
-            bestCandidate         = WINDOW;
-            bestPrimaryDistance   = PRIMARYDISTANCE;
-            bestSecondaryDistance = SECONDARYDISTANCE;
-            bestOverlap           = OVERLAP;
-            bestHasOverlap        = HASOVERLAP;
-            continue;
-        }
-
-        if (HASOVERLAP != bestHasOverlap) {
-            if (HASOVERLAP) {
-                bestCandidate         = WINDOW;
-                bestPrimaryDistance   = PRIMARYDISTANCE;
-                bestSecondaryDistance = SECONDARYDISTANCE;
-                bestOverlap           = OVERLAP;
-                bestHasOverlap        = true;
-            }
-
-            continue;
-        }
-
-        if (PRIMARYDISTANCE < bestPrimaryDistance - 0.5F) {
-            bestCandidate         = WINDOW;
-            bestPrimaryDistance   = PRIMARYDISTANCE;
-            bestSecondaryDistance = SECONDARYDISTANCE;
-            bestOverlap           = OVERLAP;
-            continue;
-        }
-
-        if (std::abs(PRIMARYDISTANCE - bestPrimaryDistance) <= 0.5F) {
-            if ((HASOVERLAP && OVERLAP > bestOverlap + 0.5F) || (!HASOVERLAP && SECONDARYDISTANCE < bestSecondaryDistance - 0.5F)) {
-                bestCandidate         = WINDOW;
-                bestPrimaryDistance   = PRIMARYDISTANCE;
-                bestSecondaryDistance = SECONDARYDISTANCE;
-                bestOverlap           = OVERLAP;
-            }
+        for (const auto& WINDOW : overviewMainGridWindows(IMAGE->pWorkspace, MONITOR)) {
+            const CBox BOX = tileBox(WINDOW);
+            if (BOX.width > 1.F && BOX.height > 1.F && overviewBoxIntersectsMonitor(BOX, MONITOR))
+                targets.push_back({BOX, EOverviewNavZone::Tile, -1, WINDOW});
         }
     }
 
-    const auto WINDOWSELECTIONMOVED = bestCandidate;
-    if (!WINDOWSELECTIONMOVED)
-        shouldMoveWorkspace = true;
+    if (targets.empty())
+        return false;
 
-    if (shouldMoveWorkspace) {
-        if (((MOVINGLEFT || MOVINGRIGHT) && layout != ScrollOverview::Config::ELayout::HORIZONTAL) || ((MOVINGUP || MOVINGDOWN) && layout == ScrollOverview::Config::ELayout::HORIZONTAL))
-            return false;
-
-        moveViewportWorkspace(MOVINGRIGHT || MOVINGDOWN);
-        return true;
+    // Where the selection is NOW.
+    CBox current;
+    switch (g_overviewNavZone) {
+        case EOverviewNavZone::Result:
+            for (const auto& TARGET : targets)
+                if (TARGET.zone == EOverviewNavZone::Result && TARGET.index == g_overviewAppSelection)
+                    current = TARGET.box;
+            break;
+        case EOverviewNavZone::Tile:
+            if (const auto SELECTED = closeOnWindow.lock(); SELECTED)
+                current = tileBox(SELECTED);
+            break;
+        case EOverviewNavZone::Desktop: current = stripCellBox(viewportCurrentWorkspace, MONITOR, scale->value()); break;
     }
 
-    closeOnWindow = bestCandidate;
-    rememberSelection(bestCandidate);
-    syncFocusedSelection();
+    // No selection yet -- the first arrow press has to land SOMEWHERE or the
+    // overview is unreachable by keyboard until the mouse has been used, which
+    // is the defect this whole item exists to fix.
+    if (current.width <= 1.F || current.height <= 1.F)
+        current = targets.front().box;
+
+    const Vector2D CUR = current.middle();
+
+    // Ordering, in this order and for this reason:
+    //
+    //   1. a candidate the selection OVERLAPS on the perpendicular axis beats
+    //      one it does not. Scoring by weighted distance instead sent UP from a
+    //      tile PAST the strip and PAST the result list to a grid cell at the
+    //      very top, because that cell happened to be column-aligned with the
+    //      tile and alignment was worth more than being 300px closer.
+    //      Measured 2026-08-05: one UP press jumped from the tiles to the last
+    //      apps cell, skipping both surfaces in between.
+    //   2. then nearest in the direction of travel.
+    //   3. then nearest sideways, which only ever breaks a tie.
+    //
+    // Same shape as upstream's own bestHasOverlap/bestPrimaryDistance walk --
+    // the geometry it applied that to was simply the wrong geometry.
+    struct SScore {
+        bool  noOverlap = true;
+        float primary   = 0.F;
+        float secondary = 0.F;
+
+        bool beats(const SScore& other) const {
+            if (noOverlap != other.noOverlap)
+                return !noOverlap;
+            if (primary != other.primary)
+                return primary < other.primary;
+            return secondary < other.secondary;
+        }
+    };
+
+    const SNavTarget* best = nullptr;
+    SScore            bestScore;
+    const SNavTarget* near = nullptr;
+    SScore            nearScore;
+
+    for (const auto& TARGET : targets) {
+        const Vector2D CENTER  = TARGET.box.middle();
+        const float    PRIMARY = RIGHT ? CENTER.x - CUR.x : LEFT ? CUR.x - CENTER.x : DOWN ? CENTER.y - CUR.y : CUR.y - CENTER.y;
+
+        // Strictly in the direction asked for, so an arrow can never pick the
+        // box it is already on or one behind it.
+        if (PRIMARY <= 1.F)
+            continue;
+
+        const SScore SCORE{
+            .noOverlap = !(LEFT || RIGHT ? TARGET.box.y < current.y + current.height && current.y < TARGET.box.y + TARGET.box.height :
+                                           TARGET.box.x < current.x + current.width && current.x < TARGET.box.x + TARGET.box.width),
+            .primary   = PRIMARY,
+            .secondary = (LEFT || RIGHT) ? std::abs(CENTER.y - CUR.y) : std::abs(CENTER.x - CUR.x),
+        };
+
+        if (!best || SCORE.beats(bestScore)) {
+            bestScore = SCORE;
+            best      = &TARGET;
+        }
+
+        // An arrow LEAVES a surface only when that surface has nowhere left to
+        // go in that direction. Without this, RIGHT on a full-width result row
+        // -- whose centre is the overview's centre, so half the tiles are "to
+        // the right" of it -- jumped straight out of the list and into the grid.
+        // Crossing between surfaces is still the point of this walk, it just has
+        // to be the LAST resort rather than the first.
+        if (TARGET.zone == g_overviewNavZone && (!near || SCORE.beats(nearScore))) {
+            nearScore = SCORE;
+            near      = &TARGET;
+        }
+    }
+
+    if (near)
+        best = near;
+
+    if (!best)
+        return false;
+
+    switch (best->zone) {
+        case EOverviewNavZone::Desktop:
+            g_overviewNavZone      = EOverviewNavZone::Desktop;
+            g_overviewAppSelection = -1;
+            // Arrowing onto a desktop GOES there: the viewport slides and the
+            // strip highlights it, so the selection is visible without the
+            // strip needing a second kind of highlight of its own. Return then
+            // only has to close.
+            if (const auto WORKSPACE = images[sc<size_t>(best->index)]->pWorkspace; WORKSPACE)
+                focusOverviewWorkspace(WORKSPACE, sc<size_t>(best->index));
+            break;
+        case EOverviewNavZone::Result:
+            g_overviewNavZone      = EOverviewNavZone::Result;
+            g_overviewAppSelection = best->index;
+            break;
+        case EOverviewNavZone::Tile:
+            g_overviewNavZone      = EOverviewNavZone::Tile;
+            g_overviewAppSelection = -1;
+            closeOnWindow          = best->window;
+            break;
+    }
+
     damage();
-
     return true;
 }
+
 
 void CScrollOverview::forceSurfaceVisibility(SP<CWLSurfaceResource> surface) {
     if (!surface)
@@ -6429,7 +6492,7 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         .renderScale          = renderScale,
         .now                  = now,
         .workspaceBox         = workspaceBox,
-        .selected             = closeOnWindow == window,
+        .selected             = g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window,
         .dragged              = dragged,
     });
 }

@@ -571,7 +571,10 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
     if (!monitor || !window || (!window->m_isMapped))
         return;
 
-    if (metrics.borderSize <= 0.F)
+    // X61. A SELECTED tile draws a ring even where the theme asks for no border
+    // at all -- with border_size 0 the keyboard selection would otherwise be
+    // invisible, which is the defect, not a styling preference.
+    if (metrics.borderSize <= 0.F && !selected)
         return;
 
     auto grad = window->m_realBorderColor;
@@ -586,6 +589,27 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
     data.roundingPower = metrics.roundingPower;
     data.a             = metrics.targetOpacity;
     data.borderSize    = metrics.borderSize;
+
+    // X61. The keyboard selection had NO visual at all: this function took
+    // `selected` and never read it, so every tile drew m_realBorderColor and a
+    // moved selection produced a byte-identical frame. That is what the user
+    // reported as the arrows not working -- measured 2026-08-06, moveSelection
+    // was picking the right tile the whole time.
+    //
+    // OPAQUE and thick, for the reason the search rows are opaque (X2): this
+    // theme accent is a dark warm brown sitting within a few units of the
+    // blurred wallpaper, so a tinted border is present but invisible. Alpha
+    // cannot carry this signal; a flat ring can.
+    if (selected) {
+        const auto ACCENT = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.active_border");
+        data.grad1.reset(ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 1.F} : ACCENT.m_colors[0].modifyA(1.F));
+        data.a            = 1.F;
+        data.borderSize   = std::max(4.F, metrics.borderSize * 4.F);
+        data.hasGrad2     = false;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
+        return;
+    }
+
     if (window->m_borderFadeAnimationProgress->isBeingAnimated()) {
         data.hasGrad2 = true;
         data.grad1    = window->m_realBorderColorPrevious;

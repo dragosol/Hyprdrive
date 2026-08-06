@@ -275,6 +275,8 @@ bool openScrollOverview(PHLMONITOR monitor) {
 
 static SDispatchResult onOverviewDispatcher(std::string arg) {
     g_overviewSearch.clear(); // every open starts unfiltered
+    // X61: and on the tiles, which is where the remembered selection lives.
+    g_overviewNavZone = EOverviewNavZone::Tile;
     SearchProviders::query("");
     g_overviewAppSelection = -1;
     const auto [ACTION, TARGET] = splitOverviewArg(arg);
