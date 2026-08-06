@@ -132,18 +132,14 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
     if (data.blurVibrancy >= 0.F)
         ScrollOverview::Config::setValue("decoration:blur:vibrancy", data.blurVibrancy);
 
-    // X94. LIVE chrome (strip panel, pill, dock): native Hyprland rect+blur at
-    // full decoration:blur:* strength. Kawase radius is size * blurA — always
-    // blurA=1 so intensity matches windows. Open/close fade stays on the tint.
-    // Different technique from the window surface path; same config knobs.
+    // X94/X95. LIVE chrome (strip panel, pill, dock): native rect+blur at full
+    // decoration:blur:* strength (blurA=1). Kawase expands damage internally;
+    // the DRAW scissor must be the ROUNDED panel shape (X14) or blur is a square
+    // under rounded chrome — dock corners were the obvious case.
     if (!data.xray) {
-        CRegion paint{data.box.copy().round()};
+        CRegion paint = roundedRectRegion(data.box, data.rounding, data.roundingPower);
         if (paint.empty())
             return {};
-
-        const int BLURSIZE   = std::max(1, ScrollOverview::Config::getValue<int>("decoration:blur:size"));
-        const int BLURPASSES = std::clamp(ScrollOverview::Config::getValue<int>("decoration:blur:passes"), 1, 8);
-        paint.expand(sc<int>(std::lround(BLURSIZE * std::pow(2.0, BLURPASSES))));
 
         const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
         g_pHyprRenderer->m_renderData.damage = paint;
@@ -168,7 +164,9 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
         const Vector2D MONSIZE = MONITOR->m_transformedSize;
         if (MONSIZE.x >= 1.0 && MONSIZE.y >= 1.0) {
             const CBox BOX = data.box;
-            CRegion    paintDamage{BOX.copy().round()};
+            CRegion    paintDamage = roundedRectRegion(BOX, data.rounding, data.roundingPower);
+            if (paintDamage.empty())
+                paintDamage = CRegion{BOX.copy().round()};
             g_pHyprRenderer->pushMonitorTransformEnabled(true);
             auto restoreXform = Hyprutils::Utils::CScopeGuard([] { g_pHyprRenderer->popMonitorTransformEnabled(); });
 
