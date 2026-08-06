@@ -6193,8 +6193,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         ADDTEX(ICONTEX, iconBox.round());
                     }
 
-                    const auto CELLTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F}, std::max(1, sc<int>(std::round(13.F * SCALE))),
-                                                              false, "", std::max(1, sc<int>(cell.width - (PADG * 2.F))));
+                    const auto CELLTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(13.F * SCALE))), false, "",
+                                                              std::max(1, sc<int>(cell.width - (PADG * 2.F))), 500);
                     if (CELLTEX && CELLTEX->ok()) {
                         CBox cellText{cell.x + std::round((cell.width - sc<float>(CELLTEX->m_size.x)) / 2.F), cell.y + PADG + ICOND + std::round(4.F * SCALE),
                                       sc<float>(CELLTEX->m_size.x), sc<float>(CELLTEX->m_size.y)};
@@ -6278,9 +6278,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     textIndent += ICOND + std::round(10.F * SCALE);
                 }
 
-                const auto ROWTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, SELECTED ? 1.F : 0.80F},
-                                                               std::max(1, sc<int>(std::round(14.F * SCALE))), false, "",
-                                                               std::max(1, sc<int>(row.width - textIndent) - ROWPAD));
+                const auto ROWTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(14.F * SCALE))), false, "",
+                                                               std::max(1, sc<int>(row.width - textIndent) - ROWPAD), 500);
                 if (ROWTEX && ROWTEX->ok()) {
                     CBox rowText{
                         row.x + textIndent,
@@ -6298,7 +6297,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const CHyprColor  FG    = !QUERIED ? CHyprColor{1.F, 1.F, 1.F, 0.55F} : (EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F});
 
     const int  FONTPX = std::max(1, sc<int>(std::round(15.F * SCALE)));
-    const auto TEX    = OverviewRender::text(LABEL, FG, FONTPX, false, "", sc<int>(FIELDW));
+    const auto TEX    = OverviewRender::text(LABEL, FG, FONTPX, false, "", sc<int>(FIELDW), QUERIED ? 600 : 0);
     if (!TEX || !TEX->ok())
         return;
 
