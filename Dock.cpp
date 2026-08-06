@@ -815,6 +815,28 @@ float hiddenFraction(PHLMONITOR monitor) {
     return R.from + ((R.shown ? 0.F : 1.F) - R.from) * E;
 }
 
+SLayout baseLayout(PHLMONITOR monitor); // defined below; slidPill needs the resting box
+
+// How far down the pill currently sits, mid-slide included. Shared with
+// layout() below so the HIT TEST and the RENDER can never disagree about where
+// the pill is -- which is the whole bug X77 fixes.
+double slideOffsetPx(PHLMONITOR monitor, double pillHeight) {
+    if (!monitor)
+        return 0.0;
+
+    return std::round((pillHeight + EDGE_MARGIN * monitor->m_scale) * hiddenFraction(monitor));
+}
+
+// The pill WHERE IT IS, not where it rests. Empty once it is fully away.
+CBox slidPill(PHLMONITOR monitor) {
+    auto pill = baseLayout(monitor).pill;
+    if (pill.empty() || hiddenFraction(monitor) >= 1.F)
+        return CBox{};
+
+    pill.y += slideOffsetPx(monitor, pill.height);
+    return pill;
+}
+
 bool autohideAnimating(PHLMONITOR monitor) {
     if (!monitor)
         return false;
@@ -954,17 +976,22 @@ void updateAutohide(PHLMONITOR monitor) {
     // sliding the dock away again, or the wiggle would play to nobody.
     const bool URGENT = Config::getValue<bool>(KEY_URGENT_NOTIFY) && anyUrgent(baseLayout(monitor).items);
 
-    bool       want   = false;
+    bool       want      = false;
+    // A reversal that catches the pill still on screen does not wait out a
+    // delay; see the X77 note below.
+    bool       immediate = false;
     if (R.shown) {
         // Up already: it stays up while the pointer is on it, or while its
         // right-click menu is -- the menu floats ABOVE the pill, so reaching for
         // a row takes the pointer off the pill and would otherwise slide the
         // dock out from under the menu the user is aiming at.
-        const auto BASE = baseLayout(monitor);
         if (menuOpen())
             want = true;
-        else if (!BASE.pill.empty()) {
-            CBox reach = BASE.pill;
+        else if (CBox reach = slidPill(monitor); !reach.empty()) {
+            // X77: the SLID pill, not the resting one. While it is still easing
+            // out it sits BELOW its resting box, so a pointer on the part that
+            // is actually on screen fell outside the resting box and read as
+            // "left the dock" -- which started a hide the user never asked for.
             reach.height += EDGE_MARGIN * monitor->m_scale; // the margin under the pill still counts as on it
             want = reach.containsPoint((g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale);
         }
@@ -986,6 +1013,30 @@ void updateAutohide(PHLMONITOR monitor) {
         const bool ATEDGE = BOX.containsPoint(POINT) && POINT.y >= BOX.y + BOX.h - REVEAL_BAND;
 
         want = ATEDGE || R.pressure >= Config::getValue<float>(KEY_PRESSURE);
+
+        // X77 (user, 2026-08-06): "if I move my cursor off it, it starts hiding
+        // and I can't unhide until it's done hiding".
+        //
+        // `shown` flips FALSE the moment the hide begins, which switched this
+        // test to the 4px screen-edge band -- while the pill was still sitting
+        // on screen under the cursor, 60-odd px above that band. So coming back
+        // to a dock that is visibly right there could not re-show it, and the
+        // user had to wait out the slide and push into the very bottom edge
+        // again. dash-to-dock has no such window: its hover lives on the actor,
+        // which stays interactive for the whole slide.
+        //
+        // Being ON the pill that is still on screen counts, and it counts
+        // IMMEDIATELY -- `show-delay` belongs to the pressure barrier, not to a
+        // pointer that never really left.
+        if (!want) {
+            if (CBox reach = slidPill(monitor); !reach.empty()) {
+                reach.height += EDGE_MARGIN * monitor->m_scale;
+                if (reach.containsPoint((g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale)) {
+                    want      = true;
+                    immediate = true;
+                }
+            }
+        }
     }
 
     // X34 `hotkeys-show-dock`, ORed in beside URGENT for the same reason: it has
@@ -1008,7 +1059,7 @@ void updateAutohide(PHLMONITOR monitor) {
         R.pendingSince = Time::steadyNow();
     }
 
-    if (elapsedMs(R.pendingSince) < sc<float>(std::max(0, Config::getValue<int>(want ? KEY_SHOW_DELAY : KEY_HIDE_DELAY))))
+    if (!immediate && elapsedMs(R.pendingSince) < sc<float>(std::max(0, Config::getValue<int>(want ? KEY_SHOW_DELAY : KEY_HIDE_DELAY))))
         return;
 
     R.from      = hiddenFraction(monitor);
@@ -1035,7 +1086,7 @@ SLayout layout(PHLMONITOR monitor) {
     if (F >= 1.F)
         return SLayout{};
 
-    const double DY = std::round((out.pill.height + EDGE_MARGIN * monitor->m_scale) * F);
+    const double DY = slideOffsetPx(monitor, out.pill.height);
     out.pill.y += DY;
     for (auto& item : out.items)
         item.iconBox.y += DY;
