@@ -685,8 +685,19 @@ static float overviewStripLogicalHeight(PHLMONITOR monitor) {
 // (48px pill + 8px margins); make it a config knob if anyone ever asks.
 static constexpr float OVERVIEW_SEARCH_ROWHL = 64.F, OVERVIEW_SEARCH_DOCKPADL = 8.F;
 
+// User, 2026-08-06: "place search results higher so that there isn't an awkward
+// space between search bar and search results". The row is the full 64px while
+// the pill sits in it, and shrinks as the pill docks away under the bar, so the
+// results, the strip and the tiles all climb into the space the pill left.
+//
+// renderSearch writes this each frame from the pill's ACTUAL landed foot rather
+// than from the dock progress, because the floor is the pill itself: collapsing
+// the row outright puts the panel's head ABOVE the docked pill's foot and the
+// two overlap. That was the r1 attempt this replaces.
+static float g_overviewSearchRowL = OVERVIEW_SEARCH_ROWHL;
+
 static float overviewSearchLogicalHeight(PHLMONITOR monitor) {
-    return monitor ? OVERVIEW_SEARCH_ROWHL : 0.F;
+    return monitor ? g_overviewSearchRowL : 0.F;
 }
 
 // X50: how far down the monitor the top chrome reaches, in logical global px.
@@ -1968,6 +1979,7 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
 
     // A previous overview's band must not open the next one already pushed.
     g_overviewResultsBandH = 0.F;
+    g_overviewSearchRowL   = OVERVIEW_SEARCH_ROWHL;
 
     if (!swipe)
         *scale = ScrollOverview::Config::getScale();
@@ -6249,12 +6261,15 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const float PILLWL  = 4.F + 40.F + 12.F + FIELDWL + 20.F;
     const CBox  PILLLOGICAL = {
         sc<float>(monitor->m_position.x) + (sc<float>(monitor->m_size.x) - PILLWL) / 2.F,
-        sc<float>(monitor->m_position.y) + (overviewSearchLogicalHeight(monitor) - 48.F) / 2.F,
+        sc<float>(monitor->m_position.y) + (OVERVIEW_SEARCH_ROWHL - 48.F) / 2.F,
         PILLWL,
         48.F,
     };
 
     CBox pill = getOverviewGlobalBox(PILLLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
+
+    // Kept so the dock offset below can be read back out in logical px.
+    const float PILLUNDOCKEDY = sc<float>(pill.y);
 
     // X50: docked, the pill leaves the card's inset behind and sits just under
     // the layer-shell bar, which is what the work area's top edge means. Only y
@@ -6272,13 +6287,6 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         pill.y += (DOCKY - sc<float>(pill.y)) * DOCK;
     }
 
-    // ponytail: the 64px row the pill vacates is NOT reclaimed by the layout.
-    // Collapsing it (tried, r1) moves the results up to the card's top edge at
-    // screen y ~97 while the docked pill's foot lands at ~110, so the panel
-    // slides under the pill. Reclaiming it properly means solving the row height
-    // that puts the card's content below the DOCKED pill, which needs the open
-    // scale inside the free layout helpers. Worth ~32px; do it if the user asks.
-
     if (pill.width <= 1.F || !overviewBoxIntersectsMonitor(pill, monitor))
         return;
     pill.round();
@@ -6290,6 +6298,17 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const float PADL   = std::round(4.F * SCALE);
     const float GAP    = std::round(12.F * SCALE);
     const float FIELDW = std::round(FIELDWL * SCALE);
+
+    // The row the pill vacates, reclaimed -- the user asked, so the ~32px the
+    // old ponytail note deferred is taken here.
+    //
+    // The floor is the pill's own foot, brought back into the card's logical
+    // space: getOverviewGlobalBox is affine and the pill's width just measured
+    // its scale, so the undocked box inverts it from one known point. Undocked
+    // this evaluates to 8 + 48 + 8 = the full 64px row, so the un-queried
+    // layout is unchanged by construction rather than by a special case.
+    const float PILLFOOTL = PILLLOGICAL.y + 48.F + ((sc<float>(pill.y) - PILLUNDOCKEDY) / std::max(0.001F, SCALE));
+    g_overviewSearchRowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
 
     // X11: frosted pill -- live rounded blur of whatever is behind it.
     OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, false);
@@ -6317,11 +6336,16 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     badgeBg.roundingPower = 2.F;
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(badgeBg));
 
-    const auto ADDTEX = [&](const auto& tex, const CBox& box) {
+    // Every texture in this pass rides TEXFADE rather than FADE directly. The
+    // section cards below fade in one at a time and there are five ADDTEX call
+    // sites inside that loop: an alpha parameter would have to be remembered at
+    // each of them, a variable cannot be forgotten at any of them.
+    float      texFade = FADE;
+    const auto ADDTEX  = [&](const auto& tex, const CBox& box) {
         CTexPassElement::SRenderData data;
         data.tex = tex;
         data.box = box;
-        data.a   = FADE;
+        data.a   = texFade;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
     };
 
@@ -6377,10 +6401,21 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             const float CARDHL = overviewResultsSectionHeight(SECTION, SPANWL);
 
             // While the band is still easing open the stack is shorter than the
-            // full list; a card that would spill past the foot is not drawn
-            // yet, so the sections unroll instead of overhanging the dock.
-            if (cardYL + CARDHL > PANELYL + PANELHL + 0.5F)
+            // full list, so each card is revealed by how much room the band has
+            // actually made for it.
+            //
+            // User, 2026-08-06: a category FADES IN as it populates instead of
+            // arriving whole. That fade is the same room measurement, which
+            // means a card is faintest exactly when it overhangs the band's
+            // foot the most -- so the reveal pays for its own overhang, and it
+            // needs no timer, no per-section state and no second animation to
+            // keep in step with the band.
+            const float ROOML = (PANELYL + PANELHL) - cardYL;
+            if (ROOML <= 0.5F)
                 break;
+
+            const float CARDA = std::clamp(ROOML / std::max(1.F, CARDHL), 0.F, 1.F);
+            texFade           = FADE * CARDA;
 
             const CBox CARDLOGICAL{SPANXL, cardYL, SPANWL, CARDHL};
             cardYL += CARDHL + OVERVIEW_RESULT_SECTIONGAPL;
@@ -6391,11 +6426,11 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             card.round();
 
             // §10 clause 3: the expanded search surface is frosted, like the pill.
-            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE, false);
+            OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, false);
 
             CRectPassElement::SRectData cardBg;
             cardBg.box           = card;
-            cardBg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.55F * FADE} : INACTIVE.m_colors[0].modifyA(0.55F * FADE);
+            cardBg.color         = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.55F * FADE * CARDA} : INACTIVE.m_colors[0].modifyA(0.55F * FADE * CARDA);
             cardBg.round         = PANELROUND;
             cardBg.roundingPower = 2.F;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(cardBg));
@@ -6426,7 +6461,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         CRectPassElement::SRectData sel;
                         sel.box           = cell;
                         // Opaque for the same reason the list's selection is.
-                        sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE} : ACCENT.m_colors[0].modifyA(FADE);
+                        sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE * CARDA} : ACCENT.m_colors[0].modifyA(FADE * CARDA);
                         sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
                         sel.roundingPower = 2.F;
                         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
@@ -6528,7 +6563,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     // rows are frosted and carry the wallpaper's blurred
                     // STRUCTURE; the selected one is flat. That difference holds
                     // against any wallpaper, which a colour delta does not.
-                    sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE} : ACCENT.m_colors[0].modifyA(FADE);
+                    sel.color         = ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 0.25F * FADE * CARDA} : ACCENT.m_colors[0].modifyA(FADE * CARDA);
                     sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
                     sel.roundingPower = 2.F;
                     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
@@ -6578,6 +6613,10 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             }
         }
     }
+
+    // The pill's own label is not a section: put the alpha back, or it
+    // inherits whatever the last card happened to fade to.
+    texFade = FADE;
 
     const std::string LABEL = !QUERIED ? "Search, calculate or run" : (EMPTYRESULT ? g_overviewSearch + "    no matches" : g_overviewSearch);
     const CHyprColor  FG    = !QUERIED ? CHyprColor{1.F, 1.F, 1.F, 0.55F} : (EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F});
