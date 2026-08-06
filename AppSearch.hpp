@@ -46,6 +46,12 @@ namespace AppSearch {
     // from a frame that is already late.
     void warmIconIndex();
 
+    // Y13. Build the icon index on a worker instead of inline. warmIconIndex()
+    // stays the blocking entry point every reader already uses; this is only
+    // about WHEN the work happens, not what it produces.
+    void warmIconIndexAsync();
+    void shutdownIconIndex();
+
     // Absolute path to the best icon file for an Icon= value, or "" if none.
     // Pure filesystem: decode and texture upload belong to the render layer.
     // Falls back to a generic application icon when the named one is missing

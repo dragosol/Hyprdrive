@@ -1166,7 +1166,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // X51/X52. Build the icon index at LOAD, where a one-off ~10ms pass is
     // invisible, rather than letting the first search pay for it inside a frame
     // that is already trying to paint results.
-    AppSearch::warmIconIndex();
+    // Y13. ASYNC. Building this inline cost 4237ms of PARSE TIME, which is
+    // time the compositor spends before exec-once and therefore before the
+    // wallpaper can even be asked for.
+    AppSearch::warmIconIndexAsync();
 
     return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", SCROLLOVERVIEW_VERSION};
 }
@@ -1178,6 +1181,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_unloading = true;
     // The D-Bus worker outlives the overview otherwise, and hyprpm reloads the
     // plugin in-process.
+    AppSearch::shutdownIconIndex();
     SearchProviders::shutdown();
     ScrollOverview::LauncherEntry::stop();
     clearScrollOverviews();

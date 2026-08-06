@@ -9,6 +9,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <thread>
+
+#include <sys/resource.h>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -755,7 +759,22 @@ namespace AppSearch {
         return roots;
     }
 
-    void warmIconIndex() {
+    // Y13. The scan below walks EVERY icon-theme root recursively. Measured at
+    // plugin load 2026-08-06: 4237ms, against the 10ms the X51 note beside its
+    // call site claimed. `hl.plugin.load` is PARSE-TIME, so all of it landed
+    // before exec-once ran -- the wallpaper appeared 13.5s into the session
+    // with the plugin loaded and 7.5s without it, and this was 4.2s of that
+    // 6s difference.
+    //
+    // It is a CACHE, so it does not have to be finished before the compositor
+    // starts; it only has to be finished before something asks. The scan now
+    // runs on a worker and every reader takes the same mutex, so an early
+    // lookup simply waits for it -- which is exactly the old behaviour, and is
+    // why this is a scheduling change rather than a correctness one.
+    std::mutex  g_iconIndexMutex;
+    std::thread g_iconIndexWorker;
+
+    void warmIconIndexLocked() {
         const auto THEME = iconThemeName();
         if (g_iconIndexBuilt && g_iconIndexTheme == THEME)
             return;
@@ -797,6 +816,37 @@ namespace AppSearch {
                 }
             }
         }
+    }
+
+    void warmIconIndex() {
+        std::scoped_lock lock(g_iconIndexMutex);
+        warmIconIndexLocked();
+    }
+
+    // Started from PLUGIN_INIT. Joined in shutdownIconIndex() rather than
+    // detached: a detached worker would still be writing g_iconIndex after the
+    // .so is unloaded, and hyprpm reloads the plugin in-process.
+    void warmIconIndexAsync() {
+        if (g_iconIndexWorker.joinable())
+            return;
+
+        g_iconIndexWorker = std::thread([] {
+            // Y13. NICED, and the measurement is why: moving the scan off the
+            // parse-time path bought 4.1s on when `qs` launches but only 2.3s
+            // on when the wallpaper lands, because the worker then spent that
+            // time competing with the session bring-up for a VM's few cores.
+            // Nothing waits on this until something asks for an icon, so it is
+            // exactly the work that should yield.
+            ::setpriority(PRIO_PROCESS, 0, 10);
+
+            std::scoped_lock lock(g_iconIndexMutex);
+            warmIconIndexLocked();
+        });
+    }
+
+    void shutdownIconIndex() {
+        if (g_iconIndexWorker.joinable())
+            g_iconIndexWorker.join();
     }
 
     std::string resolveIconPath(const std::string& iconName) {
