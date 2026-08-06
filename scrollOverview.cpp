@@ -234,10 +234,19 @@ static constexpr size_t OVERVIEW_PROVIDER_ROW_LIMIT    = 5;
 // a provider that never answers simply never appears.
 struct SSearchRow {
     std::string              name;
+    // G6/X66: kept apart from the name rather than glued on with spaces. GNOME
+    // draws these as two columns -- a bright name, then a dimmer description --
+    // and one concatenated string cannot be coloured two ways.
+    std::string              description;
     std::string              icon;
     const AppSearch::SEntry* app = nullptr;
     SearchProviders::SResult provider;
 };
+
+// G6. How many results each provider offered, INCLUDING the ones the cap and
+// the trim never showed. Filled by overviewSearchRows(); read by the section
+// header to say "%d more".
+static std::unordered_map<std::string, size_t> g_providerTotals;
 
 static std::vector<SSearchRow> overviewSearchRows() {
     std::vector<SSearchRow> rows;
@@ -247,7 +256,7 @@ static std::vector<SSearchRow> overviewSearchRows() {
     Prof::Timer PROF{Prof::rowsNs, Prof::rowsCalls};
 
     for (const auto* E : AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT))
-        rows.push_back({E->name, E->icon, E, {}});
+        rows.push_back({E->name, "", E->icon, E, {}});
 
     // G5: each provider gets its OWN five rows. Providers arrive in whatever
     // order they answer, so the count is kept per id rather than by assuming
@@ -264,8 +273,13 @@ static std::vector<SSearchRow> overviewSearchRows() {
         // the user reported. GNOME does not do this: its apps grid and its
         // provider sections are independent, and its Calculator section lists
         // "Open in Calculator" whether or not Calculator is also an app match.
-        rows.push_back({R.description.empty() ? R.name : R.name + "   " + R.description, R.icon, nullptr, R});
+        rows.push_back({R.name, R.description, R.icon, nullptr, R});
     }
+
+    // G6 needs to know how many a provider ACTUALLY had, so the header can say
+    // how many are not being shown. perProvider counted every result, including
+    // the ones the cap skipped, so it is that total already.
+    g_providerTotals = std::move(perProvider);
     return rows;
 }
 
@@ -276,7 +290,8 @@ static std::vector<SSearchRow> overviewSearchRows() {
 struct SSearchSection {
     std::string         title;
     std::string         icon;
-    std::vector<size_t> rows; // indices into the overviewSearchRows() vector
+    std::vector<size_t> rows;  // indices into the overviewSearchRows() vector
+    size_t              total = 0; // G6: how many the provider had, cap included
     // G5: which of the two layouts this section draws in. Apps are the GRID of
     // icons; every other provider is a LIST of rows under a G6 header.
     bool                grid = false;
@@ -297,12 +312,17 @@ static std::vector<SSearchSection> overviewSearchSections(const std::vector<SSea
         }
 
         keys.push_back(KEY);
+        const auto TOTALIT = g_providerTotals.find(KEY);
 
         // G6: the header carries the PROVIDER APPLICATION's icon and name,
         // which is a different app from the one the row itself points at.
         // entryForId is the only way to reach it, and a provider whose .desktop
         // is missing keeps its bare id rather than drawing a headerless card.
-        SSearchSection section{.title = "Applications", .icon = "applications-other", .rows = {i}, .grid = KEY.empty()};
+        SSearchSection section{.title = "Applications",
+                               .icon  = "applications-other",
+                               .rows  = {i},
+                               .total = TOTALIT == g_providerTotals.end() ? 0 : TOTALIT->second,
+                               .grid  = KEY.empty()};
         if (!KEY.empty()) {
             section.title = KEY;
             section.icon  = KEY;
@@ -6328,12 +6348,35 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 headIndent += ICOND + std::round(10.F * SCALE);
             }
 
+            // G6: the provider's name, and beneath it how many results are not
+            // being shown -- truncated by G5's cap or by X64's trim, which is
+            // why it counts against what the provider OFFERED rather than
+            // against the cap. GNOME's "22 more" under Settings is the model.
+            const size_t SHOWN = SECTION.rows.size();
+            const size_t MORE  = SECTION.total > SHOWN ? SECTION.total - SHOWN : 0;
+
             const float HEADWG  = std::round(OVERVIEW_RESULT_HEADERWL * SCALE);
-            const auto  HEADTEX = OverviewRender::text(SECTION.title, CHyprColor{1.F, 1.F, 1.F, 0.90F}, std::max(1, sc<int>(std::round(14.F * SCALE))), false, "",
-                                                             std::max(1, sc<int>(HEADWG - headIndent) - ROWPAD));
+            const int   HEADPX  = std::max(1, sc<int>(std::round(14.F * SCALE)));
+            const auto  HEADTEX = OverviewRender::text(SECTION.title, CHyprColor{1.F, 1.F, 1.F, 0.95F}, HEADPX, false, "", std::max(1, sc<int>(HEADWG - headIndent) - ROWPAD), 500);
+            const auto  MORETEX = MORE == 0 ? nullptr :
+                                              OverviewRender::text(std::to_string(MORE) + " more", CHyprColor{1.F, 1.F, 1.F, 0.55F}, std::max(1, sc<int>(std::round(12.F * SCALE))), false, "",
+                                                                   std::max(1, sc<int>(HEADWG - headIndent) - ROWPAD));
+
+            // Both lines centre as one block, so a section without a count does
+            // not sit at a different height from one with it.
+            const float HEADH  = HEADTEX && HEADTEX->ok() ? sc<float>(HEADTEX->m_size.y) : 0.F;
+            const float MOREH  = MORETEX && MORETEX->ok() ? sc<float>(MORETEX->m_size.y) : 0.F;
+            const float STACKH = HEADH + (MOREH > 0.F ? MOREH + std::round(2.F * SCALE) : 0.F);
+            float       headY  = card.y + std::round((card.height - STACKH) / 2.F);
+
             if (HEADTEX && HEADTEX->ok()) {
-                CBox headText{card.x + headIndent, card.y + std::round((card.height - sc<float>(HEADTEX->m_size.y)) / 2.F), sc<float>(HEADTEX->m_size.x), sc<float>(HEADTEX->m_size.y)};
+                CBox headText{card.x + headIndent, headY, sc<float>(HEADTEX->m_size.x), HEADH};
                 ADDTEX(HEADTEX, headText.round());
+                headY += HEADH + std::round(2.F * SCALE);
+            }
+            if (MORETEX && MORETEX->ok()) {
+                CBox moreText{card.x + headIndent, headY, sc<float>(MORETEX->m_size.x), MOREH};
+                ADDTEX(MORETEX, moreText.round());
             }
 
             // The rows take the rest of the width, and are centred in the card
@@ -6391,8 +6434,11 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     textIndent += ICOND + std::round(10.F * SCALE);
                 }
 
-                const auto ROWTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(14.F * SCALE))), false, "",
-                                                               std::max(1, sc<int>(row.width - textIndent) - ROWPAD), 500);
+                // The name, then the description BESIDE it in a dimmer weight
+                // -- GNOME's two columns. Glued into one string they could only
+                // ever be one colour, which is what made the rows read flat.
+                const int  ROWPX  = std::max(1, sc<int>(std::round(14.F * SCALE)));
+                const auto ROWTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, 1.F}, ROWPX, false, "", std::max(1, sc<int>(row.width - textIndent) - ROWPAD), 500);
                 if (ROWTEX && ROWTEX->ok()) {
                     CBox rowText{
                         row.x + textIndent,
@@ -6401,6 +6447,18 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         sc<float>(ROWTEX->m_size.y),
                     };
                     ADDTEX(ROWTEX, rowText.round());
+
+                    if (!RESULTS[I].description.empty()) {
+                        const float DESCX = rowText.x + rowText.width + std::round(10.F * SCALE);
+                        const int   DESCW = sc<int>((row.x + row.width - sc<float>(ROWPAD)) - DESCX);
+                        if (DESCW > sc<int>(std::round(24.F * SCALE))) {
+                            if (const auto DESCTEX = OverviewRender::text(RESULTS[I].description, CHyprColor{1.F, 1.F, 1.F, 0.62F}, ROWPX, false, "", DESCW);
+                                DESCTEX && DESCTEX->ok()) {
+                                CBox descText{DESCX, row.y + std::round((row.height - sc<float>(DESCTEX->m_size.y)) / 2.F), sc<float>(DESCTEX->m_size.x), sc<float>(DESCTEX->m_size.y)};
+                                ADDTEX(DESCTEX, descText.round());
+                            }
+                        }
+                    }
                 }
             }
         }
