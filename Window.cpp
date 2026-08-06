@@ -975,12 +975,19 @@ void renderOverviewWindow(const SRenderParams& params) {
     if (!fullscreen)
         renderOverviewWindowShadow(params.monitor, params.window, params.windowBox, metrics, params.selected);
 
-    const auto underDecos =
-        renderOverviewCustomDecorations(params.monitor, params.window, params.workspaceBox ? *params.workspaceBox : CBox{}, params.windowBox, metrics, DECORATION_LAYER_UNDER);
-    if (underDecos.queuedAny) {
-        OverviewRender::flushPass(params.monitor);
-        for (auto it = underDecos.restoreFns.rbegin(); it != underDecos.restoreFns.rend(); ++it)
-            (*it)();
+    // The UNDER decorations are inseparable from the flush: they queue, the pass
+    // is rendered, and only then may their state be restored. A caller that does
+    // not own the pass cannot do the middle step, so it does not do the first
+    // either -- queuing them and restoring without rendering would draw them
+    // with the wrong state.
+    if (params.ownsRenderPass) {
+        const auto underDecos =
+            renderOverviewCustomDecorations(params.monitor, params.window, params.workspaceBox ? *params.workspaceBox : CBox{}, params.windowBox, metrics, DECORATION_LAYER_UNDER);
+        if (underDecos.queuedAny) {
+            OverviewRender::flushPass(params.monitor);
+            for (auto it = underDecos.restoreFns.rbegin(); it != underDecos.restoreFns.rend(); ++it)
+                (*it)();
+        }
     }
 
     const Vector2D previousWindowPos       = params.window->m_realPosition->value();
@@ -1068,7 +1075,8 @@ void renderOverviewWindow(const SRenderParams& params) {
     if (!fullscreen)
         renderOverviewWindowBorder(params.monitor, params.window, params.windowBox, metrics, params.selected);
 
-    OverviewRender::flushPass(params.monitor);
+    if (params.ownsRenderPass)
+        OverviewRender::flushPass(params.monitor);
 }
 
 } // namespace OverviewWindow

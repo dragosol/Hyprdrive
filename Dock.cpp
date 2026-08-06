@@ -2678,7 +2678,8 @@ namespace {
 // a full-size window shrinking across the screen: on the dock path its frost is
 // neither scaled nor live, so it carries stale blur for the whole animation.
 // The flight therefore goes through the OVERVIEW path, exactly as a tile does.
-void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now, float alpha = 1.F, bool asOverviewTile = false) {
+void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now, float alpha = 1.F, bool asOverviewTile = false,
+                       bool ownsRenderPass = true) {
     const bool STASHED = Minimize::isMinimized(window);
     const bool OFF_ACTIVE =
         !window->m_workspace || !monitor || window->m_workspace != monitor->m_activeWorkspace;
@@ -2715,6 +2716,7 @@ void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& 
         // X91: do not rewrite real window geometry (ghost mini outline).
         .dockLivePreview         = !asOverviewTile,
         .alpha                   = alpha,
+        .ownsRenderPass          = ownsRenderPass,
     });
 
     if (ws) {
@@ -3190,15 +3192,16 @@ void render(PHLMONITOR monitor) {
     // is legal it draws the way the overview draws a tile -- live blur, frost
     // scaled to the render scale, real decorations.
     //
-    // ONLY INSIDE THE OVERVIEW, and this is measured rather than cautious: the
-    // overview path calls OverviewRender::flushPass and the rest of the
-    // overview's own pass machinery, which on a plain desktop wedges the render
-    // pass. A restore then never gets another frame, its flight never reaches
-    // T>=1, and the window stays stashed FOREVER -- reproduced on 2026-08-06,
-    // where `minimize restore` left the window on special:minimized while the
-    // same build restored it correctly with the overview open.
-    const bool OVERVIEWQUALITY = scrollOverviewForMonitor(monitor) != nullptr;
-    const auto drawFlightAt    = [&](const PHLWINDOW& window, const CBox& box, float alpha) { renderLivePreview(monitor, window, box, NOW, alpha, OVERVIEWQUALITY); };
+    // It takes that path EVERYWHERE, desktop included -- which is the point of
+    // the user's instruction. What differs off the overview is only PASS
+    // OWNERSHIP: inside the overview the plugin owns the render pass and the
+    // path may flush it mid-draw, while at RENDER_POST_WINDOWS a flush renders
+    // and CLEARS everything Hyprland queued for the rest of the frame. Measured:
+    // flushing there wedged the frame loop and stranded a restoring window on
+    // the stash permanently. Blur scaling and forced live blur do not depend on
+    // the flush, so the frost is correct in both.
+    const bool OWNSPASS     = scrollOverviewForMonitor(monitor) != nullptr;
+    const auto drawFlightAt = [&](const PHLWINDOW& window, const CBox& box, float alpha) { renderLivePreview(monitor, window, box, NOW, alpha, true, OWNSPASS); };
 
     // X47. Over the pill, under the flight -- a window on its way into an icon
     // must not disappear behind the panel it flies past. Suppressed while the

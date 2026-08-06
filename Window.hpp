@@ -36,6 +36,14 @@ struct SRenderParams {
     // window if the flight is ever interrupted. fadeAlpha is the same lever
     // Hyprland's own window fades use.
     float                 alpha                  = 1.F;
+    // Y5. Does the CALLER own the render pass? Inside the overview the plugin
+    // does, so this path may flush it mid-draw. The dock at RENDER_POST_WINDOWS
+    // does NOT: flushing there renders and CLEARS everything Hyprland has queued
+    // for the rest of the frame, which wedges the frame loop -- measured, it
+    // stranded a restoring window on the stash permanently. False skips the
+    // flushes and the decorations that depend on them; everything that makes the
+    // frost correct (blur scaled to renderScale, live blur forced) still runs.
+    bool                  ownsRenderPass         = true;
 };
 
 void renderOverviewWindow(const SRenderParams& params);
