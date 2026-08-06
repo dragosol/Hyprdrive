@@ -596,17 +596,25 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
     // reported as the arrows not working -- measured 2026-08-06, moveSelection
     // was picking the right tile the whole time.
     //
-    // OPAQUE and thick, for the reason the search rows are opaque (X2): this
-    // theme accent is a dark warm brown sitting within a few units of the
-    // blurred wallpaper, so a tinted border is present but invisible. Alpha
-    // cannot carry this signal; a flat ring can.
+    // OPAQUE, for the reason the search rows are opaque (X2). It used to be
+    // THICK as well -- 4x the window's own border -- because the only colour
+    // available was a dark warm brown within a few units of the blurred
+    // wallpaper, so weight was the only channel left to carry the signal.
+    //
+    // X72 (user, 2026-08-06): "make the window highlight a lot thinner, maybe as
+    // thin as the active window edges in hyprland - too overpowering and thick".
+    // X68/X69 gave the ring a bright themed colour, so the COLOUR carries it now
+    // and the weight does not have to. It takes the window's own border size,
+    // which is what makes it match a real Hyprland border in the overview.
+    // The floor of 1 stays: with general:border_size 0 there is no border to
+    // match, and a selection has to be visible anyway.
     if (selected) {
         // X56: the bright highlight key, not the border accent -- see
         // Config::highlightColor for why those are not the same colour here.
         const auto ACCENT = ScrollOverview::Config::highlightColor();
         data.grad1.reset(ACCENT.modifyA(1.F));
         data.a            = 1.F;
-        data.borderSize   = std::max(4.F, metrics.borderSize * 4.F);
+        data.borderSize   = std::max(1.F, metrics.borderSize);
         data.hasGrad2     = false;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
         return;
