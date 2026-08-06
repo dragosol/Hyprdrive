@@ -57,6 +57,12 @@ struct SLayout {
     CBox showApps;
 };
 
+// Y7. Whether an overview WINDOW DRAG is in flight. Told to the dock rather
+// than asked of the overview, and the DISTANCE is then computed here -- the
+// dock is the only place that knows where the pill actually is this frame,
+// which is also true while it is still sliding out.
+void setWindowDragActive(bool active);
+
 // Pure geometry, so a test rig can assert proportions without a frame.
 SLayout layout(PHLMONITOR monitor);
 void    render(PHLMONITOR monitor);
@@ -76,7 +82,10 @@ bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
 // X33. `middle` runs `middle-click-action` / `shift-middle-click-action`
 // instead, which reach ICONS only -- the reference hangs middle-click off the
 // AppIcon, so previews and Show Applications are not targets for it.
-bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle = false);
+// Y4. `ctrl` is what CYCLES now -- a plain click minimizes the whole app
+// whatever its window count, which is what X45's count-based branch made
+// impossible for a multi-window app.
+bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle = false, bool ctrl = false);
 
 // X33. A wheel tick over the pill, `up` for one notch away from the user.
 // `scroll_action` decides: `cycle-windows` steps through the windows of the icon
@@ -176,7 +185,10 @@ void feedPointerMotion(const Vector2D& delta);
 // flight. Everything that minimizes must come through these, not through
 // Minimize:: directly -- the dispatcher did exactly that and so a keybind
 // minimize never animated at all.
-void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window);
+// Y8. `bounceOnLand` hops the icon when the window arrives in it, which a DROP
+// on the pill asks for and a click does not -- the click was its own
+// acknowledgement.
+void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand = false);
 void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window);
 
 }

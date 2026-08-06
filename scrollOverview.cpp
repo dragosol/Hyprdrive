@@ -2385,7 +2385,9 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
 
                 if (!ScrollOverview::Dock::dragEnd(pMonitor.lock(), lastMousePosLocal)) {
                     const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-                    ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT));
+                    // Y4. CTRL cycles; a plain click minimizes the whole app.
+                    ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), false,
+                                                KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL));
                 }
                 return;
             }
@@ -4583,7 +4585,12 @@ void CScrollOverview::endWindowDrag() {
     // over. Everything else about a missed drop is unchanged, because
     // workspaceAtOverviewDropPoint already answers nullptr over the pill.
     if (WINDOW && ScrollOverview::Dock::pillContains(DROPMONITOR, DROPPOINTLOCAL)) {
-        ScrollOverview::Minimize::minimize(WINDOW);
+        // Y5/Y8. Was a bare Minimize::minimize, which is exactly what X54's
+        // "everything that minimizes must come through these" forbids -- so a
+        // window dropped on the dock TELEPORTED while a clicked one flew. Now it
+        // flies like every other minimize, and `true` asks the icon it lands in
+        // to bounce once.
+        ScrollOverview::Dock::minimizeWithFlight(DROPMONITOR, WINDOW, true);
         clearDragPending();
         damage();
         if (dropOverview && dropOverview != this)
@@ -7840,6 +7847,9 @@ void CScrollOverview::render() {
     // above the cards, the strip and the search field, which is where a dock the
     // user is dropping onto belongs. main.cpp skips the desktop hook while an
     // overview owns the monitor, so the pill is still drawn exactly once.
+    // Y7. The pill glows as a dragged window nears it; the dock computes the
+    // distance itself, this only says whether a drag is happening at all.
+    ScrollOverview::Dock::setWindowDragActive(dragActiveWindow.operator bool());
     ScrollOverview::Dock::render(MONITOR);
 
     // X52. One line per frame after a keystroke: the frame that PAINTS the new

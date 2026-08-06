@@ -14,4 +14,10 @@ bool                   minimize(PHLWINDOW window);
 bool                   restore(PHLWINDOW window);
 std::vector<PHLWINDOW> minimized();
 
+// Y9/Y10. The desktop a stashed window came FROM. A minimized window's own
+// m_workspace is the stash, so nothing else can answer this -- the overview
+// needs it to place the window's tile, and the flight needs it to know which
+// way an off-screen desktop lies. WORKSPACE_INVALID when not minimized.
+WORKSPACEID            originalWorkspace(PHLWINDOW window);
+
 }

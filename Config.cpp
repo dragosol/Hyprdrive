@@ -364,7 +364,8 @@ static void registerConfigValues() {
     // X24. 220ms because the standing Apple-motion rule puts entrances at ~300ms
     // and makes exits 20-30% faster; a minimize is an exit.
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
-                                  makeShared<CIntValue>("plugin:scrolloverview:dock:minimize_ms", "hyprgnomedock: shrink-into-the-dock duration, 0 to teleport", 180,
+                                  makeShared<CIntValue>("plugin:scrolloverview:dock:minimize_ms",
+                                                        "hyprgnomedock: minimize/restore flight duration, 0 to teleport (Y5: GNOME's MINIMIZE_WINDOW_ANIMATION_TIME)", 400,
                                                         SIntValueOptions{.min = 0, .max = 2000}));
     // X30. The reference's autohide numbers, verbatim. `intellihide` is false
     // there and inert while off, so it is not a key here.

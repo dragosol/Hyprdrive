@@ -82,6 +82,14 @@ bool isMinimized(PHLWINDOW window) {
     return window && entryFor(window) != g_entries.end();
 }
 
+WORKSPACEID originalWorkspace(PHLWINDOW window) {
+    if (!window)
+        return WORKSPACE_INVALID;
+
+    const auto IT = entryFor(window);
+    return IT == g_entries.end() ? WORKSPACE_INVALID : IT->workspace;
+}
+
 std::vector<PHLWINDOW> minimized() {
     dropDeadEntries();
 

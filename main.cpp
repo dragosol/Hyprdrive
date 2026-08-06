@@ -1003,6 +1003,46 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // reached the window underneath would focus it, and a release that leaked
     // after a swallowed press would leave the pointer stuck.
     static auto DOCKCLICK = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
+        // Y3. THE X28 MENU, ON THE PLAIN DESKTOP. It was wired only into
+        // scrollOverview.cpp's button hook, which exists solely while the
+        // overview is up -- so right-clicking the desktop dock did nothing at
+        // all. These are the same four moves that hook makes, in the same order
+        // and for the same reasons: only PRESSES act (the release that follows
+        // the opening press lands outside the plate and would dismiss it in the
+        // same gesture), and while the menu is up it takes every press so one
+        // that misses is a dismissal rather than a click on whatever is under it.
+        {
+            const bool PRESSED  = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
+            const auto MENUPT   = g_pInputManager->getMouseCoordsInternal();
+
+            for (const auto& MONITOR : State::monitorState()->monitors()) {
+                if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(MENUPT))
+                    continue;
+
+                const auto LOCAL = (MENUPT - MONITOR->m_position) * MONITOR->m_scale;
+
+                if (event.button == BTN_RIGHT && ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
+                    info.cancelled = true;
+                    if (PRESSED)
+                        ScrollOverview::Dock::openMenu(MONITOR, LOCAL);
+                    return;
+                }
+
+                if (ScrollOverview::Dock::menuOpen()) {
+                    info.cancelled = true;
+                    if (PRESSED) {
+                        if (!ScrollOverview::Dock::menuContains(MONITOR, LOCAL))
+                            ScrollOverview::Dock::closeMenu();
+                        else
+                            ScrollOverview::Dock::menuClick(MONITOR, LOCAL);
+                    }
+                    return;
+                }
+
+                break;
+            }
+        }
+
         // X33 adds the middle button. It carries no drag -- the reorder is the
         // left button's gesture -- so it takes the short path below and only the
         // PRESS acts, with the release swallowed to keep the pair balanced.
@@ -1066,7 +1106,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
             const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
             const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
-            ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT);
+            // Y4. CTRL is what cycles now.
+            const bool CTRL  = KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL);
+            ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, false, CTRL);
             return;
         }
     });
@@ -1106,6 +1148,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (scrollOverviewForMonitor(MONITOR))
             return;
 
+        // Y7. No overview means no window drag, and this is also what clears
+        // the flag if the overview closed while one was in flight.
+        ScrollOverview::Dock::setWindowDragActive(false);
         ScrollOverview::Dock::render(MONITOR);
     });
 
