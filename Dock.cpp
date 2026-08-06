@@ -1128,13 +1128,12 @@ CBox hoverBox(const CBox& iconBox, float scale) {
 // of the hover highlight. Anchoring to the pill put it ITEM_PAD_BOTTOM -
 // HOVER_PAD = 8px too low, and that gap is what read as "not 1:1".
 
-// X86. Desktop dock: one live frost of what is behind the pill (fine -- single
-// surface). Overview: sample the behind-chrome theme blur already built for the
-// strip so the dock does not re-blur the world and reintroduce compounding.
-static bool dockSamplesOverviewChromeBlur(PHLMONITOR monitor) {
-    return monitor && scrollOverviewForMonitor(monitor) != nullptr;
-}
-
+// X87. Dock frost is always LIVE (xray=false), desktop and overview.
+// One surface, so it does not reintroduce the multi-card compound bug that
+// forced shared sampling for strip/search. decoration:blur:* still applies
+// when the dock keys are -1 (X71). Sampling m_blurFB here was wrong for the
+// desktop path (no behind-chrome pre-blur exists) and broke once the shared
+// draw path was rewritten.
 static void queueDockFrost(PHLMONITOR monitor, const CBox& box, int rounding, float alpha) {
     if (box.empty() || alpha <= 0.F)
         return;
@@ -1144,7 +1143,7 @@ static void queueDockFrost(PHLMONITOR monitor, const CBox& box, int rounding, fl
     blur.rounding       = rounding;
     blur.roundingPower  = 2.F;
     blur.alpha          = alpha;
-    blur.xray           = dockSamplesOverviewChromeBlur(monitor);
+    blur.xray           = false; // live dual-kawase of whatever is behind the pill
     // -1 on these keys means leave decoration:blur:* alone (X71).
     blur.blurSize       = Config::getValue<int>(KEY_BLUR_SIZE);
     blur.blurPasses     = Config::getValue<int>(KEY_BLUR_PASSES);

@@ -178,10 +178,6 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
     if (box.empty())
         return;
 
-    // X86: chrome frost is decoration:blur:* only. Disabled theme blur => no frost.
-    if (!ScrollOverview::Config::getValue<bool>("decoration:blur:enabled"))
-        return;
-
     // X14: NOT a CRectPassElement. Upstream leaves a blurred rect's corners square
     // (see COverviewBlurPassElement::draw), so every frosted surface here -- strip
     // panel, workspace card, search pill -- leaked blur into its corner arcs.

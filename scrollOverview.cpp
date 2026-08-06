@@ -6353,7 +6353,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     g_overviewSearchRowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
 
     // X11 / X86: frosted pill -- sample the behind-chrome theme blur.
-    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, true);
+    OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, false); // X87: live overview frost under the bar
 
     // X4: hue inherited from the theme, alpha kept at the tuned value. The
     // resting surface reads col.inactive_border and the badge the accent -- the
@@ -7806,7 +7806,11 @@ void CScrollOverview::render() {
     // strip follows. Cards no longer contribute their own live blurs (see
     // renderWorkspaceBackground).
     OverviewRender::flushPass(MONITOR);
-    if (ScrollOverview::Config::getBlur() && ScrollOverview::Config::getValue<bool>("decoration:blur:enabled")) {
+    if (ScrollOverview::Config::getBlur()) {
+        // Always rebuild the behind-chrome buffer from the live FB. Strength is
+        // whatever decoration:blur:* says at draw time inside preBlurForCurrentMonitor
+        // (inherits dynamically). Do not gate on a separate enabled lookup here:
+        // a false negative left chrome sampling an empty m_blurFB (black glass).
         MONITOR->m_blurFBDirty        = true;
         MONITOR->m_blurFBShouldRender = true;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
@@ -7816,9 +7820,12 @@ void CScrollOverview::render() {
         Prof::Timer PROFSTRIP{Prof::stripNs, Prof::stripCalls};
         renderStrip(MONITOR, SCALE, NOW);
     }
-    renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
-    renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
+    // X87: search (and its frost) under the drag proxy. Previously renderSearch
+    // ran after renderDraggedWindow, so the pill painted over the window you
+    // were dragging -- empty or with results.
     renderSearch(MONITOR, SCALE);
+    renderPinnedFloatingWindows(MONITOR, SCALE, NOW);
+    renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
 
     const size_t FIRSTLAYERELEMENT = g_pHyprRenderer->m_renderPass.m_passElements.size();
 

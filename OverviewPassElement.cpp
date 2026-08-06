@@ -96,27 +96,12 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
     if (data.box.width < 1 || data.box.height < 1 || data.alpha <= 0.F)
         return {};
 
-    // X14: upstream's blurred rect keeps SQUARE corners. renderRectWithBlurInternal
-    // draws the blur FB as a texture sized to the whole MONITOR and gives that draw
-    // the rect's radius, so the rounding is applied to the monitor's corners and the
-    // only thing bounding the blur is the damage box. Intersect the damage with the
-    // rounded shape and the blur ends where the tint above it ends.
-    // ponytail: a region is pixel-quantised, so the arc is not antialiased like the
-    // tint drawn over it. Under a translucent tint that is invisible; a shader-side
-    // fix would mean carrying our own blur shader.
-    CRegion clipped = g_pHyprRenderer->m_renderData.damage.copy().intersect(roundedRectRegion(data.box, data.rounding, data.roundingPower));
-    if (clipped.empty())
+    const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor;
+    if (!MONITOR)
         return {};
 
-    const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
-    g_pHyprRenderer->m_renderData.damage = clipped;
-    auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
-
-    // X29. Same idiom the shadow element below uses for shadow:render_power: the
-    // blur shader reads the GLOBAL config, so a surface with its own frost swaps
-    // the values in for the length of one draw. Saved and restored unconditionally
-    // -- writing back a value that was never changed is cheaper than tracking
-    // which of the four were.
+    // X29. Blur shader reads global decoration:blur:*; per-surface overrides ride
+    // on the element and restore after (dock keys, -1 = leave global alone).
     const auto PREVSIZE       = ScrollOverview::Config::getValue<int>("decoration:blur:size");
     const auto PREVPASSES     = ScrollOverview::Config::getValue<int>("decoration:blur:passes");
     const auto PREVBRIGHTNESS = ScrollOverview::Config::getValue<float>("decoration:blur:brightness");
@@ -145,6 +130,54 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
         ScrollOverview::Config::setValue("decoration:blur:contrast", data.blurContrast);
     if (data.blurVibrancy >= 0.F)
         ScrollOverview::Config::setValue("decoration:blur:vibrancy", data.blurVibrancy);
+
+    // X87b. Prefer drawing the blurred buffer INTO our box with UV + shader
+    // rounding (AA). Upstream renderRectWithBlur draws a MONITOR-sized quad and
+    // only the damage region bounds it -- that is the pixelated-arc path (X14).
+    // Fall back to X14 if the buffer is missing so we never paint black glass.
+    SP<Render::ITexture> blurred;
+    CRegion              boxDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.box.copy().round());
+
+    if (!boxDamage.empty()) {
+        if (data.xray) {
+            if (const auto RES = MONITOR->resources(); RES && RES->m_blurFB && RES->m_blurFB->isAllocated())
+                blurred = RES->m_blurFB->getTexture();
+        } else {
+            blurred = g_pHyprRenderer->blurMainFramebuffer(data.alpha, &boxDamage);
+        }
+    }
+
+    if (blurred && blurred->ok() && !boxDamage.empty()) {
+        const Vector2D MONSIZE = MONITOR->m_transformedSize;
+        if (MONSIZE.x >= 1.0 && MONSIZE.y >= 1.0) {
+            const CBox BOX = data.box;
+            g_pHyprRenderer->pushMonitorTransformEnabled(true);
+            auto restoreXform = Hyprutils::Utils::CScopeGuard([] { g_pHyprRenderer->popMonitorTransformEnabled(); });
+
+            Render::GL::g_pHyprOpenGL->renderTexture(
+                blurred, BOX,
+                Render::GL::CHyprOpenGLImpl::STextureRenderData{
+                    .damage                      = &boxDamage,
+                    .a                           = data.alpha,
+                    .round                       = data.rounding,
+                    .roundingPower               = data.roundingPower,
+                    .allowCustomUV               = true,
+                    .allowDim                    = false,
+                    .primarySurfaceUVTopLeft     = BOX.pos() / MONSIZE,
+                    .primarySurfaceUVBottomRight = (BOX.pos() + BOX.size()) / MONSIZE,
+                });
+            return {};
+        }
+    }
+
+    // X14 fallback: pixel-quantised rounded damage + renderRectWithBlur.
+    CRegion clipped = g_pHyprRenderer->m_renderData.damage.copy().intersect(roundedRectRegion(data.box, data.rounding, data.roundingPower));
+    if (clipped.empty())
+        return {};
+
+    const auto SAVEDDAMAGE               = g_pHyprRenderer->m_renderData.damage;
+    g_pHyprRenderer->m_renderData.damage = clipped;
+    auto restoreDamage                   = Hyprutils::Utils::CScopeGuard([SAVEDDAMAGE] { g_pHyprRenderer->m_renderData.damage = SAVEDDAMAGE; });
 
     Render::GL::g_pHyprOpenGL->renderRect(data.box, CHyprColor{0.F, 0.F, 0.F, 0.F},
                                           Render::GL::CHyprOpenGLImpl::SRectRenderData{
