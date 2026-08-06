@@ -6042,7 +6042,10 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // does not leave a full-strength frost ghost. Kawase radius is
                 // never multiplied by FADE (OverviewPassElement always blurs at 1).
                 // X99: one dual-kawase pass weaker than decoration:blur:passes / windows.
-                const int CHROME_PASSES = std::max(1, ScrollOverview::Config::getValue<int>("decoration:blur:passes") - 1);
+                // Y12: full passes, not passes-1. The live fallback has to match the
+                // private chrome FB or the strip changes strength whenever the
+                // capture is missing.
+                const int CHROME_PASSES = ScrollOverview::Config::getValue<int>("decoration:blur:passes");
                 OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, true, CHROME_PASSES);
 
                 CRectPassElement::SRectData panel;
@@ -6480,7 +6483,10 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 
             // §10 clause 3 / X92: result frost samples the private overview chrome blur.
             // X99: result cards share the weaker chrome frost (passes-1).
-            const int CHROME_PASSES = std::max(1, ScrollOverview::Config::getValue<int>("decoration:blur:passes") - 1);
+            // Y12: full passes, not passes-1. The live fallback has to match the
+                // private chrome FB or the strip changes strength whenever the
+                // capture is missing.
+                const int CHROME_PASSES = ScrollOverview::Config::getValue<int>("decoration:blur:passes");
             OverviewRender::queueBlur(card, PANELROUND, 2.F, FADE * CARDA, true, CHROME_PASSES);
 
             CRectPassElement::SRectData cardBg;

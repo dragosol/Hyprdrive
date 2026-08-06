@@ -61,8 +61,14 @@ void captureFrameChromeBlur(PHLMONITOR monitor) {
     // X99. Strip + search-result chrome is ONE pass weaker than window frost.
     // This private FB is only sampled by those surfaces (pill/dock are live at
     // full decoration:blur:passes). Kawase a=1 still; only pass count drops.
+    // Y12 (user, 2026-08-06): "remove the -1 passes". X99 dual-kawased this
+    // capture at `max(1, passes - 1)` so the strip and the result cards would
+    // read one step softer than the windows. The user wants chrome frost to be
+    // the SAME blur the windows get, so the capture now runs at the configured
+    // pass count and the scope guard below is left in place only because the
+    // shader still reads the value globally.
     const int PREV_PASSES   = ScrollOverview::Config::getValue<int>("decoration:blur:passes");
-    const int CHROME_PASSES = std::max(1, PREV_PASSES - 1);
+    const int CHROME_PASSES = PREV_PASSES;
     ScrollOverview::Config::setValue("decoration:blur:passes", CHROME_PASSES);
     auto restorePasses = Hyprutils::Utils::CScopeGuard([PREV_PASSES] {
         ScrollOverview::Config::setValue("decoration:blur:passes", PREV_PASSES);
