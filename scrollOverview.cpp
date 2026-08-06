@@ -7795,12 +7795,12 @@ void CScrollOverview::render() {
 
     OverviewRender::flushPass(MONITOR);
 
-    // X92. Blur the overview main FB (cards + tiles) into a PRIVATE framebuffer.
-    // Storing blurMainFramebuffer()'s return value alone was wrong: that texture
-    // is reused by the next live blur (window tiles, search pill, dock), so the
-    // strip sampled stomped/wrong content whenever windows had run. Copy into
-    // chromeBlurFB once here; strip/results sample that stable texture.
-    if (ScrollOverview::Config::getBlur())
+    // X92 / X97. Blur the overview main FB (cards + tiles) into a PRIVATE FB.
+    // Gate on decoration:blur:enabled — the same switch window frost uses — NOT
+    // plugin:scrolloverview:blur (that only means wallpaper backdrop blur and
+    // defaults false). X96 made strip sample this FB; gating on the wallpaper
+    // option wiped strip + search-result frost entirely.
+    if (ScrollOverview::Config::getValue<bool>("decoration:blur:enabled"))
         OverviewRender::captureFrameChromeBlur(MONITOR);
     else
         OverviewRender::clearFrameChromeBlur();

@@ -144,10 +144,13 @@ std::vector<UP<IPassElement>> COverviewBlurPassElement::draw() {
     if (MONSIZE.x < 1.0 || MONSIZE.y < 1.0)
         return {};
 
+    // Prefer the private full-mon chrome FB (one dual-kawase for many samplers).
+    // Always fall back to live blurMainFramebuffer(a=1, full mon) so a missing
+    // capture (or wallpaper-blur-only config) never paints tint-without-frost.
     SP<Render::ITexture> blurred;
-    if (data.xray) {
+    if (data.xray)
         blurred = OverviewRender::frameChromeBlur();
-    } else {
+    if (!blurred || !blurred->ok()) {
         CRegion fullDamage{CBox{0, 0, MONSIZE.x, MONSIZE.y}};
         blurred = g_pHyprRenderer->blurMainFramebuffer(1.F, &fullDamage);
     }
