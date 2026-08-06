@@ -256,9 +256,14 @@ static std::vector<SSearchRow> overviewSearchRows() {
     for (const auto& R : SearchProviders::results()) {
         if (perProvider[R.providerDesktopId]++ >= OVERVIEW_PROVIDER_ROW_LIMIT)
             continue;
-        // The provider for an app we already list is the same row twice.
-        if (std::ranges::any_of(rows, [&](const SSearchRow& X) { return X.app && X.app->id == R.providerDesktopId; }))
-            continue;
+        // X66. There used to be a skip here for "the provider for an app we
+        // already list is the same row twice". It threw away EVERY result from
+        // a provider whose own app happened to match the query -- so searching
+        // "e" put Characters and Files in the apps grid and silently deleted
+        // both of their categories, which is the "only icons, no other results"
+        // the user reported. GNOME does not do this: its apps grid and its
+        // provider sections are independent, and its Calculator section lists
+        // "Open in Calculator" whether or not Calculator is also an app match.
         rows.push_back({R.description.empty() ? R.name : R.name + "   " + R.description, R.icon, nullptr, R});
     }
     return rows;

@@ -23,7 +23,21 @@
 namespace SearchProviders {
     namespace {
         constexpr const char* IFACE          = "org.gnome.Shell.SearchProvider2";
-        constexpr uint64_t    CALL_TIMEOUT_US = 400'000;
+        // X66. 400ms was far too short and it is why categories came and went.
+        // A provider that is not already running has to be D-BUS ACTIVATED
+        // first -- that spawns a whole GTK application -- and none of
+        // Characters, Clocks, Contacts or Settings can do that and answer
+        // inside 400ms. They timed out, were dropped as stale, and the user saw
+        // the apps grid and nothing else; the only categories that ever showed
+        // were the ones something else had happened to warm up, which is why
+        // the set changed between two runs of the same query.
+        //
+        // This does NOT weaken X20's "a slow provider may never stall a frame":
+        // every call here is sd_bus_call_async, so a longer deadline costs the
+        // frame nothing. It only decides how long a late answer is still
+        // wanted. Warming the providers at overview open, so this deadline is
+        // never the thing being waited on, is X51.
+        constexpr uint64_t    CALL_TIMEOUT_US = 8'000'000;
         // GNOME shows a handful per provider; asking for metas on 200 character
         // glyphs would cost more than the panel can ever show.
         constexpr size_t MAX_PER_PROVIDER = 6;
