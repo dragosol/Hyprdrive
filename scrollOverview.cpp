@@ -547,7 +547,21 @@ static std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace)
         if (getOverviewWindowToShow(window) != window || !shouldShowOverviewWindow(window))
             continue;
 
-        if (window->m_workspace != workspace)
+        // Y9 (user): "when an app window is minimized it should still be
+        // visible there, so I can see it and filter to it". A minimized window
+        // is parked on the `special:minimized` stash, so its own m_workspace can
+        // never equal a real one and the plain test below dropped it from every
+        // grid. It belongs to the desktop it was minimized FROM, which is
+        // exactly what Minimize records -- and the only source for it, since the
+        // stash has overwritten the window's own answer.
+        //
+        // This also subsumes X58(a), which asked only that the SEARCH reach
+        // minimized windows: they are in the grid now whether a query is typed
+        // or not, and the query filters them like anything else.
+        if (const auto HOME = ScrollOverview::Minimize::originalWorkspace(window); HOME != WORKSPACE_INVALID) {
+            if (HOME != workspace->m_id)
+                continue;
+        } else if (window->m_workspace != workspace)
             continue;
 
         windows.emplace_back(window);
