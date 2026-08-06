@@ -29,11 +29,15 @@ static constexpr int OVERVIEW_APP_ICON_PX = 64;
 // failed to resolve must not be re-searched on every single frame.
 static std::unordered_map<std::string, SP<Render::ITexture>> g_overviewAppIcons;
 
-SP<Render::ITexture> appIcon(const std::string& iconName) {
+SP<Render::ITexture> appIcon(const std::string& iconName, bool tintWhite) {
     if (iconName.empty())
         return nullptr;
 
-    if (const auto IT = g_overviewAppIcons.find(iconName); IT != g_overviewAppIcons.end())
+    // The tinted and untinted textures are different pixels, so they are
+    // different cache entries. \x01 cannot appear in an icon name.
+    const std::string KEY = tintWhite ? iconName + "\x01white" : iconName;
+
+    if (const auto IT = g_overviewAppIcons.find(KEY); IT != g_overviewAppIcons.end())
         return IT->second;
 
     SP<Render::ITexture> texture;
@@ -66,6 +70,24 @@ SP<Render::ITexture> appIcon(const std::string& iconName) {
                 // what ARGB8888 means to DRM. RGB24 surfaces carry no alpha.
                 const uint32_t FORMAT = cairo_image_surface_get_format(CAIRO) == CAIRO_FORMAT_RGB24 ? DRM_FORMAT_XRGB8888 : DRM_FORMAT_ARGB8888;
 
+                // White, but only where the artwork already is: the buffer is
+                // PREMULTIPLIED, so white at alpha a is exactly (a, a, a, a).
+                // Writing the alpha into all three channels recolours the glyph
+                // and leaves its antialiased edges intact.
+                //
+                // Skipped for RGB24, which carries no alpha -- there is no shape
+                // to preserve there, and tinting it would just paint a white
+                // rectangle.
+                if (DATA && tintWhite && FORMAT == DRM_FORMAT_ARGB8888) {
+                    for (int y = 0; y < H; ++y) {
+                        auto* const ROW = DATA + (sc<size_t>(y) * sc<size_t>(STRIDE));
+                        for (int x = 0; x < W; ++x) {
+                            auto* const PX = ROW + (sc<size_t>(x) * 4);
+                            PX[0] = PX[1] = PX[2] = PX[3]; // B = G = R = A
+                        }
+                    }
+                }
+
                 if (DATA && W > 0 && H > 0)
                     texture = makeShared<Render::GL::CGLTexture>(FORMAT, DATA, sc<uint32_t>(STRIDE), Vector2D{sc<double>(W), sc<double>(H)});
             }
@@ -74,7 +96,7 @@ SP<Render::ITexture> appIcon(const std::string& iconName) {
 
     Prof::icoUploadNs += std::chrono::duration_cast<std::chrono::nanoseconds>(Prof::clock::now() - UP0).count();
 
-    g_overviewAppIcons[iconName] = texture;
+    g_overviewAppIcons[KEY] = texture;
     return texture;
 }
 

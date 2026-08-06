@@ -2858,7 +2858,11 @@ void render(PHLMONITOR monitor) {
     // X32 Show Applications, drawn last of the icon row so its cell is complete
     // before the plates go over the top.
     if (!LAYOUT.showApps.empty()) {
-        if (const auto TEX = OverviewRender::appIcon(Config::getValue<std::string>(KEY_SHOW_APPS_ICON)); TEX) {
+        // User, 2026-08-06: "make the Show Applications icon white, it's too
+        // dark". view-app-grid-symbolic is near-black artwork sitting on a dark
+        // frosted pill; every other icon in the dock is a full-colour app icon,
+        // so this is the only one that needed it.
+        if (const auto TEX = OverviewRender::appIcon(Config::getValue<std::string>(KEY_SHOW_APPS_ICON), true); TEX) {
             CTexPassElement::SRenderData data;
             data.tex = TEX;
             data.box = LAYOUT.showApps;

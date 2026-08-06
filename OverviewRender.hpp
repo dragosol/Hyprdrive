@@ -14,7 +14,11 @@ void queueBlur(const CBox& box, int rounding, float roundingPower, float alpha, 
 // The texture for a desktop-entry Icon= value, decoded and uploaded once.
 // AppSearch deliberately stops at the file path; the upload is render's job,
 // and both the overview's result rows and the dock need the same cache.
-SP<Render::ITexture> appIcon(const std::string& iconName);
+// `tintWhite` rewrites the artwork to white, keeping its alpha. Symbolic icons
+// are monochrome near-black shapes -- GTK recolours them from the stylesheet at
+// draw time and this render path cannot, so an icon meant to sit on a dark
+// surface arrives invisible. Cached separately from the untinted one.
+SP<Render::ITexture> appIcon(const std::string& iconName, bool tintWhite = false);
 
 // OVERVIEW_CPP_SPEC 13.12 X57. The label plate, drawn ONCE for both surfaces
 // that need one: hyprgnomedock's icon tooltip and the overview tile's caption.
