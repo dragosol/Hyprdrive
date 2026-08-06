@@ -582,6 +582,20 @@ CHyprColor highlightColor() {
     return ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 1.F} : ACCENT.m_colors[0];
 }
 
+CHyprColor highlightForeground() {
+    const auto BG = highlightColor();
+
+    // Rec. 709 relative luminance. Deciding this from the colour rather than
+    // hardcoding either answer is what makes it survive a theme switch in
+    // EITHER direction -- a light accent and a dark one both stay readable.
+    if (const float LUMA = (0.2126F * BG.r) + (0.7152F * BG.g) + (0.0722F * BG.b); LUMA <= 0.55F)
+        return CHyprColor{1.F, 1.F, 1.F, 1.F};
+
+    // Not flat black: the accent's own dark end reads as the same material,
+    // where black on a warm pink reads as a hole punched through it.
+    return CHyprColor{BG.r * 0.18F, BG.g * 0.18F, BG.b * 0.18F, 1.F};
+}
+
 float getScale() {
     return std::clamp(getValue<float>("plugin:scrolloverview:scale"), 0.1F, 0.9F);
 }

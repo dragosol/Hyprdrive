@@ -6499,7 +6499,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         ADDTEX(ICONTEX, iconBox.round());
                     }
 
-                    const auto CELLTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, 1.F}, std::max(1, sc<int>(std::round(13.F * SCALE))), false, "",
+                    const auto CELLTEX = OverviewRender::text(RESULTS[I].name, SELECTED ? ScrollOverview::Config::highlightForeground() : CHyprColor{1.F, 1.F, 1.F, 1.F},
+                                                              std::max(1, sc<int>(std::round(13.F * SCALE))), false, "",
                                                               std::max(1, sc<int>(cell.width - (PADG * 2.F))), 500);
                     if (CELLTEX && CELLTEX->ok()) {
                         CBox cellText{cell.x + std::round((cell.width - sc<float>(CELLTEX->m_size.x)) / 2.F), cell.y + PADG + ICOND + std::round(4.F * SCALE),
@@ -6611,7 +6612,11 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 // -- GNOME's two columns. Glued into one string they could only
                 // ever be one colour, which is what made the rows read flat.
                 const int  ROWPX  = std::max(1, sc<int>(std::round(14.F * SCALE)));
-                const auto ROWTEX = OverviewRender::text(RESULTS[I].name, CHyprColor{1.F, 1.F, 1.F, 1.F}, ROWPX, false, "", std::max(1, sc<int>(row.width - textIndent) - ROWPAD), 500);
+
+                // On the selected row the fill is the accent itself, so the type
+                // reads against THAT and not against the card.
+                const auto FG     = SELECTED ? ScrollOverview::Config::highlightForeground() : CHyprColor{1.F, 1.F, 1.F, 1.F};
+                const auto ROWTEX = OverviewRender::text(RESULTS[I].name, FG, ROWPX, false, "", std::max(1, sc<int>(row.width - textIndent) - ROWPAD), 500);
                 if (ROWTEX && ROWTEX->ok()) {
                     CBox rowText{
                         row.x + textIndent,
@@ -6625,7 +6630,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         const float DESCX = rowText.x + rowText.width + std::round(10.F * SCALE);
                         const int   DESCW = sc<int>((row.x + row.width - sc<float>(ROWPAD)) - DESCX);
                         if (DESCW > sc<int>(std::round(24.F * SCALE))) {
-                            if (const auto DESCTEX = OverviewRender::text(RESULTS[I].description, CHyprColor{1.F, 1.F, 1.F, 0.85F}, ROWPX, false, "", DESCW);
+                            if (const auto DESCTEX = OverviewRender::text(RESULTS[I].description, FG.modifyA(0.78F), ROWPX, false, "", DESCW);
                                 DESCTEX && DESCTEX->ok()) {
                                 CBox descText{DESCX, row.y + std::round((row.height - sc<float>(DESCTEX->m_size.y)) / 2.F), sc<float>(DESCTEX->m_size.x), sc<float>(DESCTEX->m_size.y)};
                                 ADDTEX(DESCTEX, descText.round());

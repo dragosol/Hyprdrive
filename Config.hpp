@@ -102,6 +102,14 @@ int           getGestureDistance();
 // template line behaves exactly as before.
 CHyprColor    highlightColor();
 
+// Type to put ON the highlight. The selection fill is OPAQUE (X2: a selection
+// that can be mistaken for a hover is not a selection), so whatever sits on it
+// is reading against the accent itself, not against the dark card. With a dark
+// accent that means white; with a bright one -- which is the whole point of
+// col_highlight -- white is the low-contrast case the user reported as the
+// highlight "overpowering the fonts".
+CHyprColor    highlightForeground();
+
 float         getScale();
 float         getOpenSpeed();
 float         getCloseSpeed();
