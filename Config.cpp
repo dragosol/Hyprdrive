@@ -419,6 +419,8 @@ static void registerConfigValues() {
     // a pair: false/true is what puts the button at the right-hand end of a
     // bottom dock rather than in among the apps.
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:scrolloverview:dock:flight_log", "flight lifecycle log to /tmp/ovdbg.log, for scripts/z_rig.sh + zflight_gate.py", false));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:dock:show_favorites", "hyprgnomedock: pinned apps in the dock whether running or not (D2D show-favorites)", true));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:scrolloverview:dock:show_apps_button", "hyprgnomedock: the Show Applications button (D2D show-show-apps-button)", true));

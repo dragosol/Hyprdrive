@@ -20,4 +20,9 @@ std::vector<PHLWINDOW> minimized();
 // way an off-screen desktop lies. WORKSPACE_INVALID when not minimized.
 WORKSPACEID            originalWorkspace(PHLWINDOW window);
 
+// Z6. Recreate-if-reaped and SWITCH to the desktop a stashed window came from,
+// so a cross-workspace restore flight lands where the user is looking instead
+// of flying off the edge and snapping desktops at touchdown.
+bool                   showOriginalWorkspace(PHLWINDOW window);
+
 }

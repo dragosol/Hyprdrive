@@ -143,6 +143,23 @@ bool minimize(PHLWINDOW window) {
     return true;
 }
 
+bool showOriginalWorkspace(PHLWINDOW window) {
+    const auto IT = entryFor(window);
+    if (IT == g_entries.end())
+        return false;
+
+    auto WORKSPACE = workspaceByID(IT->workspace);
+    if (!WORKSPACE)
+        WORKSPACE = State::workspaceState()->create(IT->workspace, IT->monitor, IT->workspaceName);
+    if (!WORKSPACE)
+        return false;
+
+    if (const auto MONITOR = WORKSPACE->m_monitor.lock(); MONITOR && MONITOR->m_activeWorkspace != WORKSPACE)
+        MONITOR->changeWorkspace(WORKSPACE, false, true, true);
+
+    return true;
+}
+
 bool restore(PHLWINDOW window) {
     dropDeadEntries();
 
@@ -170,11 +187,15 @@ bool restore(PHLWINDOW window) {
 
     // ponytail: only floating windows own their box. A tiled window's geometry
     // belongs to the layout, and writing it back would fight the retile.
-    if (ENTRY.floating && !ENTRY.box.empty()) {
-        if (const auto TARGET = window->layoutTarget(); TARGET) {
+    if (const auto TARGET = window->layoutTarget(); TARGET) {
+        if (ENTRY.floating && !ENTRY.box.empty())
             TARGET->setPositionGlobal(ENTRY.box);
-            TARGET->warpPositionSize();
-        }
+        // Z4: warp for TILED restores too. The re-entered window otherwise
+        // draws its first frames easing from a transient pre-retile box
+        // (measured: 30k of 427k px) -- but the flight already animated the
+        // return, so the real window must APPEAR at its place, not animate
+        // to it. GNOME's restore does not replay an open animation either.
+        TARGET->warpPositionSize();
     }
 
     if (const auto MONITOR = WORKSPACE->m_monitor.lock(); MONITOR && MONITOR->m_activeWorkspace != WORKSPACE)

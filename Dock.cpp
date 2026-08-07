@@ -346,6 +346,23 @@ struct SFlight {
     // click was the acknowledgement, and macOS only bounces what arrives.
     bool            bounceOnLand = false;
     Time::steady_tp startedAt;
+    // Z5. A click mid-flight REVERSES the motion from wherever the proxy
+    // visually is -- restarting from the icon read as a teleport under a spam
+    // of clicks. `start` overrides the motion's origin (empty = the default
+    // end), `alphaFrom` seeds the fade so the alpha is continuous too, and
+    // `lastDrawn`/`lastAlpha` are what the NEXT reversal starts from.
+    CBox  start;
+    float alphaFrom = -1.F;
+    CBox  lastDrawn;
+    float lastAlpha = -1.F;
+    // Z4. Counts frames since the restore actually ran; the proxy holds its
+    // landing box for LAND_HOLD_FRAMES while the real window works its way
+    // back through moveWindowToWorkspace + retile + damage, because
+    // restore-then-erase in one frame left a frame with neither proxy nor
+    // real window on screen -- and one held frame measurably still dipped to
+    // 7% of the window's area (z4 gate, frame 232). Identical content at the
+    // identical box, so the overlap cannot be seen.
+    int landedFrames = -1;
 };
 
 // Y4/Y5. ONE FLIGHT PER WINDOW, replacing the single optional. Y4 makes
@@ -353,6 +370,20 @@ struct SFlight {
 // which was a documented ponytail shortcut while only shift could reach it --
 // would now teleport two of a three-window app on the user's ordinary gesture.
 std::vector<SFlight> g_flights;
+
+// Z4. Everything the compositor wants to ANIMATE about a just-restored window
+// -- geometry easing from its stash box, the MOVE_TO_WORKSPACE fade -- must be
+// warped to its goal: the flight already was the animation, and each of these
+// measurably painted its own artifact frame (a transient small box; a
+// full-size window at 7% alpha).
+void warpRestoredWindowAnims(const PHLWINDOW& window) {
+    if (!window)
+        return;
+    window->m_realPosition->warp();
+    window->m_realSize->warp();
+    for (uint8_t i = 0; i < Desktop::View::WINDOW_ALPHA_LAST; ++i)
+        window->alpha()[i]->warp();
+}
 
 // A minimize is an exit, so it accelerates. This used to be a cubic mirror --
 // the right SHAPE but not the house curve; houseEase evaluates the registered
@@ -1537,7 +1568,51 @@ CBox flightAnchorBox(PHLMONITOR monitor, const PHLWINDOW& window) {
     return windowRenderBox(monitor, window);
 }
 
+// Z5. If this window is mid-flight, flip the flight's direction in place: the
+// new motion starts at the proxy's last drawn box and alpha, so a spam of
+// clicks reads as one object changing its mind, which is what GNOME does. The
+// window's stash state is untouched -- it is stashed for the whole life of
+// either flight kind, and only a LANDED restore changes that.
+// Flight lifecycle log, off by default. scripts/z_rig.sh turns it on and
+// scripts/zflight_gate.py (host) reads it: the z5 reversal gate judges the
+// DRAWN boxes around each reversal, because a 400ms EASE_OUT_EXPO legitimately
+// moves ~900px between two 30fps film frames and no pixel metric can tell that
+// from a teleport. Plain fopen because the plugin's Log::logger is dead
+// (separate inline instance under -fno-gnu-unique).
+constexpr const char* KEY_FLIGHT_LOG = "plugin:scrolloverview:dock:flight_log";
+
+static void zdbg(const char* fmt, ...) {
+    if (!Config::getValue<bool>(KEY_FLIGHT_LOG))
+        return;
+    if (FILE* F = fopen("/tmp/ovdbg.log", "a")) {
+        va_list ap; va_start(ap, fmt); vfprintf(F, fmt, ap); va_end(ap); fclose(F);
+    }
+}
+
+bool reverseFlight(const PHLWINDOW& window, bool restoring) {
+    const auto IT = std::ranges::find_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
+    zdbg("reverse(%d) found=%d landed=%d lastA=%f\n", (int)restoring, IT != g_flights.end(), IT == g_flights.end() ? -9 : IT->landedFrames, IT == g_flights.end() ? -9.F : IT->lastAlpha);
+    if (IT == g_flights.end() || IT->landedFrames >= 0 || IT->lastAlpha < 0.F)
+        return false;
+
+    const SFlight OLD = *IT;
+    g_flights.erase(IT);
+    g_flights.emplace_back(SFlight{.window    = window,
+                                   .from      = OLD.from,
+                                   .restoring = restoring,
+                                   .startedAt = Time::steadyNow(),
+                                   .start     = OLD.lastDrawn,
+                                   .alphaFrom = OLD.lastAlpha});
+    return true;
+}
+
 void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand = false) {
+    // Z5. Mid-restore click: put it back from mid-air. The window is already
+    // stashed (a restoring flight keeps it stashed until landing), so the
+    // reversal is the whole job.
+    if (window && Minimize::isMinimized(window) && reverseFlight(window, false))
+        return;
+
     const int  DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
     const bool ANIMATE  = monitor && window && DURATION > 0 && !Minimize::isMinimized(window);
 
@@ -1548,6 +1623,7 @@ void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnL
         from = flightAnchorBox(monitor, window);
 
     Minimize::minimize(window);
+    zdbg("minimizeImpl animate=%d from=%f,%f %fx%f\n", (int)ANIMATE, from.x, from.y, from.width, from.height);
 
     if (ANIMATE && from.width >= 1 && from.height >= 1) {
         revealNow(monitor);
@@ -1561,11 +1637,29 @@ void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnL
 // instantly and the proxy would be a second copy of it. The actual restore
 // happens when the flight lands -- see the render loop.
 void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
+    // Z5. Mid-minimize click: bring it straight back from mid-air.
+    if (window && reverseFlight(window, true))
+        return;
+
     const int DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
+    zdbg("restoreImpl dur=%d mon=%d min=%d\n", DURATION, (int)(bool)monitor, window ? (int)Minimize::isMinimized(window) : -9);
 
     if (!monitor || !window || DURATION <= 0 || !Minimize::isMinimized(window)) {
         Minimize::restore(window);
         return;
+    }
+
+    // Z6 (user, 2026-08-07): a restore to ANOTHER desktop used to aim the
+    // flight off the screen edge and let Minimize::restore snap the workspace
+    // at landing -- "maximizing in the wrong place". GNOME switches first, so
+    // switch NOW and fly to the real box while the workspace slide plays
+    // underneath; both are monitor-anchored, so they compose. The overview
+    // path keeps its tile aim -- there the user is looking at the cards, and
+    // the strip is the thing that says which desktop a tile is on.
+    if (!scrollOverviewForMonitor(monitor)) {
+        const auto HOME = Minimize::originalWorkspace(window);
+        if (HOME != WORKSPACE_INVALID && monitor->m_activeWorkspace && monitor->m_activeWorkspace->m_id != HOME)
+            Minimize::showOriginalWorkspace(window);
     }
 
     // Y10. Still stashed, so this is the box it will land back in -- the TILE
@@ -1763,6 +1857,34 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl =
     for (const auto& WINDOW : windows) {
         if (!Minimize::isMinimized(WINDOW))
             visible.emplace_back(WINDOW);
+    }
+
+    // Z5. A window mid-RESTORE-flight still reads as minimized (it stays
+    // stashed until landing), so without this a spam of clicks re-restored
+    // forever instead of toggling. Count it as visible; minimizeWithFlightImpl
+    // then reverses its flight in place.
+    bool anyFlight = false;
+    for (const auto& WINDOW : windows) {
+        const auto IT = std::ranges::find_if(g_flights, [&WINDOW](const auto& f) { return f.window.lock() == WINDOW; });
+        if (IT == g_flights.end())
+            continue;
+        anyFlight = true;
+        if (IT->restoring && Minimize::isMinimized(WINDOW))
+            visible.emplace_back(WINDOW);
+    }
+
+    // Z7 (user, 2026-08-07): "if window is open in another workspace, instead
+    // of the functionality being minimize, just go to that workspace and focus
+    // the window. Then it's ok to minimize/maximize." So: visible windows, none
+    // of them on THIS workspace, nothing mid-flight -> the click is a GO-THERE,
+    // not a minimize. activateWindow already is the reference's
+    // Main.activateWindow: switch, raise, focus.
+    if (!anyFlight && !visible.empty() && monitor && monitor->m_activeWorkspace) {
+        const bool ANYHERE = std::ranges::any_of(visible, [&](const PHLWINDOW& w) { return w->m_workspace == monitor->m_activeWorkspace; });
+        if (!ANYHERE) {
+            activateWindow(visible.front());
+            return;
+        }
     }
 
     if (visible.empty()) {
@@ -3393,15 +3515,58 @@ void render(PHLMONITOR monitor) {
         const auto  ITEM   = WINDOW ? std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return item.wmClass == WINDOW->m_class; }) : LAYOUT.items.end();
 
         if (!WINDOW || T >= 1.F || ITEM == LAYOUT.items.end()) {
+            zdbg("flightEnd win=%d T=%f item=%d restoring=%d landed=%d\n", (int)(bool)WINDOW, T, ITEM != LAYOUT.items.end(), (int)it->restoring, it->landedFrames);
             if (WINDOW) {
                 // X54. A restore that reaches its end -- or loses its icon -- is
                 // where the window actually comes back, because it stayed
                 // stashed for the whole flight.
-                if (it->restoring)
-                    Minimize::restore(WINDOW);
+                //
+                // Z4. Restore-then-erase in ONE frame left a frame with neither
+                // proxy nor real window on screen -- the restore lands the
+                // window in the NEXT frame's window pass at the earliest, and
+                // the user read the hole as "it's an image, not the window".
+                // So: restore, hold the proxy at its landing box this frame,
+                // erase on the next pass, when the real window overlaps it
+                // exactly (same box, same content -- the seam is invisible).
+                // Z4, second finding: a fixed hold is not the right condition.
+                // A TILED restore re-enters the layout and its first drawn
+                // frame sits at a transient small box (measured: 30k of 427k
+                // px for one frame), then eases to its tile over the move
+                // animation. Hold until the real window's drawn geometry is
+                // back at the box the flight landed on, capped in case the
+                // layout assigned it somewhere new. The proxy draws over the
+                // settling window -- same content, so the cover is invisible.
+                constexpr int LAND_HOLD_MAX = 30;
+                if (it->restoring && it->landedFrames < LAND_HOLD_MAX) {
+                    if (it->landedFrames < 0) {
+                        Minimize::restore(WINDOW);
+                        // The retile that assigns the real goal runs after this
+                        // pass; warping NOW warps to a stale goal (measured: the
+                        // transient survived a warp inside restore()). doLater
+                        // lands between frames, after the layout tick, before
+                        // the next window pass.
+                        g_pEventLoopManager->doLater([W = PHLWINDOWREF{WINDOW}] {
+                            if (const auto WIN = W.lock())
+                                warpRestoredWindowAnims(WIN);
+                        });
+                    }
+                    it->landedFrames = std::max(0, it->landedFrames) + 1;
+
+                    // Belt and braces: stomp the animations every held frame.
+                    warpRestoredWindowAnims(WINDOW);
+
+                    const CBox REAL    = windowRenderBox(monitor, WINDOW);
+                    const bool SETTLED = it->landedFrames > 1 && std::abs(REAL.x - it->from.x) < 8.0 && std::abs(REAL.y - it->from.y) < 8.0 &&
+                                         std::abs(REAL.width - it->from.width) < 8.0 && std::abs(REAL.height - it->from.height) < 8.0;
+                    if (!SETTLED) {
+                        drawFlightAt(WINDOW, it->from, 1.F);
+                        ++it;
+                        continue;
+                    }
+                }
                 // Y8. The hop is the ARRIVAL, so it is armed here and not at the
                 // drop: macOS bounces what lands, not what was let go of.
-                else if (it->bounceOnLand && ITEM != LAYOUT.items.end())
+                if (!it->restoring && it->bounceOnLand && ITEM != LAYOUT.items.end())
                     g_bounces.emplace_back(SBounce{.wmClass = WINDOW->m_class, .startedAt = Time::steadyNow()});
             }
 
@@ -3409,16 +3574,28 @@ void render(PHLMONITOR monitor) {
             continue;
         }
 
-        const float E = easeOutExpo(T);
+        const float E  = easeOutExpo(T);
+        const float A0 = it->alphaFrom;
+        CBox        box;
+        float       alpha;
 
-        if (it->restoring)
+        if (it->restoring) {
             // Y5 divergence, recorded in the spec: GNOME does NOT fade a window
             // back in (its opacity is already 255 on this path). The user asked
             // for "fade out/in", so this one is ours.
-            drawFlightAt(WINDOW, lerpBox(ITEM->iconBox, it->from, E), E);
-        else
-            drawFlightAt(WINDOW, lerpBox(it->from, ITEM->iconBox, E), 1.F - E);
+            const CBox START = it->start.width >= 1 ? it->start : ITEM->iconBox;
+            box              = lerpBox(START, it->from, E);
+            alpha            = (A0 >= 0.F ? A0 : 0.F) * (1.F - E) + E;
+        } else {
+            const CBox START = it->start.width >= 1 ? it->start : it->from;
+            box              = lerpBox(START, ITEM->iconBox, E);
+            alpha            = (A0 >= 0.F ? A0 : 1.F) * (1.F - E);
+        }
 
+        it->lastDrawn = box;
+        it->lastAlpha = alpha;
+        zdbg("draw r=%d box=%f,%f %fx%f a=%f\n", (int)it->restoring, box.x, box.y, box.width, box.height, alpha);
+        drawFlightAt(WINDOW, box, alpha);
         ++it;
     }
 
