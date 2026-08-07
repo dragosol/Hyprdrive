@@ -46,7 +46,7 @@ namespace {
 constexpr float HOVER_GROW    = 0.05F;
 constexpr float PRESS_SHRINK  = 0.04F;
 constexpr float HOVER_IN_MS   = 200.F;
-constexpr float HOVER_OUT_MS  = 200.F;
+constexpr float HOVER_OUT_MS  = 150.F; // exits run 20-30% faster, house rule -- the one deviation the 2026-08-07 GNOME-numbers audit found
 
 // User, 2026-08-06: a tile the cursor has left stays blown up for a beat, "that
 // way it gives me time to decide whether to press the x button or not". Only
