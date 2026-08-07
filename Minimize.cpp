@@ -143,6 +143,11 @@ bool minimize(PHLWINDOW window) {
     return true;
 }
 
+CBox originalBox(PHLWINDOW window) {
+    const auto IT = entryFor(window);
+    return IT == g_entries.end() ? CBox{} : IT->box;
+}
+
 bool showOriginalWorkspace(PHLWINDOW window) {
     const auto IT = entryFor(window);
     if (IT == g_entries.end())

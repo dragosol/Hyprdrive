@@ -105,6 +105,25 @@ case "$W" in
     rm -f $OUT/z4-*.png; ffmpeg -loglevel error -i $OUT/z4.mp4 $OUT/z4-%03d.png
     echo "z4 filmed: $(ls $OUT/z4-*.png | wc -l) frames"
     ;;
+  z4t)
+    # The user's "slight bug on first maximize" (video 2026-08-07 11:02): a
+    # TILED window's restore grew out of the stash workspace's own retile box
+    # instead of flying to its tile -- flightAnchorBox read the stashed
+    # geometry. The flight now aims at Minimize::originalBox. Same hole gate
+    # as z4; the fixture is forced tiled first.
+    ws 1; spawn
+    F=$(hyprctl clients -j | python3 -c "import json,sys; print([c['"'"'floating'"'"'] for c in json.load(sys.stdin) if c['"'"'class'"'"']=='"'"'zfix'"'"'][0])")
+    [ "$F" = "True" ] && { hyprctl dispatch "hl.dsp.window.float()" >/dev/null 2>&1; sleep 0.6; }
+    click; sleep 1.5
+    [ "$(fixws)" = special:minimized ] || { echo "z4t RIG FAULT: minimize missed"; exit 1; }
+    rm -f $OUT/z4t.mp4
+    wf-recorder -f $OUT/z4t.mp4 -c libvpx-vp9 -r 30 >$OUT/z4t-wfr.log 2>&1 & WFR=$!
+    sleep 2.5
+    clickcenter; sleep 3
+    kill -INT $WFR 2>/dev/null; wait $WFR 2>/dev/null
+    [ "$(fixws)" = 1 ] || { echo "z4t RIG FAULT: restore missed (fixws=$(fixws))"; exit 1; }
+    echo "z4t filmed"
+    ;;
   z5)
     ws 1; spawn
     # NO anim_scale: flights run on the wall clock (measured -- a scaled run's

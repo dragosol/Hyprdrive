@@ -18,7 +18,7 @@ from PIL import Image
 
 MODE = sys.argv[1]
 frames = sorted(glob.glob(f'/tmp/zrig/{MODE}-*.png'))
-if MODE in ('z4', 'z5'):
+if MODE in ('z4', 'z4t', 'z5'):
     assert len(frames) > 30, f'only {len(frames)} frames -- film too short to judge'
 
 def green_count(p):
@@ -26,7 +26,7 @@ def green_count(p):
     m = (im[:, :, 1] > 150) & (im[:, :, 0] < 110) & (im[:, :, 2] < 110)
     return int(m.sum())
 
-if MODE == 'z4':
+if MODE in ('z4', 'z4t'):
     counts = [green_count(p) for p in frames]
     steady = max(np.mean(counts[-8:]), 1.0)
     assert steady > 50000, f'steady={steady:.0f}px is a dock cell, not a restored window -- the restore click missed; rig fault'
@@ -38,7 +38,7 @@ if MODE == 'z4':
         elif started and c < 0.25 * steady:
             holes.append((i, c))
     assert started, 'restore never reached 50% of steady -- rig fault, not a pass'
-    print(f'z4 {"FAIL" if holes else "PASS"}: steady={steady:.0f}px holes={holes[:5]}')
+    print(f'{MODE} {"FAIL" if holes else "PASS"}: steady={steady:.0f}px holes={holes[:5]}')
     sys.exit(1 if holes else 0)
 
 if MODE == 'z5log':

@@ -25,4 +25,9 @@ WORKSPACEID            originalWorkspace(PHLWINDOW window);
 // of flying off the edge and snapping desktops at touchdown.
 bool                   showOriginalWorkspace(PHLWINDOW window);
 
+// Z4/first-maximize. The GLOBAL LOGICAL box the window had when it was
+// minimized. The restore flight aims here: reading the stashed window itself
+// gives the stash workspace's retile, which is not where the window is going.
+CBox                   originalBox(PHLWINDOW window);
+
 }

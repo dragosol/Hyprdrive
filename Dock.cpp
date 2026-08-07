@@ -355,6 +355,12 @@ struct SFlight {
     float alphaFrom = -1.F;
     CBox  lastDrawn;
     float lastAlpha = -1.F;
+    // Z4 stability release: consecutive frames the real window's box has not
+    // moved. If it is stable somewhere OTHER than the flight's landing box,
+    // the layout re-decided -- holding the proxy at the stale box would fight
+    // reality, so the hold releases.
+    CBox lastReal;
+    int  realStable = 0;
     // Z4. Counts frames since the restore actually ran; the proxy holds its
     // landing box for LAND_HOLD_FRAMES while the real window works its way
     // back through moveWindowToWorkspace + retile + damage, because
@@ -1662,9 +1668,23 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
             Minimize::showOriginalWorkspace(window);
     }
 
-    // Y10. Still stashed, so this is the box it will land back in -- the TILE
-    // while the overview is up, not the desktop geometry behind it.
-    const CBox TO = flightAnchorBox(monitor, window);
+    // Y10. Still stashed, so flightAnchorBox reads the TILE while the overview
+    // is up. On the DESKTOP path it would read the stash workspace's own
+    // retile of the window -- for a TILED window that is a small box that has
+    // nothing to do with where the window is going, so the flight landed
+    // there and the real tile popped out of it ("slight bug on first
+    // maximize", user video 2026-08-07 11:02). Minimize recorded the
+    // pre-minimize box; aim there. Floating windows restore to exactly that
+    // box; tiled windows return to it whenever the layout has not changed
+    // underneath, and the landing hold covers the rare case it has.
+    CBox TO = flightAnchorBox(monitor, window);
+    if (!scrollOverviewForMonitor(monitor)) {
+        const CBox HOME = Minimize::originalBox(window); // global logical
+        if (HOME.width >= 1 && HOME.height >= 1) {
+            const float SCALE = std::max(monitor->m_scale, 0.01F);
+            TO = CBox{(HOME.x - monitor->m_position.x) * SCALE, (HOME.y - monitor->m_position.y) * SCALE, HOME.width * SCALE, HOME.height * SCALE};
+        }
+    }
     if (TO.width < 1 || TO.height < 1) {
         Minimize::restore(window);
         return;
@@ -3556,8 +3576,14 @@ void render(PHLMONITOR monitor) {
                     warpRestoredWindowAnims(WINDOW);
 
                     const CBox REAL    = windowRenderBox(monitor, WINDOW);
-                    const bool SETTLED = it->landedFrames > 1 && std::abs(REAL.x - it->from.x) < 8.0 && std::abs(REAL.y - it->from.y) < 8.0 &&
-                                         std::abs(REAL.width - it->from.width) < 8.0 && std::abs(REAL.height - it->from.height) < 8.0;
+                    const bool SAME    = std::abs(REAL.x - it->lastReal.x) < 1.0 && std::abs(REAL.y - it->lastReal.y) < 1.0 &&
+                                         std::abs(REAL.width - it->lastReal.width) < 1.0 && std::abs(REAL.height - it->lastReal.height) < 1.0;
+                    it->realStable     = SAME ? it->realStable + 1 : 0;
+                    it->lastReal       = REAL;
+                    const bool SETTLED = (it->landedFrames > 1 && std::abs(REAL.x - it->from.x) < 8.0 && std::abs(REAL.y - it->from.y) < 8.0 &&
+                                          std::abs(REAL.width - it->from.width) < 8.0 && std::abs(REAL.height - it->from.height) < 8.0) ||
+                                         (it->landedFrames > 2 && it->realStable >= 2);
+                    zdbg("hold f=%d REAL=%.1f,%.1f %.1fx%.1f from=%.1f,%.1f %.1fx%.1f\n", it->landedFrames, REAL.x, REAL.y, REAL.width, REAL.height, it->from.x, it->from.y, it->from.width, it->from.height);
                     if (!SETTLED) {
                         drawFlightAt(WINDOW, it->from, 1.F);
                         ++it;
