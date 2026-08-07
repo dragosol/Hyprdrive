@@ -1,5 +1,11 @@
 #include "Dock.hpp"
 
+// Z16: for renderOverviewWorkspaceShadow + getOverviewShadowConfig -- the
+// flight proxy carries the same shadow the overview cards use. This drags the
+// whole internal header in; if a name ever collides with Dock's own statics,
+// split the shadow helpers into their own header instead.
+#include "OverviewInternal.hpp"
+
 #include "AppSearch.hpp"
 #include "globals.hpp"
 #include "Config.hpp"
@@ -366,6 +372,27 @@ struct SFlight {
     // identical box, so the overlap cannot be seen.
     int landedFrames = -1;
 };
+
+// Z13. The tile a window occupied when it was minimized WITH THE OVERVIEW
+// OPEN. Grid slots are recomputed when the window rejoins the workspace, so
+// aiming a restore at the scaled desktop box lands wrong and the tile then
+// snaps into the grid ("teleports among the distribution"). The slot it HAD
+// is the best predictor: same window set, same slot. Used once, then dropped.
+std::vector<std::pair<PHLWINDOWREF, CBox>> g_minimizeTiles;
+
+void rememberMinimizeTile(const PHLWINDOW& window, const CBox& tile) {
+    std::erase_if(g_minimizeTiles, [&](const auto& e) { return !e.first.lock() || e.first.lock() == window; });
+    g_minimizeTiles.emplace_back(window, tile);
+}
+
+CBox takeMinimizeTile(const PHLWINDOW& window) {
+    const auto IT = std::ranges::find_if(g_minimizeTiles, [&](const auto& e) { return e.first.lock() == window; });
+    if (IT == g_minimizeTiles.end())
+        return {};
+    const CBox TILE = IT->second;
+    g_minimizeTiles.erase(IT);
+    return TILE;
+}
 
 // Y4/Y5. ONE FLIGHT PER WINDOW, replacing the single optional. Y4 makes
 // "minimize the whole app" the DEFAULT click, so the old one-at-a-time rule --
@@ -1626,6 +1653,11 @@ static void zdbg(const char* fmt, ...) {
     }
 }
 
+// Z15 (user): defined after g_panel below; a flight click kills the hover
+// panel INSTANTLY. Leaving it alive re-eased it from a stale parked box, which
+// read as "a panel dragged from the bottom of the screen" under the restore.
+void dismissHoverPanelNow();
+
 bool reverseFlight(const PHLWINDOW& window, bool restoring) {
     const auto IT = std::ranges::find_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
     zdbg("reverse(%d) found=%d landed=%d lastA=%f\n", (int)restoring, IT != g_flights.end(), IT == g_flights.end() ? -9 : IT->landedFrames, IT == g_flights.end() ? -9.F : IT->lastAlpha);
@@ -1660,9 +1692,18 @@ void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnL
         from = flightAnchorBox(monitor, window);
 
     Minimize::minimize(window);
+    // Z14 (user): "the window shadows do not follow it down" -- the stash move
+    // arms MOVE_FROM_WORKSPACE / fade animations that draw the real window
+    // (shadow included) fading at its OLD rect while the proxy departs. The
+    // flight is the animation; warp them all.
+    if (ANIMATE)
+        warpRestoredWindowAnims(window);
     zdbg("minimizeImpl animate=%d from=%f,%f %fx%f\n", (int)ANIMATE, from.x, from.y, from.width, from.height);
 
+    dismissHoverPanelNow(); // Z15
     if (ANIMATE && from.width >= 1 && from.height >= 1) {
+        if (scrollOverviewForMonitor(monitor))
+            rememberMinimizeTile(window, from); // Z13: `from` IS the tile here
         revealNow(monitor);
         // Z10 (user, overriding Y8's "macOS bounces what arrives"): the hop is
         // the ACKNOWLEDGEMENT of the drop, so it fires now, while the window
@@ -1704,16 +1745,18 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
             Minimize::showOriginalWorkspace(window);
     }
 
-    // Y10. Still stashed, so flightAnchorBox reads the TILE while the overview
-    // is up. On the DESKTOP path it would read the stash workspace's own
-    // retile of the window -- for a TILED window that is a small box that has
-    // nothing to do with where the window is going, so the flight landed
-    // there and the real tile popped out of it ("slight bug on first
-    // maximize", user video 2026-08-07 11:02). Minimize recorded the
-    // pre-minimize box; aim there. Floating windows restore to exactly that
-    // box; tiled windows return to it whenever the layout has not changed
-    // underneath, and the landing hold covers the rare case it has.
-    CBox TO = flightAnchorBox(monitor, window);
+    // Y10/Z13. With the overview up, aim at the tile the window occupied when
+    // it was minimized (recorded) -- overviewBoxForGlobal was the DESKTOP box
+    // scaled into the card, which is not where the grid puts a tile, so the
+    // landing snapped. On the DESKTOP path, flightAnchorBox would read the
+    // stash workspace's own retile -- aim at the recorded pre-minimize box
+    // instead ("slight bug on first maximize", user video 2026-08-07 11:02).
+    // The landing hold covers whatever the layout re-decides.
+    CBox TO{};
+    if (scrollOverviewForMonitor(monitor))
+        TO = takeMinimizeTile(window);
+    if (TO.width < 1 || TO.height < 1)
+        TO = flightAnchorBox(monitor, window);
     if (!scrollOverviewForMonitor(monitor)) {
         const CBox HOME = Minimize::originalBox(window); // global logical
         if (HOME.width >= 1 && HOME.height >= 1) {
@@ -1726,15 +1769,20 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
         return;
     }
 
+    dismissHoverPanelNow(); // Z15
+
+    // Z9 (user, round two): focus BEFORE the flight exists, and WARP the
+    // active-appearance animations -- focus flipped instantly but
+    // WINDOW_ALPHA_ACTIVE and the border-colour fade EASE over ~250ms, so the
+    // proxy still spent most of the flight looking unfocused.
+    Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_OTHER);
+    window->alpha()[Desktop::View::WINDOW_ALPHA_ACTIVE]->warp();
+    if (window->m_borderFadeAnimationProgress)
+        window->m_borderFadeAnimationProgress->warp();
+
     revealNow(monitor);
     std::erase_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
     g_flights.emplace_back(SFlight{.window = window, .from = TO, .restoring = true, .startedAt = Time::steadyNow()});
-
-    // Z9 (user): the proxy flew UNFOCUSED and focus arrived with the landing's
-    // restore -- visibly, because focused and unfocused frost differ. GNOME
-    // activates on the click. The window is still stashed; focusing it does
-    // not unstash it, and the landing's own focus becomes a no-op.
-    Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_OTHER);
 }
 
 // X24's click policy, straight off the reference config: `click-action`
@@ -3005,6 +3053,14 @@ struct SPanel {
 
 std::optional<SPanel> g_panel;
 
+void dismissHoverPanelNow() {
+    g_panel.reset();
+    // The tooltip is a separate element and lingered into the flight ("sh"
+    // bubble, frame 279 of the verification film). Clearing the name kills it
+    // this frame -- the fade-out path only runs while a name is remembered.
+    g_tip = {};
+}
+
 // Y1/Y2. The panel AS DRAWN last frame, plus the cell each window landed in.
 // Hit-testing has to use these rather than the settled target: during the
 // entrance and the slide the plate on screen is somewhere else entirely, and a
@@ -3682,7 +3738,25 @@ void render(PHLMONITOR monitor) {
         it->lastDrawn = box;
         it->lastAlpha = alpha;
         zdbg("draw r=%d box=%f,%f %fx%f a=%f\n", (int)it->restoring, box.x, box.y, box.width, box.height, alpha);
+        // Z16 (user): "shadows and the thin window outline do not stay on the
+        // window as it maximizes". The proxy is a bare surface; a real window
+        // carries Hyprland's shadow and border. Same shadow pass the overview
+        // cards use, and the window's own border gradient (focused by Z9, so
+        // the active colours), both riding the flight's box and alpha.
+        renderOverviewWorkspaceShadow(monitor, box, 1.F, false, alpha);
         drawFlightAt(WINDOW, box, alpha);
+        {
+            const int BORDERSIZE = std::max(0, ScrollOverview::Config::getValue<int>("general:border_size"));
+            if (BORDERSIZE > 0 && alpha > 0.01F) {
+                CBorderPassElement::SBorderData border;
+                border.box        = box;
+                border.grad1      = WINDOW->m_realBorderColor;
+                border.a          = alpha;
+                border.borderSize = BORDERSIZE;
+                border.round      = sc<int>(sc<float>(ScrollOverview::Config::getValue<int>("decoration:rounding")) * monitor->m_scale);
+                g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
+            }
+        }
         ++it;
     }
 
