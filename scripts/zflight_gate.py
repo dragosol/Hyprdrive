@@ -57,16 +57,27 @@ if MODE == 'z5log':
         elif l.startswith('reverse') and 'found=1' in l:
             reversals.append(i)
     assert len(reversals) >= 2, f'only {len(reversals)} reversals -- spam did not hit mid-flight'
-    worst = 0.0
+    # Timing-immune: a fixed pixel limit tripped on frame starvation (a 248px
+    # first step is just expo across a 2-3 frame gap). The invariant that
+    # separates a CONTINUED flight from a RESTARTED one: the first draw after
+    # a reversal is never FARTHER from the new motion's endpoint than the last
+    # draw before it -- a restart jumps back toward the far end.
+    worst = -1e9
     for r in reversals:
         before = [d for d in draws if d[0] < r]
         after  = [d for d in draws if d[0] > r]
         assert before and after, 'reversal without draws around it'
-        b, a = before[-1], after[0]
-        dc = ((b[1]+b[3]/2 - (a[1]+a[3]/2))**2 + (b[2]+b[4]/2 - (a[2]+a[4]/2))**2) ** 0.5
-        worst = max(worst, dc)
-    print(f'z5log {'FAIL' if worst > 150 else 'PASS'}: {len(reversals)} reversals, worst centre discontinuity {worst:.1f}px (limit 150)')
-    sys.exit(1 if worst > 150 else 0)
+        seg_end = next((i for i in reversals if i > r), None)
+        seg     = [d for d in after if seg_end is None or d[0] < seg_end]
+        end     = seg[-1]
+        ec      = (end[1] + end[3] / 2, end[2] + end[4] / 2)
+        def dist(d):
+            return ((d[1] + d[3] / 2 - ec[0]) ** 2 + (d[2] + d[4] / 2 - ec[1]) ** 2) ** 0.5
+        regress = dist(after[0]) - dist(before[-1])
+        worst   = max(worst, regress)
+    verdict = 'FAIL' if worst > 40 else 'PASS'
+    print(f'z5log {verdict}: {len(reversals)} reversals, worst regression toward the far end {worst:.1f}px (limit 40; continuation is negative)')
+    sys.exit(1 if worst > 40 else 0)
 
 if MODE == 'z5':
     JUMP_PX = 350

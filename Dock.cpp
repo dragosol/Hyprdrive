@@ -1771,14 +1771,20 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
 
     dismissHoverPanelNow(); // Z15
 
-    // Z9 (user, round two): focus BEFORE the flight exists, and WARP the
-    // active-appearance animations -- focus flipped instantly but
-    // WINDOW_ALPHA_ACTIVE and the border-colour fade EASE over ~250ms, so the
-    // proxy still spent most of the flight looking unfocused.
+    // Z9 (user, round three): focus BEFORE the flight exists -- and then make
+    // the window RECOMPUTE its decoration targets before warping. Round two
+    // warped the animations while their goals still said "inactive": nothing
+    // re-targets m_realBorderColor / dim / active alpha until
+    // updateDecorationValues() runs, so the warp was a no-op and the next
+    // recompute eased from wherever it was. Order matters: focus, recompute,
+    // warp.
     Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_OTHER);
+    window->updateDecorationValues();
     window->alpha()[Desktop::View::WINDOW_ALPHA_ACTIVE]->warp();
     if (window->m_borderFadeAnimationProgress)
         window->m_borderFadeAnimationProgress->warp();
+    if (window->m_dimPercent)
+        window->m_dimPercent->warp();
 
     revealNow(monitor);
     std::erase_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
@@ -3681,6 +3687,13 @@ void render(PHLMONITOR monitor) {
                 if (it->restoring && it->landedFrames < LAND_HOLD_MAX) {
                     if (it->landedFrames < 0) {
                         Minimize::restore(WINDOW);
+                        // Z9: restore() focused it; retarget + warp so the real
+                        // window is active-coloured on its FIRST frame.
+                        WINDOW->updateDecorationValues();
+                        if (WINDOW->m_borderFadeAnimationProgress)
+                            WINDOW->m_borderFadeAnimationProgress->warp();
+                        if (WINDOW->m_dimPercent)
+                            WINDOW->m_dimPercent->warp();
                         // The retile that assigns the real goal runs after this
                         // pass; warping NOW warps to a stale goal (measured: the
                         // transient survived a warp inside restore()). doLater
@@ -3737,7 +3750,11 @@ void render(PHLMONITOR monitor) {
 
         it->lastDrawn = box;
         it->lastAlpha = alpha;
-        zdbg("draw r=%d box=%f,%f %fx%f a=%f\n", (int)it->restoring, box.x, box.y, box.width, box.height, alpha);
+        {
+            const auto& GC = WINDOW->m_realBorderColor.m_colors;
+            zdbg("draw r=%d box=%f,%f %fx%f a=%f bc=%02x%02x%02x\n", (int)it->restoring, box.x, box.y, box.width, box.height, alpha,
+                 GC.empty() ? 0 : sc<int>(GC[0].r * 255.F), GC.empty() ? 0 : sc<int>(GC[0].g * 255.F), GC.empty() ? 0 : sc<int>(GC[0].b * 255.F));
+        }
         // Z16 (user): "shadows and the thin window outline do not stay on the
         // window as it maximizes". The proxy is a bare surface; a real window
         // carries Hyprland's shadow and border. Same shadow pass the overview
