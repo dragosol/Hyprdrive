@@ -87,6 +87,13 @@ bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
 // impossible for a multi-window app.
 bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle = false, bool ctrl = false);
 
+// Z2. The Y1 hover panel's own button. It sits ABOVE the pill, so `pillContains`
+// is false over it and this has to be asked FIRST in both button hooks or the
+// click reaches the window underneath instead of the preview it landed on.
+// Returns whether the panel claimed the event; `release` false claims without
+// acting, matching the dock's press-remembers / release-decides gesture.
+bool    panelClick(PHLMONITOR monitor, const Vector2D& point, bool release);
+
 // X33. A wheel tick over the pill, `up` for one notch away from the user.
 // `scroll_action` decides: `cycle-windows` steps through the windows of the icon
 // under the pointer, `switch-workspace` moves to the neighbouring workspace from

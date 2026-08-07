@@ -2992,6 +2992,55 @@ bool panelUp() {
 
 }
 
+// Z2. A CLICK on a preview goes to that window. The panel floats ABOVE the pill,
+// so every one of these clicks failed the `pillContains` gate both button hooks
+// open with and fell through to whatever window was underneath -- the panel was
+// readable and dead, which is Y1's bug one layer up. Y2 already hit-tests these
+// same cells for the title, so the geometry is there; only the button was
+// missing. `release` because the dock's own gesture is press-remembers /
+// release-decides, and a preview must not be the one place a press acts.
+//
+// Claiming the press as well is what stops it starting an icon drag or reaching
+// the tile below; the caller swallows either edge on a true.
+//
+// OUTSIDE the anonymous namespace above, and that is not a style point: put in
+// it, this compiles and links, and then Hyprland dies with `undefined symbol`
+// the first time a mouse button is pressed -- a plugin's unresolved symbol is
+// not a load-time error, it is a lazy-binding abort at the first call, so it
+// took the compositor down mid-session rather than failing the build.
+bool panelClick(PHLMONITOR monitor, const Vector2D& point, bool release) {
+    if (!monitor || !panelContains(point))
+        return false;
+
+    if (!release)
+        return true;
+
+    const auto CELL = panelCellAt(point);
+    if (!CELL)
+        return true;
+
+    const auto WINDOW = CELL->second;
+
+    // The SAME three lines the X28 menu's window rows already run, deliberately:
+    // both are "the dock naming one window and being asked to go to it", and one
+    // dock must not have two answers. So a minimized window is restored (the
+    // stash has no card to land a selection on), and inside the overview the
+    // window is committed as the selection AND the overview closes, which is
+    // what a tile click does -- focusing it directly would be overwritten by
+    // close()'s own selection.
+    if (Minimize::isMinimized(WINDOW)) {
+        Minimize::restore(WINDOW);
+        return true;
+    }
+
+    if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
+        OVERVIEW->selectAndClose(WINDOW);
+    else
+        activateWindow(WINDOW);
+
+    return true;
+}
+
 // Y8. How far this app's icon is lifted out of the pill right now. Reads the
 // largest of any overlapping hops rather than summing them, so two windows
 // landing together is one bounce and not a double-height launch.

@@ -2399,6 +2399,14 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 return;
             }
 
+            // Z2. The hover panel, ahead of the pill for the same reason the
+            // desktop hook asks first: it floats above the pill, so pillContains
+            // is false over a preview and the press would reach the tile below.
+            // Behind the drag guard, though -- a window released over the panel
+            // belongs to the drag, exactly as the pill branch has it.
+            if (!dragActiveWindow && ScrollOverview::Dock::panelClick(pMonitor.lock(), lastMousePosLocal, event.state == WL_POINTER_BUTTON_STATE_RELEASED))
+                return;
+
             if (!dragActiveWindow && ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
                 // X32. The press is no longer the click. It only remembers what
                 // is under it; motion past the threshold turns that into a

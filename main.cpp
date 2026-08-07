@@ -1096,6 +1096,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 continue;
 
             const auto LOCAL = (POINT - MONITOR->m_position) * MONITOR->m_scale;
+
+            // Z2. Before the pill, because the panel is not on it -- it floats a
+            // gap above, so pillContains is false over every preview and the
+            // click would go to the window underneath.
+            if (ScrollOverview::Dock::panelClick(MONITOR, LOCAL, event.state != WL_POINTER_BUTTON_STATE_PRESSED)) {
+                info.cancelled = true;
+                return;
+            }
+
             if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
                 // X32. A drag released OFF the pill is a cancel, and the press
                 // that started it was the dock's -- so this release is not a
