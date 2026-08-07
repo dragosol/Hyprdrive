@@ -166,6 +166,12 @@ class CScrollOverview : public IOverview {
 
     size_t viewportCurrentWorkspace = 0;
     bool   rebuildPending           = false;
+
+    // Y9. Whether the LAST frame ran with an empty query. shouldShowOverviewWindow
+    // answers differently for a MINIMIZED window either side of that edge, and
+    // the window list is not rebuilt on its own, so the edge has to be noticed.
+    // Starts true because every open starts unfiltered (main.cpp:282).
+    bool   lastQueryEmpty           = true;
     bool   overviewBlurDirty        = true;
     bool   backdropBlurDirty        = true;
     bool   overviewBlurStateValid   = false;

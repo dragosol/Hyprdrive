@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# OVERVIEW_CPP_SPEC Y9, as the user revised it 2026-08-06: "let's make those
+# minimized windows only show in overview when filtered, otherwise they still
+# don't show."
+#
+# Commit 50197ec proved the FIRST half (no query -> gone) and left the second
+# explicitly unproven, calling it the next thing to do: typing a matching query
+# must bring the minimized window BACK. Until that holds, a minimized window is
+# unreachable from the overview, which is worse than where the user started.
+#
+# THREE STATES, one fixture set, one output, so the same wallpaper sits behind
+# each and the numbers are comparable:
+#
+#   q0  overview, no query        magenta ABSENT   green present
+#   q1  overview, "MAGWIN" typed  magenta PRESENT  green reduced
+#   q2  query cleared             magenta ABSENT   green present again
+#
+# q2 is not decoration. Without it, a build that simply showed minimized windows
+# always would pass q1, and that is the exact behaviour the user asked to be
+# narrowed (00dbba9 -> 50197ec).
+#
+# GREEN IS THE LIVENESS CONTROL. It must not match "MAGWIN", so if the query
+# never reaches the search bar green does not change either -- which is how
+# 50197ec's run failed, and it is a rig fault that reads exactly like a product
+# fault unless something else in the frame is watching for it.
+set -u
+export XDG_RUNTIME_DIR=/run/user/1000
+export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
+export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+
+TAG=${1:?usage: y9_rig.sh <tag>}
+OUT=/mnt/host/y9; mkdir -p $OUT
+
+dsp()  { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
+ov()   { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
+mini() { dsp "hl.plugin.scrolloverview.minimize($1)"; }
+
+restore() {
+    ov off
+    mini "[[restore]]"
+    hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1
+    sleep 1.2
+    for m in $(hyprctl monitors all -j | python3 -c "
+import json,sys
+print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
+        hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
+    done
+    systemctl --user start hyprwall.timer 2>/dev/null
+}
+trap restore EXIT
+
+systemctl --user stop hyprwall.timer 2>/dev/null
+systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+
+ov off; sleep 1
+pkill -x kitty 2>/dev/null; sleep 1.5
+dsp "hl.dsp.focus({workspace = 1})"; sleep 0.8
+
+hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2
+for m in $(hyprctl monitors all -j | python3 -c "
+import json,sys
+print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
+    hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
+done
+sleep 1
+hyprctl output create headless >/dev/null 2>&1; sleep 1.5
+HL=$(hyprctl monitors all -j | python3 -c "
+import json,sys
+hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
+print(hs[0] if len(hs)==1 else '')")
+[ -n "$HL" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
+hyprctl eval "return hl.monitor({output = [[$HL]], mode = [[2560x1600@60]], position = [[0x0]], scale = 1})" >/dev/null 2>&1; sleep 1.2
+hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
+
+read -r MON W H <<< "$(hyprctl monitors -j | python3 -c "
+import json,sys
+m=json.load(sys.stdin)[0]; print(m['name'], m['width'], m['height'])")"
+echo "monitor: $MON ${W}x${H}"
+case "$MON" in HEADLESS*) ;; *) echo "ABORT: expected the headless output, got $MON"; exit 1 ;; esac
+
+dsp "hl.dsp.focus({monitor = \"$MON\"})"; sleep 0.3
+setsid kitty -c NONE --class Y9GRN --title GRNWIN -o background='#00c000' -o background_opacity=1.0 \
+    -o font_size=40 -o confirm_os_window_close=0 --hold sh -c 'clear; sleep infinity' >/dev/null 2>&1 </dev/null &
+sleep 2.6
+setsid kitty -c NONE --class Y9MAG --title MAGWIN -o background='#ff00ff' -o background_opacity=1.0 \
+    -o font_size=40 -o confirm_os_window_close=0 --hold sh -c 'clear; sleep infinity' >/dev/null 2>&1 </dev/null &
+sleep 2.6
+
+MAG=$(hyprctl clients -j | python3 -c "
+import json,sys
+print(next((c['address'] for c in json.load(sys.stdin) if c['class']=='Y9MAG'), ''))")
+[ -n "$MAG" ] || { echo "ABORT: Y9MAG did not appear"; exit 1; }
+
+# Both on screen first: the baseline that says the magenta CAN be seen at all.
+grim -o $MON $OUT/$TAG-desktop.png
+
+dsp "hl.dsp.focus({window = [[address:$MAG]]})"; sleep 0.6
+mini ""
+sleep 2.0
+grim -o $MON $OUT/$TAG-minimized.png
+
+ov on; sleep 3
+grim -o $MON $OUT/$TAG-q0.png
+
+ydotool type "MAGWIN" >/dev/null 2>&1
+sleep 3
+grim -o $MON $OUT/$TAG-q1.png
+
+# Clear it a character at a time -- Escape closes the overview on this build,
+# which would end the run rather than clear the query.
+for i in 1 2 3 4 5 6; do ydotool key 14:1 14:0 >/dev/null 2>&1; sleep 0.12; done
+sleep 3
+grim -o $MON $OUT/$TAG-q2.png
+
+echo "frames: $(ls $OUT/$TAG-*.png | wc -l)"
+echo Y9_RIG_OK

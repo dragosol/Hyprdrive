@@ -7700,6 +7700,23 @@ void CScrollOverview::onPreRender() {
 
     focusSyncedFromWorkspaceID = WORKSPACE_INVALID;
 
+    // Y9. A QUERY STARTING OR ENDING CHANGES WHICH WINDOWS EXIST. 50197ec put the
+    // rule in shouldShowOverviewWindow -- a minimized window is in the overview
+    // only while a query is running -- but the window list is built when the
+    // overview opens and rebuilt only on demand, and every open starts
+    // unfiltered. So a minimized window was excluded at open time and stayed
+    // excluded no matter what was typed: measured with scripts/y9_rig.sh, the
+    // filter was plainly live (the non-matching fixture fell from 521403 px to
+    // 53) while the minimized one sat at 0 px throughout. That made a minimized
+    // window unreachable from the overview, which is worse than not hiding it.
+    //
+    // The EDGE, not every keystroke. Empty <-> non-empty is the only transition
+    // that changes the answer, and X52 is about what a keystroke costs.
+    if (const bool QUERYEMPTY = g_overviewSearch.empty(); QUERYEMPTY != lastQueryEmpty) {
+        lastQueryEmpty = QUERYEMPTY;
+        rebuildPending = true;
+    }
+
     if (rebuildPending) {
         rebuildPending = false;
         markBlurDirty();
