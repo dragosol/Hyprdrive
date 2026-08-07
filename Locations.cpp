@@ -353,9 +353,13 @@ void activate(const std::string& uri) {
     if (uri.empty())
         return;
 
-    // The URI is one argv element, never a word in a command line: a volume
-    // label is user data and lands in this string.
-    spawn("xdg-open", {uri});
+    // Open with Nautilus directly. Fedora ships BOTH
+    // org.freedesktop.FileManager1.service (nautilus) and
+    // org.kde.dolphin.FileManager1.service (dolphin --daemon); xdg-open /
+    // FileManager1 activation can land on Dolphin when Nautilus is slow or
+    // stuck. This rice uses Nautilus as the file manager (dock + overview
+    // search + trash). One argv element so a volume label stays one URI.
+    spawn("nautilus", {uri});
 }
 
 void emptyTrash() {
@@ -393,6 +397,22 @@ void unmount(const std::string& uri, bool eject) {
     // build. It carries the polkit prompt and the "device is busy" reporting
     // that a raw umount(2) from in here would not.
     spawn("gio", {"mount", eject ? "-e" : "-u", uri});
+}
+
+// Declared in the header and CALLED from Dock.cpp's Mount row since X35, and
+// never defined: the .so linked fine and Hyprland would abort with `undefined
+// symbol` the first time that row was clicked, because a plugin's unresolved
+// symbol is a lazy-binding abort at the call and not a load-time failure.
+// Found by scripts/symcheck.sh, which now runs before every load -- not by
+// anyone reaching the row.
+//
+// The mirror of unmount, and gio for the same reason: it carries the polkit
+// prompt, which is exactly what mounting a device wants.
+void mount(const std::string& uri) {
+    if (uri.empty())
+        return;
+
+    spawn("gio", {"mount", uri});
 }
 
 }
