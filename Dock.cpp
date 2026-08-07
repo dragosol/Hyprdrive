@@ -2710,9 +2710,18 @@ namespace {
 constexpr float                                            PREVIEWING_MS = 250.F;
 std::vector<std::pair<PHLWINDOWREF, Time::steady_tp>>      g_previewed;
 
+// REAL milliseconds, deliberately NOT the dock's elapsedMs. That one divides by
+// plugin:scrolloverview:anim_scale, which is right for every animation in this
+// file and wrong here: this is a staleness window on a frame-callback policy,
+// not a curve. At anim_scale 10 it would hold entries for 2.5s, and at 0.05 it
+// would expire them in 12ms and starve the previews it exists to keep alive.
+float realElapsedMs(const Time::steady_tp& since) {
+    return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count());
+}
+
 void notePreviewing(const PHLWINDOW& window) {
     const auto NOW = Time::steadyNow();
-    std::erase_if(g_previewed, [&](const auto& e) { return !e.first.lock() || elapsedMs(e.second) >= PREVIEWING_MS; });
+    std::erase_if(g_previewed, [&](const auto& e) { return !e.first.lock() || realElapsedMs(e.second) >= PREVIEWING_MS; });
 
     for (auto& [REF, AT] : g_previewed) {
         if (REF.lock() == window) {
@@ -3041,7 +3050,7 @@ bool isPreviewing(const PHLWINDOW& window) {
     if (!window)
         return false;
 
-    return std::ranges::any_of(g_previewed, [&](const auto& e) { return e.first.lock() == window && elapsedMs(e.second) < PREVIEWING_MS; });
+    return std::ranges::any_of(g_previewed, [&](const auto& e) { return e.first.lock() == window && realElapsedMs(e.second) < PREVIEWING_MS; });
 }
 
 bool panelClick(PHLMONITOR monitor, const Vector2D& point, bool release) {
