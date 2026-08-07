@@ -2026,785 +2026,27 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
 
     lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
-    auto onMouseMove = [this](Vector2D, Event::SCallbackInfo& info) {
-        const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
-        if (INPUTOVERVIEW) {
-            const auto INPUTMONITOR = INPUTOVERVIEW->pMonitor.lock();
-            if (INPUTMONITOR && INPUTMONITOR != Desktop::focusState()->monitor())
-                Desktop::focusState()->rawMonitorFocus(INPUTMONITOR);
-        }
-
-        if (closing || (g_pointerGrabOverview && g_pointerGrabOverview != this) || (!g_pointerGrabOverview && INPUTOVERVIEW.get() != this))
-            return;
-
-        const bool     LEFT_HANDED           = ScrollOverview::Config::getLeftHanded();
-        const uint32_t MAIN_BUTTON           = LEFT_HANDED ? BTN_RIGHT : BTN_LEFT;
-        const bool     INVERT_DRAG_MODE      = ScrollOverview::Config::getDragMode() == 1;
-        const uint32_t SECONDARY_DRAG_BUTTON = BTN_MIDDLE;
-        const float    DRAGTHRESHOLD         = ScrollOverview::Config::getDragThreshold() * (pMonitor ? pMonitor->m_scale : 1.F);
-        const float    DRAGTHRESHOLDSQ       = std::pow(DRAGTHRESHOLD, 2);
-
-        lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-
-        updateTileHover();
-
-        // The dock's hover highlight is the only thing on screen that changes on
-        // a bare pointer move over an otherwise idle overview: no tile hover
-        // changes there, so nothing else asks for a frame and the highlight would
-        // simply never appear (measured -- the two captures differed by 490 px,
-        // all of them the cursor plane). A plain damageMonitor is not enough
-        // either: hkScheduleFrame throttles AQ_SCHEDULE_DAMAGE for as long as an
-        // overview is open, so the frame has to be asked for the overview's way.
-        if (ScrollOverview::Dock::damageIfChanged(pMonitor.lock())) {
-            damage();
-            requestInputFrame();
-        }
-
-        // X32. The dock's drag lives in the dock; the overview only forwards the
-        // motion, exactly as it forwards the button edges.
-        if (ScrollOverview::Dock::dragPending() && ScrollOverview::Dock::dragMove(pMonitor.lock(), lastMousePosLocal)) {
-            damage();
-            requestInputFrame();
-        }
-
-        // G12. The hold has to pass BEFORE the distance is even looked at.
-        if (g_resultDrag && !g_resultDrag->desktopId.empty()) {
-            if (!g_resultDrag->live) {
-                const float HELDMS = ScrollOverview::Config::animElapsedMs(g_resultDrag->startedAt);
-                if (HELDMS >= G12_HOLD_MS && g_resultDrag->start.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
-                    g_resultDrag->live = true;
-            }
-
-            if (g_resultDrag->live) {
-                const auto MON = pMonitor.lock();
-                ScrollOverview::Dock::setForeignInsert(ScrollOverview::Dock::showAppsContains(MON, lastMousePosLocal) ? -1 : ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal));
-                damage();
-                requestInputFrame();
-            }
-        }
-
-        const auto beginScrollingPanAtPoint = [&](const Vector2D& point) {
-            auto WORKSPACE = workspaceAtOverviewPoint(point);
-            if (!WORKSPACE) {
-                const auto WINDOW = windowAtOverviewPoint(point);
-                if (WINDOW)
-                    WORKSPACE = WINDOW->m_workspace;
-            }
-
-            if (!isWorkspaceScrolling(WORKSPACE))
-                return false;
-
-            beginScrollingPan(WORKSPACE);
-            scrollingPanLastMouseLocal = point;
-            updateScrollingPan();
-            return true;
-        };
-
-        // submapMouseClickPending IS a held button, exactly like dragPendingPrimary.
-        // Without it here, any pointer transit over a top layer (the bar -- and
-        // ydotool absolute moves slam through the corner every step) silently
-        // cleared the pending press and no submap drag could ever start.
-        if (!dragPendingPrimary && !submapMouseClickPending && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
-            submapMouseClickPending = false;
-            submapMouseClickButton  = 0;
-            return;
-        }
-
-        info.cancelled = true;
-        requestInputFrame();
-
-        // D6: a drag that STARTS on a strip mini picks up that window, not
-        // whatever main tile the band happens to float over. Same ordering as
-        // the drop path and E6's click path.
-        const auto beginDragAtStart = [this]() {
-            CBox       mini;
-            const auto STRIPWINDOW = windowAtStripPoint(dragStartMouseLocal, &mini);
-            if (STRIPWINDOW)
-                beginWindowDrag(STRIPWINDOW, &mini);
-            else
-                beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
-        };
-
-        if (submapMouseClickPending) {
-            const bool DRAGTHRESHOLDREACHED = dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ;
-
-            if (submapMouseClickButton == MAIN_BUTTON && !dragActiveWindow && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
-                // OVERVIEW_CPP_SPEC 13.5 X16. Do NOT clear the pending press here.
-                // finishWindowDragOrClick() turns a drag that ends near its start back
-                // into a click, but shouldRunDefaultClickAction() needs the pending
-                // press to know the click is ours -- clearing it here meant that
-                // recovery path fell through to "not our click" and the press vanished:
-                // no focus, no close, overview left open. The committed-drag path
-                // already calls clearSubmapMouseClickPending() after endWindowDrag().
-                // Safe to keep set: the !dragActiveWindow guard above stops a re-drag,
-                // and the SECONDARY branches below require a different button.
-
-                if (!INVERT_DRAG_MODE)
-                    beginDragAtStart();
-                else
-                    beginScrollingPanAtPoint(dragStartMouseLocal);
-            }
-
-            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && !INVERT_DRAG_MODE && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
-                if (beginScrollingPanAtPoint(dragStartMouseLocal)) {
-                    submapMouseClickPending = false;
-                    submapMouseClickButton  = 0;
-                }
-            }
-
-            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && INVERT_DRAG_MODE && !dragActiveWindow && DRAGTHRESHOLDREACHED) {
-                submapMouseClickPending = false;
-                submapMouseClickButton  = 0;
-                beginDragAtStart();
-            }
-        }
-
-        if (dragPendingPrimary) {
-            if (!dragActiveWindow && !scrollingPanPointerDown && dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ) {
-                if (!INVERT_DRAG_MODE) {
-                    beginDragAtStart();
-                } else
-                    beginScrollingPanAtPoint(dragStartMouseLocal);
-            }
-        }
-
-        if (dragActiveWindow)
-            updateWindowDrag();
-
-        if (resizePointerDown && resizePendingWindow) {
-            if (!resizeActiveWindow && resizeStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
-                beginWindowResize();
-
-            if (resizeActiveWindow)
-                updateWindowResize();
-        }
-
-        if (scrollingPanPointerDown)
-            updateScrollingPan();
-
-        //  highlightHoverDebug();
-    };
-
-    auto onTouchMove = [this](ITouch::SMotionEvent, Event::SCallbackInfo& info) {
-        if (closing || scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()).get() != this)
-            return;
-
-        info.cancelled    = true;
-        lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-        requestInputFrame();
-    };
-
-    auto onMouseButton = [this](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
-        const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
-        if (closing || (g_pointerGrabOverview && g_pointerGrabOverview != this) || (!g_pointerGrabOverview && INPUTOVERVIEW.get() != this))
-            return;
-
-        const bool RELEASESPOINTERGRAB = event.state == WL_POINTER_BUTTON_STATE_RELEASED;
-        auto       releasePointerGrab  = Hyprutils::Utils::CScopeGuard([this, RELEASESPOINTERGRAB] {
-            if (RELEASESPOINTERGRAB && g_pointerGrabOverview == this)
-                g_pointerGrabOverview = nullptr;
-        });
-
-        if (!dragPendingPrimary && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
-            submapMouseClickPending = false;
-            submapMouseClickButton  = 0;
-            return;
-        }
-
-        if (event.state == WL_POINTER_BUTTON_STATE_PRESSED)
-            g_pointerGrabOverview = this;
-
-        info.cancelled = true;
-        Config::Actions::state()->m_lastMouseCode = event.button;
-        Config::Actions::state()->m_lastCode      = 0;
-        Config::Actions::state()->m_timeLastMs    = event.timeMs;
-        // Without releasing buttons, mouse-triggered overview consumes release
-        // events
-        // before they reach Hyprland's input manager, leaving it stuck thinking
-        // buttons are still pressed, which locks focus.
-        g_pInputManager->releaseAllMouseButtons();
-
-        const bool     LEFT_HANDED        = ScrollOverview::Config::getLeftHanded();
-        const uint32_t MAIN_BUTTON        = LEFT_HANDED ? BTN_RIGHT : BTN_LEFT;
-        const uint32_t RESIZE_BUTTON      = LEFT_HANDED ? BTN_LEFT : BTN_RIGHT;
-        const bool     INVERT_DRAG_MODE   = ScrollOverview::Config::getDragMode() == 1;
-        const uint32_t SECONDARY_DRAG_BUTTON = BTN_MIDDLE;
-        const auto     clearSubmapMouseClickPending = [&]() {
-            submapMouseClickPending = false;
-            submapMouseClickButton  = 0;
-        };
-        const auto     beginSubmapMouseClickPending = [&](uint32_t button) {
-            if (!usesSubmapKeybinds || !isOverviewSubmapActive())
-                return false;
-
-            submapMouseClickPending = true;
-            submapMouseClickButton  = button;
-            dragStartMouseLocal     = lastMousePosLocal;
-            return true;
-        };
-        const auto     shouldRunDefaultClickAction = [&](uint32_t button) {
-            if (submapMouseClickPending && submapMouseClickButton == button) {
-                clearSubmapMouseClickPending();
-                // Only claim the click if the submap bind actually ran. Ignoring the
-                // return value swallowed the click whenever dispatch failed.
-                if (dispatchSubmapMouseClick(button))
-                    return false;
-            }
-
-            return !usesSubmapKeybinds || !isOverviewSubmapActive();
-        };
-        const auto     performClickAction = [&](uint32_t button) {
-            if (!shouldRunDefaultClickAction(button))
-                return;
-
-            performPrimaryClickAction();
-        };
-        const auto     finishWindowDragOrClick = [&](uint32_t button, bool allowClick) {
-            // OVERVIEW_CPP_SPEC 13.5 X16. This MUST exceed the drag threshold or the
-            // click branch below is unreachable: a drag only starts past
-            // getDragThreshold(), so an equal slop means every started drag also fails
-            // the click test. A real click that wobbles 11 px was therefore swallowed --
-            // the overview stayed open and nothing got focused. Measured on the repro:
-            // distSq 104.4 vs threshSq 100.0 -> drag, no focus, no close.
-            // ponytail: flat 3x band (~30 px). If drags start feeling sticky, the upgrade
-            // is a press-duration test, not a bigger number.
-            const float CLICK_MAX_DRAG_DISTANCE = ScrollOverview::Config::getDragThreshold() * 3.F * (pMonitor ? pMonitor->m_scale : 1.F);
-
-            if (dragActiveWindow) {
-                if (dragStartMouseLocal.distanceSq(lastMousePosLocal) < CLICK_MAX_DRAG_DISTANCE * CLICK_MAX_DRAG_DISTANCE) {
-                    clearDragPending();
-
-                    if (allowClick)
-                        performClickAction(button);
-                    else
-                        clearSubmapMouseClickPending();
-
-                    return;
-                }
-
-                endWindowDrag();
-                clearSubmapMouseClickPending();
-                return;
-            }
-
-            clearDragPending();
-
-            if (allowClick)
-                performClickAction(button);
-            else
-                clearSubmapMouseClickPending();
-        };
-        const auto     workspaceAtPanPoint = [&](const Vector2D& point) {
-            auto WORKSPACE = workspaceAtOverviewPoint(point);
-            if (WORKSPACE)
-                return WORKSPACE;
-
-            const auto WINDOW = windowAtOverviewPoint(point);
-            return WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{};
-        };
-
-        // OVERVIEW_CPP_SPEC §13.9 X28. The dock's right-click menu, ahead of
-        // every other pointer gesture: it floats over the main area exactly as
-        // the pill does, so the tile underneath would otherwise take the press,
-        // and once it is up it is modal until something dismisses it.
-        //
-        // Only PRESSES are acted on. The right-button RELEASE that follows the
-        // press which opened the menu lands outside the plate, and treating it
-        // as a click would dismiss the menu in the same gesture that opened it.
-        {
-            const auto DOCKMONITOR = pMonitor.lock();
-            const auto DOCKPOINT   = getOverviewMousePosLocal(DOCKMONITOR);
-            const bool PRESSED     = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
-
-            if (PRESSED && event.button == RESIZE_BUTTON && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
-                lastMousePosLocal = DOCKPOINT;
-                ScrollOverview::Dock::openMenu(DOCKMONITOR, DOCKPOINT);
-                return;
-            }
-
-            if (ScrollOverview::Dock::menuOpen()) {
-                if (PRESSED) {
-                    lastMousePosLocal = DOCKPOINT;
-                    if (!ScrollOverview::Dock::menuContains(DOCKMONITOR, DOCKPOINT))
-                        ScrollOverview::Dock::closeMenu();
-                    else
-                        ScrollOverview::Dock::menuClick(DOCKMONITOR, DOCKPOINT);
-                }
-                return;
-            }
-
-            // X33. The middle button over the pill, and it MUST be claimed here
-            // rather than further down: BTN_MIDDLE is also SECONDARY_DRAG_BUTTON,
-            // so without this a middle-click on an icon would start a workspace
-            // pan instead of launching. Both edges are eaten so the pan branch
-            // never sees the release either.
-            if (event.button == BTN_MIDDLE && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
-                lastMousePosLocal = DOCKPOINT;
-
-                if (PRESSED) {
-                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-                    ScrollOverview::Dock::click(DOCKMONITOR, DOCKPOINT, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), true);
-                }
-
-                return;
-            }
-        }
-
-        if (event.button == MAIN_BUTTON) {
-            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-
-            // X24 dock-side, in the overview. The pill is pinned here (§10
-            // clause 6) and floats OVER the main area, so without this the tile
-            // underneath takes the press and the click selects a window instead
-            // of minimizing one. Both edges are eaten: returning on the press
-            // alone would leave the release to performPrimaryClickAction().
-            //
-            // ...but NOT while a window drag is in flight. X26 drops a dragged
-            // window on this same pill, and eating that release stranded the
-            // drag: endWindowDrag() never ran, so its OVERDOCK branch never
-            // minimized anything and the proxy stayed on screen mid-gesture.
-            // A drag release belongs to the drag, whatever it is released over.
-            // G12. A result drag ends wherever it is released, and it is the
-            // FIRST thing the release is offered to: the dock branch below
-            // would otherwise read the drop as a click on the icon under it.
-            // On the pill it pins, on Show Applications it unpins, and anywhere
-            // else -- including on another result -- it is rejected outright,
-            // which is what "must not create a folder or reorder anything" is.
-            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && g_resultDrag) {
-                const auto DRAG = *g_resultDrag;
-                g_resultDrag.reset();
-                ScrollOverview::Dock::setForeignInsert(-1);
-                damage();
-                requestInputFrame();
-
-                if (DRAG.live && !DRAG.desktopId.empty()) {
-                    const auto MON = pMonitor.lock();
-                    // The button sits INSIDE the pill, so it has to be asked
-                    // first or the drop index would claim it.
-                    if (ScrollOverview::Dock::showAppsContains(MON, lastMousePosLocal))
-                        ScrollOverview::Dock::unpin(DRAG.desktopId);
-                    else if (const int INDEX = ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal); INDEX >= 0)
-                        ScrollOverview::Dock::pinAt(DRAG.desktopId, INDEX);
-                    return;
-                }
-
-                // X62. The hold never completed, so this was a CLICK. Released
-                // over the row it was pressed on, it activates exactly as Return
-                // on that selection would; released anywhere else it is the
-                // user changing their mind, which is a no-op. G12's hold stays
-                // the drag gate -- a click is simply what happens without it.
-                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW && ROW->index == DRAG.index && activateSearchResult(ROW->index))
-                    close();
-
-                return;
-            }
-
-            // Z2. The hover panel, ahead of the pill for the same reason the
-            // desktop hook asks first: it floats above the pill, so pillContains
-            // is false over a preview and the press would reach the tile below.
-            // Behind the drag guard, though -- a window released over the panel
-            // belongs to the drag, exactly as the pill branch has it.
-            if (!dragActiveWindow && ScrollOverview::Dock::panelClick(pMonitor.lock(), lastMousePosLocal, event.state == WL_POINTER_BUTTON_STATE_RELEASED))
-                return;
-
-            if (!dragActiveWindow && ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
-                // X32. The press is no longer the click. It only remembers what
-                // is under it; motion past the threshold turns that into a
-                // reorder, and the RELEASE decides which of the two gestures
-                // happened. Both edges are still eaten either way -- the pill is
-                // not a window and must not leak clicks through to the tile
-                // underneath.
-                if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                    ScrollOverview::Dock::dragBegin(pMonitor.lock(), lastMousePosLocal);
-                    return;
-                }
-
-                if (!ScrollOverview::Dock::dragEnd(pMonitor.lock(), lastMousePosLocal)) {
-                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-                    // Y4. CTRL cycles; a plain click minimizes the whole app.
-                    ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), false,
-                                                KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL));
-                }
-                return;
-            }
-
-            // X32. A dock drag released OFF the pill is a cancel. The press that
-            // started it belonged to the pill, so this release must not also be
-            // read as a click on whatever the pointer has since wandered over.
-            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && ScrollOverview::Dock::dragPending()) {
-                ScrollOverview::Dock::dragCancel();
-                damage();
-                requestInputFrame();
-                return;
-            }
-
-            // G12. A press over a result belongs to the panel, which floats over
-            // the grid exactly as the pill does. Nothing happens yet: only the
-            // hold makes it a drag, and a plain click over a row is still the
-            // panel's to define.
-            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
-                    g_resultDrag =
-                        SResultDrag{.desktopId = ROW->desktopId, .icon = ROW->icon, .start = lastMousePosLocal, .startedAt = Time::steadyNow(), .index = ROW->index};
-                    return;
-                }
-            }
-
-            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                // The close button eats the press outright -- no drag, no select.
-                // User request 2026-08-02: an X on the top right of the hovered
-                // tile. Drop the hover first so the button cannot be clicked
-                // twice while the window takes its time going away.
-                if (const auto HOVERED = TileChrome::hovered(); HOVERED && tileCloseButtonBox(HOVERED).containsPoint(lastMousePosLocal)) {
-                    TileChrome::setHovered(PHLWINDOW{});
-                    HOVERED->sendClose();
-                    return;
-                }
-
-                // Before the submap check: that branch returns, and the press
-                // shrink has to show whether or not a submap is active.
-                TileChrome::setPressed(windowAtOverviewPoint(lastMousePosLocal), true);
-
-                if (beginSubmapMouseClickPending(event.button))
-                    return;
-
-                dragPendingPrimary  = true;
-                dragStartMouseLocal = lastMousePosLocal;
-                return;
-            }
-
-            TileChrome::setPressed(PHLWINDOW{}, false);
-
-            const bool WASPANNING = scrollingPanPointerDown;
-            if (scrollingPanPointerDown)
-                endScrollingPan();
-
-            finishWindowDragOrClick(event.button, !WASPANNING);
-            return;
-        }
-
-        if (event.button == SECONDARY_DRAG_BUTTON && !INVERT_DRAG_MODE) {
-            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-
-            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                if (beginSubmapMouseClickPending(event.button))
-                    return;
-
-                const auto WORKSPACE = workspaceAtPanPoint(lastMousePosLocal);
-
-                if (!isWorkspaceScrolling(WORKSPACE)) {
-                    scrollingPanPointerDown = false;
-                    return;
-                }
-
-                beginScrollingPan(WORKSPACE);
-                return;
-            }
-
-            if (submapMouseClickPending && submapMouseClickButton == event.button) {
-                const bool WASPANNING = scrollingPanPointerDown;
-                if (scrollingPanPointerDown)
-                    endScrollingPan();
-
-                if (!WASPANNING)
-                    shouldRunDefaultClickAction(event.button);
-                else
-                    clearSubmapMouseClickPending();
-
-                return;
-            }
-
-            if (scrollingPanPointerDown)
-                endScrollingPan();
-            return;
-        }
-
-        if (event.button == RESIZE_BUTTON) {
-            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-
-            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                beginSubmapMouseClickPending(event.button);
-
-                size_t resizeWorkspace = 0;
-                const auto window      = windowAtOverviewCursor(&resizeWorkspace);
-                if (!shouldShowOverviewWindow(window) || shouldShowPinnedFloatingOverviewWindow(window)) {
-                    resizePointerDown = false;
-                    resizePendingWindow.reset();
-                    return;
-                }
-
-                const auto MONITOR = pMonitor.lock();
-                if (!MONITOR)
-                    return;
-
-                const auto WORKSPACEOFFSET =
-                    workspaceOverviewOffset(resizeWorkspace, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
-                const auto WINDOWBOX = getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
-
-                resizePointerDown    = true;
-                resizeStartMouseLocal = lastMousePosLocal;
-                resizePendingWindow   = window;
-                resizeWorkspaceIdx    = resizeWorkspace;
-                resizeCorner          = Layout::cornerFromBox(WINDOWBOX, lastMousePosLocal);
-                return;
-            }
-
-            if (resizeActiveWindow) {
-                endWindowResize();
-                clearSubmapMouseClickPending();
-                return;
-            }
-
-            resizePointerDown = false;
-            resizePendingWindow.reset();
-
-            shouldRunDefaultClickAction(event.button);
-            return;
-        }
-
-        if (event.button != SECONDARY_DRAG_BUTTON || !INVERT_DRAG_MODE)
-            return;
-
-        lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-
-        if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-            if (beginSubmapMouseClickPending(event.button))
-                return;
-
-            dragStartMouseLocal = lastMousePosLocal;
-            beginWindowDrag(windowAtOverviewCursor());
-            return;
-        }
-
-        finishWindowDragOrClick(event.button, true);
-    };
-
-    auto onCursorSelect = [this](auto, Event::SCallbackInfo& info) {
-        if (closing || scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()).get() != this)
-            return;
-
-        if (isPointerOnTopLayer(pMonitor.lock()))
-            return;
-
-        info.cancelled = true;
-
-        selectWindowAtOverviewCursor();
-
-        close();
-    };
-
-    auto onMouseAxis = [this](IPointer::SAxisEvent e, Event::SCallbackInfo& info) {
-        if (closing || scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()).get() != this)
-            return;
-
-        info.cancelled = true;
-
-        const auto ACTION = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL ? ScrollOverview::Config::getHorizontalScrollAction(layout) :
-                                                                          ScrollOverview::Config::getVerticalScrollAction(layout);
-
-        // mouse wheel: discrete stepping, throttled by scroll_event_delay so one notch is one step
-        if (e.source == WL_POINTER_AXIS_SOURCE_WHEEL) {
-            if (e.delta == 0.0)
-                return;
-            trackpadScrollAccum        = 0.0;
-            trackpadWorkspaceFollowing = false;
-            trackpadTapeFollowing      = false;
-            if (!scrollStepAllowed(e.timeMs))
-                return;
-
-            if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE)
-                moveViewportWorkspace(e.delta > 0);
-            else
-                moveScrollingColumnSelection(e.delta > 0);
-
-            return;
-        }
-
-        if (images.empty() || viewportCurrentWorkspace >= images.size())
-            return;
-
-        // scroll workspace or layout with 1:1 animation (snaping on release)
-        if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE)
-            trackpadSwipeWorkspace(e.delta);
-        else
-            trackpadSwipeLayout(images[viewportCurrentWorkspace]->pWorkspace, e.delta);
-    };
-
-    auto onWindowOpen = [this](PHLWINDOW) {
-        if (closing)
-            return;
-
-        rebuildPending = true;
-        damage();
-    };
-
-    auto onWindowClose = [this](PHLWINDOW) {
-        if (closing)
-            return;
-
-        rebuildPending = true;
-        damage();
-    };
-
-    auto onWindowMove = [this](PHLWINDOW, PHLWORKSPACE) {
-        if (closing)
-            return;
-
-        rebuildPending = true;
-        damage();
-    };
-
-    auto onWindowActive = [this](PHLWINDOW window, Desktop::eFocusReason) {
-        if (closing)
-            return;
-
-        g_pInputManager->unconstrainMouse();
-
-        const auto overviewWindow = getOverviewWindowToShow(window);
-        const auto fullscreenWindow = overviewWindow && overviewWindow->m_workspace ? getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(overviewWindow->m_workspace)) : PHLWINDOW{};
-
-        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == overviewWindow->m_workspace && overviewWindow->m_isFloating)
-            emitFullscreenVisibilityState(fullscreenWindow, true);
-        else
-            emitFullscreenVisibilityState(overviewWindow, true);
-
-        if (shouldShowOverviewWindow(overviewWindow) && overviewWindow->m_monitor == pMonitor) {
-            rebuildPending = true;
-            closeOnWindow  = overviewWindow;
-            rememberSelection(overviewWindow);
-
-            for (size_t i = 0; i < images.size(); ++i) {
-                if (images[i]->pWorkspace == overviewWindow->m_workspace) {
-                    viewportCurrentWorkspace = i;
-                    break;
-                }
-            }
-        }
-
-        damage();
-    };
-
-    auto onWindowFullscreen = [this](PHLWINDOW window) {
-        if (closing || emittingFullscreenVisibilityState)
-            return;
-
-        window = getOverviewWindowToShow(window);
-        if (!window || window->m_monitor != pMonitor || !Fullscreen::controller()->isFullscreen(window))
-            return;
-
-        emitFullscreenVisibilityState(window, true);
-    };
-
-    auto onWorkspaceLifecycle = [this](auto) {
-        if (closing)
-            return;
-
-        rebuildPending = true;
-        damage();
-    };
-
-    auto onKeyboardKey = [this](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
-        if (closing || event.state != WL_KEYBOARD_KEY_STATE_PRESSED || activeScrollOverview().get() != this)
-            return;
-
-        if (isTopLayerFocused(pMonitor.lock()))
-            return;
-
-        const auto KEYSYM = getOverviewKeysym(event);
-        const auto MODS   = g_pInputManager->getModsFromAllKBs() & ~(HL_MODIFIER_CAPS | HL_MODIFIER_MOD2);
-
-        if ((KEYSYM == XKB_KEY_Return || KEYSYM == XKB_KEY_KP_Enter || KEYSYM == XKB_KEY_Left || KEYSYM == XKB_KEY_KP_Left || KEYSYM == XKB_KEY_Right ||
-             KEYSYM == XKB_KEY_KP_Right || KEYSYM == XKB_KEY_Up || KEYSYM == XKB_KEY_KP_Up || KEYSYM == XKB_KEY_Down || KEYSYM == XKB_KEY_KP_Down) &&
-            MODS != 0)
-            return;
-
-        switch (KEYSYM) {
-            case XKB_KEY_Left:
-            case XKB_KEY_KP_Left:
-                moveSelection("left");
-                break;
-            case XKB_KEY_Right:
-            case XKB_KEY_KP_Right:
-                moveSelection("right");
-                break;
-            case XKB_KEY_Up:
-            case XKB_KEY_KP_Up:
-                moveSelection("up");
-                break;
-            case XKB_KEY_Down:
-            case XKB_KEY_KP_Down:
-                moveSelection("down");
-                break;
-            case XKB_KEY_Tab:
-            case XKB_KEY_ISO_Left_Tab: {
-                const auto RESULTS = overviewSearchRows();
-                if (RESULTS.empty())
-                    return;
-
-                // -1 is the grid. Tab walks down the results and back out to it,
-                // so the grid is never unreachable by keyboard.
-                const int COUNT = sc<int>(RESULTS.size());
-                if (KEYSYM == XKB_KEY_ISO_Left_Tab)
-                    g_overviewAppSelection = g_overviewAppSelection <= -1 ? COUNT - 1 : g_overviewAppSelection - 1;
-                else
-                    g_overviewAppSelection = g_overviewAppSelection >= COUNT - 1 ? -1 : g_overviewAppSelection + 1;
-
-                damage();
-                break;
-            }
-            case XKB_KEY_Return:
-            case XKB_KEY_KP_Enter: {
-                const auto RESULTS = overviewSearchRows();
-
-                // X61. Return means "activate what is selected", and WHAT that is
-                // depends on the zone. A desktop needs nothing done to it:
-                // arrowing onto a strip cell already switched the viewport, so
-                // closing simply lands there. A tile needs nothing either --
-                // closeOnWindow is exactly what close() focuses. Only a result
-                // has to be run, which is why this is the only branch here.
-                //
-                // The fallback is unchanged: with no explicit selection and no
-                // window matching the query, Return takes the top result. It is
-                // suppressed in the Desktop zone, where the user has said where
-                // they want to go and launching an app instead would be a
-                // surprise.
-                int launchIdx = -1;
-                if (g_overviewNavZone == EOverviewNavZone::Result && g_overviewAppSelection >= 0 && g_overviewAppSelection < sc<int>(RESULTS.size()))
-                    launchIdx = g_overviewAppSelection;
-                else if (g_overviewNavZone != EOverviewNavZone::Desktop && !RESULTS.empty() && matchingWindowCount() == 0)
-                    launchIdx = 0;
-
-                activateSearchResult(launchIdx);
-                close();
-                break;
-            }
-            default: return;
-        }
-
-        info.cancelled = true;
-    };
-
-    mouseMoveHook = Event::bus()->m_events.input.mouse.move.listen(onMouseMove);
-    touchMoveHook = Event::bus()->m_events.input.touch.motion.listen(onTouchMove);
-    mouseAxisHook = Event::bus()->m_events.input.mouse.axis.listen(onMouseAxis);
-
-    mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen(onMouseButton);
-    touchDownHook   = Event::bus()->m_events.input.touch.down.listen(onCursorSelect);
-
-    windowOpenHook      = Event::bus()->m_events.window.open.listen(onWindowOpen);
-    windowCloseHook     = Event::bus()->m_events.window.close.listen(onWindowClose);
-    windowMoveHook      = Event::bus()->m_events.window.moveToWorkspace.listen(onWindowMove);
-    windowActiveHook    = Event::bus()->m_events.window.active.listen(onWindowActive);
-    windowFullscreenHook = Event::bus()->m_events.window.fullscreen.listen(onWindowFullscreen);
-    workspaceCreatedHook = Event::bus()->m_events.workspace.created.listen(onWorkspaceLifecycle);
-    workspaceRemovedHook = Event::bus()->m_events.workspace.removed.listen(onWorkspaceLifecycle);
+    mouseMoveHook = Event::bus()->m_events.input.mouse.move.listen([this](Vector2D a0, Event::SCallbackInfo& a1) { onMouseMove(a0, a1); });
+    touchMoveHook = Event::bus()->m_events.input.touch.motion.listen([this](ITouch::SMotionEvent a0, Event::SCallbackInfo& a1) { onTouchMove(a0, a1); });
+    mouseAxisHook = Event::bus()->m_events.input.mouse.axis.listen([this](IPointer::SAxisEvent a0, Event::SCallbackInfo& a1) { onMouseAxis(a0, a1); });
+
+    mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen([this](IPointer::SButtonEvent a0, Event::SCallbackInfo& a1) { onMouseButton(a0, a1); });
+    touchDownHook   = Event::bus()->m_events.input.touch.down.listen([this](ITouch::SDownEvent a0, Event::SCallbackInfo& a1) { onCursorSelect(a0, a1); });
+
+    windowOpenHook      = Event::bus()->m_events.window.open.listen([this](PHLWINDOW a0) { onWindowOpen(a0); });
+    windowCloseHook     = Event::bus()->m_events.window.close.listen([this](PHLWINDOW a0) { onWindowClose(a0); });
+    windowMoveHook      = Event::bus()->m_events.window.moveToWorkspace.listen([this](PHLWINDOW a0, PHLWORKSPACE a1) { onWindowMove(a0, a1); });
+    windowActiveHook    = Event::bus()->m_events.window.active.listen([this](PHLWINDOW a0, Desktop::eFocusReason a1) { onWindowActive(a0, a1); });
+    windowFullscreenHook = Event::bus()->m_events.window.fullscreen.listen([this](PHLWINDOW a0) { onWindowFullscreen(a0); });
+    workspaceCreatedHook = Event::bus()->m_events.workspace.created.listen([this](PHLWORKSPACEREF a0) { onWorkspaceLifecycle(a0); });
+    workspaceRemovedHook = Event::bus()->m_events.workspace.removed.listen([this](PHLWORKSPACEREF a0) { onWorkspaceLifecycle(a0); });
     activateSubmapIfConfigured();
     // The submap only owns the KEYBOARD if it actually binds keys. Gating this
     // on the submap merely existing left arrows, Tab and Return with no handler
     // at all in a rice whose submap exists purely for the mouse P0 fix (a click
     // with SUPER still held); measured 2026-08-01, the arrow keys were dead.
     if (!hasOverviewSubmapKeyBinds())
-        keyboardKeyHook = Event::bus()->m_events.input.keyboard.key.listen(onKeyboardKey);
+        keyboardKeyHook = Event::bus()->m_events.input.keyboard.key.listen([this](IKeyboard::SKeyEvent a0, Event::SCallbackInfo& a1) { onKeyboardKey(a0, a1); });
 
     Pointer::Cursor::overrideController->setOverride("left_ptr", Pointer::Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
 
@@ -8217,3 +7459,771 @@ void CScrollOverview::onSwipeEnd() {
     (*scale)    = ScrollOverview::Config::getScale();
     m_isSwiping = false;
 }
+
+// ---------------------------------------------------------------------------
+// Event handlers. These were inline [this] lambdas inside the constructor,
+// which is why it was 958 lines. Moved verbatim -- the [this]-only capture
+// list is the proof none of them could reference a constructor local.
+// ponytail: same translation unit, because they use 14 file-static helpers
+// (getOverviewKeysym, overviewSearchRows, ...). To move them to their own
+// file, un-static those into an internal header first.
+// ---------------------------------------------------------------------------
+
+void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
+        const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
+        if (INPUTOVERVIEW) {
+            const auto INPUTMONITOR = INPUTOVERVIEW->pMonitor.lock();
+            if (INPUTMONITOR && INPUTMONITOR != Desktop::focusState()->monitor())
+                Desktop::focusState()->rawMonitorFocus(INPUTMONITOR);
+        }
+
+        if (closing || (g_pointerGrabOverview && g_pointerGrabOverview != this) || (!g_pointerGrabOverview && INPUTOVERVIEW.get() != this))
+            return;
+
+        const bool     LEFT_HANDED           = ScrollOverview::Config::getLeftHanded();
+        const uint32_t MAIN_BUTTON           = LEFT_HANDED ? BTN_RIGHT : BTN_LEFT;
+        const bool     INVERT_DRAG_MODE      = ScrollOverview::Config::getDragMode() == 1;
+        const uint32_t SECONDARY_DRAG_BUTTON = BTN_MIDDLE;
+        const float    DRAGTHRESHOLD         = ScrollOverview::Config::getDragThreshold() * (pMonitor ? pMonitor->m_scale : 1.F);
+        const float    DRAGTHRESHOLDSQ       = std::pow(DRAGTHRESHOLD, 2);
+
+        lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+        updateTileHover();
+
+        // The dock's hover highlight is the only thing on screen that changes on
+        // a bare pointer move over an otherwise idle overview: no tile hover
+        // changes there, so nothing else asks for a frame and the highlight would
+        // simply never appear (measured -- the two captures differed by 490 px,
+        // all of them the cursor plane). A plain damageMonitor is not enough
+        // either: hkScheduleFrame throttles AQ_SCHEDULE_DAMAGE for as long as an
+        // overview is open, so the frame has to be asked for the overview's way.
+        if (ScrollOverview::Dock::damageIfChanged(pMonitor.lock())) {
+            damage();
+            requestInputFrame();
+        }
+
+        // X32. The dock's drag lives in the dock; the overview only forwards the
+        // motion, exactly as it forwards the button edges.
+        if (ScrollOverview::Dock::dragPending() && ScrollOverview::Dock::dragMove(pMonitor.lock(), lastMousePosLocal)) {
+            damage();
+            requestInputFrame();
+        }
+
+        // G12. The hold has to pass BEFORE the distance is even looked at.
+        if (g_resultDrag && !g_resultDrag->desktopId.empty()) {
+            if (!g_resultDrag->live) {
+                const float HELDMS = ScrollOverview::Config::animElapsedMs(g_resultDrag->startedAt);
+                if (HELDMS >= G12_HOLD_MS && g_resultDrag->start.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
+                    g_resultDrag->live = true;
+            }
+
+            if (g_resultDrag->live) {
+                const auto MON = pMonitor.lock();
+                ScrollOverview::Dock::setForeignInsert(ScrollOverview::Dock::showAppsContains(MON, lastMousePosLocal) ? -1 : ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal));
+                damage();
+                requestInputFrame();
+            }
+        }
+
+        const auto beginScrollingPanAtPoint = [&](const Vector2D& point) {
+            auto WORKSPACE = workspaceAtOverviewPoint(point);
+            if (!WORKSPACE) {
+                const auto WINDOW = windowAtOverviewPoint(point);
+                if (WINDOW)
+                    WORKSPACE = WINDOW->m_workspace;
+            }
+
+            if (!isWorkspaceScrolling(WORKSPACE))
+                return false;
+
+            beginScrollingPan(WORKSPACE);
+            scrollingPanLastMouseLocal = point;
+            updateScrollingPan();
+            return true;
+        };
+
+        // submapMouseClickPending IS a held button, exactly like dragPendingPrimary.
+        // Without it here, any pointer transit over a top layer (the bar -- and
+        // ydotool absolute moves slam through the corner every step) silently
+        // cleared the pending press and no submap drag could ever start.
+        if (!dragPendingPrimary && !submapMouseClickPending && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
+            submapMouseClickPending = false;
+            submapMouseClickButton  = 0;
+            return;
+        }
+
+        info.cancelled = true;
+        requestInputFrame();
+
+        // D6: a drag that STARTS on a strip mini picks up that window, not
+        // whatever main tile the band happens to float over. Same ordering as
+        // the drop path and E6's click path.
+        const auto beginDragAtStart = [this]() {
+            CBox       mini;
+            const auto STRIPWINDOW = windowAtStripPoint(dragStartMouseLocal, &mini);
+            if (STRIPWINDOW)
+                beginWindowDrag(STRIPWINDOW, &mini);
+            else
+                beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
+        };
+
+        if (submapMouseClickPending) {
+            const bool DRAGTHRESHOLDREACHED = dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ;
+
+            if (submapMouseClickButton == MAIN_BUTTON && !dragActiveWindow && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
+                // OVERVIEW_CPP_SPEC 13.5 X16. Do NOT clear the pending press here.
+                // finishWindowDragOrClick() turns a drag that ends near its start back
+                // into a click, but shouldRunDefaultClickAction() needs the pending
+                // press to know the click is ours -- clearing it here meant that
+                // recovery path fell through to "not our click" and the press vanished:
+                // no focus, no close, overview left open. The committed-drag path
+                // already calls clearSubmapMouseClickPending() after endWindowDrag().
+                // Safe to keep set: the !dragActiveWindow guard above stops a re-drag,
+                // and the SECONDARY branches below require a different button.
+
+                if (!INVERT_DRAG_MODE)
+                    beginDragAtStart();
+                else
+                    beginScrollingPanAtPoint(dragStartMouseLocal);
+            }
+
+            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && !INVERT_DRAG_MODE && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
+                if (beginScrollingPanAtPoint(dragStartMouseLocal)) {
+                    submapMouseClickPending = false;
+                    submapMouseClickButton  = 0;
+                }
+            }
+
+            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && INVERT_DRAG_MODE && !dragActiveWindow && DRAGTHRESHOLDREACHED) {
+                submapMouseClickPending = false;
+                submapMouseClickButton  = 0;
+                beginDragAtStart();
+            }
+        }
+
+        if (dragPendingPrimary) {
+            if (!dragActiveWindow && !scrollingPanPointerDown && dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ) {
+                if (!INVERT_DRAG_MODE) {
+                    beginDragAtStart();
+                } else
+                    beginScrollingPanAtPoint(dragStartMouseLocal);
+            }
+        }
+
+        if (dragActiveWindow)
+            updateWindowDrag();
+
+        if (resizePointerDown && resizePendingWindow) {
+            if (!resizeActiveWindow && resizeStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
+                beginWindowResize();
+
+            if (resizeActiveWindow)
+                updateWindowResize();
+        }
+
+        if (scrollingPanPointerDown)
+            updateScrollingPan();
+
+        //  highlightHoverDebug();
+}
+
+void CScrollOverview::onTouchMove(ITouch::SMotionEvent, Event::SCallbackInfo& info) {
+        if (closing || scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()).get() != this)
+            return;
+
+        info.cancelled    = true;
+        lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+        requestInputFrame();
+}
+
+void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
+        const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
+        if (closing || (g_pointerGrabOverview && g_pointerGrabOverview != this) || (!g_pointerGrabOverview && INPUTOVERVIEW.get() != this))
+            return;
+
+        const bool RELEASESPOINTERGRAB = event.state == WL_POINTER_BUTTON_STATE_RELEASED;
+        auto       releasePointerGrab  = Hyprutils::Utils::CScopeGuard([this, RELEASESPOINTERGRAB] {
+            if (RELEASESPOINTERGRAB && g_pointerGrabOverview == this)
+                g_pointerGrabOverview = nullptr;
+        });
+
+        if (!dragPendingPrimary && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
+            submapMouseClickPending = false;
+            submapMouseClickButton  = 0;
+            return;
+        }
+
+        if (event.state == WL_POINTER_BUTTON_STATE_PRESSED)
+            g_pointerGrabOverview = this;
+
+        info.cancelled = true;
+        Config::Actions::state()->m_lastMouseCode = event.button;
+        Config::Actions::state()->m_lastCode      = 0;
+        Config::Actions::state()->m_timeLastMs    = event.timeMs;
+        // Without releasing buttons, mouse-triggered overview consumes release
+        // events
+        // before they reach Hyprland's input manager, leaving it stuck thinking
+        // buttons are still pressed, which locks focus.
+        g_pInputManager->releaseAllMouseButtons();
+
+        const bool     LEFT_HANDED        = ScrollOverview::Config::getLeftHanded();
+        const uint32_t MAIN_BUTTON        = LEFT_HANDED ? BTN_RIGHT : BTN_LEFT;
+        const uint32_t RESIZE_BUTTON      = LEFT_HANDED ? BTN_LEFT : BTN_RIGHT;
+        const bool     INVERT_DRAG_MODE   = ScrollOverview::Config::getDragMode() == 1;
+        const uint32_t SECONDARY_DRAG_BUTTON = BTN_MIDDLE;
+        const auto     clearSubmapMouseClickPending = [&]() {
+            submapMouseClickPending = false;
+            submapMouseClickButton  = 0;
+        };
+        const auto     beginSubmapMouseClickPending = [&](uint32_t button) {
+            if (!usesSubmapKeybinds || !isOverviewSubmapActive())
+                return false;
+
+            submapMouseClickPending = true;
+            submapMouseClickButton  = button;
+            dragStartMouseLocal     = lastMousePosLocal;
+            return true;
+        };
+        const auto     shouldRunDefaultClickAction = [&](uint32_t button) {
+            if (submapMouseClickPending && submapMouseClickButton == button) {
+                clearSubmapMouseClickPending();
+                // Only claim the click if the submap bind actually ran. Ignoring the
+                // return value swallowed the click whenever dispatch failed.
+                if (dispatchSubmapMouseClick(button))
+                    return false;
+            }
+
+            return !usesSubmapKeybinds || !isOverviewSubmapActive();
+        };
+        const auto     performClickAction = [&](uint32_t button) {
+            if (!shouldRunDefaultClickAction(button))
+                return;
+
+            performPrimaryClickAction();
+        };
+        const auto     finishWindowDragOrClick = [&](uint32_t button, bool allowClick) {
+            // OVERVIEW_CPP_SPEC 13.5 X16. This MUST exceed the drag threshold or the
+            // click branch below is unreachable: a drag only starts past
+            // getDragThreshold(), so an equal slop means every started drag also fails
+            // the click test. A real click that wobbles 11 px was therefore swallowed --
+            // the overview stayed open and nothing got focused. Measured on the repro:
+            // distSq 104.4 vs threshSq 100.0 -> drag, no focus, no close.
+            // ponytail: flat 3x band (~30 px). If drags start feeling sticky, the upgrade
+            // is a press-duration test, not a bigger number.
+            const float CLICK_MAX_DRAG_DISTANCE = ScrollOverview::Config::getDragThreshold() * 3.F * (pMonitor ? pMonitor->m_scale : 1.F);
+
+            if (dragActiveWindow) {
+                if (dragStartMouseLocal.distanceSq(lastMousePosLocal) < CLICK_MAX_DRAG_DISTANCE * CLICK_MAX_DRAG_DISTANCE) {
+                    clearDragPending();
+
+                    if (allowClick)
+                        performClickAction(button);
+                    else
+                        clearSubmapMouseClickPending();
+
+                    return;
+                }
+
+                endWindowDrag();
+                clearSubmapMouseClickPending();
+                return;
+            }
+
+            clearDragPending();
+
+            if (allowClick)
+                performClickAction(button);
+            else
+                clearSubmapMouseClickPending();
+        };
+        const auto     workspaceAtPanPoint = [&](const Vector2D& point) {
+            auto WORKSPACE = workspaceAtOverviewPoint(point);
+            if (WORKSPACE)
+                return WORKSPACE;
+
+            const auto WINDOW = windowAtOverviewPoint(point);
+            return WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{};
+        };
+
+        // OVERVIEW_CPP_SPEC §13.9 X28. The dock's right-click menu, ahead of
+        // every other pointer gesture: it floats over the main area exactly as
+        // the pill does, so the tile underneath would otherwise take the press,
+        // and once it is up it is modal until something dismisses it.
+        //
+        // Only PRESSES are acted on. The right-button RELEASE that follows the
+        // press which opened the menu lands outside the plate, and treating it
+        // as a click would dismiss the menu in the same gesture that opened it.
+        {
+            const auto DOCKMONITOR = pMonitor.lock();
+            const auto DOCKPOINT   = getOverviewMousePosLocal(DOCKMONITOR);
+            const bool PRESSED     = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
+
+            if (PRESSED && event.button == RESIZE_BUTTON && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
+                lastMousePosLocal = DOCKPOINT;
+                ScrollOverview::Dock::openMenu(DOCKMONITOR, DOCKPOINT);
+                return;
+            }
+
+            if (ScrollOverview::Dock::menuOpen()) {
+                if (PRESSED) {
+                    lastMousePosLocal = DOCKPOINT;
+                    if (!ScrollOverview::Dock::menuContains(DOCKMONITOR, DOCKPOINT))
+                        ScrollOverview::Dock::closeMenu();
+                    else
+                        ScrollOverview::Dock::menuClick(DOCKMONITOR, DOCKPOINT);
+                }
+                return;
+            }
+
+            // X33. The middle button over the pill, and it MUST be claimed here
+            // rather than further down: BTN_MIDDLE is also SECONDARY_DRAG_BUTTON,
+            // so without this a middle-click on an icon would start a workspace
+            // pan instead of launching. Both edges are eaten so the pan branch
+            // never sees the release either.
+            if (event.button == BTN_MIDDLE && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
+                lastMousePosLocal = DOCKPOINT;
+
+                if (PRESSED) {
+                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+                    ScrollOverview::Dock::click(DOCKMONITOR, DOCKPOINT, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), true);
+                }
+
+                return;
+            }
+        }
+
+        if (event.button == MAIN_BUTTON) {
+            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+            // X24 dock-side, in the overview. The pill is pinned here (§10
+            // clause 6) and floats OVER the main area, so without this the tile
+            // underneath takes the press and the click selects a window instead
+            // of minimizing one. Both edges are eaten: returning on the press
+            // alone would leave the release to performPrimaryClickAction().
+            //
+            // ...but NOT while a window drag is in flight. X26 drops a dragged
+            // window on this same pill, and eating that release stranded the
+            // drag: endWindowDrag() never ran, so its OVERDOCK branch never
+            // minimized anything and the proxy stayed on screen mid-gesture.
+            // A drag release belongs to the drag, whatever it is released over.
+            // G12. A result drag ends wherever it is released, and it is the
+            // FIRST thing the release is offered to: the dock branch below
+            // would otherwise read the drop as a click on the icon under it.
+            // On the pill it pins, on Show Applications it unpins, and anywhere
+            // else -- including on another result -- it is rejected outright,
+            // which is what "must not create a folder or reorder anything" is.
+            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && g_resultDrag) {
+                const auto DRAG = *g_resultDrag;
+                g_resultDrag.reset();
+                ScrollOverview::Dock::setForeignInsert(-1);
+                damage();
+                requestInputFrame();
+
+                if (DRAG.live && !DRAG.desktopId.empty()) {
+                    const auto MON = pMonitor.lock();
+                    // The button sits INSIDE the pill, so it has to be asked
+                    // first or the drop index would claim it.
+                    if (ScrollOverview::Dock::showAppsContains(MON, lastMousePosLocal))
+                        ScrollOverview::Dock::unpin(DRAG.desktopId);
+                    else if (const int INDEX = ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal); INDEX >= 0)
+                        ScrollOverview::Dock::pinAt(DRAG.desktopId, INDEX);
+                    return;
+                }
+
+                // X62. The hold never completed, so this was a CLICK. Released
+                // over the row it was pressed on, it activates exactly as Return
+                // on that selection would; released anywhere else it is the
+                // user changing their mind, which is a no-op. G12's hold stays
+                // the drag gate -- a click is simply what happens without it.
+                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW && ROW->index == DRAG.index && activateSearchResult(ROW->index))
+                    close();
+
+                return;
+            }
+
+            // Z2. The hover panel, ahead of the pill for the same reason the
+            // desktop hook asks first: it floats above the pill, so pillContains
+            // is false over a preview and the press would reach the tile below.
+            // Behind the drag guard, though -- a window released over the panel
+            // belongs to the drag, exactly as the pill branch has it.
+            if (!dragActiveWindow && ScrollOverview::Dock::panelClick(pMonitor.lock(), lastMousePosLocal, event.state == WL_POINTER_BUTTON_STATE_RELEASED))
+                return;
+
+            if (!dragActiveWindow && ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
+                // X32. The press is no longer the click. It only remembers what
+                // is under it; motion past the threshold turns that into a
+                // reorder, and the RELEASE decides which of the two gestures
+                // happened. Both edges are still eaten either way -- the pill is
+                // not a window and must not leak clicks through to the tile
+                // underneath.
+                if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                    ScrollOverview::Dock::dragBegin(pMonitor.lock(), lastMousePosLocal);
+                    return;
+                }
+
+                if (!ScrollOverview::Dock::dragEnd(pMonitor.lock(), lastMousePosLocal)) {
+                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+                    // Y4. CTRL cycles; a plain click minimizes the whole app.
+                    ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), false,
+                                                KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL));
+                }
+                return;
+            }
+
+            // X32. A dock drag released OFF the pill is a cancel. The press that
+            // started it belonged to the pill, so this release must not also be
+            // read as a click on whatever the pointer has since wandered over.
+            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && ScrollOverview::Dock::dragPending()) {
+                ScrollOverview::Dock::dragCancel();
+                damage();
+                requestInputFrame();
+                return;
+            }
+
+            // G12. A press over a result belongs to the panel, which floats over
+            // the grid exactly as the pill does. Nothing happens yet: only the
+            // hold makes it a drag, and a plain click over a row is still the
+            // panel's to define.
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
+                    g_resultDrag =
+                        SResultDrag{.desktopId = ROW->desktopId, .icon = ROW->icon, .start = lastMousePosLocal, .startedAt = Time::steadyNow(), .index = ROW->index};
+                    return;
+                }
+            }
+
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                // The close button eats the press outright -- no drag, no select.
+                // User request 2026-08-02: an X on the top right of the hovered
+                // tile. Drop the hover first so the button cannot be clicked
+                // twice while the window takes its time going away.
+                if (const auto HOVERED = TileChrome::hovered(); HOVERED && tileCloseButtonBox(HOVERED).containsPoint(lastMousePosLocal)) {
+                    TileChrome::setHovered(PHLWINDOW{});
+                    HOVERED->sendClose();
+                    return;
+                }
+
+                // Before the submap check: that branch returns, and the press
+                // shrink has to show whether or not a submap is active.
+                TileChrome::setPressed(windowAtOverviewPoint(lastMousePosLocal), true);
+
+                if (beginSubmapMouseClickPending(event.button))
+                    return;
+
+                dragPendingPrimary  = true;
+                dragStartMouseLocal = lastMousePosLocal;
+                return;
+            }
+
+            TileChrome::setPressed(PHLWINDOW{}, false);
+
+            const bool WASPANNING = scrollingPanPointerDown;
+            if (scrollingPanPointerDown)
+                endScrollingPan();
+
+            finishWindowDragOrClick(event.button, !WASPANNING);
+            return;
+        }
+
+        if (event.button == SECONDARY_DRAG_BUTTON && !INVERT_DRAG_MODE) {
+            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                if (beginSubmapMouseClickPending(event.button))
+                    return;
+
+                const auto WORKSPACE = workspaceAtPanPoint(lastMousePosLocal);
+
+                if (!isWorkspaceScrolling(WORKSPACE)) {
+                    scrollingPanPointerDown = false;
+                    return;
+                }
+
+                beginScrollingPan(WORKSPACE);
+                return;
+            }
+
+            if (submapMouseClickPending && submapMouseClickButton == event.button) {
+                const bool WASPANNING = scrollingPanPointerDown;
+                if (scrollingPanPointerDown)
+                    endScrollingPan();
+
+                if (!WASPANNING)
+                    shouldRunDefaultClickAction(event.button);
+                else
+                    clearSubmapMouseClickPending();
+
+                return;
+            }
+
+            if (scrollingPanPointerDown)
+                endScrollingPan();
+            return;
+        }
+
+        if (event.button == RESIZE_BUTTON) {
+            lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                beginSubmapMouseClickPending(event.button);
+
+                size_t resizeWorkspace = 0;
+                const auto window      = windowAtOverviewCursor(&resizeWorkspace);
+                if (!shouldShowOverviewWindow(window) || shouldShowPinnedFloatingOverviewWindow(window)) {
+                    resizePointerDown = false;
+                    resizePendingWindow.reset();
+                    return;
+                }
+
+                const auto MONITOR = pMonitor.lock();
+                if (!MONITOR)
+                    return;
+
+                const auto WORKSPACEOFFSET =
+                    workspaceOverviewOffset(resizeWorkspace, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
+                const auto WINDOWBOX = getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
+
+                resizePointerDown    = true;
+                resizeStartMouseLocal = lastMousePosLocal;
+                resizePendingWindow   = window;
+                resizeWorkspaceIdx    = resizeWorkspace;
+                resizeCorner          = Layout::cornerFromBox(WINDOWBOX, lastMousePosLocal);
+                return;
+            }
+
+            if (resizeActiveWindow) {
+                endWindowResize();
+                clearSubmapMouseClickPending();
+                return;
+            }
+
+            resizePointerDown = false;
+            resizePendingWindow.reset();
+
+            shouldRunDefaultClickAction(event.button);
+            return;
+        }
+
+        if (event.button != SECONDARY_DRAG_BUTTON || !INVERT_DRAG_MODE)
+            return;
+
+        lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+        if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+            if (beginSubmapMouseClickPending(event.button))
+                return;
+
+            dragStartMouseLocal = lastMousePosLocal;
+            beginWindowDrag(windowAtOverviewCursor());
+            return;
+        }
+
+        finishWindowDragOrClick(event.button, true);
+}
+
+void CScrollOverview::onCursorSelect(ITouch::SDownEvent, Event::SCallbackInfo& info) {
+        if (closing || scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()).get() != this)
+            return;
+
+        if (isPointerOnTopLayer(pMonitor.lock()))
+            return;
+
+        info.cancelled = true;
+
+        selectWindowAtOverviewCursor();
+
+        close();
+}
+
+void CScrollOverview::onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& info) {
+        if (closing || scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()).get() != this)
+            return;
+
+        info.cancelled = true;
+
+        const auto ACTION = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL ? ScrollOverview::Config::getHorizontalScrollAction(layout) :
+                                                                          ScrollOverview::Config::getVerticalScrollAction(layout);
+
+        // mouse wheel: discrete stepping, throttled by scroll_event_delay so one notch is one step
+        if (e.source == WL_POINTER_AXIS_SOURCE_WHEEL) {
+            if (e.delta == 0.0)
+                return;
+            trackpadScrollAccum        = 0.0;
+            trackpadWorkspaceFollowing = false;
+            trackpadTapeFollowing      = false;
+            if (!scrollStepAllowed(e.timeMs))
+                return;
+
+            if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE)
+                moveViewportWorkspace(e.delta > 0);
+            else
+                moveScrollingColumnSelection(e.delta > 0);
+
+            return;
+        }
+
+        if (images.empty() || viewportCurrentWorkspace >= images.size())
+            return;
+
+        // scroll workspace or layout with 1:1 animation (snaping on release)
+        if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE)
+            trackpadSwipeWorkspace(e.delta);
+        else
+            trackpadSwipeLayout(images[viewportCurrentWorkspace]->pWorkspace, e.delta);
+}
+
+void CScrollOverview::onWindowOpen(PHLWINDOW) {
+        if (closing)
+            return;
+
+        rebuildPending = true;
+        damage();
+}
+
+void CScrollOverview::onWindowClose(PHLWINDOW) {
+        if (closing)
+            return;
+
+        rebuildPending = true;
+        damage();
+}
+
+void CScrollOverview::onWindowMove(PHLWINDOW, PHLWORKSPACE) {
+        if (closing)
+            return;
+
+        rebuildPending = true;
+        damage();
+}
+
+void CScrollOverview::onWindowActive(PHLWINDOW window, Desktop::eFocusReason) {
+        if (closing)
+            return;
+
+        g_pInputManager->unconstrainMouse();
+
+        const auto overviewWindow = getOverviewWindowToShow(window);
+        const auto fullscreenWindow = overviewWindow && overviewWindow->m_workspace ? getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(overviewWindow->m_workspace)) : PHLWINDOW{};
+
+        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == overviewWindow->m_workspace && overviewWindow->m_isFloating)
+            emitFullscreenVisibilityState(fullscreenWindow, true);
+        else
+            emitFullscreenVisibilityState(overviewWindow, true);
+
+        if (shouldShowOverviewWindow(overviewWindow) && overviewWindow->m_monitor == pMonitor) {
+            rebuildPending = true;
+            closeOnWindow  = overviewWindow;
+            rememberSelection(overviewWindow);
+
+            for (size_t i = 0; i < images.size(); ++i) {
+                if (images[i]->pWorkspace == overviewWindow->m_workspace) {
+                    viewportCurrentWorkspace = i;
+                    break;
+                }
+            }
+        }
+
+        damage();
+}
+
+void CScrollOverview::onWindowFullscreen(PHLWINDOW window) {
+        if (closing || emittingFullscreenVisibilityState)
+            return;
+
+        window = getOverviewWindowToShow(window);
+        if (!window || window->m_monitor != pMonitor || !Fullscreen::controller()->isFullscreen(window))
+            return;
+
+        emitFullscreenVisibilityState(window, true);
+}
+
+void CScrollOverview::onWorkspaceLifecycle(PHLWORKSPACEREF) {
+        if (closing)
+            return;
+
+        rebuildPending = true;
+        damage();
+}
+
+void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
+        if (closing || event.state != WL_KEYBOARD_KEY_STATE_PRESSED || activeScrollOverview().get() != this)
+            return;
+
+        if (isTopLayerFocused(pMonitor.lock()))
+            return;
+
+        const auto KEYSYM = getOverviewKeysym(event);
+        const auto MODS   = g_pInputManager->getModsFromAllKBs() & ~(HL_MODIFIER_CAPS | HL_MODIFIER_MOD2);
+
+        if ((KEYSYM == XKB_KEY_Return || KEYSYM == XKB_KEY_KP_Enter || KEYSYM == XKB_KEY_Left || KEYSYM == XKB_KEY_KP_Left || KEYSYM == XKB_KEY_Right ||
+             KEYSYM == XKB_KEY_KP_Right || KEYSYM == XKB_KEY_Up || KEYSYM == XKB_KEY_KP_Up || KEYSYM == XKB_KEY_Down || KEYSYM == XKB_KEY_KP_Down) &&
+            MODS != 0)
+            return;
+
+        switch (KEYSYM) {
+            case XKB_KEY_Left:
+            case XKB_KEY_KP_Left:
+                moveSelection("left");
+                break;
+            case XKB_KEY_Right:
+            case XKB_KEY_KP_Right:
+                moveSelection("right");
+                break;
+            case XKB_KEY_Up:
+            case XKB_KEY_KP_Up:
+                moveSelection("up");
+                break;
+            case XKB_KEY_Down:
+            case XKB_KEY_KP_Down:
+                moveSelection("down");
+                break;
+            case XKB_KEY_Tab:
+            case XKB_KEY_ISO_Left_Tab: {
+                const auto RESULTS = overviewSearchRows();
+                if (RESULTS.empty())
+                    return;
+
+                // -1 is the grid. Tab walks down the results and back out to it,
+                // so the grid is never unreachable by keyboard.
+                const int COUNT = sc<int>(RESULTS.size());
+                if (KEYSYM == XKB_KEY_ISO_Left_Tab)
+                    g_overviewAppSelection = g_overviewAppSelection <= -1 ? COUNT - 1 : g_overviewAppSelection - 1;
+                else
+                    g_overviewAppSelection = g_overviewAppSelection >= COUNT - 1 ? -1 : g_overviewAppSelection + 1;
+
+                damage();
+                break;
+            }
+            case XKB_KEY_Return:
+            case XKB_KEY_KP_Enter: {
+                const auto RESULTS = overviewSearchRows();
+
+                // X61. Return means "activate what is selected", and WHAT that is
+                // depends on the zone. A desktop needs nothing done to it:
+                // arrowing onto a strip cell already switched the viewport, so
+                // closing simply lands there. A tile needs nothing either --
+                // closeOnWindow is exactly what close() focuses. Only a result
+                // has to be run, which is why this is the only branch here.
+                //
+                // The fallback is unchanged: with no explicit selection and no
+                // window matching the query, Return takes the top result. It is
+                // suppressed in the Desktop zone, where the user has said where
+                // they want to go and launching an app instead would be a
+                // surprise.
+                int launchIdx = -1;
+                if (g_overviewNavZone == EOverviewNavZone::Result && g_overviewAppSelection >= 0 && g_overviewAppSelection < sc<int>(RESULTS.size()))
+                    launchIdx = g_overviewAppSelection;
+                else if (g_overviewNavZone != EOverviewNavZone::Desktop && !RESULTS.empty() && matchingWindowCount() == 0)
+                    launchIdx = 0;
+
+                activateSearchResult(launchIdx);
+                close();
+                break;
+            }
+            default: return;
+        }
+
+        info.cancelled = true;
+}
+

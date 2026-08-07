@@ -315,6 +315,20 @@ class CScrollOverview : public IOverview {
     bool                             closing = false;
     bool                             closeApplied = false; // close() has run its teardown; guards against double-invocation
 
+    // event handlers -- moved out of the constructor, defined at the bottom of scrollOverview.cpp
+    void onMouseMove(Vector2D, Event::SCallbackInfo& info);
+    void onTouchMove(ITouch::SMotionEvent, Event::SCallbackInfo& info);
+    void onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo& info);
+    void onCursorSelect(ITouch::SDownEvent, Event::SCallbackInfo& info);
+    void onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& info);
+    void onWindowOpen(PHLWINDOW);
+    void onWindowClose(PHLWINDOW);
+    void onWindowMove(PHLWINDOW, PHLWORKSPACE);
+    void onWindowActive(PHLWINDOW window, Desktop::eFocusReason);
+    void onWindowFullscreen(PHLWINDOW window);
+    void onWorkspaceLifecycle(PHLWORKSPACEREF);
+    void onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallbackInfo& info);
+
     CHyprSignalListener             mouseMoveHook;
     CHyprSignalListener             mouseButtonHook;
     CHyprSignalListener             touchMoveHook;
