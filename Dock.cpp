@@ -1771,14 +1771,17 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
 
     dismissHoverPanelNow(); // Z15
 
-    // Z9 (user, round three): focus BEFORE the flight exists -- and then make
-    // the window RECOMPUTE its decoration targets before warping. Round two
-    // warped the animations while their goals still said "inactive": nothing
-    // re-targets m_realBorderColor / dim / active alpha until
-    // updateDecorationValues() runs, so the warp was a no-op and the next
-    // recompute eased from wherever it was. Order matters: focus, recompute,
-    // warp.
-    Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_OTHER);
+    // Z9 (user, round four). Round three's fullWindowFocus on a STASHED
+    // window REVEALS the special workspace -- measured: the monitor's
+    // specialWorkspace read special:minimized for the whole flight and the
+    // real window rendered alongside the proxy as a double image. What the
+    // user actually SEES as focus is the CLIENT's own light theme, driven by
+    // wl_keyboard.enter -- so hand the seat's keyboard to the surface
+    // directly; no workspace machinery is involved and the stash stays
+    // hidden. The landing's restore performs the real fullWindowFocus once
+    // the window is off the stash.
+    if (window->wlSurface() && window->wlSurface()->resource())
+        g_pSeatManager->setKeyboardFocus(window->wlSurface()->resource());
     window->updateDecorationValues();
     window->alpha()[Desktop::View::WINDOW_ALPHA_ACTIVE]->warp();
     if (window->m_borderFadeAnimationProgress)
