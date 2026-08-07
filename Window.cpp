@@ -942,6 +942,24 @@ void renderOverviewWindow(const SRenderParams& params) {
 
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
 
+        // Z1. renderWindow draws at the window's position PLUS its workspace's
+        // m_renderOffset, but the transform above is computed from the position
+        // alone -- so a window whose workspace is parked off-screen was drawn a
+        // whole monitor away from the cell and clipped to nothing. The offset is
+        // zero until a workspace has been switched away from with an animation,
+        // which is why the preview worked until the user swapped desktops and
+        // then never again. The overview path below already neutralizes it; this
+        // is the same neutralization, restored the same way.
+        const auto     PREVIEWWS      = WINDOW->m_workspace;
+        const bool     OVERRIDEOFFSET = PREVIEWWS && !WINDOW->m_pinned;
+        const Vector2D PREVIOUSOFFSET = OVERRIDEOFFSET ? PREVIEWWS->m_renderOffset->value() : Vector2D{};
+        if (OVERRIDEOFFSET)
+            PREVIEWWS->m_renderOffset->value() = {};
+        auto restorePreviewOffset = Hyprutils::Utils::CScopeGuard([&] {
+            if (OVERRIDEOFFSET && PREVIEWWS)
+                PREVIEWWS->m_renderOffset->value() = PREVIOUSOFFSET;
+        });
+
         const size_t firstElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
         // standalone: no decorate path side effects; content only. Rounding is
         // forced below so the cell still reads as a rounded thumbnail.
