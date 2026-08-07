@@ -4177,6 +4177,7 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
     dragOriginalOverviewHitbox    = CBox{};
     dragActiveWindow              = WINDOW;
 
+
     const auto MONITOR = pMonitor.lock();
     if (MONITOR && workspaceIdx < images.size()) {
         const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
@@ -4702,14 +4703,36 @@ void CScrollOverview::endWindowDrag() {
         }
     };
 
-    bool       dropWorkspaceFullyVisible = false;
+    // Z3. Whether the drop point can be read as a point INSIDE the destination
+    // card, which is the only thing that makes mapping the cursor into that
+    // workspace meaningful. Two conditions, and X42 only had the first:
+    //
+    //   * the card is fully on screen, and
+    //   * the drop did not land on the DESKTOP STRIP.
+    //
+    // X42 assumed the second followed from the first -- "a strip-mini drop
+    // targets a card that is off-screen by construction". It does not: the strip
+    // shows every desktop including the one whose card fills the viewport, so
+    // dropping on THAT mini gave a fully-visible card and a cursor sitting up in
+    // the strip band. overviewPointToGlobal then mapped a strip coordinate into
+    // the workspace and the window landed jammed against the top edge --
+    // measured (200,150) -> (324,1) -- which is the user's "subsequent moves of
+    // that same window do not remember coordinates". The first move is to
+    // another desktop, whose card is off-screen, so it kept its position; moving
+    // it back to the desktop you are looking at is the one that loses it.
+    //
+    // workspaceAtStripPoint is the honest test rather than "is the point in the
+    // card box": the strip band deliberately OVERLAPS the tiles it floats above,
+    // which workspaceAtOverviewDropPoint already has to say out loud for the
+    // same reason.
+    bool       dropPointMapsIntoCard = false;
     if (DROPMONITOR) {
         const auto WORKSPACEBOX =
             getOverviewWorkspaceBox(DROPMONITOR, dropOverview->scale->value(), dropOverview->viewOffset->value(),
                                     dropOverview->workspaceOverviewOffset(dropWorkspaceIdx, dropOverview->activeWorkspaceIndex(),
                                                                          getWorkspaceRenderedPitch(DROPMONITOR, dropOverview->scale->value(), dropOverview->layout)),
                                     dropOverview->layout);
-        dropWorkspaceFullyVisible = overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, DROPMONITOR);
+        dropPointMapsIntoCard = overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, DROPMONITOR) && !dropOverview->workspaceAtStripPoint(DROPPOINTLOCAL);
 
         if (DROPSIDEHORIZONTAL) {
             if (DROPPOINTLOCAL.x < WORKSPACEBOX.x)
@@ -4747,7 +4770,7 @@ void CScrollOverview::endWindowDrag() {
         RESTOREACTIVEWORKSPACE();
 
         if (DROPSCROLLINGLAYOUT) {
-            if (!dropWorkspaceFullyVisible)
+            if (!dropPointMapsIntoCard)
                 moveOverviewScrollingTargetToWorkspaceEdge(TARGET, 1);
             else if (DROPANCHOR && !dropDirection.empty())
                 moveOverviewTargetNextToWindow(TARGET, DROPANCHOR, dropDirection);
@@ -4796,10 +4819,11 @@ void CScrollOverview::endWindowDrag() {
             // construction, so there is no in-card point to map the cursor to.
             // Keeping the window where it already was is what stops every
             // arrival stacking up on the workspace centre.
-            auto GLOBALBOX = dropWorkspaceFullyVisible ? CBox{dropOverview->overviewPointToGlobal(dropWorkspaceIdx, DRAGBOX.pos()), GLOBALSIZE} :
+            auto GLOBALBOX = dropPointMapsIntoCard ? CBox{dropOverview->overviewPointToGlobal(dropWorkspaceIdx, DRAGBOX.pos()), GLOBALSIZE} :
                 HAVEORIGINAL                           ? CBox{dragOriginalBox.pos(), GLOBALSIZE} :
                                                          centerBoxInWorkspace(CBox{Vector2D{}, GLOBALSIZE}, DROPWORKSPACE, DROPMONITOR);
             GLOBALBOX = clampBoxToWorkspace(GLOBALBOX, DROPWORKSPACE, DROPMONITOR, WINDOW->getRealBorderSize());
+
 
             TARGET->setPositionGlobal(GLOBALBOX);
             TARGET->warpPositionSize();
