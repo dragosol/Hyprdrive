@@ -7319,6 +7319,27 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
     if (!window || window->m_monitor != MONITOR)
         return true;
 
+    // Y11. THE DOCK IS A SECOND VIEWER OF THIS WINDOW. Everything below decides
+    // whether the window is worth drawing IN THE OVERVIEW, and refuses the frame
+    // callback when its tile is off screen -- which is right for a tile nobody
+    // can see and wrong the moment the same window is in a dock preview.
+    //
+    // It is not a near miss either: while the overview is up, hkSendFrameEvents-
+    // ToWorkspace suppresses Hyprland's own per-workspace dispatch entirely, so
+    // this is the ONLY route a frame callback takes. Dock::presentPreview
+    // (whose whole job is "the client draws the next frame when the last one is
+    // acked") goes through CWLSurfaceResource::frame, which is hooked, which
+    // asks this -- so the dock was asking for frames and having them thrown
+    // away, and an off-desktop preview was a still. Measured by scripts/
+    // y11_rig.sh: 25131 px changed on the screen between two instants and 0 px
+    // inside the preview cell.
+    //
+    // Minimized windows never hit this because their stash workspace fails
+    // shouldShowOverviewWindow below and takes the `return true` -- which is why
+    // X25's minimized previews measured live and Y11's did not.
+    if (ScrollOverview::Dock::isPreviewing(window))
+        return true;
+
     if (shouldShowPinnedFloatingOverviewWindow(window)) {
         if (sendingOverviewFrameCallbacks)
             return true;

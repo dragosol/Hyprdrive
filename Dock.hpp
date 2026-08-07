@@ -94,6 +94,13 @@ bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle
 // acting, matching the dock's press-remembers / release-decides gesture.
 bool    panelClick(PHLMONITOR monitor, const Vector2D& point, bool release);
 
+// Y11. Is the dock drawing a LIVE preview of this window right now? The overview
+// suppresses frame callbacks for windows whose tile is off screen, which is
+// correct for a tile nobody can see and wrong for the same window shown in a
+// dock preview -- the client stops committing and the preview freezes. The
+// overview asks this before refusing.
+bool    isPreviewing(const PHLWINDOW& window);
+
 // X33. A wheel tick over the pill, `up` for one notch away from the user.
 // `scroll_action` decides: `cycle-windows` steps through the windows of the icon
 // under the pointer, `switch-workspace` moves to the neighbouring workspace from

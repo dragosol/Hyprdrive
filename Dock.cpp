@@ -2699,8 +2699,35 @@ namespace {
 // a full-size window shrinking across the screen: on the dock path its frost is
 // neither scaled nor live, so it carries stale blur for the whole animation.
 // The flight therefore goes through the OVERVIEW path, exactly as a tile does.
+// Y11. Every window the dock has drawn a live preview of recently, so the
+// OVERVIEW can be told not to starve it of frame callbacks.
+//
+// Time-stamped rather than cleared on a frame boundary: render() runs once per
+// monitor and the compositor's frame-event pass can fall on either side of it,
+// so a set that was emptied at the top of one monitor's render would answer
+// "no" for windows the other monitor is previewing. A window drawn within
+// PREVIEWING_MS is being previewed; nothing else has to be true.
+constexpr float                                            PREVIEWING_MS = 250.F;
+std::vector<std::pair<PHLWINDOWREF, Time::steady_tp>>      g_previewed;
+
+void notePreviewing(const PHLWINDOW& window) {
+    const auto NOW = Time::steadyNow();
+    std::erase_if(g_previewed, [&](const auto& e) { return !e.first.lock() || elapsedMs(e.second) >= PREVIEWING_MS; });
+
+    for (auto& [REF, AT] : g_previewed) {
+        if (REF.lock() == window) {
+            AT = NOW;
+            return;
+        }
+    }
+
+    g_previewed.emplace_back(PHLWINDOWREF{window}, NOW);
+}
+
 void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now, float alpha = 1.F, bool asOverviewTile = false,
                        bool ownsRenderPass = true) {
+    notePreviewing(window);
+
     const bool STASHED = Minimize::isMinimized(window);
     const bool OFF_ACTIVE =
         !window->m_workspace || !monitor || window->m_workspace != monitor->m_activeWorkspace;
@@ -3008,6 +3035,15 @@ bool panelUp() {
 // the first time a mouse button is pressed -- a plugin's unresolved symbol is
 // not a load-time error, it is a lazy-binding abort at the first call, so it
 // took the compositor down mid-session rather than failing the build.
+// Y11. Asked by CScrollOverview::shouldAllowSurfaceFrame. See the comment there
+// for why a preview cannot keep itself alive without it.
+bool isPreviewing(const PHLWINDOW& window) {
+    if (!window)
+        return false;
+
+    return std::ranges::any_of(g_previewed, [&](const auto& e) { return e.first.lock() == window && elapsedMs(e.second) < PREVIEWING_MS; });
+}
+
 bool panelClick(PHLMONITOR monitor, const Vector2D& point, bool release) {
     if (!monitor || !panelContains(point))
         return false;
