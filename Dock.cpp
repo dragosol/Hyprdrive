@@ -341,10 +341,6 @@ struct SFlight {
     PHLWINDOWREF window;
     CBox         from;             // the WINDOW's box, monitor-local RENDER px
     bool         restoring = false; // icon -> window, instead of window -> icon
-    // Y8. Set when the minimize came from a DROP on the pill, so the icon hops
-    // when the window lands. A minimize from a click does not bounce -- the
-    // click was the acknowledgement, and macOS only bounces what arrives.
-    bool            bounceOnLand = false;
     Time::steady_tp startedAt;
     // Z5. A click mid-flight REVERSES the motion from wherever the proxy
     // visually is -- restarting from the icon read as a teleport under a spam
@@ -1278,17 +1274,40 @@ void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& it
 
     const uint32_t ARGB = Config::getValue<uint32_t>(KEY_DOT_COLOR);
 
-    CRectPassElement::SRectData dot;
-    dot.box   = CBox{std::round(CX - SIZE / 2.F), std::round(TOP), std::round(SIZE), std::round(SIZE)};
-    dot.color = CHyprColor{sc<float>((ARGB >> 16) & 0xFF) / 255.F, sc<float>((ARGB >> 8) & 0xFF) / 255.F, sc<float>(ARGB & 0xFF) / 255.F, sc<float>((ARGB >> 24) & 0xFF) / 255.F};
-    // `border-radius: 5px` on a 5px box: a circle. Half the size, so it stays one
-    // when the dot is themed larger.
-    // Truncated, not rounded: a radius even slightly OVER half the box collapses
-    // the circle into a diamond, and the stock 5px dot rounds to 3 against a
-    // half-width of 2.5. Seen on screen 2026-08-03.
-    dot.round         = sc<int>(SIZE / 2.F);
-    dot.roundingPower = 2.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(dot));
+    // Z12 (user, 2026-08-07, overrides X31's measured single dot): one dot per
+    // WINDOW. Row one keeps today's exact position and grows outward from the
+    // icon's centre; overflow wraps to a second row underneath; two rows max,
+    // and windows beyond that are simply not shown.
+    size_t count = 0;
+    for (const auto& WINDOW : Desktop::windowState()->windows())
+        if (interesting(WINDOW) && WINDOW->m_class == item.wmClass)
+            ++count;
+    count = std::max<size_t>(count, 1);
+
+    const float  GAP    = 3.F * SCALE;
+    const size_t PERROW = std::max<size_t>(1, sc<size_t>((sc<float>(item.iconBox.width) + GAP) / (SIZE + GAP)));
+    count               = std::min(count, PERROW * 2);
+    const size_t ROW1   = std::min(count, PERROW);
+    const size_t ROW2   = count - ROW1;
+
+    const auto drawRow = [&](size_t n, float top) {
+        const float SPAN = sc<float>(n) * SIZE + sc<float>(n - 1) * GAP;
+        for (size_t i = 0; i < n; ++i) {
+            CRectPassElement::SRectData dot;
+            dot.box   = CBox{std::round(CX - SPAN / 2.F + sc<float>(i) * (SIZE + GAP)), std::round(top), std::round(SIZE), std::round(SIZE)};
+            dot.color = CHyprColor{sc<float>((ARGB >> 16) & 0xFF) / 255.F, sc<float>((ARGB >> 8) & 0xFF) / 255.F, sc<float>(ARGB & 0xFF) / 255.F, sc<float>((ARGB >> 24) & 0xFF) / 255.F};
+            // `border-radius: 5px` on a 5px box: a circle. Truncated, not
+            // rounded -- a radius even slightly OVER half the box collapses the
+            // circle into a diamond (seen on screen 2026-08-03).
+            dot.round         = sc<int>(SIZE / 2.F);
+            dot.roundingPower = 2.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(dot));
+        }
+    };
+
+    drawRow(ROW1, TOP);
+    if (ROW2)
+        drawRow(ROW2, TOP + SIZE + std::max(1.F, 2.F * SCALE));
 }
 
 // `_notificationBadgeCountToText`, same thresholds and the same rounding.
@@ -1568,6 +1587,18 @@ CBox flightAnchorBox(PHLMONITOR monitor, const PHLWINDOW& window) {
         if (CBox tile = OVERVIEW->tileBox(window); tile.width >= 1 && tile.height >= 1)
             return tile;
 
+        // Z8 (user video): a MINIMIZED window has no tile unless Y9's filter is
+        // on, so restores fell through to the offscreen aim -- whose
+        // home==active case is not LEFT, i.e. it aimed at the NEXT desktop for
+        // a window belonging to the very card the user is looking at. Aim at
+        // the recorded pre-minimize box transformed into its home card.
+        const auto HOMEWS = Minimize::originalWorkspace(window);
+        const CBox HOME   = Minimize::originalBox(window);
+        if (HOMEWS != WORKSPACE_INVALID && HOME.width >= 1) {
+            if (CBox b = OVERVIEW->overviewBoxForGlobal(HOMEWS, HOME); b.width >= 1 && b.height >= 1)
+                return b;
+        }
+
         return offscreenAimBox(monitor, window);
     }
 
@@ -1633,8 +1664,13 @@ void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnL
 
     if (ANIMATE && from.width >= 1 && from.height >= 1) {
         revealNow(monitor);
+        // Z10 (user, overriding Y8's "macOS bounces what arrives"): the hop is
+        // the ACKNOWLEDGEMENT of the drop, so it fires now, while the window
+        // is still flying in -- not at the landing.
+        if (bounceOnLand)
+            g_bounces.emplace_back(SBounce{.wmClass = window->m_class, .startedAt = Time::steadyNow()});
         std::erase_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
-        g_flights.emplace_back(SFlight{.window = window, .from = from, .bounceOnLand = bounceOnLand, .startedAt = Time::steadyNow()});
+        g_flights.emplace_back(SFlight{.window = window, .from = from, .startedAt = Time::steadyNow()});
     }
 }
 
@@ -1693,6 +1729,12 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
     revealNow(monitor);
     std::erase_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
     g_flights.emplace_back(SFlight{.window = window, .from = TO, .restoring = true, .startedAt = Time::steadyNow()});
+
+    // Z9 (user): the proxy flew UNFOCUSED and focus arrived with the landing's
+    // restore -- visibly, because focused and unfocused frost differ. GNOME
+    // activates on the click. The window is still stashed; focusing it does
+    // not unstash it, and the landing's own focus becomes a no-op.
+    Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_OTHER);
 }
 
 // X24's click policy, straight off the reference config: `click-action`
@@ -1807,6 +1849,14 @@ void cycleOrActivate(const std::string& wmClass, bool reversed) {
 // X33 gave this a second caller and with it a second way to be asked: a RUNNING
 // app middle-clicked for a new window owns a class but need not own a favourite,
 // so `desktopId` can be empty where `idForClass` still answers.
+// Z11 (user): spam-clicking a launcher must REPLAY the blow-up but exec ONE
+// instance. The vulnerable window is exec -> first map: once a window exists,
+// clicks take the toggle branch and never reach here. 30s covers a cold app;
+// a slower one gets a deliberate second chance.
+// ponytail: plain timestamps, no startup-notification protocol.
+std::unordered_map<std::string, Time::steady_tp> g_pendingLaunches;
+constexpr float                                  LAUNCH_PENDING_MS = 30000.F;
+
 void launchApp(PHLMONITOR monitor, const SItem& item) {
     // Y6. Armed here rather than in activateItem so every path that actually
     // starts something gets the blow-up -- a click on a closed app, a hotkey,
@@ -1814,6 +1864,14 @@ void launchApp(PHLMONITOR monitor, const SItem& item) {
     // the same place, on activation rather than on the branch that chose it.
     if (!item.icon.empty() && item.iconBox.width >= 1 && item.iconBox.height >= 1)
         g_launchZooms.emplace_back(SLaunchZoom{.icon = item.icon, .from = item.iconBox, .startedAt = Time::steadyNow()});
+
+    const bool  FIRSTINSTANCE = item.uri.empty() ? classWindows(item.wmClass).empty() : true;
+    const auto  PENDKEY       = !item.uri.empty() ? item.uri : (item.desktopId.empty() ? item.wmClass : item.desktopId);
+    if (FIRSTINSTANCE && !PENDKEY.empty()) {
+        if (const auto IT = g_pendingLaunches.find(PENDKEY); IT != g_pendingLaunches.end() && elapsedMs(IT->second) < LAUNCH_PENDING_MS)
+            return; // the zoom above replays; the exec does not
+        g_pendingLaunches[PENDKEY] = Time::steadyNow();
+    }
 
     // X35. `new-window` on a location is opening it -- the reference's fake
     // ShellApp answers `open_new_window` with the same `launch` either way.
@@ -3420,12 +3478,19 @@ void render(PHLMONITOR monitor) {
         float x = sc<float>(ZOOM.from.x) - (W - sc<float>(ZOOM.from.width)) / 2.F;
         float y = sc<float>(ZOOM.from.y) - (H - sc<float>(ZOOM.from.height)) / 2.F;
 
-        // `Math.clamp` in zoomOutActorAtPos -- "avoid monitor edges to not zoom
-        // outside the current monitor".
+        // Z11 (user): GNOME's blow-up drifts UPWARD off a bottom dock. Its
+        // clamp is baked into the tween's END STATE and EASED from frame one
+        // (`translation_y: containedY - scaledY` inside the same ease) --
+        // per-frame clamping only engages once the box already hits the edge,
+        // which read as "expands in all directions".
         const float MONW = sc<float>(monitor->m_size.x) * monitor->m_scale;
         const float MONH = sc<float>(monitor->m_size.y) * monitor->m_scale;
-        x                = std::clamp(x, 0.F, std::max(0.F, MONW - W));
-        y                = std::clamp(y, 0.F, std::max(0.F, MONH - H));
+        const float FW   = sc<float>(ZOOM.from.width) * LAUNCH_ZOOM_SCALE;
+        const float FH   = sc<float>(ZOOM.from.height) * LAUNCH_ZOOM_SCALE;
+        const float FX   = sc<float>(ZOOM.from.x) - (FW - sc<float>(ZOOM.from.width)) / 2.F;
+        const float FY   = sc<float>(ZOOM.from.y) - (FH - sc<float>(ZOOM.from.height)) / 2.F;
+        x += (std::clamp(FX, 0.F, std::max(0.F, MONW - FW)) - FX) * E;
+        y += (std::clamp(FY, 0.F, std::max(0.F, MONH - FH)) - FY) * E;
 
         CTexPassElement::SRenderData data;
         data.tex = TEX;
@@ -3590,10 +3655,6 @@ void render(PHLMONITOR monitor) {
                         continue;
                     }
                 }
-                // Y8. The hop is the ARRIVAL, so it is armed here and not at the
-                // drop: macOS bounces what lands, not what was let go of.
-                if (!it->restoring && it->bounceOnLand && ITEM != LAYOUT.items.end())
-                    g_bounces.emplace_back(SBounce{.wmClass = WINDOW->m_class, .startedAt = Time::steadyNow()});
             }
 
             it = g_flights.erase(it);

@@ -103,6 +103,7 @@ class CScrollOverview : public IOverview {
     PHLWINDOW windowAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     CBox      tileBox(const PHLWINDOW& window) const;
+    CBox      overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const;
     bool      selectAndClose(const PHLWINDOW& window);
     CBox      tileCloseButtonBox(const PHLWINDOW& window) const;
     void      updateTileHover();

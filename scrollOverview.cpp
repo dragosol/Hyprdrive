@@ -738,6 +738,26 @@ CBox CScrollOverview::tileBox(const PHLWINDOW& window) const {
     return TileChrome::scaledBox(window, getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout));
 }
 
+CBox CScrollOverview::overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return {};
+
+    size_t workspaceIdx = images.size();
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (images[i] && images[i]->pWorkspace && images[i]->pWorkspace->m_id == workspaceId) {
+            workspaceIdx = i;
+            break;
+        }
+    }
+
+    if (workspaceIdx >= images.size())
+        return {};
+
+    const auto OFFSET = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
+    return getOverviewGlobalBox(globalBox, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout);
+}
+
 bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
     if (!window)
         return false;

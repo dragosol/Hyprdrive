@@ -1,5 +1,6 @@
 #pragma once
 #include <hyprland/src/desktop/DesktopTypes.hpp>
+#include <hyprland/src/SharedDefs.hpp> // WORKSPACEID
 #include <hyprland/src/helpers/memory/Memory.hpp>
 #include <hyprland/src/helpers/math/Math.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
@@ -51,6 +52,12 @@ class IOverview {
     // started from it has to shrink from the tile the user is looking at, not
     // from the window's real geometry underneath it.
     virtual CBox  tileBox(const PHLWINDOW& window) const = 0;
+    // Z8. A GLOBAL LOGICAL box transformed into the overview's rendering of a
+    // given desktop's card. The restore flight aims a MINIMIZED window here:
+    // it has no tile (Y9 reveals minimized windows only under a filter), and
+    // the offscreen fallback aimed at the NEXT desktop for a window whose home
+    // IS the active one.
+    virtual CBox  overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const = 0;
 
     // X28. Commit the overview's selection to one window and close, the way a
     // tile click does. The dock's right-click window list needs exactly this:
