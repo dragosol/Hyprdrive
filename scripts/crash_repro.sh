@@ -14,6 +14,7 @@
 # Reuses x26_open.sh as the opener. Do not write a new one -- a bespoke opener is
 # how the last rig produced a false negative.
 set -u
+mkdir -p /mnt/host/x26   # x26_open.sh writes grim+clients dumps there; missing dir silently skips them and the repro goes cold
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 sig() { ls -t $XDG_RUNTIME_DIR/hypr | head -1; }
 export HYPRLAND_INSTANCE_SIGNATURE=$(sig)

@@ -98,6 +98,12 @@ namespace TileChrome = ScrollOverview::TileChrome;
 #include "Window.hpp"
 #include "SearchProviders.hpp"
 
+// Anything that eases by hand -- tile hover, tile press, the grid reflow -- goes
+// through here, so the whole plugin is driven by the same two curve objects the
+// open and close animations use. Global scope on purpose: TileChrome.cpp links
+// to this exact symbol (_Z9houseEasebf) via its own extern declaration, so it
+// must NOT move into OvInternal. Defined in scrollOverview.cpp.
+float houseEase(bool decel, float t);
 
 namespace OvInternal {
 
@@ -193,23 +199,16 @@ inline constexpr const char* OVERVIEW_REMOVE_FADE_BEZIER = "scrolloverviewWorksp
 inline constexpr const char* OVERVIEW_OPEN_BEZIER  = HOUSE_DECEL_BEZIER;
 inline constexpr const char* OVERVIEW_CLOSE_BEZIER = HOUSE_ACCEL_BEZIER;
 
-// Anything that eases by hand -- tile hover, tile press, the grid reflow -- goes
-// through here, so the whole plugin is driven by the same two curve objects the
-// open and close animations use. Approximating them with a polynomial was how
-// the tile hover ended up on an OVERSHOOTING easeOutBack while the rest of the
-// rice had none.
-inline float houseEase(bool decel, float t) {
-    const float T = std::clamp(t, 0.F, 1.F);
-
-    if (Animation::mgr()) {
-        if (const auto CURVE = Animation::mgr()->getBezier(decel ? HOUSE_DECEL_BEZIER : HOUSE_ACCEL_BEZIER))
-            return CURVE->getYForPoint(T);
-    }
-
-    // Not registered yet: ease-out cubic, or its mirror for an exit.
-    const float INV = 1.F - T;
-    return decel ? 1.F - INV * INV * INV : T * T * T;
-}
+// houseEase lives at GLOBAL scope, declared above the namespace and defined in
+// scrollOverview.cpp. It is the one helper other translation units link to by
+// symbol: TileChrome.cpp extern-declares `float houseEase(bool, float)` and the
+// original split swept the definition into OvInternal:: with everything else,
+// which renamed the exported symbol and left _Z9houseEasebf undefined. A shared
+// object links fine with undefined symbols and dlopen resolves lazily, so the
+// compositor died at the first mid-close tile ease, not at load: ld.so's error
+// path exits 127, and a garbage PLT jump gives "segfault at X ip X".
+// scripts/symcheck.sh now diffs against the host's exports instead of grepping
+// for a namespace, precisely so the next global-scope symbol cannot hide.
 
 inline bool isPointerOnTopLayer(PHLMONITOR monitor) {
     if (!monitor)

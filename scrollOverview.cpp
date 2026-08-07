@@ -1,5 +1,23 @@
 #include "OverviewInternal.hpp"
 
+// The definition behind the global declaration in OverviewInternal.hpp. One real
+// symbol in one TU -- TileChrome.cpp binds to it through the PLT, so it cannot be
+// inline-in-a-header (emission would then depend on some includer happening to
+// ODR-use it) and cannot be namespaced (that renames the symbol; the compositor
+// died at the first mid-close tile ease when the split did exactly that).
+float houseEase(bool decel, float t) {
+    const float T = std::clamp(t, 0.F, 1.F);
+
+    if (Animation::mgr()) {
+        if (const auto CURVE = Animation::mgr()->getBezier(decel ? HOUSE_DECEL_BEZIER : HOUSE_ACCEL_BEZIER))
+            return CURVE->getYForPoint(T);
+    }
+
+    // Not registered yet: ease-out cubic, or its mirror for an exit.
+    const float INV = 1.F - T;
+    return decel ? 1.F - INV * INV * INV : T * T * T;
+}
+
 CScrollOverview::~CScrollOverview() {
     TileChrome::forget();
     // X51: the cache used to be dropped here, which meant every open re-rendered
