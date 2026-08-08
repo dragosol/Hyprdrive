@@ -1,3 +1,25 @@
+// Z19: this block must be FIRST. m_Value is private in hyprutils, and the
+// flight drives the RENDERED box only -- setValueAndWarp moves the GOAL, and
+// goal changes configure the client: a ~60-configure storm per flight, whose
+// late acks from a slow client (Zen) land after the flight and clobber the
+// geometry. The std headers are included clean first so private=public covers
+// ONLY the hyprutils header whose guard we claim here; every later inclusion
+// is a no-op.
+#include <sstream>
+#include <functional>
+#include <memory>
+#include <chrono>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <any>
+#define private public
+#define protected public
+#include <hyprutils/animation/AnimatedVariable.hpp>
+#undef protected
+#undef private
+
 #include "Dock.hpp"
 
 // Z16: for renderOverviewWorkspaceShadow + getOverviewShadowConfig -- the
@@ -1688,8 +1710,8 @@ CBox restoreForFlight(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& i
     // differ (measured: a 3.2M-luminance seam frame at landing); a window that
     // was never swapped has no seam.
     if (iconBox.width >= 1) {
-        window->m_realPosition->setValueAndWarp(Vector2D{iconBox.x / SCALE + monitor->m_position.x, iconBox.y / SCALE + monitor->m_position.y});
-        window->m_realSize->setValueAndWarp(Vector2D{std::max(4.0, iconBox.width / SCALE), std::max(4.0, iconBox.height / SCALE)});
+        window->m_realPosition->m_Value = Vector2D{iconBox.x / SCALE + monitor->m_position.x, iconBox.y / SCALE + monitor->m_position.y};
+        window->m_realSize->m_Value     = Vector2D{std::max(4.0, iconBox.width / SCALE), std::max(4.0, iconBox.height / SCALE)};
     }
     window->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(0.F);
     return TARGET;
@@ -1741,8 +1763,8 @@ bool reverseFlight(const PHLWINDOW& window, bool restoring) {
         // (OLD.from, render px) before the stash captures it.
         if (const auto MON = window->m_monitor.lock(); MON && OLD.from.width >= 1 && !window->isHidden()) {
             const float SCALE = std::max(MON->m_scale, 0.01F);
-            window->m_realPosition->setValueAndWarp(Vector2D{OLD.from.x / SCALE + MON->m_position.x, OLD.from.y / SCALE + MON->m_position.y});
-            window->m_realSize->setValueAndWarp(Vector2D{std::max(4.0, OLD.from.width / SCALE), std::max(4.0, OLD.from.height / SCALE)});
+            window->m_realPosition->m_Value = Vector2D{OLD.from.x / SCALE + MON->m_position.x, OLD.from.y / SCALE + MON->m_position.y};
+            window->m_realSize->m_Value     = Vector2D{std::max(4.0, OLD.from.width / SCALE), std::max(4.0, OLD.from.height / SCALE)};
         }
         window->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
         window->setHidden(false);
@@ -3800,8 +3822,8 @@ void render(PHLMONITOR monitor) {
                         const float SCALE = std::max(monitor->m_scale, 0.01F);
                         const Vector2D POS{it->from.x / SCALE + monitor->m_position.x, it->from.y / SCALE + monitor->m_position.y};
                         const Vector2D SZ{std::max(4.0, it->from.width / SCALE), std::max(4.0, it->from.height / SCALE)};
-                        WINDOW->m_realPosition->setValueAndWarp(POS);
-                        WINDOW->m_realSize->setValueAndWarp(SZ);
+                        WINDOW->m_realPosition->m_Value = POS;
+                        WINDOW->m_realSize->m_Value     = SZ;
                         // Z18b: the LAYOUT TARGET too. Minimize captures
                         // TARGET->position(), not the anim vars -- landing
                         // without this write-back left the target at its
@@ -3837,8 +3859,8 @@ void render(PHLMONITOR monitor) {
             box               = lerpBox(START, it->from, E);
             alpha             = (A0 >= 0.F ? A0 : 0.F) * (1.F - E) + E;
 
-            WINDOW->m_realPosition->setValueAndWarp(Vector2D{box.x / SCALE + monitor->m_position.x, box.y / SCALE + monitor->m_position.y});
-            WINDOW->m_realSize->setValueAndWarp(Vector2D{std::max(4.0, box.width / SCALE), std::max(4.0, box.height / SCALE)});
+            WINDOW->m_realPosition->m_Value = Vector2D{box.x / SCALE + monitor->m_position.x, box.y / SCALE + monitor->m_position.y};
+            WINDOW->m_realSize->m_Value     = Vector2D{std::max(4.0, box.width / SCALE), std::max(4.0, box.height / SCALE)};
             WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(alpha);
 
             it->lastDrawn = box;
