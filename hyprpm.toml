@@ -1,6 +1,6 @@
 [repository]
-name = "hyprland-scroll-overview"
-authors = ["yayuuu"]
+name = "Hyprdrive"
+authors = ["dragos"]
 commit_pins = [
     # Hyprland                                  hyprland-scroll-overview
     ["521ece463c4a9d3d128670688a34756805a4328f", "e35c31c73fe36af05e75b7ff530b5ede422f75a9"], # v0.54.3
@@ -11,7 +11,7 @@ commit_pins = [
 ]
 
 [scrolloverview]
-description = "A scrollable overview plugin for Hyprland with optional hyprbars integration."
+description = "Hyprdrive: mission-control overview + dock for Hyprland."
 authors = ["yayuuu"]
 output = "scrolloverview.so"
 build = [

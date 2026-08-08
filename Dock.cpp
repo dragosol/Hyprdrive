@@ -559,15 +559,14 @@ std::filesystem::path favoritesPath() {
     return {};
 }
 
-// The user's own `org.gnome.shell favorite-apps`, in order, dumped 2026-08-02
-// and recorded in RICE_PROGRESS.md. It seeds an EMPTY store only -- an id that
-// no desktop entry claims is dropped at layout time, not here, so this list
-// stays the reference's rather than being quietly filtered down to whatever the
-// test VM happens to have installed.
-constexpr std::array<const char*, 14> DEFAULT_FAVORITES = {
-    "app.zen_browser.zen", "com.discordapp.Discord",  "org.gnome.Nautilus",    "net.thunderbird.Thunderbird", "steam",
-    "claude-desktop",      "lmstudio",                "org.gnome.Calendar",    "org.gnome.Software",          "md.obsidian.Obsidian",
-    "org.gnome.TextEditor", "io.github.tobagin.karere", "net.lutris.Lutris",   "org.gnome.Ptyxis",
+// Seeds an EMPTY store only, and only with neutral entries every desktop is
+// likely to have -- an id that no desktop entry claims is dropped at layout
+// time, not here. Real dock contents are whatever the user pins; the store
+// under ~/.local/state/scrolloverview/favorites wins from the first write on.
+constexpr std::array<const char*, 3> DEFAULT_FAVORITES = {
+    "org.gnome.Nautilus",
+    "org.gnome.TextEditor",
+    "org.gnome.Ptyxis",
 };
 
 std::vector<std::string>& favorites() {
