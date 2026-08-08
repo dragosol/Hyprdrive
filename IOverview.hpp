@@ -58,6 +58,12 @@ class IOverview {
     // the offscreen fallback aimed at the NEXT desktop for a window whose home
     // IS the active one.
     virtual CBox  overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const = 0;
+    // Z20. Rebuild the per-card window lists from live state. setHidden fires
+    // no compositor event, so a window unhidden at a flight's landing is
+    // otherwise never re-added to workspaceImage->windows -- the grid and
+    // hit-test see it (live iteration) while the render (list walk) does not:
+    // a clickable, invisible tile.
+    virtual void  refreshWindows() = 0;
 
     // X28. Commit the overview's selection to one window and close, the way a
     // tile click does. The dock's right-click window list needs exactly this:

@@ -4218,6 +4218,10 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         WALPHA->setValueAndWarp(PREVA);
 }
 
+void CScrollOverview::refreshWindows() {
+    redrawAll();
+}
+
 void CScrollOverview::redrawAll(bool forcelowres) {
     rebuildWorkspaceImages();
     seedRememberedSelections();

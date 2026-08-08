@@ -3811,6 +3811,12 @@ void render(PHLMONITOR monitor) {
                         WINDOW->setHidden(false);
                         warpRestoredWindowAnims(WINDOW);
                         WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
+                        // Z20: setHidden fires no event; without this the
+                        // overview's draw list never re-adds the window -- a
+                        // clickable, invisible tile (grid and hit-test iterate
+                        // live, the render walks the list).
+                        if (const auto OVERVIEW = scrollOverviewForMonitor(monitor))
+                            OVERVIEW->refreshWindows();
                     }
                     it->landedFrames = std::max(0, it->landedFrames) + 1;
                     drawFlightAt(WINDOW, it->from, 1.F);
