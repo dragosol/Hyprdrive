@@ -124,6 +124,26 @@ case "$W" in
     [ "$(fixws)" = 1 ] || { echo "z4t RIG FAULT: restore missed (fixws=$(fixws))"; exit 1; }
     echo "z4t filmed"
     ;;
+  z4c)
+    # Z18 regression gate: REPEATED cycles with a zombie overview registered.
+    # An overview object persists after close (reopen design); treating "object
+    # exists" as "overview open" sent desktop restores down the proxy path,
+    # whose landing never restored geometry -- each cycle shrank the window
+    # x0.82 and the layout target drifted (user screenshots, 2026-08-08).
+    ws 1; spawn
+    hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[on]]))" >/dev/null 2>&1; sleep 1.5
+    hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[off]]))" >/dev/null 2>&1; sleep 1.5
+    BOX0=$(hyprctl clients -j | python3 -c "import json,sys; c=[x for x in json.load(sys.stdin) if x['class']=='zfix'][0]; print(c['at'],c['size'])")
+    FAIL=0
+    for i in 1 2 3; do
+      click; sleep 1.2
+      [ "$(fixws)" = special:minimized ] || { echo "z4c RIG FAULT: minimize $i missed"; exit 1; }
+      clickcenter; sleep 1.5
+      B=$(hyprctl clients -j | python3 -c "import json,sys; c=[x for x in json.load(sys.stdin) if x['class']=='zfix'][0]; print(c['at'],c['size'])")
+      [ "$B" = "$BOX0" ] || { echo "z4c FAIL: cycle $i geometry $B != $BOX0"; FAIL=1; }
+    done
+    [ "$FAIL" = 0 ] && echo "z4c PASS: 3 cycles, geometry invariant $BOX0"
+    ;;
   z5)
     ws 1; spawn
     # NO anim_scale: flights run on the wall clock (measured -- a scaled run's
