@@ -38,8 +38,22 @@ if MODE in ('z4', 'z4t'):
         elif started and c < 0.25 * steady:
             holes.append((i, c))
     assert started, 'restore never reached 50% of steady -- rig fault, not a pass'
-    print(f'{MODE} {"FAIL" if holes else "PASS"}: steady={steady:.0f}px holes={holes[:5]}')
-    sys.exit(1 if holes else 0)
+
+    # Z17 flash detector: a landing hand-off seam is one frame that differs
+    # sharply from BOTH neighbours while the neighbours agree (the proxy->real
+    # swap measured 3.2M luminance delta). Motion itself never trips this: in
+    # motion the neighbours disagree with each other too.
+    grey = [np.asarray(Image.open(p).convert('L')).astype(int) for p in frames[-60:]]
+    flashes = []
+    for i in range(1, len(grey) - 1):
+        d1 = int(np.abs(grey[i] - grey[i-1]).sum())
+        d2 = int(np.abs(grey[i+1] - grey[i]).sum())
+        d3 = int(np.abs(grey[i+1] - grey[i-1]).sum())
+        if min(d1, d2) > 800_000 and (d1 + d2) / 2 > 1.5 * max(d3, 1):
+            flashes.append((len(frames) - 60 + i, d1, d2, d3))
+    ok = not holes and not flashes
+    print(f'{MODE} {"PASS" if ok else "FAIL"}: steady={steady:.0f}px holes={holes[:3]} flashes={flashes[:3]}')
+    sys.exit(0 if ok else 1)
 
 if MODE == 'z5log':
     # The drawn-box log is the instrument: at every reversal, the first box the
@@ -51,7 +65,7 @@ if MODE == 'z5log':
     lines = open('/home/dragos/hyprvm/share/zrig/ovdbg.log').read().splitlines()
     draws, reversals = [], []
     for i, l in enumerate(lines):
-        if l.startswith('draw '):
+        if l.startswith('draw ') or l.startswith('drive '):
             m = _re.findall(r'-?\d+\.?\d*', l)
             draws.append((i, float(m[1]), float(m[2]), float(m[3]), float(m[4])))
         elif l.startswith('reverse') and 'found=1' in l:

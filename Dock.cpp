@@ -1633,7 +1633,7 @@ CBox flightAnchorBox(PHLMONITOR monitor, const PHLWINDOW& window) {
 // dark again). setHidden(true) keeps the compositor from drawing it for the
 // flight; the plugin's own preview paths ignore m_hidden, so the proxy is the
 // only image on screen.
-void restoreForFlight(PHLMONITOR monitor, const PHLWINDOW& window) {
+CBox restoreForFlight(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& iconBox) {
     Minimize::restore(window);
     warpRestoredWindowAnims(window);
     window->updateDecorationValues();
@@ -1641,13 +1641,42 @@ void restoreForFlight(PHLMONITOR monitor, const PHLWINDOW& window) {
         window->m_borderFadeAnimationProgress->warp();
     if (window->m_dimPercent)
         window->m_dimPercent->warp();
-    window->setHidden(true);
-    // the retile lands after this tick; warp again once it has (frame
-    // ordering measured in the Z4 work)
-    g_pEventLoopManager->doLater([W = PHLWINDOWREF{window}] {
-        if (const auto WIN = W.lock())
-            warpRestoredWindowAnims(WIN);
-    });
+
+    if (const auto OVERVIEW = scrollOverviewForMonitor(monitor)) {
+        // Overview path: proxy machinery, window hidden for the flight (the
+        // tile and the proxy share a render pipeline, so that seam is clean).
+        window->setHidden(true);
+        g_pEventLoopManager->doLater([W = PHLWINDOWREF{window}] {
+            if (const auto WIN = W.lock())
+                warpRestoredWindowAnims(WIN);
+        });
+        return {};
+    }
+
+    // Capture the layout's target BEFORE parking -- setValueAndWarp moves the
+    // GOAL too (hyprutils keeps m_Value private, so there is no value-only
+    // write), and reading goal() after parking chased the parked box itself
+    // (measured: 121 drive frames pinned at the icon). The flight freezes this
+    // target in SFlight.from; a retile mid-flight lands via the closing warp.
+    const auto  GOALPOS = window->m_realPosition->goal();
+    const auto  GOALSZ  = window->m_realSize->goal();
+    const float SCALE   = std::max(monitor->m_scale, 0.01F);
+    const CBox  TARGET{(GOALPOS.x - monitor->m_position.x) * SCALE, (GOALPOS.y - monitor->m_position.y) * SCALE, GOALSZ.x * SCALE, GOALSZ.y * SCALE};
+
+    // Z17 (user: "are we not using the real windows, like the rest of the
+    // overview"). Desktop path: NO proxy, no hidden flag. The real window is
+    // the animation -- parked at the icon at alpha 0, then its animated
+    // variables are driven along the flight curve each frame while the
+    // compositor renders it natively: real shadow, real border, real blur,
+    // focused. A proxy hand-off cannot be seamless because the two renderings
+    // differ (measured: a 3.2M-luminance seam frame at landing); a window that
+    // was never swapped has no seam.
+    if (iconBox.width >= 1) {
+        window->m_realPosition->setValueAndWarp(Vector2D{iconBox.x / SCALE + monitor->m_position.x, iconBox.y / SCALE + monitor->m_position.y});
+        window->m_realSize->setValueAndWarp(Vector2D{std::max(4.0, iconBox.width / SCALE), std::max(4.0, iconBox.height / SCALE)});
+    }
+    window->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(0.F);
+    return TARGET;
 }
 
 // Z5. If this window is mid-flight, flip the flight's direction in place: the
@@ -1686,10 +1715,20 @@ bool reverseFlight(const PHLWINDOW& window, bool restoring) {
     g_flights.erase(IT);
 
     // Z9r5: state flips WITH the direction. A restoring flight's window is
-    // already real (hidden) -- sending it back means unhide + stash. The
-    // minimize->restore direction is handled by the caller via
+    // already real -- sending it back means stash (plus unhide on the overview
+    // path). The minimize->restore direction is handled by the caller via
     // restoreForFlight, which needs the monitor.
     if (!restoring && !Minimize::isMinimized(window)) {
+        // Z17: a DRIVEN flight moved goal AND value to the mid-air box; stashing
+        // now would record that as the window's geometry and a later restore
+        // would bring it back shrunken. Re-goal to the flight's true target
+        // (OLD.from, render px) before the stash captures it.
+        if (const auto MON = window->m_monitor.lock(); MON && OLD.from.width >= 1 && !window->isHidden()) {
+            const float SCALE = std::max(MON->m_scale, 0.01F);
+            window->m_realPosition->setValueAndWarp(Vector2D{OLD.from.x / SCALE + MON->m_position.x, OLD.from.y / SCALE + MON->m_position.y});
+            window->m_realSize->setValueAndWarp(Vector2D{std::max(4.0, OLD.from.width / SCALE), std::max(4.0, OLD.from.height / SCALE)});
+        }
+        window->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
         window->setHidden(false);
         Minimize::minimize(window);
     }
@@ -1751,8 +1790,12 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
     // Z5. Mid-minimize click: bring it straight back from mid-air -- and give
     // it the same click-time restore treatment a fresh flight gets (Z9r5).
     if (window && reverseFlight(window, true)) {
-        if (monitor && Minimize::isMinimized(window))
-            restoreForFlight(monitor, window);
+        if (monitor && Minimize::isMinimized(window)) {
+            const CBox TARGET = restoreForFlight(monitor, window, CBox{});
+            const auto IT     = std::ranges::find_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
+            if (IT != g_flights.end() && TARGET.width >= 1)
+                IT->from = TARGET;
+        }
         return;
     }
 
@@ -1803,7 +1846,16 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
 
     dismissHoverPanelNow(); // Z15
 
-    restoreForFlight(monitor, window);
+    {
+        const float SCALE = std::max(monitor->m_scale, 0.01F);
+        const float MW    = sc<float>(monitor->m_size.x) * SCALE;
+        const float MH    = sc<float>(monitor->m_size.y) * SCALE;
+        // parked box: the dock band's centre. It is on screen for 0-1 frames at
+        // alpha 0 before the first driven frame -- placement is cosmetic.
+        const CBox TARGET = restoreForFlight(monitor, window, CBox{MW / 2.F - 27.F, MH - 80.F, 54.F, 54.F});
+        if (TARGET.width >= 1)
+            TO = TARGET;
+    }
 
     revealNow(monitor);
     std::erase_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
@@ -3706,11 +3758,15 @@ void render(PHLMONITOR monitor) {
                 // So: restore, hold the proxy at its landing box this frame,
                 // erase on the next pass, when the real window overlaps it
                 // exactly (same box, same content -- the seam is invisible).
-                // Z9r5: the restore ran at CLICK time; the landing only
-                // unhides. Two held frames bridge the unhide to the window's
-                // first composited frame -- geometry settled while hidden, and
-                // the flight tracked it, so the overlap is exact.
-                if (it->restoring && it->landedFrames < 2) {
+                // Z17: a natively-driven desktop restore has no swap to
+                // bridge -- warp to the layout's goals and stop. The overview
+                // path still unhides its hidden window over two held frames.
+                if (it->restoring && !WINDOW->isHidden()) {
+                    const float SCALE = std::max(monitor->m_scale, 0.01F);
+                    WINDOW->m_realPosition->setValueAndWarp(Vector2D{it->from.x / SCALE + monitor->m_position.x, it->from.y / SCALE + monitor->m_position.y});
+                    WINDOW->m_realSize->setValueAndWarp(Vector2D{std::max(4.0, it->from.width / SCALE), std::max(4.0, it->from.height / SCALE)});
+                    WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
+                } else if (it->restoring && it->landedFrames < 2) {
                     if (it->landedFrames < 0)
                         WINDOW->setHidden(false);
                     it->landedFrames = std::max(0, it->landedFrames) + 1;
@@ -3729,17 +3785,29 @@ void render(PHLMONITOR monitor) {
         CBox        box;
         float       alpha;
 
+        if (it->restoring && !scrollOverviewForMonitor(monitor) && !Minimize::isMinimized(WINDOW)) {
+            // Z17: the DESKTOP restore is the real window, driven natively --
+            // no proxy draw at all. The target is the layout's live goal, so a
+            // retile mid-flight retargets the flight for free.
+            const float SCALE = std::max(monitor->m_scale, 0.01F);
+            const CBox  START = it->start.width >= 1 ? it->start : ITEM->iconBox;
+            box               = lerpBox(START, it->from, E);
+            alpha             = (A0 >= 0.F ? A0 : 0.F) * (1.F - E) + E;
+
+            WINDOW->m_realPosition->setValueAndWarp(Vector2D{box.x / SCALE + monitor->m_position.x, box.y / SCALE + monitor->m_position.y});
+            WINDOW->m_realSize->setValueAndWarp(Vector2D{std::max(4.0, box.width / SCALE), std::max(4.0, box.height / SCALE)});
+            WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(alpha);
+
+            it->lastDrawn = box;
+            it->lastAlpha = alpha;
+            zdbg("drive r=1 box=%f,%f %fx%f a=%f\n", box.x, box.y, box.width, box.height, alpha);
+            ++it;
+            continue;
+        }
+
         if (it->restoring) {
-            // Z9r5: the real window owns its final geometry already (hidden);
-            // track it so the flight lands exactly on reality. The overview
-            // keeps the recorded-tile aim -- its grid excludes hidden windows.
-            if (!scrollOverviewForMonitor(monitor) && !Minimize::isMinimized(WINDOW)) {
-                if (const CBox REAL = windowRenderBox(monitor, WINDOW); REAL.width >= 1 && REAL.height >= 1)
-                    it->from = REAL;
-            }
-            // Y5 divergence, recorded in the spec: GNOME does NOT fade a window
-            // back in (its opacity is already 255 on this path). The user asked
-            // for "fade out/in", so this one is ours.
+            // Overview path: proxy machinery (Y5 divergence: GNOME does NOT
+            // fade a window back in; the user asked for "fade out/in").
             const CBox START = it->start.width >= 1 ? it->start : ITEM->iconBox;
             box              = lerpBox(START, it->from, E);
             alpha            = (A0 >= 0.F ? A0 : 0.F) * (1.F - E) + E;
