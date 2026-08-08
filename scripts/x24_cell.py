@@ -26,12 +26,10 @@ for c in json.load(sys.stdin):
     if c["class"] not in seen:
         seen.add(c["class"])
         classes.append(c["class"])
-    # A minimized window keeps its icon AND adds a preview slot, so the pill
-    # grows and every icon centre shifts left. Ignoring that aimed a click ~35px
-    # off the cell it named.
-    if c["workspace"]["name"] == STASH:
-        w, h = c["size"]
-        previews.append(min(2.20, max(0.60, w / float(h))) if h else 1.0)
+    # X46 DELETED the per-minimize preview slot -- a stashed window is an icon
+    # like any other. This block used to model the old layout and shifted every
+    # prediction ~35px left whenever anything was minimized (measured: the
+    # restore click landed in the gap, twice, on two different days).
 
 slots = float(len(classes) + len(previews))
 units = float(len(classes)) + sum(previews)

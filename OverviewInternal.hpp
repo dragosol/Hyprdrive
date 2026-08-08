@@ -476,6 +476,11 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
 // removes it from the grid too, and the survivors re-lay-out through the U4
 // reflow animation at no extra cost.
 inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
+    // Z9r5: a window hidden for a dock flight is the proxy's alone -- drawing
+    // its tile too would be the double image the spec forbids.
+    if (window && window->isHidden())
+        return false;
+
     const auto WINDOW = getOverviewWindowToShow(window);
 
     if (!validMapped(WINDOW))
