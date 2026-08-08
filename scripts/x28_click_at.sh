@@ -5,9 +5,8 @@
 # `hover` moves without clicking, so the gate can MEASURE a menu row from its
 # hover highlight instead of re-deriving row heights renderText decides.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x28
 MON=$(awk '{print $2}' $OUT/monitor.txt)
 
@@ -19,10 +18,11 @@ case "$BTN" in
     *) echo "ABORT: bad button $BTN"; exit 1 ;;
 esac
 
-# ydotool's motion space is half the output (see x24_dock_click.sh).
-ydotool mousemove -a -x $((X / 2)) -y $((Y / 2)); sleep 0.25
-ydotool mousemove -a -x $((X / 2 + 1)) -y $((Y / 2)); sleep 0.10
-ydotool mousemove -a -x $((X / 2)) -y $((Y / 2)); sleep 0.35
+# rig.sh warp owns the ydotool half-space rule; the +2 monitor px jiggle below
+# is the old +1 in halved space.
+warp "$X" "$Y"; sleep 0.25
+warp $((X + 2)) "$Y"; sleep 0.10
+warp "$X" "$Y"; sleep 0.35
 
 if [ -n "$DOWN" ]; then
     ydotool click $DOWN; sleep 0.12; ydotool click $UP

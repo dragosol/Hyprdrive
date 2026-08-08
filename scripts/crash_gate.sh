@@ -3,11 +3,12 @@
 # A single SURVIVED means nothing at a ~2/3 hit rate: 8 clean runs is ~99.98%.
 set -u
 N=${1:-8}
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 SEG0=$(journalctl -b --no-pager 2>/dev/null | grep -c "Hyprland.*segfault")
 DEATHS=0
 for i in $(seq $N); do
-    R=$(bash ~/overview-cpp/scripts/crash_repro.sh 2>&1 | tail -1)
+    R=$(bash "$(dirname "$0")/crash_repro.sh" 2>&1 | tail -1)
     echo "run $i: $R"
     [ "$R" != SURVIVED ] && DEATHS=$((DEATHS+1))
 done

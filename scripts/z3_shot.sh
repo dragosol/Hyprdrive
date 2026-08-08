@@ -5,9 +5,8 @@
 # and every piece of drag state it holds -- so a second drag taken after it is a
 # first drag wearing a different name.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/z3
 MON=$(hyprctl monitors -j | python3 -c "
 import json,sys

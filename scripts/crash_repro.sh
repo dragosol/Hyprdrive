@@ -15,19 +15,16 @@
 # how the last rig produced a false negative.
 set -u
 mkdir -p /mnt/host/x26   # x26_open.sh writes grim+clients dumps there; missing dir silently skips them and the repro goes cold
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-sig() { ls -t $XDG_RUNTIME_DIR/hypr | head -1; }
-export HYPRLAND_INSTANCE_SIGNATURE=$(sig)
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-BEFORE=$HYPRLAND_INSTANCE_SIGNATURE
-bash ~/overview-cpp/scripts/x26_open.sh >/dev/null 2>&1
-[ "$(sig)" != "$BEFORE" ] && { echo "DIED: during open"; exit 1; }
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1        # RIG_SIG0 is the per-run baseline; alive_or_die re-reads the sig each step
+bash "$(dirname "$0")/x26_open.sh" >/dev/null 2>&1
+alive_or_die "during open"
 ydotool type "fire"; sleep 1.2
 ydotool mousemove -a -x 640 -y 300; sleep 0.8
-[ "$(sig)" != "$BEFORE" ] && { echo "DIED: on hover"; exit 1; }
+alive_or_die "on hover"
 for i in $(seq 10); do ydotool key 14:1 14:0; done
 sleep 1.0
-[ "$(sig)" != "$BEFORE" ] && { echo "DIED: tight backspace loop"; exit 1; }
+alive_or_die "tight backspace loop"
 ydotool mousemove -a -x 700 -y 300; sleep 0.9
-[ "$(sig)" != "$BEFORE" ] && { echo "DIED: on the hover after"; exit 1; }
+alive_or_die "on the hover after"
 echo SURVIVED

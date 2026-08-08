@@ -13,15 +13,12 @@
 # grew by roughly an icon's width and every cell shifted left ~35px. So "the
 # strip is pixel-identical before and after a minimize" is exactly X46.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x46; mkdir -p $OUT
 TAG=${1:?usage: x46_rig.sh <tag>}
 
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()  { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
+# dsp()/ov() come from lib/rig.sh (identical bodies lived here first).
 STRIP='0,1480 2560x120'
 
 minimized_total() {
@@ -30,7 +27,7 @@ import json,sys
 print(sum(1 for c in json.load(sys.stdin) if c['workspace']['name']=='special:minimized'))"
 }
 
-systemctl --user stop hyprwall.timer 2>/dev/null
+hyprwall_pause
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
 

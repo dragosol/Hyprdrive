@@ -24,61 +24,34 @@
 # 50197ec's run failed, and it is a rig fault that reads exactly like a product
 # fault unless something else in the frame is watching for it.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 
 TAG=${1:?usage: y9_rig.sh <tag>}
 OUT=/mnt/host/y9; mkdir -p $OUT
 
-dsp()  { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()   { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
 mini() { dsp "hl.plugin.scrolloverview.minimize($1)"; }
 
 restore() {
     ov off
     mini "[[restore]]"
-    hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1
-    sleep 1.2
-    for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-        hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-    done
-    systemctl --user start hyprwall.timer 2>/dev/null
+    headless_off
+    hyprwall_resume
 }
 trap restore EXIT
 
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+hyprwall_pause
 
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
 dsp "hl.dsp.focus({workspace = 1})"; sleep 0.8
 
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2
-for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-    hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-done
-sleep 1
-hyprctl output create headless >/dev/null 2>&1; sleep 1.5
-HL=$(hyprctl monitors all -j | python3 -c "
-import json,sys
-hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
-print(hs[0] if len(hs)==1 else '')")
-[ -n "$HL" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
-hyprctl eval "return hl.monitor({output = [[$HL]], mode = [[2560x1600@60]], position = [[0x0]], scale = 1})" >/dev/null 2>&1; sleep 1.2
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
+RIG_HEADLESS_MODE=2560x1600@60      # this gate was proven at @60 [rig.sh header note]
+headless_on || exit 1
+trap restore EXIT                   # re-chain: headless_on installed its own EXIT trap
 
-read -r MON W H <<< "$(hyprctl monitors -j | python3 -c "
-import json,sys
-m=json.load(sys.stdin)[0]; print(m['name'], m['width'], m['height'])")"
+MON=$RIG_MON W=$RIG_W H=$RIG_H
 echo "monitor: $MON ${W}x${H}"
-case "$MON" in HEADLESS*) ;; *) echo "ABORT: expected the headless output, got $MON"; exit 1 ;; esac
 
 dsp "hl.dsp.focus({monitor = \"$MON\"})"; sleep 0.3
 setsid kitty -c NONE --class Y9GRN --title GRNWIN -o background='#00c000' -o background_opacity=1.0 \

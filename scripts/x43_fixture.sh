@@ -14,34 +14,25 @@
 # the way -o background_opacity=1.0 does here, and a translucent fixture makes
 # the overlap probe meaningless.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x43; mkdir -p $OUT
 
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
+# ov()/dsp() come from lib/rig.sh (identical bodies lived here first).
 
-systemctl --user stop hyprwall.timer 2>/dev/null
+hyprwall_pause
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
 
 # Exactly one headless output, Virtual-1 off: a starved Virtual-1 stalls every
-# output including headless (established by the X1 fixture).
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2
-for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-    hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-done
-sleep 1
-hyprctl output create headless >/dev/null 2>&1; sleep 1.5
+# output including headless (established by the X1 fixture). The swap itself is
+# OWNED BY THE GATE WRAPPER (gates/x43_raise/run.sh, via rig.sh headless_on),
+# because its EXIT-trap teardown must outlive this script -- x43_open.sh and
+# x43_click.sh still need the headless after this one exits.
 MON=$(hyprctl monitors -j | python3 -c "
 import json,sys
-hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
-print(hs[0] if len(hs)==1 else '')")
-[ -n "$MON" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
+print(next((m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')), ''))")
+[ -n "$MON" ] || { echo "ABORT: no headless output up -- run via gates/x43_raise/run.sh"; exit 1; }
 echo "output: $MON"
 
 spawn() { # class colour ws w h x y

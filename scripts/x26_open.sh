@@ -6,14 +6,13 @@
 # and workspace, and a stale coordinate produces a drag that grabs nothing and
 # a rig that reports "drop did not commit" for the wrong reason.
 set -u
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t $XDG_RUNTIME_DIR/hypr | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x26
 
-ov() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null; }
 clear_search() { for _ in $(seq 20); do ydotool key 14:1 14:0; done; sleep 0.5; }
 
-systemctl --user stop hyprwall.timer
+hyprwall_pause
 pkill kitty; sleep 1.0
 hyprctl dispatch "hl.dsp.focus({workspace = 1})" >/dev/null; sleep 0.5
 

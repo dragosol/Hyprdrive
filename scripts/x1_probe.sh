@@ -4,14 +4,14 @@
 # query that matches nothing. If those three frames are near-identical, the
 # filter phase of the stress run is unfalsifiable and its pass means nothing.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x1; mkdir -p $OUT
 MON=$(hyprctl monitors -j | python3 -c "
 import json,sys
 print(next((m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')), ''))")
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
+# ov() comes from rig.sh; key() stays LOCAL -- rig.sh's key() sleeps 0.30
+# built-in and this probe's keystroke pacing is its own (0.10-0.12s).
 key() { ydotool key "$1:1" "$1:0" 2>/dev/null; }
 
 ov off; sleep 1.5

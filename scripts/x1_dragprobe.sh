@@ -4,15 +4,14 @@
 # ydotool absolute coords are HALF screen coords on this rig (measured: sending
 # 100 lands the cursor at 201), hence mv2.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x1; mkdir -p $OUT
 MON=$(hyprctl monitors -j | python3 -c "
 import json,sys
 print(next((m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')), ''))")
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-mv2() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
+# ov() comes from rig.sh (verbatim-equivalent)
+mv2() { warp "$1" "$2"; }    # rig.sh warp owns the ydotool halving now
 walk(){ local n=14 i; for i in $(seq 1 $n); do
     mv2 $(( $1 + ($3 - $1) * i / n )) $(( $2 + ($4 - $2) * i / n )); sleep 0.04; done; }
 ws()  { hyprctl workspaces -j | python3 -c "import json,sys; print(' '.join('%d:%d'%(w['id'],w['windows']) for w in sorted(json.load(sys.stdin),key=lambda x:x['id'])))"; }

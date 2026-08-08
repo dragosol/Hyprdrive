@@ -8,13 +8,12 @@
 # Stops at the FIRST committing target, because a commit reflows the grid and
 # invalidates the grab point for later laps.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 GX=${GX:-512}; GY=${GY:-478}; TY=${TY:-170}
 CANDS=${CANDS:-"240 360 480 610 730"}
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-mv2() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
+# ov() comes from rig.sh (verbatim-equivalent)
+mv2() { warp "$1" "$2"; }    # rig.sh warp owns the ydotool halving now
 walk(){ local n=${5:-12} i; for i in $(seq 1 $n); do
     mv2 $(( $1 + ($3 - $1) * i / n )) $(( $2 + ($4 - $2) * i / n )); sleep 0.04; done; }
 occ() { hyprctl workspaces -j | python3 -c "

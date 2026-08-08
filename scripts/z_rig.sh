@@ -2,30 +2,27 @@
 # Z4-Z7 dock flight gates. usage: z_rig.sh <z4|z5|z6|z7>. Runs IN THE GUEST.
 # z7/z6 print PASS/FAIL themselves; z4/z5 record films for zflight_gate.py.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/zrig; mkdir -p $OUT /mnt/host/x24d
-cp ~/overview-cpp/scripts/x24_cell.py /mnt/host/ 2>/dev/null
+cp "$RIG_LIB_DIR/../x24_cell.py" /mnt/host/ 2>/dev/null
 W=$1
 
-cfg(){ hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
-scale(){ hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=$1}}}) return 0" >/dev/null 2>&1; }
+cfg(){ cfg_dock "$1"; }
+scale(){ hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=$1}}}) return 0" >/dev/null 2>&1; }   # NOT rig.sh anim_slow: its readback sleep would shift z4's click timing
 ws(){ hyprctl dispatch "hl.dsp.focus({workspace = $1})" >/dev/null 2>&1; sleep 0.8; }
-killothers(){ hyprctl clients -j | python3 -c "import json,sys
-for c in json.load(sys.stdin):
-    if c.get('class') not in ('zfix','') and c.get('pid',0)>0: print(c['pid'])" | xargs -r kill -9 2>/dev/null; }
+# killothers comes from rig.sh (identical -9 sweep); the keep-class is passed.
 # Nautilus gets D-Bus-activated back to life BETWEEN a single startup sweep and
 # the click (measured: two rig runs, two different corpses in the dock), so the
 # sweep runs immediately before EVERY click.
-click(){ killothers; sleep 0.6; bash ~/overview-cpp/scripts/x24_dock_click.sh zfix >/dev/null 2>&1; }
+click(){ killothers zfix; sleep 0.6; bash "$RIG_LIB_DIR/../x24_dock_click.sh" zfix >/dev/null 2>&1; }
 # x24_cell.py still models a MINIMIZED window as icon+preview-slot; X46 deleted
 # the preview slot, so its x lands 46px left of the real single cell. With
 # every other dock item off and one class, the cell sits at screen centre by
 # symmetry -- click there. Rig-local; the shared locator stays untouched.
-clickcenter(){ killothers; sleep 0.6
+clickcenter(){ killothers zfix; sleep 0.6
+  # RAW ydotool half-space coords (640,778 = screen 1280,1556) -- do NOT route
+  # these through rig.sh warp(), which would halve them again.
   ydotool mousemove -a -x 640 -y 778 2>/dev/null; sleep 0.5
   ydotool click 0x40; for d in 2 -2 3 -1 0; do ydotool mousemove -a -x $((640+d)) -y $((778-d)) 2>/dev/null; sleep 0.025; done; ydotool click 0x80; }
 # no tail sleep in clickcenter: z6 samples the active workspace 150ms after the
@@ -150,7 +147,7 @@ case "$W" in
     # clicks all landed after each 400ms flight had finished, and the gate was
     # testing nothing). Real spam: park the mouse on the cell once, then three
     # fast held presses ~250ms apart, all inside one flight's lifetime.
-    killothers; sleep 0.6
+    killothers zfix; sleep 0.6
     rm -f $OUT/z5.mp4
     wf-recorder -f $OUT/z5.mp4 -c libvpx-vp9 -r 30 >$OUT/z5-wfr.log 2>&1 & WFR=$!
     sleep 2.5

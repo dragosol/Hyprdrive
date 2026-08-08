@@ -15,11 +15,8 @@
 # ids and window addresses, not pixels, so there is nothing for the host to
 # count.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 
 TAG=${1:?usage: z2_rig.sh <tag>}
 OUT=/mnt/host/z2; mkdir -p $OUT
@@ -27,10 +24,10 @@ OUT=/mnt/host/z2; mkdir -p $OUT
 WS_HOME=1
 WS_AWAY=7
 
-dsp()   { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()    { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
-warp()  { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
-cfg()   { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
+# dsp/ov/warp come from rig.sh (identical bodies; warp owns the halving)
+cfg()   { cfg_dock "$1"; }
+# overrides rig.sh's click(X Y) on purpose: a plain ~120ms press with no warp --
+# raise() has already parked the pointer on the cell and it must not move.
 click() { ydotool click 0x40; sleep 0.12; ydotool click 0x80; }
 
 act()   { hyprctl activeworkspace -j | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])"; }
@@ -39,49 +36,23 @@ import json,sys
 d=json.load(sys.stdin) or {}
 print(d.get('address','none'))"; }
 
-restore() {
+restore() {   # chained in front of headless_off/hyprwall_resume once headless_on is up
     ov off
     cfg "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false"
     dsp "hl.dsp.focus({workspace = $WS_HOME})"
-    hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1
-    sleep 1.2
-    for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-        hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-    done
-    systemctl --user start hyprwall.timer 2>/dev/null
 }
-trap restore EXIT
 
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+hyprwall_pause
 
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
 dsp "hl.dsp.focus({workspace = $WS_HOME})"; sleep 0.8
 
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2
-for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-    hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-done
-sleep 1
-hyprctl output create headless >/dev/null 2>&1; sleep 1.5
-HL=$(hyprctl monitors all -j | python3 -c "
-import json,sys
-hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
-print(hs[0] if len(hs)==1 else '')")
-[ -n "$HL" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
-hyprctl eval "return hl.monitor({output = [[$HL]], mode = [[2560x1600@60]], position = [[0x0]], scale = 1})" >/dev/null 2>&1; sleep 1.2
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
-
-read -r MON W H <<< "$(hyprctl monitors -j | python3 -c "
-import json,sys
-m=json.load(sys.stdin)[0]; print(m['name'], m['width'], m['height'])")"
+RIG_HEADLESS_MODE=2560x1600@60      # this rig was proven at @60; keep it
+headless_on || exit 1
+trap 'restore; headless_off; hyprwall_resume' EXIT   # chain, per rig.sh contract
+MON=$RIG_MON; W=$RIG_W; H=$RIG_H
 echo "monitor: $MON ${W}x${H}"
-case "$MON" in HEADLESS*) ;; *) echo "ABORT: expected the headless output, got $MON"; exit 1 ;; esac
 
 cfg "autohide=false, show_favorites=false, show_apps_button=false, show_trash=false, show_mounts=false"
 sleep 0.8

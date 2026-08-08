@@ -21,21 +21,13 @@
 # nothing to do with the band, and the TILES check would be measuring that.
 # Both live on workspace 1 so no cross-desktop promotion can add a third tile.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"   # env discovery, ov/dsp/key, K_* keycodes
+rig_env || exit 1
 OUT=/mnt/host/x48; mkdir -p $OUT
-
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-key() { ydotool key "$1:1" "$1:0"; sleep 0.30; }
 
 # TAB, not DOWN: DOWN goes to moveSelection() and walks the GRID's tile
 # selection (scrollOverview.cpp:2413). Only Tab walks the result rows, and only
 # a selected row is drawn in opaque accent -- which is the whole locator here.
-K_ESC=1; K_K=37; K_TAB=15
 
 restore() {
     hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1

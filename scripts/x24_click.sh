@@ -11,15 +11,16 @@
 # duration is a config key precisely so a rig can do this without a rebuild; the
 # gate asserts the SHIPPING default separately.
 set -u
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t $XDG_RUNTIME_DIR/hypr | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x24
 MS=${MS:-2400}   # MS=0 is the negative control: teleport, and the gate must fail
 
-ov() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null; }
+# ov() comes from rig.sh; RIG_MON is set when the wrapper runs this headless,
+# standalone runs keep the old Virtual-1 target.
 
 if [ "$1" = setup ]; then
-    systemctl --user stop hyprwall.timer
+    hyprwall_pause
     pkill kitty; sleep 1.0
     hyprctl dispatch "hl.dsp.focus({workspace = 1})" >/dev/null; sleep 0.5
 
@@ -56,18 +57,18 @@ LUA
     hyprctl eval "return hl.plugin.scrolloverview.configure({dock = {minimize_ms = $MS}})" >/dev/null
     ov on; sleep 1.5
     for _ in $(seq 20); do ydotool key 14:1 14:0; done; sleep 0.5
-    grim -o Virtual-1 $OUT/open.png
+    grim -o "${RIG_MON:-Virtual-1}" $OUT/open.png
     echo "setup ms=$MS"
     exit
 fi
 
-# Coordinates are SCREEN px; ydotool's absolute space here is half the output.
-ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )); sleep 0.4
+# Coordinates are SCREEN px; rig.sh's warp() owns the ydotool halving.
+warp $1 $2; sleep 0.4
 
 # The control frame is shot with the pointer already parked on the icon, so the
 # tile it measures is the tile the flight actually starts from -- hover ease and
 # all.
-grim -o Virtual-1 $OUT/pre.png
+grim -o "${RIG_MON:-Virtual-1}" $OUT/pre.png
 
 ydotool click 0xC0
 # 0.15s of lead. The stash and the first flight frame are not the same frame --
@@ -75,9 +76,9 @@ ydotool click 0xC0
 # fired the instant the click lands can catch the gap and read as a teleport.
 # 0.15s of a 2400ms flight is t=0.06, which the cubic has barely moved.
 sleep 0.15
-for i in 1 2 3 4 5; do grim -o Virtual-1 $OUT/fly$i.png; done
+for i in 1 2 3 4 5; do grim -o "${RIG_MON:-Virtual-1}" $OUT/fly$i.png; done
 sleep 2.0
-grim -o Virtual-1 $OUT/landed.png
+grim -o "${RIG_MON:-Virtual-1}" $OUT/landed.png
 hyprctl clients -j > $OUT/clients.json
 hyprctl eval "return hl.plugin.scrolloverview.configure({dock = {minimize_ms = $(cat $OUT/default_ms.txt)}})" >/dev/null
 echo "clicked $1,$2"

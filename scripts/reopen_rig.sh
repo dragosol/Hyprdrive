@@ -10,10 +10,8 @@
 # goes in at 120ms: far enough in that the animation is genuinely running, early
 # enough that it has not already ended.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=$(basename $(ls -t /run/user/1000/wayland-* | grep -v lock | head -1))
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/reopenshots
 mkdir -p $OUT
 
@@ -22,7 +20,9 @@ import json,sys
 m = json.load(sys.stdin)[0]
 print(m['name'], m['width'], m['height'])")"
 
-dsp()  { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
+# dsp() comes from lib/rig.sh. warp() below deliberately SHADOWS rig.sh's: this
+# rig always slept 0.3 after each move and that timing must not change. The
+# halving lives in this body, so nothing is halved twice.
 tog()  { dsp "hl.plugin.scrolloverview.overview([[toggle]])"; }
 warp() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; sleep 0.3; }
 park() { warp $((W / 2)) $((H / 3)); }
@@ -31,8 +31,7 @@ shot() { sleep 0.6; grim -o "$MON" $OUT/$1.png; }
 case "${1:?usage: reopen_rig.sh <fixture|run>}" in
 
 fixture)
-    systemctl --user stop hyprwall.timer 2>/dev/null
-    systemd-run --user --on-active=40min systemctl --user start hyprwall.timer >/dev/null 2>&1
+    hyprwall_pause 40min
     dsp "hl.plugin.scrolloverview.overview([[off]])"; sleep 1.0
     pkill -f kitty 2>/dev/null; sleep 1.0
     for i in 1 2; do

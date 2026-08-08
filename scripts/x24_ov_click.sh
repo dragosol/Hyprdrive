@@ -13,37 +13,39 @@
 # post.png must land nearer control A than control B. Identical controls mean
 # the capture stalled, and the gate fails rather than scoring that as a pass.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x24d
 CLS=${1:-X24SOLO}
 
-ov() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
+# ov() comes from rig.sh; RIG_MON is set when the wrapper runs this headless,
+# standalone runs keep the old Virtual-1 target.
 
 ov off; sleep 1.5
-grim -o Virtual-1 $OUT/desktop.png
+grim -o "${RIG_MON:-Virtual-1}" $OUT/desktop.png
 
 ov on;  sleep 2.5
-grim -o Virtual-1 $OUT/ovopen.png
+grim -o "${RIG_MON:-Virtual-1}" $OUT/ovopen.png
 
 hyprctl clients -j      > $OUT/pre-clients.json
 hyprctl activewindow -j > $OUT/pre-active.json
 
 # Same cell prediction as the desktop rig -- the pill does not move when the
-# overview opens, which is itself part of what this proves.
-read -r CX CY <<< "$(hyprctl clients -j | python3 /mnt/host/x24_cell.py "$CLS")"
+# overview opens, which is itself part of what this proves. x45dock_cell.py is
+# the corrected post-X46 predictor, rewired here at promotion.
+read -r CX CY <<< "$(hyprctl clients -j | python3 "$(dirname "$0")/x45dock_cell.py" "$CLS")"
+[ -n "${CX:-}" ] || { echo "no dock cell predicted for $CLS" >&2; exit 1; }
 
-mv2() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
-mv2 $CX $CY; sleep 0.5
+# warp() comes from rig.sh and owns the ydotool halving.
+warp $CX $CY; sleep 0.5
 ydotool click 0x40
-for d in 2 -2 3 -1 0; do mv2 $((CX+d)) $((CY-d)); sleep 0.025; done
+for d in 2 -2 3 -1 0; do warp $((CX+d)) $((CY-d)); sleep 0.025; done
 ydotool click 0x80
 sleep 2.0
 
 hyprctl clients -j      > $OUT/post-clients.json
 hyprctl activewindow -j > $OUT/post-active.json
-grim -o Virtual-1 $OUT/post.png
+grim -o "${RIG_MON:-Virtual-1}" $OUT/post.png
 
 ov off
 echo "OV_CLICKED $CLS at $CX,$CY"

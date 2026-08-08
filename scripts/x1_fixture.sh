@@ -17,21 +17,21 @@
 set -u
 N=${1:-24}
 NWS=${2:-3}
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x1; mkdir -p $OUT
 
 # The wallpaper rotates every 3 minutes and a stress run is longer than that.
 # A wallpaper change mid-run moves every pixel in the frame, so every
 # before/after diff gate would pass trivially -- the exact failure the gates
-# exist to prevent. Deferred restart so an aborted run cannot orphan it off.
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemctl --user stop hyprwall-resume.timer 2>/dev/null
-systemd-run --user --on-active=30min --unit=hyprwall-resume \
-    systemctl --user start hyprwall.timer >/dev/null 2>&1
+# exist to prevent. rig.sh hyprwall_pause arms the deferred restart so an
+# aborted run cannot orphan it off.
+hyprwall_pause
 
-ov() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
+# ov() comes from rig.sh (verbatim-equivalent). The headless build below stays
+# LOCAL: rig.sh headless_on forces RIG_HEADLESS_MODE and traps headless_off on
+# EXIT, but this fixture must LEAVE the headless output alive (and at the mode
+# x1_stress's measured GX/GY defaults were taken on) for x1_stress.sh to use.
 
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; pkill -x wf-recorder 2>/dev/null; sleep 1.5

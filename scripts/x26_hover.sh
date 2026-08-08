@@ -9,11 +9,11 @@
 # and read as "the highlight does not render". The control frame is now the same
 # frame the target is measured from.
 set -u
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t $XDG_RUNTIME_DIR/hypr | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x26
 
-mv() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )); sleep 0.2; }
+mv() { warp "$1" "$2"; sleep 0.2; }   # rig.sh warp owns the halving; pacing stays here
 
 case "$1" in
 off)

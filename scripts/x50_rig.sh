@@ -18,15 +18,11 @@
 # a0/a1 bracket the resting state: if those two differ the output is drifting
 # and no later diff means anything.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 SRC=/mnt/host/x48; OUT=/mnt/host/x50; mkdir -p $OUT
 
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-key() { ydotool key "$1:1" "$1:0"; sleep 0.30; }
+# ov()/key() come from lib/rig.sh (verbatim-equivalent to the old local ones).
 K_ESC=1; K_K=37; K_Z=44; K_Q=16; K_X=45; K_J=36; K_W=17
 
 TAG=${1:?usage: x50_rig.sh <tag>}

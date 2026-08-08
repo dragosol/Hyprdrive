@@ -10,16 +10,8 @@
 # in the same instant never crosses the drag threshold and so never exercises the
 # path a real hand does (X16's lesson, which cost a whole fire).
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
-
-dsp()  { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()   { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
-warp() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
-cfg()  { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 
 # press, wobble, release -- a real hand moves between the two edges
 click() {
@@ -51,16 +43,15 @@ d=json.load(sys.stdin); print(d.get('title','(none)'))" 2>/dev/null
 
 restore() {
     ov off
-    cfg "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false"
-    systemctl --user start hyprwall.timer 2>/dev/null
+    cfg_dock "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false"
+    hyprwall_resume
 }
 trap restore EXIT
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+hyprwall_pause
 
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
-cfg "autohide=false, show_favorites=false, show_apps_button=false, show_trash=false, show_mounts=false"
+cfg_dock "autohide=false, show_favorites=false, show_apps_button=false, show_trash=false, show_mounts=false"
 sleep 0.8
 
 for t in ONE TWO THREE; do

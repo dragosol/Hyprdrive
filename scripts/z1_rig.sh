@@ -19,11 +19,8 @@
 #
 # Runs IN THE GUEST. Captures only -- the counting is on the host (no numpy).
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 
 TAG=${1:?usage: z1_rig.sh <tag>}
 OUT=/mnt/host/z1; mkdir -p $OUT
@@ -31,57 +28,29 @@ OUT=/mnt/host/z1; mkdir -p $OUT
 WS_HOME=1        # where the rig stands
 WS_AWAY=7        # never visited before the swap phase -- that is the point
 
-dsp()  { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()   { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
-warp() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
-cfg()  { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
+# dsp/ov/warp come from rig.sh (identical bodies; warp owns the halving)
+cfg()  { cfg_dock "$1"; }
 
-restore() {
+restore() {   # chained in front of headless_off/hyprwall_resume once headless_on is up
     ov off
     cfg "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false"
     dsp "hl.dsp.focus({workspace = $WS_HOME})"
-    hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1
-    sleep 1.2
-    for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-        hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-    done
-    systemctl --user start hyprwall.timer 2>/dev/null
 }
-trap restore EXIT
 
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+hyprwall_pause
 
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
 dsp "hl.dsp.focus({workspace = $WS_HOME})"; sleep 0.8
 
-# --- headless output, Virtual-1 off: Virtual-1 draws ~1fps with no viewer
-# attached, so grim hands back stale frames and every measurement below is a
-# reading of the throttle rather than of the plugin.
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2
-for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-    hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-done
-sleep 1
-hyprctl output create headless >/dev/null 2>&1; sleep 1.5
-HL=$(hyprctl monitors all -j | python3 -c "
-import json,sys
-hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
-print(hs[0] if len(hs)==1 else '')")
-[ -n "$HL" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
-hyprctl eval "return hl.monitor({output = [[$HL]], mode = [[2560x1600@60]], position = [[0x0]], scale = 1})" >/dev/null 2>&1; sleep 1.2
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
-
-read -r MON W H <<< "$(hyprctl monitors -j | python3 -c "
-import json,sys
-m=json.load(sys.stdin)[0]; print(m['name'], m['width'], m['height'])")"
+# --- headless output, Virtual-1 off (rig.sh headless_on): Virtual-1 draws
+# ~1fps with no viewer attached, so grim hands back stale frames and every
+# measurement below is a reading of the throttle rather than of the plugin.
+RIG_HEADLESS_MODE=2560x1600@60      # this rig was proven at @60; keep it
+headless_on || exit 1
+trap 'restore; headless_off; hyprwall_resume' EXIT   # chain, per rig.sh contract
+MON=$RIG_MON; W=$RIG_W; H=$RIG_H
 echo "monitor: $MON ${W}x${H}"
-case "$MON" in HEADLESS*) ;; *) echo "ABORT: expected the headless output, got $MON"; exit 1 ;; esac
 
 # Running classes only, so x47_cell.py's prediction is a prediction.
 cfg "autohide=false, show_favorites=false, show_apps_button=false, show_trash=false, show_mounts=false"
@@ -131,11 +100,7 @@ shot() { grim -g "$BAND" "$OUT/$TAG-$1.png" 2>/dev/null; }
 PARKX=$((W - 60)); PARKY=60
 
 hover() {   # hover the icon, let the panel settle past PANEL_IN_MS, capture
-    warp $IX $IY
-    sleep 0.4
-    read -r CX CY <<< "$(hyprctl cursorpos | tr -d ',')"
-    [ "$(( CX > IX - 6 && CX < IX + 6 && CY > IY - 6 && CY < IY + 6 ))" = 1 ] \
-        || { echo "ABORT: warp landed at $CX,$CY, not $IX,$IY"; exit 1; }
+    warp_or_die $IX $IY
     sleep 0.6
     shot "$1"
 }

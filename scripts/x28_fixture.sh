@@ -11,34 +11,22 @@
 # Headless output, Virtual-1 disabled: Virtual-1 draws ~1fps with no viewer
 # attached and every capture in this rig would be a stale frame.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x28; mkdir -p $OUT
 
-ov() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+hyprwall_pause
 
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
 
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2
-for m in $(hyprctl monitors all -j | python3 -c "
-import json,sys
-print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
-    hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
-done
-sleep 1
-hyprctl output create headless >/dev/null 2>&1; sleep 1.5
-MON=$(hyprctl monitors -j | python3 -c "
-import json,sys
-hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
-print(hs[0] if len(hs)==1 else '')")
-[ -n "$MON" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
-hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
+# Headless create + Virtual-1 disable moved to rig.sh headless_on, called by
+# the WRAPPER (scripts/gates/x28/run.sh): headless_on installs an EXIT-trap
+# teardown, and from here it would fire when this fixture exits -- before a
+# single click. The wrapper's process spans the whole gate, so the swap-back
+# happens after the last frame instead.
+[ -n "${RIG_MON:-}" ] || { echo "ABORT: RIG_MON unset -- run via scripts/gates/x28/run.sh (headless_on first)"; exit 1; }
+MON=$RIG_MON
 
 hyprctl monitors -j | python3 -c "
 import json,sys

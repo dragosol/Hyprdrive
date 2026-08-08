@@ -19,20 +19,12 @@
 #      OPEN; with no search active the first ESC closes it. Frame 40 must look
 #      open, and its control frame 50 must look closed.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-# Never hardcode wayland-1 -- a restarted GDM leaves the old wedged Hyprland
-# holding it and clients connect to the corpse.
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"   # env discovery, ov/key, K_ESC
+rig_env || exit 1
 OUT=/mnt/host/g1
 
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-key() { ydotool key "$1:1" "$1:0"; sleep 0.30; }
-
 # KEY_COMPOSE is evdev 127 -- the Menu key, which is what `compose:menu` binds.
-K_ESC=1; K_E=18; K_APOS=40; K_MENU=127
+K_E=18; K_APOS=40; K_MENU=127
 
 TAG=${1:?usage: g1c_rig.sh <tag>}
 MON=$(cat $OUT/mon)

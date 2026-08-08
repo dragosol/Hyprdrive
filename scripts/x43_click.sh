@@ -7,25 +7,24 @@
 # drag_threshold: this is a click test, not a drag test -- cross the threshold
 # and you are measuring beginWindowDrag instead.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x43
 GX=$1; GY=$2
 MON=$(hyprctl monitors -j | python3 -c "
 import json,sys
 print(next((m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')), ''))")
 
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-mv2() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
+# ov() and warp() come from lib/rig.sh; warp owns the ydotool halving, and GX/GY
+# arrive here as full-resolution monitor pixels, so they are halved exactly once.
 
 ov off; sleep 1.2
 hyprctl activewindow -j > $OUT/click-active-pre.json
 ov on;  sleep 3
 
-mv2 $GX $GY; sleep 0.4
+warp $GX $GY; sleep 0.4
 ydotool click 0x40            # press, no release
-for d in 2 -2 3 -1 0; do mv2 $((GX+d)) $((GY-d)); sleep 0.025; done
+for d in 2 -2 3 -1 0; do warp $((GX+d)) $((GY-d)); sleep 0.025; done
 ydotool click 0x80            # release
 sleep 3
 

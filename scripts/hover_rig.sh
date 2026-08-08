@@ -17,17 +17,12 @@
 # captures. Frames are a horizontal band through the tile's middle, because a
 # full-screen grim is ~500ms here and would be slower than the animation.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/hover; mkdir -p $OUT
 
-dsp()  { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()   { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
-# ydotool's absolute space is HALF this guest's output (standing rig rule).
-warp() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
+# dsp()/ov()/warp() come from lib/rig.sh (verbatim-equivalent to the old local
+# ones; warp owns the ydotool half-space rule, coordinates here stay monitor px).
 
 TAG=${1:?usage: hover_rig.sh <tag>}
 

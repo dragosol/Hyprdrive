@@ -16,10 +16,8 @@
 #
 # usage: y7_probe.sh <grabX> <grabY>
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/y7; mkdir -p $OUT
 
 GX=$1; GY=$2
@@ -28,13 +26,11 @@ DRAGX=200
 read -r MON W H <<< "$(hyprctl monitors -j | python3 -c "
 import json,sys
 m=json.load(sys.stdin)[0]; print(m['name'], m['width'], m['height'])")"
-cfg() { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
-cfg "autohide=false"
+cfg_dock "autohide=false"
 sleep 0.6
 
-mv2()  { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
 walk() { local n=10 i; for i in $(seq 1 $n); do
-    mv2 $(( $1 + ($3 - $1) * i / n )) $(( $2 + ($4 - $2) * i / n )); sleep 0.04; done; }
+    warp $(( $1 + ($3 - $1) * i / n )) $(( $2 + ($4 - $2) * i / n )); sleep 0.04; done; }
 
 # The band top the plugin uses: bottom 30% of the output.
 BANDTOP=$(( H * 70 / 100 ))
@@ -45,7 +41,7 @@ YS="$(( BANDTOP - 90 )) $BANDTOP $(( BANDTOP + (H - 90 - BANDTOP) * 1 / 4 )) $((
 echo "rungs: $YS"
 echo "$YS" > $OUT/rungs.txt
 
-mv2 $GX $GY; sleep 0.6
+warp $GX $GY; sleep 0.6
 ydotool click 0x40; sleep 0.15          # press and HOLD
 walk $GX $GY $DRAGX $(( BANDTOP - 90 )) # into the drag, above the band
 sleep 0.8
@@ -64,6 +60,6 @@ done
 # the band but off the pill is still a move, and this run is about the glow.
 walk $DRAGX $PREV $GX $GY; sleep 0.5
 ydotool click 0x80; sleep 1.5
-cfg "autohide=true"
+cfg_dock "autohide=true"
 echo "frames: $i"
 echo Y7_PROBE_OK

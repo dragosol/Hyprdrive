@@ -1,11 +1,11 @@
-build/
+# build
 .build/
-.cache/
 scrolloverview.so
+hyprdrive.so
 
-# Nix
-result/
-result
-result-*
-.envrc
-.direnv/
+# python bytecode from the gate graders
+__pycache__/
+*.pyc
+
+# gate run artifacts
+scripts/gates/*/last.log

@@ -21,16 +21,9 @@
 # TAB, never DOWN: DOWN goes to moveSelection() and walks the GRID's tile
 # selection (scrollOverview.cpp:2413). Only Tab walks the results.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"   # env discovery, ov/key, K_ESC/K_TAB/K_K
+rig_env || exit 1
 SRC=/mnt/host/x48; OUT=/mnt/host/g5; mkdir -p $OUT
-
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-key() { ydotool key "$1:1" "$1:0"; sleep 0.30; }
-K_ESC=1; K_TAB=15; K_K=37
 
 STEPS=10
 TAG=${1:?usage: g5_rig.sh <tag>}

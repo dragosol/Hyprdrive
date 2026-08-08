@@ -19,21 +19,9 @@
 # A frozen output hands back the same frame forever, so 20 and 40 are what stop
 # this rig passing on a dead compositor.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-# NEVER hardcode wayland-1: a restarted GDM leaves the old, wedged Hyprland
-# holding that socket while the live session moves on, and clients then connect
-# to the corpse and map nothing, silently.
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"   # env discovery, ov/dsp/key, K_* keycodes
+rig_env || exit 1
 OUT=/mnt/host/g1; mkdir -p $OUT
-
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-key() { ydotool key "$1:1" "$1:0"; sleep 0.30; }
-
-K_ESC=1; K_K=37; K_X=45; K_SPACE=57; K_TAB=15; K_BKSP=14; K_F5=63
 
 case "${1:?usage: g1_rig.sh fixture|run <tag>}" in
 

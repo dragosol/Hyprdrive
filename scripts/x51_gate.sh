@@ -6,11 +6,10 @@
 # Identical frames are also what a stalled Virtual-1 produces, so C is a control
 # that MUST differ: a typed query the other two never had.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()  { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
+# dsp()/ov() come from lib/rig.sh. rig_env also exports WAYLAND_DISPLAY, which
+# the old block never set -- grim used to depend on inheriting it by luck.
 systemctl --user stop hyprwall.timer 2>/dev/null
 
 ov on; sleep 4; grim /mnt/host/x51_A_coldtext.png; ov off; sleep 2

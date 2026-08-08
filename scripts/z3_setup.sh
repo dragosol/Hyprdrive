@@ -14,24 +14,23 @@
 # only window on it: yellow is ws2, cyan is ws3. MARK is red and is the one
 # thing that moves.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/z3; mkdir -p $OUT
 
 MARKX=200; MARKY=150
 
-ov()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
+# ov/dsp come from rig.sh (identical expansions)
 
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+hyprwall_pause
 
 ov off; sleep 1
 pkill -x kitty 2>/dev/null; sleep 1.5
 
+# Hand-rolled headless, NOT rig.sh headless_on: the output must OUTLIVE this
+# script (z3_drag/z3_shot photograph it next), and headless_on's EXIT trap
+# would tear it down the moment this script ends.
+# gates/z3_position_memory/run.sh owns the teardown.
 hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2
 for m in $(hyprctl monitors all -j | python3 -c "
 import json,sys

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# GATE x51_text_cache -- text served from the surviving glyph cache must be
+# PIXEL-IDENTICAL to text rendered fresh. Frame A needs a COLD cache, so this
+# wrapper restarts the guest compositor first (share/hyprrestart.sh, ~14s),
+# waits for the NEW session, runs x51_gate.sh, then scripts the comparison the
+# gate's promotion notes said was still manual:
+#   A == B  (bytes)      cold text == cached text
+#   B != C  (must-differ control: a typed query -- identical means the output
+#            was starved and A==B proves nothing -> VOID, not a pass)
+#
+# RUN THIS OVER SSH (ssh -p 2222), never from a terminal inside the Hyprland
+# session: the GDM restart would kill the very shell running it.
+set -u
+REPO=$(cd "$(dirname "$0")/../../.." && pwd)
+cd "$REPO"
+source scripts/lib/rig.sh
+
+RESTART=/mnt/host/hyprrestart.sh
+if [ ! -f "$RESTART" ]; then
+    echo "NEEDS-HOST: $RESTART not found in the guest share -- X51 needs a compositor" >&2
+    echo "restart (cold glyph cache) before frame A and this wrapper has no other way" >&2
+    echo "to get one. Restart via share/hyprrestart.sh, then run scripts/x51_gate.sh." >&2
+    exit 3
+fi
+
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+OLD_SIG=$(rig_sig)
+
+bash "$RESTART" || { echo "FAIL: hyprrestart.sh returned nonzero" >&2; exit 1; }
+
+# Wait for the NEW compositor: the instance signature must change (a restart
+# mints a new instance dir) and rig_env must find a live session.
+ok=0
+for _ in $(seq 1 45); do
+    sleep 2
+    NEW_SIG=$(rig_sig)
+    if [ -n "$NEW_SIG" ] && [ "$NEW_SIG" != "$OLD_SIG" ]; then
+        RIG_ENV_OK=0
+        if rig_env 2>/dev/null; then ok=1; break; fi
+    fi
+done
+if [ "$ok" != 1 ]; then
+    echo "FAIL: no fresh compositor session appeared within 90s of the restart" >&2
+    exit 1
+fi
+sleep 8      # let the plugin and the rest of the session finish coming up
+
+hyprwall_pause                 # x51_gate.sh stops the timer and never restarts it
+trap hyprwall_resume EXIT
+
+bash scripts/x51_gate.sh || { echo "FAIL: x51_gate.sh capture run failed" >&2; exit 1; }
+alive_or_die "after the x51 capture run"
+
+A=/mnt/host/x51_A_coldtext.png
+B=/mnt/host/x51_B_cachedtext.png
+C=/mnt/host/x51_C_control.png
+for f in "$A" "$B" "$C"; do
+    [ -s "$f" ] || { echo "FAIL: $f missing or empty -- capture did not land" >&2; exit 1; }
+done
+
+if cmp -s "$B" "$C"; then
+    echo "VOID: B and C are byte-identical -- the typed-query control did not move," >&2
+    echo "the output was starved, and A==B would prove nothing" >&2
+    exit 1
+fi
+if ! cmp -s "$A" "$B"; then
+    echo "FAIL: cold text (A) != cached text (B) -- the glyph-cache-served render is not pixel-identical" >&2
+    exit 1
+fi
+echo "X51 PASS: cached text is byte-identical to fresh text (A==B), and the typed-query control differs (B!=C)"
+exit 0

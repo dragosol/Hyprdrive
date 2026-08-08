@@ -5,12 +5,12 @@
 # moves with the window count and the pill is centred, so both drift.
 # Coordinates are SCREEN px; ydotool's absolute space here is half the output.
 set -u
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t $XDG_RUNTIME_DIR/hypr | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x26
 GX=$1; GY=$2; TX=$3; TY=$4; NAME=$5
 
-mv() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )); sleep 0.05; }
+mv() { warp "$1" "$2"; sleep 0.05; }   # rig.sh warp owns the halving; pacing stays here
 # Absolute jumps read as one teleport; the overview's drag threshold and its
 # per-motion hover work both want a stream of moves. Interpolate every leg.
 glide() { # glide <x0> <y0> <x1> <y1>

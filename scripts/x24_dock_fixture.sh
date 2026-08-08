@@ -8,13 +8,12 @@
 # Class X24DUO owns two windows (the `minimize-shift` case), X24SOLO owns one
 # (the `activate-single-window` case).
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 
 # A wallpaper rotation moves every pixel; nothing here is pixel-based, but the
 # repaint churn perturbs timing, so hold it for the run like the X1 rigs do.
-systemctl --user stop hyprwall.timer 2>/dev/null
-systemd-run --user --on-active=30min systemctl --user start hyprwall.timer >/dev/null 2>&1
+hyprwall_pause
 
 pkill -f 'kitty --class X24' 2>/dev/null
 sleep 0.5

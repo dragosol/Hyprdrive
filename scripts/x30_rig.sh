@@ -13,9 +13,8 @@
 # warped to the bottom edge would report "pressure never builds" for a reason
 # that has nothing to do with the plugin.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x30
 mkdir -p $OUT
 
@@ -27,12 +26,12 @@ print(m['name'], m['width'], m['height'])")"
 # `hyprctl keyword` is gone in 0.56 and exits 0 having changed nothing -- see
 # x27_capture.sh, where that cost a whole run.
 key()  { hyprctl eval "return hl.config({ plugin = { scrolloverview = { dock = { $1 = $2 } } } })" >/dev/null; }
-ov()   { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null; }
 shot() { grim -o "$MON" $OUT/$1.png; }
 
 # ydotool's ABSOLUTE motion is 1:1 with the output here. The half-space note in
 # x24_dock_click.sh does NOT hold at 2560x1600; halving parked the cursor in the
 # middle of the screen and every push in this rig missed the barrier entirely.
+# This DELIBERATELY shadows rig.sh's halved warp() -- do not "fix" it.
 warp() { ydotool mousemove -a -x $1 -y $2 2>/dev/null; }
 park() { warp $((W / 2)) $((H / 2)); sleep 0.4; }
 
@@ -58,8 +57,7 @@ case "${1:?usage: x30_rig.sh <phase>}" in
 
 fixture)
     # A wallpaper rotation moves every pixel and this rig is entirely pixel-based.
-    systemctl --user stop hyprwall.timer 2>/dev/null
-    systemd-run --user --on-active=40min systemctl --user start hyprwall.timer >/dev/null 2>&1
+    hyprwall_pause 40min
 
     ov off 2>/dev/null; sleep 0.5
     pkill -f 'kitty --class X30' 2>/dev/null; sleep 0.6

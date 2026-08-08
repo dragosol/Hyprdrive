@@ -12,10 +12,8 @@
 #   * a capture identical to its control is a FAIL, not a pass: a throttled
 #     output hands back the same frame forever and it reads as "nothing moved".
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x34shots
 STORE=$HOME/.local/state/scrolloverview/favorites
 mkdir -p $OUT
@@ -61,8 +59,7 @@ seed11)
     ;;
 
 fixture)
-    systemctl --user stop hyprwall.timer 2>/dev/null
-    systemd-run --user --on-active=40min systemctl --user start hyprwall.timer >/dev/null 2>&1
+    hyprwall_pause 40min
 
     dsp "hl.plugin.scrolloverview.overview([[off]])" 2>/dev/null
     sleep 0.5

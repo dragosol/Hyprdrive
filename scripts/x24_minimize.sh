@@ -9,11 +9,11 @@
 # what makes a missing raise visible in pixels.
 # kitty, never foot (user standing rule).
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/x24; mkdir -p $OUT
 
-dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
+# dsp() comes from rig.sh
 mini() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.minimize([[$1]]))" 2>&1; }
 snap() { hyprctl clients -j > "$1"; }
 

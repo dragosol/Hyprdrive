@@ -11,10 +11,8 @@
 # and z3_view.sh both leave it that way, and a drag that started with it closed
 # would be measuring nothing.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 OUT=/mnt/host/z3
 
 GX=$1; GY=$2; TX=$3; TY=$4; TAG=$5
@@ -22,12 +20,12 @@ MON=$(hyprctl monitors -j | python3 -c "
 import json,sys
 print(next((m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')), ''))")
 
-mv2()  { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
+# warp comes from rig.sh and owns the halving; coordinates here stay monitor px
 walk() { local n=16 i jx jy; for i in $(seq 1 $n); do
     jx=$(( (i % 3) * 8 - 8 )); jy=$(( (i % 2) * 11 - 5 ))
-    mv2 $(( $1 + ($3 - $1) * i / n + jx )) $(( $2 + ($4 - $2) * i / n + jy )); sleep 0.05; done; }
+    warp $(( $1 + ($3 - $1) * i / n + jx )) $(( $2 + ($4 - $2) * i / n + jy )); sleep 0.05; done; }
 
-mv2 $GX $GY; sleep 0.6
+warp $GX $GY; sleep 0.6
 ydotool click 0x40; sleep 0.15
 walk $GX $GY $TX $TY; sleep 0.4
 grim -o $MON $OUT/$TAG-mid.png

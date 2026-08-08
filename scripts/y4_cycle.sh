@@ -5,12 +5,8 @@
 # window looks like, and also what a dead cycle looks like. Three clicks in a
 # row tell them apart: a live cycle visits a different window at least twice.
 set -u
-export XDG_RUNTIME_DIR=/run/user/1000
-export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -1)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
-export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
-warp() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) >/dev/null 2>&1; }
+source "$(dirname "$0")/lib/rig.sh"
+rig_env || exit 1
 click() {
     local x=$1 y=$2
     warp $x $y; sleep 0.25
@@ -28,10 +24,9 @@ print(json.load(sys.stdin).get('title','(none)'))" 2>/dev/null; }
 # The dock must hold RUNNING CLASSES ONLY, or x47_cell.py's prediction aims at
 # the wrong icon -- the first run of this probe clicked Nautilus, whose window is
 # titled "Home", and read that as a broken cycle.
-cfg()  { hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
-cfg "autohide=false, show_favorites=false, show_apps_button=false, show_trash=false, show_mounts=false"
+cfg_dock "autohide=false, show_favorites=false, show_apps_button=false, show_trash=false, show_mounts=false"
 sleep 0.8
-trap 'cfg "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true"' EXIT
+trap 'cfg_dock "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true"' EXIT
 
 echo "windows: $(hyprctl clients -j | python3 -c "
 import json,sys
