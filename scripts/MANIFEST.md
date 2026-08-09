@@ -109,3 +109,17 @@ Known follow-ups (tracked, not worked around):
   login keyring in the guest session, before a full suite run.
 - `fade_alpha`, `x51_text_cache`: NEEDS-HOST (two builds / compositor restart);
   suite reports them SKIP (exit 3), not FAIL.
+
+## Gate baseline notes (2026-08-08)
+
+- `x47_hover_preview`: BEHAVIOR half green (FRESH/PANEL/LEFT/RISES/LIVE/FOLLOWS/
+  GRACE all PASS on the -O2 build). The FROST A/B half is INCONCLUSIVE, not
+  failing on the plugin: its `SAMEBACK` control (backdrop behind the plate must
+  be bit-identical between the sharp and frosted arms) fails because the two
+  arms run as SEPARATE x47_rig.sh invocations and the hover panel lands at a
+  different x between them (measured: sharp plate x~695, frosted x~780), so the
+  compared plate rect holds different content and `BLURS` reads backwards. FIX:
+  the frost A/B must spawn the fixture and place the pointer ONCE, then capture
+  both blur configs against that one frozen layout (or pin the hovered icon +
+  cursor identically across arms). Repair before trusting frost regressions,
+  which gates the deferred Window.cpp membership-gate unification.
