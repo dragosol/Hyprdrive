@@ -164,5 +164,46 @@ case "$W" in
     rm -f $OUT/z5-*.png; ffmpeg -loglevel error -i $OUT/z5.mp4 $OUT/z5-%03d.png
     echo "z5 filmed: $(ls $OUT/z5-*.png | wc -l) frames"
     ;;
+  zfocus)
+    # Focus-consistency gate for the minimize flight. The bug (user, 2026-08-09):
+    # spam-minimize briefly UNFOCUSES the window right before it stashes, so a
+    # focus-themed client (Zen) renders DARK mid-flight. The fix keeps the window
+    # focused for the whole flight and hands the keyboard off only at landing.
+    # focus is a queryable boolean, so measure it directly -- no pixels needed.
+    ws 1; spawn
+    B4=$(focusedc)
+    [ "$B4" = zfix ] || { echo "zfocus RIG FAULT: fixture not focused pre-minimize ($B4)"; exit 1; }
+    # fixws goes to special:minimized at flight START (the stash), not at landing,
+    # so it cannot mark the end -- instead sample a FIXED cadence across the known
+    # ~4s scaled flight. The fix keeps focus on zfix the WHOLE time; a brief
+    # unfocus (the bug) shows up as any non-zfix sample.
+    scale 10
+    click
+    MID=""; N=0; ZF=0
+    for i in $(seq 1 8); do
+      sleep 0.4
+      f=$(focusedc); MID="$MID $f"; N=$((N+1)); [ "$f" = zfix ] && ZF=$((ZF+1))
+    done
+    sleep 5
+    [ "$(fixws)" = special:minimized ] || { echo "zfocus RIG FAULT: minimize never landed (fixws=$(fixws))"; scale 1; exit 1; }
+    AFTER=$(focusedc)
+    scale 1
+    # Correct SHAPE = a zfix prefix (focus HELD through the flight) then a non-zfix
+    # suffix (handed off at LANDING), never flipping back. The buggy code hands off
+    # at STASH (t=0), so its very first sample is already non-zfix -> PREFIX=0.
+    PREFIX=0; BROKE=0; REFOCUS=0
+    for f in $MID; do
+      if [ "$BROKE" = 0 ] && [ "$f" = zfix ]; then PREFIX=$((PREFIX+1))
+      elif [ "$f" = zfix ]; then REFOCUS=1
+      else BROKE=1; fi
+    done
+    # single fixture: landing handoff has nothing to focus -> resets, AFTER != zfix
+    if [ "$PREFIX" -ge 3 ] && [ "$REFOCUS" = 0 ] && [ "$AFTER" != zfix ]; then
+      echo "zfocus PASS: focus held for a $PREFIX-sample prefix of the flight then handed off (mid=[$MID] after=$AFTER)"
+    else
+      echo "zfocus FAIL: prefix=$PREFIX refocus=$REFOCUS after=$AFTER mid=[$MID] (want prefix>=3, no refocus, after!=zfix)"
+    fi
+    ;;
+
 esac
 cfg "autohide=true"; cfg "show_favorites=true"; cfg "show_trash=true"; cfg "show_apps_button=true"; cfg "flight_log=false"

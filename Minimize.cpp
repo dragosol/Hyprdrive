@@ -100,7 +100,7 @@ std::vector<PHLWINDOW> minimized() {
     return out;
 }
 
-bool minimize(PHLWINDOW window) {
+bool minimize(PHLWINDOW window, bool handoffFocus) {
     dropDeadEntries();
 
     if (!window || isMinimized(window))
@@ -127,7 +127,12 @@ bool minimize(PHLWINDOW window) {
     // typing went to something invisible and the dock read the app as still
     // focused -- which is the test `cycle-windows` branches on. Hand the focus
     // to whatever is left on the workspace it came from.
-    if (Desktop::focusState()->isWindowActive(window)) {
+    //
+    // A dock FLIGHT defers this (handoffFocus=false): it keeps the window
+    // focused so the flying proxy renders bright, and calls handoffMinimizedFocus
+    // when the flight lands. The origin workspace is captured in the ledger
+    // entry above, so the landing can find it even though the window is stashed.
+    if (handoffFocus && Desktop::focusState()->isWindowActive(window)) {
         PHLWINDOW next;
         for (const auto& CANDIDATE : Desktop::windowState()->windows()) {
             if (CANDIDATE != window && CANDIDATE->m_isMapped && CANDIDATE->m_workspace == WORKSPACE)
@@ -141,6 +146,28 @@ bool minimize(PHLWINDOW window) {
     }
 
     return true;
+}
+
+void handoffMinimizedFocus(PHLWINDOW window) {
+    if (!window || !Desktop::focusState()->isWindowActive(window))
+        return;
+
+    // The window is stashed now; its origin workspace is the ledger's, the same
+    // one minimize() would have handed off to. Reap-safe: if that workspace is
+    // gone (last window minimized), nothing there to focus -> reset.
+    const auto ORIGIN = originalWorkspace(window);
+    PHLWINDOW  next;
+    if (ORIGIN != WORKSPACE_INVALID) {
+        for (const auto& CANDIDATE : Desktop::windowState()->windows()) {
+            if (CANDIDATE != window && CANDIDATE->m_isMapped && CANDIDATE->m_workspace && CANDIDATE->m_workspace->m_id == ORIGIN)
+                next = CANDIDATE;
+        }
+    }
+
+    if (next)
+        Desktop::focusState()->fullWindowFocus(next, Desktop::FOCUS_REASON_OTHER);
+    else
+        Desktop::focusState()->resetWindowFocus();
 }
 
 CBox originalBox(PHLWINDOW window) {

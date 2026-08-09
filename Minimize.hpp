@@ -10,7 +10,18 @@
 namespace ScrollOverview::Minimize {
 
 bool                   isMinimized(PHLWINDOW window);
-bool                   minimize(PHLWINDOW window);
+// `handoffFocus` false keeps the window focused after it is stashed -- the dock
+// flight wants that, so the flying proxy renders the window BRIGHT (Zen and
+// other focus-themed clients darken the instant they lose focus, and a minimize
+// that flickers dark mid-flight is the bug this fixes; the restore flight
+// already focuses first). The flight hands focus off at its landing instead,
+// via handoffMinimizedFocus. A non-flight minimize passes true and hands off
+// immediately (X33: a stashed window must not keep the keyboard).
+bool                   minimize(PHLWINDOW window, bool handoffFocus = true);
+// X33 focus handoff, deferred: give the keyboard to a window on the workspace
+// the stashed window came from (or reset it). Called when a minimize FLIGHT
+// lands, so the window stays focused/bright for the whole animation.
+void                   handoffMinimizedFocus(PHLWINDOW window);
 bool                   restore(PHLWINDOW window);
 std::vector<PHLWINDOW> minimized();
 

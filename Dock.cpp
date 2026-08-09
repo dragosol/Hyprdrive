@@ -1796,7 +1796,7 @@ bool reverseFlight(const PHLWINDOW& window, bool restoring) {
         }
         window->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
         window->setHidden(false);
-        Minimize::minimize(window);
+        Minimize::minimize(window, false); // keep focus: the flight hands off at landing
     }
 
     // A reversed flight is always a proxy (never driven): the desktop-driven
@@ -1826,7 +1826,10 @@ void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnL
     if (ANIMATE)
         from = flightAnchorBox(monitor, window);
 
-    Minimize::minimize(window);
+    // Keep focus only when a flight will actually play (ANIMATE); the flight
+    // hands off at its landing. With no flight there is nothing to stay bright
+    // for, so hand off immediately like any other minimize.
+    Minimize::minimize(window, !ANIMATE);
     // Z14 (user): "the window shadows do not follow it down" -- the stash move
     // arms MOVE_FROM_WORKSPACE / fade animations that draw the real window
     // (shadow included) fading at its OLD rect while the proxy departs. The
@@ -3883,6 +3886,12 @@ void render(PHLMONITOR monitor) {
                     } else
                         warpRestoredWindowAnims(WINDOW);
                     WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
+                } else {
+                    // A MINIMIZE flight landed. The window kept focus for the
+                    // whole flight so the flying proxy stayed bright (Zen no
+                    // longer darkens mid-flight, and a spam of clicks no longer
+                    // flickers it); hand the keyboard off now (deferred X33).
+                    Minimize::handoffMinimizedFocus(WINDOW);
                 }
             }
 
