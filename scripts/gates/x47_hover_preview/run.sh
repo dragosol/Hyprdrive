@@ -24,21 +24,20 @@ if [ ! -e /home/dragos/hyprvm/share ]; then
     ln -sfn /mnt/host /home/dragos/hyprvm/share || exit 1
 fi
 
-echo "== x47 sharp arm (fa)"
-X47_STRIPES=1 X47_BLUR='blur_size=1, blur_passes=1' bash scripts/x47_rig.sh fa \
-    || { echo "X47: sharp arm failed"; exit 1; }
-alive_or_die "after the sharp arm"
+# ONE run: the main gate grades RISES/LIVE/FOLLOWS/GRACE on the frosted frames,
+# and X47_FROST_PAIR captures the sharp+frosted plate pair against the SAME
+# frozen hover (frost-fa / frost-fb) so the frost A/B compares a bit-identical
+# backdrop. Two independent runs floated the fixtures apart and broke SAMEBACK.
+echo "== x47 run (frosted main + frost A/B pair)"
+X47_STRIPES=1 X47_FROST_PAIR=1 X47_BLUR='blur_size=20, blur_passes=4' bash scripts/x47_rig.sh fb \
+    || { echo "X47: run failed"; exit 1; }
+alive_or_die "after the run"
 
-echo "== x47 frosted arm (fb)"
-X47_STRIPES=1 X47_BLUR='blur_size=20, blur_passes=4' bash scripts/x47_rig.sh fb \
-    || { echo "X47: frosted arm failed"; exit 1; }
-alive_or_die "after the frosted arm"
-
-echo "== x47_gate (on the frosted arm's frames)"
+echo "== x47_gate (on the frosted run's frames)"
 python3 scripts/x47_gate.py fb || exit 1
 
-echo "== x47_frost fa fb"
-python3 scripts/x47_frost.py fa fb || exit 1
+echo "== x47_frost frost-fa frost-fb"
+python3 scripts/x47_frost.py frost-fa frost-fb || exit 1
 
 echo X47_GATE_GREEN
 exit 0

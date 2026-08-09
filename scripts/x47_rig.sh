@@ -191,6 +191,29 @@ shot h0
 sleep 0.5            # the counter ticks every 80ms, so this must differ
 shot h1
 
+# --- FROST A/B, both configs against THIS ONE frozen hover ------------------
+# X47_FROST_PAIR=1: the frost gate needs a sharp plate and a frosted plate over
+# a BIT-IDENTICAL backdrop, differing only in the blur pass. Two separate rig
+# runs cannot give that -- the striped fixtures float to slightly different
+# spots each run, so the plate's backdrop moves and SAMEBACK (its control) fails
+# with the plate rect half off the fixture. So capture BOTH here, still hovering
+# X47A, changing nothing but dock:blur_size/passes (renderHoverPreview reads
+# them per frame, Dock.cpp). The control frame carries no panel, so it is
+# blur-independent -- fa-c0 and fb-c0 are the same desktop and are shared.
+if [ "${X47_FROST_PAIR:-0}" = 1 ]; then
+    echo "$PX $PY $PW $PH" | tee $OUT/frost-fa-panel.txt > $OUT/frost-fb-panel.txt
+    cp $OUT/$TAG-c0.png $OUT/frost-fa-c0.png
+    cp $OUT/$TAG-c0.png $OUT/frost-fb-c0.png
+    cfg_dock "blur_size=20, blur_passes=4"; sleep 0.6
+    for kv in blur_size=20 blur_passes=4; do want "${kv%%=*}" "${kv##*=}"; done
+    grim -g "$BAND" $OUT/frost-fb-h0.png 2>/dev/null
+    cfg_dock "blur_size=1, blur_passes=1"; sleep 0.6
+    for kv in blur_size=1 blur_passes=1; do want "${kv%%=*}" "${kv##*=}"; done
+    grim -g "$BAND" $OUT/frost-fa-h0.png 2>/dev/null
+    cfg_dock "blur_size=20, blur_passes=4"; sleep 0.4   # main run stays frosted
+    echo "frost pair: frost-fa (sharp) + frost-fb (frosted) over one hover"
+fi
+
 # --- FOLLOWS ---------------------------------------------------------------
 warp $BX $BY
 sleep 0.9

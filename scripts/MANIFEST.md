@@ -112,14 +112,15 @@ Known follow-ups (tracked, not worked around):
 
 ## Gate baseline notes (2026-08-08)
 
-- `x47_hover_preview`: BEHAVIOR half green (FRESH/PANEL/LEFT/RISES/LIVE/FOLLOWS/
-  GRACE all PASS on the -O2 build). The FROST A/B half is INCONCLUSIVE, not
-  failing on the plugin: its `SAMEBACK` control (backdrop behind the plate must
-  be bit-identical between the sharp and frosted arms) fails because the two
-  arms run as SEPARATE x47_rig.sh invocations and the hover panel lands at a
-  different x between them (measured: sharp plate x~695, frosted x~780), so the
-  compared plate rect holds different content and `BLURS` reads backwards. FIX:
-  the frost A/B must spawn the fixture and place the pointer ONCE, then capture
-  both blur configs against that one frozen layout (or pin the hovered icon +
-  cursor identically across arms). Repair before trusting frost regressions,
-  which gates the deferred Window.cpp membership-gate unification.
+- `x47_hover_preview`: BEHAVIOR half green. FROST A/B: the arm-alignment bug is
+  FIXED -- both blur configs are now captured against ONE frozen hover
+  (X47_FROST_PAIR in x47_rig.sh, frost-fa/frost-fb frames), so SAMEBACK is
+  bit-identical (0.0/255) and BLURS reads the right way (HF 5.77 sharp -> 3.61
+  frosted, frost suppresses). Frost is directionally confirmed. STILL red on
+  TEXTURE/BACKDROP: in this fixture the panel renders over a low-contrast dark
+  wallpaper region (backdrop luminance sd 14.8 < 20), so there is too little
+  texture behind the plate to measure blur strength as an absolute pass/fail.
+  Calibration follow-up: put a high-contrast surface behind the panel's actual
+  render position (bottom-centre), or review the absolute texture thresholds,
+  before treating the frost A/B as a trusted gate. Not a plugin frost defect --
+  the plugin frost code is untouched and the behavior gate is green.
