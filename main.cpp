@@ -3,6 +3,8 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <optional>
+#include <utility>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
@@ -184,36 +186,47 @@ static void hkSurfaceFrame(void* thisptr, const Time::steady_tp& now) {
     rc<origSurfaceFrame>(g_pScrollSurfaceFrameHook->m_original)(thisptr, now);
 }
 
-static void hkAddDamageA(void* thisptr, const CBox& box) {
-    const auto PMONITOR = sc<Monitor::CMonitor*>( thisptr );
+// CMonitor::addDamage has two overloads (a CBox, a pixman region); we hook both
+// and the suppress decision is identical for either payload. It is the ONE thing
+// the two hooks share, so it lives here and the hooks are one line each. Only the
+// overview's own render is ever suppressed; everything else passes straight to the
+// original -- the old code's `!OVERVIEW || blockDamageReporting || damageFromSurface`
+// branch and the fall-through both called the original with the same args, so it
+// was dead weight and is gone.
+static bool suppressAddDamage(void* thisptr) {
+    const auto PMONITOR = sc<Monitor::CMonitor*>(thisptr);
     const auto OVERVIEW = scrollOverviewForMonitor(PMONITOR->m_self.lock());
+    return OVERVIEW && renderingOverviewMonitor.lock() == PMONITOR->m_self.lock() && !damageFromSurface && OVERVIEW->shouldSuppressRenderDamage();
+}
 
-    if (OVERVIEW && renderingOverviewMonitor.lock() == PMONITOR->m_self.lock() && !damageFromSurface && OVERVIEW->shouldSuppressRenderDamage()) {
+static void hkAddDamageA(void* thisptr, const CBox& box) {
+    if (suppressAddDamage(thisptr))
         return;
-    }
-
-    if (!OVERVIEW || OVERVIEW->blockDamageReporting || damageFromSurface) {
-        rc<origAddDamageA>(g_pScrollAddDamageHookA->m_original)(thisptr, box);
-        return;
-    }
-
     rc<origAddDamageA>(g_pScrollAddDamageHookA->m_original)(thisptr, box);
 }
 
 static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
-    const auto PMONITOR = sc<Monitor::CMonitor*>(thisptr);
-    const auto OVERVIEW = scrollOverviewForMonitor(PMONITOR->m_self.lock());
-
-    if (OVERVIEW && renderingOverviewMonitor.lock() == PMONITOR->m_self.lock() && !damageFromSurface && OVERVIEW->shouldSuppressRenderDamage()) {
+    if (suppressAddDamage(thisptr))
         return;
-    }
-
-    if (!OVERVIEW || OVERVIEW->blockDamageReporting || damageFromSurface) {
-        rc<origAddDamageB>(g_pScrollAddDamageHookB->m_original)(thisptr, rg);
-        return;
-    }
-
     rc<origAddDamageB>(g_pScrollAddDamageHookB->m_original)(thisptr, rg);
+}
+
+// The desktop dock's pointer hooks all begin the same way: take the cursor, find
+// the monitor it is over, SKIP any monitor whose overview is up (that one has its
+// own input path -- letting the desktop hook fire there too is a double-handle),
+// and hand back the pill-local point. Five hooks pasted this preamble; the one
+// that forgot the overview-skip would be the drift this phase exists to kill. Now
+// there is one copy. Returns nullopt when the cursor is over no plain-desktop
+// monitor (an empty result means "not my click", same as the old loop falling
+// through without a match).
+static std::optional<std::pair<PHLMONITOR, Vector2D>> monitorUnderCursor() {
+    const auto POINT = g_pInputManager->getMouseCoordsInternal();
+    for (const auto& MONITOR : State::monitorState()->monitors()) {
+        if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(POINT))
+            continue;
+        return std::make_pair(MONITOR, (POINT - MONITOR->m_position) * MONITOR->m_scale);
+    }
+    return std::nullopt;
 }
 
 static std::pair<std::string, std::string> splitOverviewArg(const std::string& arg) {
@@ -982,19 +995,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
 
     static auto DOCKHOVER = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo&) {
-        const auto POINT = g_pInputManager->getMouseCoordsInternal();
-        for (const auto& MONITOR : State::monitorState()->monitors()) {
-            if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(POINT))
-                continue;
+        const auto HIT = monitorUnderCursor();
+        if (!HIT)
+            return;
+        const auto& [MONITOR, LOCAL] = *HIT;
 
-            // X32. The desktop dock reorders too, and its drag needs motion for
-            // the same reason the highlight does: on an idle desktop nothing
-            // else is asking for a frame.
-            if (ScrollOverview::Dock::dragPending())
-                ScrollOverview::Dock::dragMove(MONITOR, (POINT - MONITOR->m_position) * MONITOR->m_scale);
+        // X32. The desktop dock reorders too, and its drag needs motion for
+        // the same reason the highlight does: on an idle desktop nothing
+        // else is asking for a frame.
+        if (ScrollOverview::Dock::dragPending())
+            ScrollOverview::Dock::dragMove(MONITOR, LOCAL);
 
-            ScrollOverview::Dock::damageIfChanged(MONITOR);
-        }
+        ScrollOverview::Dock::damageIfChanged(MONITOR);
     });
 
     // X24 dock-side. The overview installs its own button hook; this one is the
@@ -1011,52 +1023,43 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // the opening press lands outside the plate and would dismiss it in the
         // same gesture), and while the menu is up it takes every press so one
         // that misses is a dismissal rather than a click on whatever is under it.
-        {
-            const bool PRESSED  = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
-            const auto MENUPT   = g_pInputManager->getMouseCoordsInternal();
+        if (const auto HIT = monitorUnderCursor()) {
+            const bool PRESSED           = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
+            const auto& [MONITOR, LOCAL] = *HIT;
 
-            for (const auto& MONITOR : State::monitorState()->monitors()) {
-                if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(MENUPT))
-                    continue;
+            if (event.button == BTN_RIGHT && ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
+                info.cancelled = true;
+                if (PRESSED)
+                    ScrollOverview::Dock::openMenu(MONITOR, LOCAL);
+                return;
+            }
 
-                const auto LOCAL = (MENUPT - MONITOR->m_position) * MONITOR->m_scale;
-
-                if (event.button == BTN_RIGHT && ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
+            if (ScrollOverview::Dock::menuOpen()) {
+                if (!PRESSED) {
                     info.cancelled = true;
-                    if (PRESSED)
-                        ScrollOverview::Dock::openMenu(MONITOR, LOCAL);
                     return;
                 }
 
-                if (ScrollOverview::Dock::menuOpen()) {
-                    if (!PRESSED) {
-                        info.cancelled = true;
-                        return;
-                    }
-
-                    if (ScrollOverview::Dock::menuContains(MONITOR, LOCAL)) {
-                        ScrollOverview::Dock::menuClick(MONITOR, LOCAL);
-                        info.cancelled = true;
-                        return;
-                    }
-
-                    // FAIL-SAFE, and it is not theoretical: menuContains answers
-                    // against the LAST FRAME's row geometry, which only render()
-                    // fills in. On a desktop where the pill is not being drawn
-                    // the menu has no geometry at all, so it can be opened and
-                    // then never dismissed -- and swallowing here made every
-                    // press on every window disappear until the session was
-                    // restarted. Measured 2026-08-06: after one right-click on
-                    // the dock icon, focus went to none and `focuswindow` could
-                    // not get it back; a fresh session was unaffected.
-                    //
-                    // So a press that misses the menu closes it and is LET
-                    // THROUGH. The overview swallows the same press, which is
-                    // nicer, and it can afford to: it is always drawing.
-                    ScrollOverview::Dock::closeMenu();
+                if (ScrollOverview::Dock::menuContains(MONITOR, LOCAL)) {
+                    ScrollOverview::Dock::menuClick(MONITOR, LOCAL);
+                    info.cancelled = true;
+                    return;
                 }
 
-                break;
+                // FAIL-SAFE, and it is not theoretical: menuContains answers
+                // against the LAST FRAME's row geometry, which only render()
+                // fills in. On a desktop where the pill is not being drawn
+                // the menu has no geometry at all, so it can be opened and
+                // then never dismissed -- and swallowing here made every
+                // press on every window disappear until the session was
+                // restarted. Measured 2026-08-06: after one right-click on
+                // the dock icon, focus went to none and `focuswindow` could
+                // not get it back; a fresh session was unaffected.
+                //
+                // So a press that misses the menu closes it and is LET
+                // THROUGH. The overview swallows the same press, which is
+                // nicer, and it can afford to: it is always drawing.
+                ScrollOverview::Dock::closeMenu();
             }
         }
 
@@ -1064,24 +1067,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // left button's gesture -- so it takes the short path below and only the
         // PRESS acts, with the release swallowed to keep the pair balanced.
         if (event.button == BTN_MIDDLE) {
-            const auto MIDPOINT = g_pInputManager->getMouseCoordsInternal();
-            for (const auto& MONITOR : State::monitorState()->monitors()) {
-                if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(MIDPOINT))
-                    continue;
-
-                const auto LOCAL = (MIDPOINT - MONITOR->m_position) * MONITOR->m_scale;
-                if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL))
-                    return;
-
-                info.cancelled = true;
-
-                if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                    const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-                    const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
-                    ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, true);
-                }
-
+            const auto HIT = monitorUnderCursor();
+            if (!HIT)
                 return;
+            const auto& [MONITOR, LOCAL] = *HIT;
+
+            if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL))
+                return;
+
+            info.cancelled = true;
+
+            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+                const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
+                ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, true);
             }
 
             return;
@@ -1090,53 +1089,49 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (event.button != BTN_LEFT)
             return;
 
-        const auto POINT = g_pInputManager->getMouseCoordsInternal();
-        for (const auto& MONITOR : State::monitorState()->monitors()) {
-            if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(POINT))
-                continue;
+        const auto HIT = monitorUnderCursor();
+        if (!HIT)
+            return;
+        const auto& [MONITOR, LOCAL] = *HIT;
 
-            const auto LOCAL = (POINT - MONITOR->m_position) * MONITOR->m_scale;
-
-            // Z2. Before the pill, because the panel is not on it -- it floats a
-            // gap above, so pillContains is false over every preview and the
-            // click would go to the window underneath.
-            if (ScrollOverview::Dock::panelClick(MONITOR, LOCAL, event.state != WL_POINTER_BUTTON_STATE_PRESSED)) {
-                info.cancelled = true;
-                return;
-            }
-
-            if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
-                // X32. A drag released OFF the pill is a cancel, and the press
-                // that started it was the dock's -- so this release is not a
-                // click on the desktop either.
-                if (event.state != WL_POINTER_BUTTON_STATE_PRESSED && ScrollOverview::Dock::dragPending()) {
-                    ScrollOverview::Dock::dragCancel();
-                    info.cancelled = true;
-                }
-                return;
-            }
-
+        // Z2. Before the pill, because the panel is not on it -- it floats a
+        // gap above, so pillContains is false over every preview and the
+        // click would go to the window underneath.
+        if (ScrollOverview::Dock::panelClick(MONITOR, LOCAL, event.state != WL_POINTER_BUTTON_STATE_PRESSED)) {
             info.cancelled = true;
-
-            // X32. Press remembers, motion commits to a drag, release decides
-            // which of the two gestures happened. See the same three lines in
-            // scrollOverview.cpp's own button hook -- the overview's dock and
-            // the desktop's are one dock and must not behave differently.
-            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                ScrollOverview::Dock::dragBegin(MONITOR, LOCAL);
-                return;
-            }
-
-            if (ScrollOverview::Dock::dragEnd(MONITOR, LOCAL))
-                return;
-
-            const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-            const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
-            // Y4. CTRL is what cycles now.
-            const bool CTRL  = KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL);
-            ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, false, CTRL);
             return;
         }
+
+        if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
+            // X32. A drag released OFF the pill is a cancel, and the press
+            // that started it was the dock's -- so this release is not a
+            // click on the desktop either.
+            if (event.state != WL_POINTER_BUTTON_STATE_PRESSED && ScrollOverview::Dock::dragPending()) {
+                ScrollOverview::Dock::dragCancel();
+                info.cancelled = true;
+            }
+            return;
+        }
+
+        info.cancelled = true;
+
+        // X32. Press remembers, motion commits to a drag, release decides
+        // which of the two gestures happened. See the same three lines in
+        // scrollOverview.cpp's own button hook -- the overview's dock and
+        // the desktop's are one dock and must not behave differently.
+        if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+            ScrollOverview::Dock::dragBegin(MONITOR, LOCAL);
+            return;
+        }
+
+        if (ScrollOverview::Dock::dragEnd(MONITOR, LOCAL))
+            return;
+
+        const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+        const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
+        // Y4. CTRL is what cycles now.
+        const bool CTRL  = KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL);
+        ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, false, CTRL);
     });
 
     // X33. The wheel over the pill, on the PLAIN desktop only.
@@ -1154,16 +1149,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (event.axis != WL_POINTER_AXIS_VERTICAL_SCROLL || event.source != WL_POINTER_AXIS_SOURCE_WHEEL || event.delta == 0.0)
             return;
 
-        const auto POINT = g_pInputManager->getMouseCoordsInternal();
-        for (const auto& MONITOR : State::monitorState()->monitors()) {
-            if (!MONITOR || scrollOverviewForMonitor(MONITOR) || !MONITOR->logicalBox().containsPoint(POINT))
-                continue;
-
-            if (ScrollOverview::Dock::scroll(MONITOR, (POINT - MONITOR->m_position) * MONITOR->m_scale, event.delta < 0.0))
-                info.cancelled = true;
-
+        const auto HIT = monitorUnderCursor();
+        if (!HIT)
             return;
-        }
+        const auto& [MONITOR, LOCAL] = *HIT;
+
+        if (ScrollOverview::Dock::scroll(MONITOR, LOCAL, event.delta < 0.0))
+            info.cancelled = true;
     });
 
     static auto DOCK = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
