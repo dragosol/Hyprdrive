@@ -1751,7 +1751,16 @@ void dismissHoverPanelNow();
 bool reverseFlight(const PHLWINDOW& window, bool restoring) {
     const auto IT = std::ranges::find_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
     zdbg("reverse(%d) found=%d landed=%d lastA=%f\n", (int)restoring, IT != g_flights.end(), IT == g_flights.end() ? -9 : IT->landedFrames, IT == g_flights.end() ? -9.F : IT->lastAlpha);
-    if (IT == g_flights.end() || IT->landedFrames >= 0 || IT->lastAlpha < 0.F)
+    // Reverse UNLESS the flight is already landing (past the point where the
+    // motion means anything). It used to also bail when lastAlpha < 0 -- a
+    // flight that had not drawn a frame yet -- but that was a strand: the caller
+    // then started a FRESH flight without this one being erased, so two flights
+    // for one window fought in the render loop and the toggle ended in the wrong
+    // state. A click can beat the first frame under spam on a slow output (z5),
+    // and a never-drawn flight has no visible proxy to be discontinuous with, so
+    // the empty lastDrawn / negative lastAlpha below simply fall through to the
+    // render loop's fresh-flight defaults (START = icon/from, default alpha).
+    if (IT == g_flights.end() || IT->landedFrames >= 0)
         return false;
 
     const SFlight OLD = *IT;

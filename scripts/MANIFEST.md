@@ -124,3 +124,12 @@ Known follow-ups (tracked, not worked around):
   render position (bottom-centre), or review the absolute texture thresholds,
   before treating the frost A/B as a trusted gate. Not a plugin frost defect --
   the plugin frost code is untouched and the behavior gate is green.
+
+## Guest gate dependencies + known flakes (2026-08-09)
+
+- The film gates (z4/z4t/z5) need `ffmpeg` in the guest; the pixel graders need
+  `python3-pillow` + `python3-numpy`. Install once per guest.
+- `zflight_z4_z7 :: z4c` is flaky at its precondition ("minimize 1 missed" --
+  the first click misses the predicted dock cell; ~1 in 3 standalone runs is
+  clean, and when it runs the geometry is invariant). Rig-hardening follow-up
+  (sweep + settle harder before the first click), not a product defect.
