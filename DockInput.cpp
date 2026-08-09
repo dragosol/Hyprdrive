@@ -1,0 +1,116 @@
+#include "DockInput.hpp"
+
+#include <hyprland/src/managers/SeatManager.hpp>
+#include <hyprland/src/devices/IKeyboard.hpp>
+
+using namespace ScrollOverview;
+
+namespace {
+bool shiftHeld() {
+    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+    return KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
+}
+bool ctrlHeld() {
+    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+    return KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL);
+}
+}
+
+namespace ScrollOverview::DockInput {
+
+SClaim handleMenu(PHLMONITOR mon, const Vector2D& local, EButton role, bool pressed, bool windowDragActive, bool menuMissLetsThrough) {
+    SClaim out;
+
+    // §13.9 X28. Right/resize press on the pill (re)opens the menu, ahead of every
+    // other gesture -- it floats over whatever is beneath exactly as the pill
+    // does. Only the PRESS opens; the release that follows lands outside the plate
+    // and treating it as a click would dismiss the menu in the same gesture.
+    if (role == EButton::Menu && pressed && !windowDragActive && Dock::pillContains(mon, local)) {
+        Dock::openMenu(mon, local);
+        out.claimed = true;
+        return out;
+    }
+
+    // While the menu is up it is modal and takes every press: a press inside runs
+    // the row, a press that misses closes it. On the plain desktop that miss is
+    // LET THROUGH (menuMissLetsThrough) -- the menu there may have no drawn
+    // geometry, and swallowing a miss into a dead menu ate every press until a
+    // restart (measured 2026-08-06). The overview always draws, so it swallows.
+    // A release is always swallowed; the pill is not a window.
+    if (Dock::menuOpen()) {
+        if (!pressed) {
+            out.claimed = true;
+            return out;
+        }
+        if (Dock::menuContains(mon, local)) {
+            Dock::menuClick(mon, local);
+            out.claimed = true;
+            return out;
+        }
+        Dock::closeMenu();
+        out.claimed = !menuMissLetsThrough;
+        return out;
+    }
+
+    // A stray menu-button edge over the pill with no menu open is swallowed: the
+    // pill is not a window and a right press/release must not reach through to it.
+    if (role == EButton::Menu && Dock::pillContains(mon, local)) {
+        out.claimed = true;
+        return out;
+    }
+
+    // X33. The middle button on the pill launches/raises the app, and it MUST be
+    // claimed here: BTN_MIDDLE is also the overview's secondary drag button, so a
+    // miss would start a workspace pan instead of launching. Press acts, both
+    // edges eaten.
+    if (role == EButton::Launch && !windowDragActive && Dock::pillContains(mon, local)) {
+        if (pressed)
+            Dock::click(mon, local, shiftHeld(), true);
+        out.claimed = true;
+        return out;
+    }
+
+    return out;
+}
+
+SClaim handlePill(PHLMONITOR mon, const Vector2D& local, EButton role, bool pressed, bool windowDragActive) {
+    SClaim out;
+    if (role != EButton::Main)
+        return out;
+
+    // Z2. The hover panel floats above the pill, so it is asked first -- a press
+    // over a preview would otherwise reach the tile below. Behind the window-drag
+    // guard: a window released over the panel belongs to the drag, not the panel.
+    if (!windowDragActive && Dock::panelClick(mon, local, !pressed)) {
+        out.claimed = true;
+        return out;
+    }
+
+    // X32. The pill press only remembers what is under it; motion past the
+    // threshold turns that into a reorder, and the RELEASE decides which of the
+    // two gestures happened. Both edges are eaten -- the pill is not a window and
+    // must not leak a click through to the tile beneath.
+    if (!windowDragActive && Dock::pillContains(mon, local)) {
+        if (pressed)
+            Dock::dragBegin(mon, local);
+        else if (!Dock::dragEnd(mon, local))
+            Dock::click(mon, local, shiftHeld(), false, ctrlHeld()); // Y4: CTRL cycles, a plain click minimizes the app
+        out.claimed = true;
+        return out;
+    }
+
+    // X32. A drag released OFF the pill is a cancel: its press belonged to the
+    // pill, so this release must not also read as a click on whatever the pointer
+    // has since wandered over. The snap-back needs a frame the overview would not
+    // otherwise ask for.
+    if (!pressed && Dock::dragPending()) {
+        Dock::dragCancel();
+        out.claimed    = true;
+        out.needsFrame = true;
+        return out;
+    }
+
+    return out;
+}
+
+}

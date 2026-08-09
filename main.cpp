@@ -32,6 +32,7 @@ using namespace Hyprutils::String;
 #include "AppSearch.hpp"
 #include "Config.hpp"
 #include "Dock.hpp"
+#include "DockInput.hpp"
 #include "LauncherEntry.hpp"
 #include "Minimize.hpp"
 #include "PluginVersion.hpp"
@@ -1015,123 +1016,30 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // reached the window underneath would focus it, and a release that leaked
     // after a swallowed press would leave the pointer stuck.
     static auto DOCKCLICK = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
-        // Y3. THE X28 MENU, ON THE PLAIN DESKTOP. It was wired only into
-        // scrollOverview.cpp's button hook, which exists solely while the
-        // overview is up -- so right-clicking the desktop dock did nothing at
-        // all. These are the same four moves that hook makes, in the same order
-        // and for the same reasons: only PRESSES act (the release that follows
-        // the opening press lands outside the plate and would dismiss it in the
-        // same gesture), and while the menu is up it takes every press so one
-        // that misses is a dismissal rather than a click on whatever is under it.
-        if (const auto HIT = monitorUnderCursor()) {
-            const bool PRESSED           = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
-            const auto& [MONITOR, LOCAL] = *HIT;
-
-            if (event.button == BTN_RIGHT && ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
-                info.cancelled = true;
-                if (PRESSED)
-                    ScrollOverview::Dock::openMenu(MONITOR, LOCAL);
-                return;
-            }
-
-            if (ScrollOverview::Dock::menuOpen()) {
-                if (!PRESSED) {
-                    info.cancelled = true;
-                    return;
-                }
-
-                if (ScrollOverview::Dock::menuContains(MONITOR, LOCAL)) {
-                    ScrollOverview::Dock::menuClick(MONITOR, LOCAL);
-                    info.cancelled = true;
-                    return;
-                }
-
-                // FAIL-SAFE, and it is not theoretical: menuContains answers
-                // against the LAST FRAME's row geometry, which only render()
-                // fills in. On a desktop where the pill is not being drawn
-                // the menu has no geometry at all, so it can be opened and
-                // then never dismissed -- and swallowing here made every
-                // press on every window disappear until the session was
-                // restarted. Measured 2026-08-06: after one right-click on
-                // the dock icon, focus went to none and `focuswindow` could
-                // not get it back; a fresh session was unaffected.
-                //
-                // So a press that misses the menu closes it and is LET
-                // THROUGH. The overview swallows the same press, which is
-                // nicer, and it can afford to: it is always drawing.
-                ScrollOverview::Dock::closeMenu();
-            }
-        }
-
-        // X33 adds the middle button. It carries no drag -- the reorder is the
-        // left button's gesture -- so it takes the short path below and only the
-        // PRESS acts, with the release swallowed to keep the pair balanced.
-        if (event.button == BTN_MIDDLE) {
-            const auto HIT = monitorUnderCursor();
-            if (!HIT)
-                return;
-            const auto& [MONITOR, LOCAL] = *HIT;
-
-            if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL))
-                return;
-
-            info.cancelled = true;
-
-            if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-                const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
-                ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, true);
-            }
-
-            return;
-        }
-
-        if (event.button != BTN_LEFT)
-            return;
-
         const auto HIT = monitorUnderCursor();
         if (!HIT)
             return;
         const auto& [MONITOR, LOCAL] = *HIT;
 
-        // Z2. Before the pill, because the panel is not on it -- it floats a
-        // gap above, so pillContains is false over every preview and the
-        // click would go to the window underneath.
-        if (ScrollOverview::Dock::panelClick(MONITOR, LOCAL, event.state != WL_POINTER_BUTTON_STATE_PRESSED)) {
+        // The plain desktop's button map is fixed: right opens the menu, middle
+        // launches, left drives the pill. (The overview honours the left-handed
+        // config; the desktop dock never has.) The ladder and the reasons for its
+        // order live in DockInput -- this is the same dock the overview drives.
+        const auto ROLE = event.button == BTN_RIGHT  ? ScrollOverview::DockInput::EButton::Menu
+                        : event.button == BTN_MIDDLE ? ScrollOverview::DockInput::EButton::Launch
+                        : event.button == BTN_LEFT   ? ScrollOverview::DockInput::EButton::Main
+                                                     : ScrollOverview::DockInput::EButton::Other;
+        const bool PRESSED = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
+
+        // Desktop never has a window drag in flight, and lets a menu miss through
+        // (its menu may have no drawn geometry to hit-test); a let-through miss
+        // then falls into the pill ladder, exactly as the overview's own dock does.
+        if (ScrollOverview::DockInput::handleMenu(MONITOR, LOCAL, ROLE, PRESSED, false, true).claimed) {
             info.cancelled = true;
             return;
         }
-
-        if (!ScrollOverview::Dock::pillContains(MONITOR, LOCAL)) {
-            // X32. A drag released OFF the pill is a cancel, and the press
-            // that started it was the dock's -- so this release is not a
-            // click on the desktop either.
-            if (event.state != WL_POINTER_BUTTON_STATE_PRESSED && ScrollOverview::Dock::dragPending()) {
-                ScrollOverview::Dock::dragCancel();
-                info.cancelled = true;
-            }
-            return;
-        }
-
-        info.cancelled = true;
-
-        // X32. Press remembers, motion commits to a drag, release decides
-        // which of the two gestures happened. See the same three lines in
-        // scrollOverview.cpp's own button hook -- the overview's dock and
-        // the desktop's are one dock and must not behave differently.
-        if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-            ScrollOverview::Dock::dragBegin(MONITOR, LOCAL);
-            return;
-        }
-
-        if (ScrollOverview::Dock::dragEnd(MONITOR, LOCAL))
-            return;
-
-        const auto KEEB  = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-        const bool SHIFT = KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT);
-        // Y4. CTRL is what cycles now.
-        const bool CTRL  = KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL);
-        ScrollOverview::Dock::click(MONITOR, LOCAL, SHIFT, false, CTRL);
+        if (ScrollOverview::DockInput::handlePill(MONITOR, LOCAL, ROLE, PRESSED, false).claimed)
+            info.cancelled = true;
     });
 
     // X33. The wheel over the pill, on the PLAIN desktop only.

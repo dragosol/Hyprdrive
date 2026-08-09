@@ -1,4 +1,5 @@
 #include "OverviewInternal.hpp"
+#include "DockInput.hpp"
 using namespace OvInternal; // opted in here rather than leaked from the header
 
 // ---------------------------------------------------------------------------
@@ -285,49 +286,22 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             return WINDOW ? WINDOW->m_workspace : PHLWORKSPACE{};
         };
 
-        // OVERVIEW_CPP_SPEC §13.9 X28. The dock's right-click menu, ahead of
-        // every other pointer gesture: it floats over the main area exactly as
-        // the pill does, so the tile underneath would otherwise take the press,
-        // and once it is up it is modal until something dismisses it.
-        //
-        // Only PRESSES are acted on. The right-button RELEASE that follows the
-        // press which opened the menu lands outside the plate, and treating it
-        // as a click would dismiss the menu in the same gesture that opened it.
+        // The dock's menu and middle-launch, ahead of every overview gesture:
+        // both float over the main area exactly as the pill does. Same ladder the
+        // plain desktop runs -- it lives in DockInput. The overview honours the
+        // left-handed config (its resize button is the menu), never lets a menu
+        // miss through (it always draws), and keeps the dock out of a window drag.
         {
             const auto DOCKMONITOR = pMonitor.lock();
             const auto DOCKPOINT   = getOverviewMousePosLocal(DOCKMONITOR);
             const bool PRESSED     = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
+            const auto ROLE        = event.button == RESIZE_BUTTON ? ScrollOverview::DockInput::EButton::Menu
+                                   : event.button == BTN_MIDDLE    ? ScrollOverview::DockInput::EButton::Launch
+                                   : event.button == MAIN_BUTTON   ? ScrollOverview::DockInput::EButton::Main
+                                                                   : ScrollOverview::DockInput::EButton::Other;
 
-            if (PRESSED && event.button == RESIZE_BUTTON && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
+            if (ScrollOverview::DockInput::handleMenu(DOCKMONITOR, DOCKPOINT, ROLE, PRESSED, static_cast<bool>(dragActiveWindow), false).claimed) {
                 lastMousePosLocal = DOCKPOINT;
-                ScrollOverview::Dock::openMenu(DOCKMONITOR, DOCKPOINT);
-                return;
-            }
-
-            if (ScrollOverview::Dock::menuOpen()) {
-                if (PRESSED) {
-                    lastMousePosLocal = DOCKPOINT;
-                    if (!ScrollOverview::Dock::menuContains(DOCKMONITOR, DOCKPOINT))
-                        ScrollOverview::Dock::closeMenu();
-                    else
-                        ScrollOverview::Dock::menuClick(DOCKMONITOR, DOCKPOINT);
-                }
-                return;
-            }
-
-            // X33. The middle button over the pill, and it MUST be claimed here
-            // rather than further down: BTN_MIDDLE is also SECONDARY_DRAG_BUTTON,
-            // so without this a middle-click on an icon would start a workspace
-            // pan instead of launching. Both edges are eaten so the pan branch
-            // never sees the release either.
-            if (event.button == BTN_MIDDLE && !dragActiveWindow && ScrollOverview::Dock::pillContains(DOCKMONITOR, DOCKPOINT)) {
-                lastMousePosLocal = DOCKPOINT;
-
-                if (PRESSED) {
-                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-                    ScrollOverview::Dock::click(DOCKMONITOR, DOCKPOINT, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), true);
-                }
-
                 return;
             }
         }
@@ -381,42 +355,18 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 return;
             }
 
-            // Z2. The hover panel, ahead of the pill for the same reason the
-            // desktop hook asks first: it floats above the pill, so pillContains
-            // is false over a preview and the press would reach the tile below.
-            // Behind the drag guard, though -- a window released over the panel
-            // belongs to the drag, exactly as the pill branch has it.
-            if (!dragActiveWindow && ScrollOverview::Dock::panelClick(pMonitor.lock(), lastMousePosLocal, event.state == WL_POINTER_BUTTON_STATE_RELEASED))
-                return;
-
-            if (!dragActiveWindow && ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal)) {
-                // X32. The press is no longer the click. It only remembers what
-                // is under it; motion past the threshold turns that into a
-                // reorder, and the RELEASE decides which of the two gestures
-                // happened. Both edges are still eaten either way -- the pill is
-                // not a window and must not leak clicks through to the tile
-                // underneath.
-                if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                    ScrollOverview::Dock::dragBegin(pMonitor.lock(), lastMousePosLocal);
-                    return;
+            // The pill's own gestures: hover panel > pill drag/click > off-pill
+            // cancel. Behind the result-drag release above -- a dropped result
+            // sits inside the pill and is offered first -- and behind the
+            // window-drag guard. Same dock the plain desktop drives; the ladder
+            // and the reasons for its order live in DockInput.
+            if (const auto CLAIM = ScrollOverview::DockInput::handlePill(pMonitor.lock(), lastMousePosLocal, ScrollOverview::DockInput::EButton::Main,
+                                                         event.state == WL_POINTER_BUTTON_STATE_PRESSED, static_cast<bool>(dragActiveWindow));
+                CLAIM.claimed) {
+                if (CLAIM.needsFrame) {
+                    damage();
+                    requestInputFrame();
                 }
-
-                if (!ScrollOverview::Dock::dragEnd(pMonitor.lock(), lastMousePosLocal)) {
-                    const auto KEEB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
-                    // Y4. CTRL cycles; a plain click minimizes the whole app.
-                    ScrollOverview::Dock::click(pMonitor.lock(), lastMousePosLocal, KEEB && (KEEB->getModifiers() & HL_MODIFIER_SHIFT), false,
-                                                KEEB && (KEEB->getModifiers() & HL_MODIFIER_CTRL));
-                }
-                return;
-            }
-
-            // X32. A dock drag released OFF the pill is a cancel. The press that
-            // started it belonged to the pill, so this release must not also be
-            // read as a click on whatever the pointer has since wandered over.
-            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && ScrollOverview::Dock::dragPending()) {
-                ScrollOverview::Dock::dragCancel();
-                damage();
-                requestInputFrame();
                 return;
             }
 
