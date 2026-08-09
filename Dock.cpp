@@ -22,12 +22,6 @@
 
 #include "Dock.hpp"
 
-// Z16: for renderOverviewWorkspaceShadow + getOverviewShadowConfig -- the
-// flight proxy carries the same shadow the overview cards use. This drags the
-// whole internal header in; if a name ever collides with Dock's own statics,
-// split the shadow helpers into their own header instead.
-#include "OverviewInternal.hpp"
-
 #include "AppSearch.hpp"
 #include "globals.hpp"
 #include "Config.hpp"
@@ -73,6 +67,14 @@
 #include <hyprland/src/state/WorkspaceState.hpp>
 #undef protected
 #undef private
+
+// Z16: the flight proxy carries the same card shadow the overview draws. Comes
+// AFTER the protected=public block above: this header pulls Renderer/Monitor/
+// Window, and if it landed before the block those classes would be defined with
+// protected intact and Dock could not reach m_realPosition/m_realSize. These
+// helpers used to force the whole ~1900-line OverviewInternal.hpp (and with it
+// Dock.hpp, an include knot) into this TU; they now live in their own header.
+#include "OverviewChrome.hpp"
 
 namespace ScrollOverview::Dock {
 
@@ -3899,7 +3901,7 @@ void render(PHLMONITOR monitor) {
         // carries Hyprland's shadow and border. Same shadow pass the overview
         // cards use, and the window's own border gradient (focused by Z9, so
         // the active colours), both riding the flight's box and alpha.
-        renderOverviewWorkspaceShadow(monitor, box, 1.F, false, alpha);
+        OvInternal::renderOverviewWorkspaceShadow(monitor, box, 1.F, false, alpha);
         drawFlightAt(WINDOW, box, alpha);
         {
             const int BORDERSIZE = std::max(0, ScrollOverview::Config::getValue<int>("general:border_size"));

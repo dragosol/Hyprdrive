@@ -1,0 +1,136 @@
+#pragma once
+
+// Overview card chrome: the drop-shadow and corner-rounding helpers, split out
+// of OverviewInternal.hpp so the dock can draw a card shadow without pulling the
+// ~1900-line everything-header (which includes Dock.hpp -- the include knot the
+// dock sat inside). Kept inline in namespace OvInternal so the moved code and
+// every call site are byte-identical; OverviewInternal.hpp re-includes this
+// BEFORE it opens its own OvInternal block (this header opens the namespace
+// itself, so including it inside another OvInternal block would double-nest it).
+
+#include "scrollOverview.hpp"       // Config, PHLMONITOR/PHLLS, CBox, sc<>
+#include "OverviewPassElement.hpp"  // COverviewShadowPassElement
+
+#include <hyprland/src/output/Monitor.hpp>                     // CMonitor, m_layerSurfaceLayers
+#include <hyprland/src/render/Renderer.hpp>                    // g_pHyprRenderer
+#include <hyprland/protocols/wlr-layer-shell-unstable-v1.hpp>  // ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY
+
+#include <algorithm>
+
+namespace OvInternal {
+
+struct SOverviewShadowConfig {
+    bool       enabled     = false;
+    int        range       = 0;
+    int        renderPower = 1;
+    Config::CGradientValueData color;
+};
+
+inline SOverviewShadowConfig getOverviewShadowConfig() {
+    const auto enabled     = ScrollOverview::Config::getShadowEnabled();
+    const auto range       = ScrollOverview::Config::getShadowRange();
+    const auto renderPower = ScrollOverview::Config::getShadowRenderPower();
+    const auto color       = ScrollOverview::Config::getShadowColor();
+
+    const auto globalRange       = ScrollOverview::Config::getValue<int>("decoration:shadow:range");
+    const auto globalRenderPower = ScrollOverview::Config::getValue<int>("decoration:shadow:render_power");
+    const auto globalColor       = ScrollOverview::Config::getValue<::Config::CGradientValueData>("decoration:shadow:color");
+
+    Config::CGradientValueData shadowColor;
+    if (color && !color->m_colors.empty())
+        shadowColor = *color;
+    else if (!globalColor.m_colors.empty())
+        shadowColor = globalColor;
+
+    return {
+        .enabled      = !!enabled,
+        .range        = std::max(0, range >= 0 ? range : globalRange),
+        .renderPower  = std::clamp(renderPower >= 0 ? renderPower : globalRenderPower, 1, 4),
+        .color        = shadowColor,
+    };
+}
+
+// E8-c: cards take the theme's corner radius and rounding power rather than a
+// hardcoded one, so switching themes moves the overview with it.
+struct SOverviewCardRounding {
+    int   rounding = 0;
+    float power    = 2.F;
+};
+
+// ponytail: the floor is a constant, not a config knob. Spec §13.1 fixes the
+// "desktops are never square" rule, so a knob could only be used to break it.
+inline constexpr int OVERVIEW_MIN_CARD_ROUNDING = 8;
+
+inline SOverviewCardRounding getOverviewCardRounding(PHLMONITOR monitor, float overviewScale) {
+    const auto THEMEROUNDING = ScrollOverview::Config::getValue<int>("decoration:rounding");
+    const auto THEMEPOWER    = ScrollOverview::Config::getValue<float>("decoration:rounding_power");
+
+    const float MONITORSCALE = monitor ? monitor->m_scale : 1.F;
+
+    // E8-c (user): the desktop curve the eye compares against is NOT
+    // decoration:rounding -- it is the rice fake screen rounding, the
+    // quickshell:screenCorners overlay. That layer is exactly radius-sized
+    // (23x23 corner pieces today), so read the radius off the live layer and
+    // the cards follow the rice by construction. Unscaled on purpose: the user
+    // asked for the SAME radius as the desktop curve, not a shrunk one.
+    // ponytail: exact namespace match; a differently-named corner overlay
+    // falls back to the theme path below.
+    if (monitor) {
+        for (auto const& lsRef : monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
+            const auto LS = lsRef.lock();
+            if (!LS || LS->m_namespace != "quickshell:screenCorners")
+                continue;
+
+            const int DIM = sc<int>(std::round(std::min(LS->m_geometry.width, LS->m_geometry.height)));
+            if (DIM <= 0)
+                continue;
+
+            return {
+                .rounding = std::max(1, sc<int>(std::round(DIM * MONITORSCALE))),
+                .power    = std::clamp(THEMEPOWER > 0.F ? THEMEPOWER : 2.F, 1.F, 10.F),
+            };
+        }
+    }
+
+    const int LOGICAL = std::max(THEMEROUNDING, OVERVIEW_MIN_CARD_ROUNDING);
+
+    return {
+        .rounding = std::max(1, sc<int>(std::round(LOGICAL * MONITORSCALE * overviewScale))),
+        .power    = std::clamp(THEMEPOWER > 0.F ? THEMEPOWER : 2.F, 1.F, 10.F),
+    };
+}
+
+inline void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F) {
+    if (!monitor)
+        return;
+
+    const auto SHADOW = getOverviewShadowConfig();
+    const bool HASVISIBLECOLOR = std::ranges::any_of(SHADOW.color.m_colors, [](const CHyprColor& color) { return color.a > 0.F; });
+    if (!SHADOW.enabled || SHADOW.range <= 0 || !HASVISIBLECOLOR || alpha <= 0.F)
+        return;
+
+    const int RANGE = sc<int>(std::round(SHADOW.range * monitor->m_scale * overviewScale));
+    if (RANGE <= 0)
+        return;
+
+    auto baseBox = workspaceBox.copy().round();
+    if (baseBox.width < 1 || baseBox.height < 1)
+        return;
+
+    const auto CARDROUND = getOverviewCardRounding(monitor, overviewScale);
+
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
+        .monitor       = monitor,
+        .fullBox       = baseBox.copy().expand(RANGE).round(),
+        .cutoutBox     = baseBox,
+        .rounding      = CARDROUND.rounding,
+        .roundingPower = CARDROUND.power,
+        .range         = RANGE,
+        .renderPower   = SHADOW.renderPower,
+        .color         = SHADOW.color,
+        .alpha         = alpha,
+        .ignoreWindow  = cutoutCenter,
+    }));
+}
+
+} // namespace OvInternal
