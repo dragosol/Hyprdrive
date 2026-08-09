@@ -314,8 +314,16 @@ class CScrollOverview : public IOverview {
     Time::steady_tp                  realtimePreviewTimerDue = {};
     wl_event_source*                 realtimePreviewTimer = nullptr;
 
+    // The overview's whole lifecycle is two states: Open and Closing. `closing`
+    // is the single source of truth for both -- set at the top of close() (which
+    // is also the double-invocation guard) and cleared by reopen() via
+    // setClosing(false). It used to be shadowed by a second `closeApplied` bool
+    // that carried the same fact; two bools for one state is a drift waiting to
+    // happen (the Z18 zombie class is exactly "which flag is authoritative"), so
+    // there is one now. `closing` is read directly by every input handler, hence
+    // a bool rather than an enum -- with two states there is nothing to make
+    // unrepresentable.
     bool                             closing = false;
-    bool                             closeApplied = false; // close() has run its teardown; guards against double-invocation
 
     // event handlers -- moved out of the constructor, defined at the bottom of scrollOverview.cpp
     void onMouseMove(Vector2D, Event::SCallbackInfo& info);

@@ -1660,9 +1660,13 @@ CBox flightAnchorBox(PHLMONITOR monitor, const PHLWINDOW& window) {
 // overview earlier -- every restore since hid the window, the bridge landing
 // never warped geometry, and each cycle shrank the window by the abandoned
 // flight's last frame (500 -> 410 -> 336 -> 276, x0.82).
+//
+// The predicate that Z18 forced the dock to invent now lives on the manager,
+// next to the registry it filters -- openScrollOverviewForMonitor() -- so no
+// other consumer has to re-derive "exists AND not closing" and get it wrong.
+// This stays as a local spelling of it.
 SP<IOverview> overviewOpenFor(PHLMONITOR monitor) {
-    auto O = scrollOverviewForMonitor(monitor);
-    return (O && !O->isClosing()) ? O : SP<IOverview>{};
+    return openScrollOverviewForMonitor(monitor);
 }
 
 // Z9 round five. The click-time restore treatment: the window comes off the

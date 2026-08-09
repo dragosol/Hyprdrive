@@ -79,6 +79,12 @@ class IOverview {
 
 const std::vector<SP<IOverview>>& scrollOverviews();
 SP<IOverview>                     scrollOverviewForMonitor(PHLMONITOR monitor);
+// The registry holds overviews in every phase, including ones still animating
+// their close (a "zombie": exists but not open -- see Z18 in Dock.cpp). This is
+// the query almost every caller actually wants: the overview on `monitor` only
+// if it is OPEN, i.e. registered and not closing. Ask this instead of pairing
+// scrollOverviewForMonitor with a hand-written !isClosing() at each call site.
+SP<IOverview>                     openScrollOverviewForMonitor(PHLMONITOR monitor);
 SP<IOverview>                     scrollOverviewAt(const Vector2D& point);
 SP<IOverview>                     activeScrollOverview();
 void                              registerScrollOverview(const SP<IOverview>& overview);

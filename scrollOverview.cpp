@@ -4797,9 +4797,12 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
 }
 
 void CScrollOverview::close() {
-    if (closeApplied)
+    // Set at the top, before the dock teardown below, so it doubles as the
+    // guard against a second close() -- setClosing(true) further down re-affirms
+    // it (idempotent) alongside the state teardown it also owns.
+    if (closing)
         return;
-    closeApplied = true;
+    closing = true;
 
     // X28. The pill only exists while the overview does, so its menu must go
     // with it -- otherwise a stale plate is still holding every pointer press
@@ -5386,7 +5389,7 @@ void CScrollOverview::useAnimDirection(bool opening) {
 }
 
 void CScrollOverview::reopen() {
-    if (!closeApplied)
+    if (!closing)
         return;
 
     // Before anything re-targets the animation: close() left an end callback
@@ -5394,9 +5397,8 @@ void CScrollOverview::reopen() {
     // that teardown at the end of the re-open.
     scale->setCallbackOnEnd([](auto) {});
 
-    closeApplied = false;
     closeOnWindow.reset();
-    setClosing(false);
+    setClosing(false); // flips `closing` back to false + re-arms the overrides
 
     if (sharedStateOwner)
         forceWorkspaceAlphaVisible();

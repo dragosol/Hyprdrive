@@ -35,6 +35,14 @@ SP<IOverview> scrollOverviewForMonitor(PHLMONITOR monitor) {
     return IT == g_scrollOverviews.end() ? SP<IOverview>{} : *IT;
 }
 
+// The registry serves overviews in every phase; a closing one is a zombie
+// (Z18). This is the filtered query -- exists AND not closing -- that consumers
+// want instead of re-deriving the predicate. Lives here, beside the registry.
+SP<IOverview> openScrollOverviewForMonitor(PHLMONITOR monitor) {
+    const auto OVERVIEW = scrollOverviewForMonitor(monitor);
+    return (OVERVIEW && !OVERVIEW->isClosing()) ? OVERVIEW : SP<IOverview>{};
+}
+
 SP<IOverview> scrollOverviewAt(const Vector2D& point) {
     const auto IT = std::ranges::find_if(g_scrollOverviews, [&point](const auto& overview) {
         const auto monitor = overview ? overview->pMonitor.lock() : PHLMONITOR{};
