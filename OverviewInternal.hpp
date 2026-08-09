@@ -1903,5 +1903,8 @@ inline Vector2D hyprlerp(const Vector2D& from, const Vector2D& to, const float p
 
 } // namespace OvInternal
 
-using namespace OvInternal;
+// The trailing `using namespace OvInternal;` used to live here so the moved code
+// needed no edits -- but at file scope in a header it leaks the whole namespace
+// into every TU that includes this. Each consumer opts in for itself now (right
+// after the include), so a future includer decides its own qualification.
 

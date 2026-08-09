@@ -1,4 +1,5 @@
 #include "OverviewInternal.hpp"
+using namespace OvInternal; // opted in here rather than leaked from the header
 
 // ---------------------------------------------------------------------------
 // Event handlers. These were inline [this] lambdas inside the constructor,

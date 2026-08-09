@@ -1,4 +1,5 @@
 #include "OverviewInternal.hpp"
+using namespace OvInternal; // opted in here rather than leaked from the header
 
 // The definition behind the global declaration in OverviewInternal.hpp. One real
 // symbol in one TU -- TileChrome.cpp binds to it through the PLT, so it cannot be
