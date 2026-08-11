@@ -27,9 +27,15 @@ HOST=${2:-$(command -v Hyprland || echo /usr/bin/Hyprland)}
 [ -f "$SO" ] || { echo "symcheck: no $SO"; exit 2; }
 [ -f "$HOST" ] || { echo "symcheck: no host binary $HOST"; exit 2; }
 
+# 2026-08-10: a disk-full truncated the .so to 0 bytes and this script said
+# "OK (1 checked)" -- nm of nothing is nothing. Empty input must fail loudly,
+# and a plugin that imports nothing from the host is not a plugin build.
+[ -s "$SO" ] || { echo "symcheck: FAIL -- $SO is empty (truncated build?)"; exit 1; }
+
 # $1=="U": strong undefineds only -- weak ones (__gmon_start__ etc) may stay
 # unresolved by design. @VERSION stripped so needed/provided spellings match.
 NEEDED=$(nm -D --undefined-only "$SO" | awk '$1=="U"{print $2}' | sed 's/@.*//' | sort -u)
+[ -n "$NEEDED" ] || { echo "symcheck: FAIL -- $SO imports nothing from the host; truncated or bogus"; exit 1; }
 PROVIDED=$( { nm -D --defined-only "$SO" "$HOST";
               { ldd "$HOST"; ldd "$SO"; } | awk '$3 ~ /^\// {print $3}' | sort -u \
                 | xargs -r -n1 nm -D --defined-only 2>/dev/null; } \
