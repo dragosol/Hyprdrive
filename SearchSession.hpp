@@ -141,6 +141,57 @@ struct SSearchLayout {
     // G12/X62: the rows and grid cells as drawn, in draw order.
     std::vector<SSearchRowHit> hits;
 
+    // ---- the rest is THIS frame's geometry, handed straight to the draw pass --
+    //
+    // Rendered px unless a name ends in L. Nothing here is re-derived while
+    // drawing: layoutSearch() decides every box once, so a "just nudge it in the
+    // renderer" edit cannot move the pixels away from the boxes the hit-test and
+    // the keyboard walk are answering against.
+
+    // The pill survived its own cull -- there is a frame to paint. False leaves
+    // the two heights above still valid (they carry from the last frame that
+    // did get this far), which is what the culled-pill path has always done.
+    bool  drawable = false;
+
+    float fade  = 0.F; // the overview's open progress; every element rides it
+    float scale = 1.F; // pill.width / its logical width: the card transform, MEASURED
+    bool  queried = false, emptyResult = false;
+
+    CBox  pill, badge;
+    float fieldW = 0.F; // the text field, rendered px
+    float gap    = 0.F; // badge -> field, rendered px
+
+    // What the field says: the placeholder, the query, or X20's "no matches"
+    // suffix. Decided with the rest of the layout so the draw pass has no
+    // opinion about the query at all.
+    std::string label;
+
+    // X61/X62: the selection AS THE PANEL RESOLVED IT. The ranking can shrink
+    // under a selection made against a longer list; the clamp belongs to the
+    // frame that noticed, and is written back by the publish step.
+    int   selection = -1;
+
+    // One drawn result -- a G5 grid cell or a list row, they differ only in
+    // which boxes the card put them at.
+    struct SItem {
+        size_t      hit = 0; // index into hits: this item's box, in draw order
+        std::string name, description, icon;
+        bool        selected = false;
+    };
+
+    // X49: one rounded card per provider.
+    struct SCard {
+        CBox               box;
+        // X64/user 2026-08-06: a card fades in by how much room the band has
+        // actually made for it, so the reveal pays for its own overhang and
+        // needs no timer and no second animation to keep in step with the band.
+        float              alpha = 1.F;
+        bool               grid  = false; // G5: apps are a GRID of cells, providers a LIST of rows
+        std::string        title, icon;   // G6's header; empty on a grid card
+        size_t             more  = 0;     // G6's "%d more"
+        std::vector<SItem> items;
+    };
+    std::vector<SCard> cards;
 };
 
 // THE search session. One instance, `g_search` below; there is exactly one
