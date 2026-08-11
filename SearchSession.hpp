@@ -53,6 +53,32 @@ enum class EOverviewNavZone : uint8_t {
 // (48px pill + 8px margins); make it a config knob if anyone ever asks.
 inline constexpr float OVERVIEW_SEARCH_ROWHL = 64.F, OVERVIEW_SEARCH_DOCKPADL = 8.F;
 
+// X2. The pill's own metrics, from the deprecated Quickshell overview's
+// SearchBar.qml (ii/modules/ii/overview/): a 40px row + 4px margins = 48 high,
+// 15px type, 22px glyph, 210px collapsed / 360px expanded. They are LOGICAL px:
+// the draw pass measures the card transform off the landed box and scales every
+// one of them by it, so the pill's contents follow the transform for free.
+//
+// The row height above and these belong together -- 4 + 40 + 4 is where the 48
+// comes from, and 8 + 48 + 8 is where the 64 comes from -- which is why they
+// sit here rather than with the result-card family in OverviewInternal.hpp.
+inline constexpr float OVERVIEW_PILL_HL       = 48.F;  // the pill itself
+inline constexpr float OVERVIEW_PILL_PADL     = 4.F;   // its leading margin, and the badge's inset
+inline constexpr float OVERVIEW_PILL_BADGEL   = 40.F;  // the accent badge carrying the search glyph
+inline constexpr float OVERVIEW_PILL_GAPL     = 12.F;  // badge -> text field
+inline constexpr float OVERVIEW_PILL_TAILL    = 20.F;  // text field -> trailing edge
+inline constexpr float OVERVIEW_PILL_FIELDL   = 210.F; // the field at rest
+inline constexpr float OVERVIEW_PILL_FIELDQL  = 360.F; // ...and once a query is typed
+inline constexpr float OVERVIEW_PILL_GLYPHPX  = 22.F;  // the Material Symbols glyph in the badge
+inline constexpr float OVERVIEW_PILL_TEXTPX   = 15.F;  // the query / placeholder
+
+// The full width the pill lays out to. Named because BOTH the layout and the
+// scale it measures back out of the landed box divide by it, and a mismatch
+// there silently rescales everything inside the pill.
+inline constexpr float OVERVIEW_PILL_WL(float fieldWL) {
+    return OVERVIEW_PILL_PADL + OVERVIEW_PILL_BADGEL + OVERVIEW_PILL_GAPL + fieldWL + OVERVIEW_PILL_TAILL;
+}
+
 // OVERVIEW_CPP_SPEC §13.4 G12. A result row as it was last DRAWN. Same contract
 // as the dock's own menu rows: a row's box is only known inside the render pass,
 // so the hit-test answers against the last frame -- which is the frame the user

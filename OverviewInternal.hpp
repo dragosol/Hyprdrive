@@ -757,6 +757,32 @@ inline constexpr float OVERVIEW_RESULT_SECTIONGAPL = 8.F, OVERVIEW_RESULT_HEADER
 // at whatever fits, so a narrow monitor wraps instead of overflowing.
 inline constexpr float OVERVIEW_RESULT_CELLWL = 132.F, OVERVIEW_RESULT_CELLHL = 78.F, OVERVIEW_RESULT_CELLICONL = 48.F;
 
+// The rest of the card's metrics, which the draw pass used to spell out as bare
+// literals eight scroll-screens away from the family above. Every one of these
+// is multiplied by the card transform's SCALE at the point of use -- they are
+// LOGICAL px like the OVERVIEW_RESULT_* family, not rendered px.
+//
+// The repeats are named apart on purpose: the icon-to-title gap, the icon-to-row
+// -text gap and the name-to-description gap were all the literal 10, and reading
+// them as one number is how "nudge the description over" quietly moves the G6
+// header too.
+inline constexpr float OVERVIEW_CARD_ROUNDL       = 16.F; // the card's corner radius
+inline constexpr float OVERVIEW_CARD_PADL         = 12.F; // inner pad: card edge -> icon, row edge -> icon
+inline constexpr float OVERVIEW_CARD_SELROUNDL    = 10.F; // the selected row's / cell's fill
+inline constexpr float OVERVIEW_CARD_HEADICONL    = 32.F; // G6 provider icon on the leading edge
+inline constexpr float OVERVIEW_CARD_HEADGAPL     = 10.F; // that icon -> the provider name
+inline constexpr float OVERVIEW_CARD_HEADPX       = 14.F; // the provider name
+inline constexpr float OVERVIEW_CARD_MOREPX       = 12.F; // G6's "%d more", one step down
+inline constexpr float OVERVIEW_CARD_HEADLINEGAPL = 2.F;  // name -> "%d more", so the pair centres as a block
+inline constexpr float OVERVIEW_CARD_ROWPX        = 14.F; // a list row's name and description
+inline constexpr float OVERVIEW_CARD_ROWICONL     = 22.F; // the app icon on a list row
+inline constexpr float OVERVIEW_CARD_ROWICONGAPL  = 10.F; // that icon -> the name
+inline constexpr float OVERVIEW_CARD_DESCGAPL     = 10.F; // the name -> the dimmer description beside it
+inline constexpr float OVERVIEW_CARD_DESCMINL     = 24.F; // below this much room the description is dropped, not squeezed
+inline constexpr float OVERVIEW_CARD_CELLPADL     = 6.F;  // G5 grid cell: its own inset
+inline constexpr float OVERVIEW_CARD_CELLGAPL     = 4.F;  // that cell's icon -> its label
+inline constexpr float OVERVIEW_CARD_CELLPX       = 13.F; // that label
+
 inline float overviewResultsLogicalHeight(PHLMONITOR monitor) {
     return monitor ? std::max(0.F, g_search.layout.bandH) : 0.F;
 }

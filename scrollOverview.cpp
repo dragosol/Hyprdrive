@@ -3681,13 +3681,13 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // but invisible (X10). The overview scale insets this logical row far
     // enough down to clear the bar; X22 only removed the pan (see
     // OVERVIEW_CHROME_NO_PAN).
-    const float FIELDWL = QUERIED ? 360.F : 210.F;
-    const float PILLWL  = 4.F + 40.F + 12.F + FIELDWL + 20.F;
+    const float FIELDWL = QUERIED ? OVERVIEW_PILL_FIELDQL : OVERVIEW_PILL_FIELDL;
+    const float PILLWL  = OVERVIEW_PILL_WL(FIELDWL);
     const CBox  PILLLOGICAL = {
         sc<float>(monitor->m_position.x) + (sc<float>(monitor->m_size.x) - PILLWL) / 2.F,
-        sc<float>(monitor->m_position.y) + (OVERVIEW_SEARCH_ROWHL - 48.F) / 2.F,
+        sc<float>(monitor->m_position.y) + (OVERVIEW_SEARCH_ROWHL - OVERVIEW_PILL_HL) / 2.F,
         PILLWL,
-        48.F,
+        OVERVIEW_PILL_HL,
     };
 
     CBox pill = getOverviewGlobalBox(PILLLOGICAL, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
@@ -3718,9 +3718,9 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // Everything inside the pill is measured off the box as it actually landed,
     // so the badge and the type follow the card transform for free.
     const float SCALE  = sc<float>(pill.width) / PILLWL;
-    const float BADGED = std::round(40.F * SCALE);
-    const float PADL   = std::round(4.F * SCALE);
-    const float GAP    = std::round(12.F * SCALE);
+    const float BADGED = std::round(OVERVIEW_PILL_BADGEL * SCALE);
+    const float PADL   = std::round(OVERVIEW_PILL_PADL * SCALE);
+    const float GAP    = std::round(OVERVIEW_PILL_GAPL * SCALE);
     const float FIELDW = std::round(FIELDWL * SCALE);
 
     // The row the pill vacates, reclaimed -- the user asked, so the ~32px the
@@ -3731,7 +3731,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // its scale, so the undocked box inverts it from one known point. Undocked
     // this evaluates to 8 + 48 + 8 = the full 64px row, so the un-queried
     // layout is unchanged by construction rather than by a special case.
-    const float PILLFOOTL = PILLLOGICAL.y + 48.F + ((sc<float>(pill.y) - PILLUNDOCKEDY) / std::max(0.001F, SCALE));
+    const float PILLFOOTL = PILLLOGICAL.y + OVERVIEW_PILL_HL + ((sc<float>(pill.y) - PILLUNDOCKEDY) / std::max(0.001F, SCALE));
     g_search.layout.rowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
 
     // X11 / X86: frosted pill -- sample the behind-chrome theme blur.
@@ -3776,7 +3776,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // U+E8B6 is the Material Symbols "search" glyph. The codepoint is used
     // directly rather than the "search" ligature, which needs font shaping the
     // text renderer does not promise.
-    const auto GLYPHTEX = OverviewRender::text("\uE8B6", CHyprColor{1.F, 1.F, 1.F, 0.92F}, std::max(1, sc<int>(std::round(22.F * SCALE))), false,
+    const auto GLYPHTEX = OverviewRender::text("\uE8B6", CHyprColor{1.F, 1.F, 1.F, 0.92F}, std::max(1, sc<int>(std::round(OVERVIEW_PILL_GLYPHPX * SCALE))), false,
                                                       "Material Symbols Rounded", 0);
     if (GLYPHTEX && GLYPHTEX->ok()) {
         CBox glyphBox = {
@@ -3817,8 +3817,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         const float PANELHL = overviewResultsLogicalHeight(monitor) - (OVERVIEW_RESULT_PANELGAPL * 2.F);
         const float PANELYL = sc<float>(monitor->m_position.y) + overviewSearchLogicalHeight(monitor) + OVERVIEW_RESULT_PANELGAPL;
 
-        const int PANELROUND = std::max(1, sc<int>(std::round(16.F * SCALE)));
-        const int ROWPAD     = sc<int>(std::round(12.F * SCALE));
+        const int PANELROUND = std::max(1, sc<int>(std::round(OVERVIEW_CARD_ROUNDL * SCALE)));
+        const int ROWPAD     = sc<int>(std::round(OVERVIEW_CARD_PADL * SCALE));
 
         float cardYL = PANELYL;
         for (const auto& SECTION : SECTIONS) {
@@ -3891,13 +3891,13 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         sel.box           = cell;
                         // Opaque for the same reason the list's selection is.
                         sel.color         = ACCENT.modifyA(FADE * CARDA);
-                        sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
+                        sel.round         = std::max(1, sc<int>(std::round(OVERVIEW_CARD_SELROUNDL * SCALE)));
                         sel.roundingPower = 2.F;
                         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
                     }
 
                     const float ICOND = std::round(OVERVIEW_RESULT_CELLICONL * SCALE);
-                    const float PADG  = std::round(6.F * SCALE);
+                    const float PADG  = std::round(OVERVIEW_CARD_CELLPADL * SCALE);
 
                     const auto ICONTEX = OverviewRender::appIcon(RESULTS[I].icon);
                     if (ICONTEX && ICONTEX->ok()) {
@@ -3906,10 +3906,10 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     }
 
                     const auto CELLTEX = OverviewRender::text(RESULTS[I].name, SELECTED ? ScrollOverview::Config::highlightForeground() : CHyprColor{1.F, 1.F, 1.F, 1.F},
-                                                              std::max(1, sc<int>(std::round(13.F * SCALE))), false, "",
+                                                              std::max(1, sc<int>(std::round(OVERVIEW_CARD_CELLPX * SCALE))), false, "",
                                                               std::max(1, sc<int>(cell.width - (PADG * 2.F))), 500);
                     if (CELLTEX && CELLTEX->ok()) {
-                        CBox cellText{cell.x + std::round((cell.width - sc<float>(CELLTEX->m_size.x)) / 2.F), cell.y + PADG + ICOND + std::round(4.F * SCALE),
+                        CBox cellText{cell.x + std::round((cell.width - sc<float>(CELLTEX->m_size.x)) / 2.F), cell.y + PADG + ICOND + std::round(OVERVIEW_CARD_CELLGAPL * SCALE),
                                       sc<float>(CELLTEX->m_size.x), sc<float>(CELLTEX->m_size.y)};
                         ADDTEX(CELLTEX, cellText.round());
                     }
@@ -3922,10 +3922,10 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             float      headIndent = sc<float>(ROWPAD);
             const auto HEADICON   = OverviewRender::appIcon(SECTION.icon);
             if (HEADICON && HEADICON->ok()) {
-                const float ICOND = std::round(32.F * SCALE);
+                const float ICOND = std::round(OVERVIEW_CARD_HEADICONL * SCALE);
                 CBox        iconBox{card.x + sc<float>(ROWPAD), card.y + std::round((card.height - ICOND) / 2.F), ICOND, ICOND};
                 ADDTEX(HEADICON, iconBox.round());
-                headIndent += ICOND + std::round(10.F * SCALE);
+                headIndent += ICOND + std::round(OVERVIEW_CARD_HEADGAPL * SCALE);
             }
 
             // G6: the provider's name, and beneath it how many results are not
@@ -3936,23 +3936,23 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
             const size_t MORE  = SECTION.total > SHOWN ? SECTION.total - SHOWN : 0;
 
             const float HEADWG  = std::round(OVERVIEW_RESULT_HEADERWL * SCALE);
-            const int   HEADPX  = std::max(1, sc<int>(std::round(14.F * SCALE)));
+            const int   HEADPX  = std::max(1, sc<int>(std::round(OVERVIEW_CARD_HEADPX * SCALE)));
             const auto  HEADTEX = OverviewRender::text(SECTION.title, CHyprColor{1.F, 1.F, 1.F, 0.95F}, HEADPX, false, "", std::max(1, sc<int>(HEADWG - headIndent) - ROWPAD), 500);
             const auto  MORETEX = MORE == 0 ? nullptr :
-                                              OverviewRender::text(std::to_string(MORE) + " more", CHyprColor{1.F, 1.F, 1.F, 0.78F}, std::max(1, sc<int>(std::round(12.F * SCALE))), false, "",
+                                              OverviewRender::text(std::to_string(MORE) + " more", CHyprColor{1.F, 1.F, 1.F, 0.78F}, std::max(1, sc<int>(std::round(OVERVIEW_CARD_MOREPX * SCALE))), false, "",
                                                                    std::max(1, sc<int>(HEADWG - headIndent) - ROWPAD));
 
             // Both lines centre as one block, so a section without a count does
             // not sit at a different height from one with it.
             const float HEADH  = HEADTEX && HEADTEX->ok() ? sc<float>(HEADTEX->m_size.y) : 0.F;
             const float MOREH  = MORETEX && MORETEX->ok() ? sc<float>(MORETEX->m_size.y) : 0.F;
-            const float STACKH = HEADH + (MOREH > 0.F ? MOREH + std::round(2.F * SCALE) : 0.F);
+            const float STACKH = HEADH + (MOREH > 0.F ? MOREH + std::round(OVERVIEW_CARD_HEADLINEGAPL * SCALE) : 0.F);
             float       headY  = card.y + std::round((card.height - STACKH) / 2.F);
 
             if (HEADTEX && HEADTEX->ok()) {
                 CBox headText{card.x + headIndent, headY, sc<float>(HEADTEX->m_size.x), HEADH};
                 ADDTEX(HEADTEX, headText.round());
-                headY += HEADH + std::round(2.F * SCALE);
+                headY += HEADH + std::round(OVERVIEW_CARD_HEADLINEGAPL * SCALE);
             }
             if (MORETEX && MORETEX->ok()) {
                 CBox moreText{card.x + headIndent, headY, sc<float>(MORETEX->m_size.x), MOREH};
@@ -3994,7 +3994,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     // STRUCTURE; the selected one is flat. That difference holds
                     // against any wallpaper, which a colour delta does not.
                     sel.color         = ACCENT.modifyA(FADE * CARDA);
-                    sel.round         = std::max(1, sc<int>(std::round(10.F * SCALE)));
+                    sel.round         = std::max(1, sc<int>(std::round(OVERVIEW_CARD_SELROUNDL * SCALE)));
                     sel.roundingPower = 2.F;
                     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(sel));
                 }
@@ -4003,7 +4003,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 float      textIndent = sc<float>(ROWPAD);
                 const auto ICONTEX    = OverviewRender::appIcon(RESULTS[I].icon);
                 if (ICONTEX && ICONTEX->ok()) {
-                    const float ICOND = std::round(22.F * SCALE);
+                    const float ICOND = std::round(OVERVIEW_CARD_ROWICONL * SCALE);
                     CBox        iconBox{
                         row.x + sc<float>(ROWPAD),
                         row.y + std::round((row.height - ICOND) / 2.F),
@@ -4011,13 +4011,13 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                         ICOND,
                     };
                     ADDTEX(ICONTEX, iconBox.round());
-                    textIndent += ICOND + std::round(10.F * SCALE);
+                    textIndent += ICOND + std::round(OVERVIEW_CARD_ROWICONGAPL * SCALE);
                 }
 
                 // The name, then the description BESIDE it in a dimmer weight
                 // -- GNOME's two columns. Glued into one string they could only
                 // ever be one colour, which is what made the rows read flat.
-                const int  ROWPX  = std::max(1, sc<int>(std::round(14.F * SCALE)));
+                const int  ROWPX  = std::max(1, sc<int>(std::round(OVERVIEW_CARD_ROWPX * SCALE)));
 
                 // On the selected row the fill is the accent itself, so the type
                 // reads against THAT and not against the card.
@@ -4033,9 +4033,9 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     ADDTEX(ROWTEX, rowText.round());
 
                     if (!RESULTS[I].description.empty()) {
-                        const float DESCX = rowText.x + rowText.width + std::round(10.F * SCALE);
+                        const float DESCX = rowText.x + rowText.width + std::round(OVERVIEW_CARD_DESCGAPL * SCALE);
                         const int   DESCW = sc<int>((row.x + row.width - sc<float>(ROWPAD)) - DESCX);
-                        if (DESCW > sc<int>(std::round(24.F * SCALE))) {
+                        if (DESCW > sc<int>(std::round(OVERVIEW_CARD_DESCMINL * SCALE))) {
                             if (const auto DESCTEX = OverviewRender::text(RESULTS[I].description, FG.modifyA(0.78F), ROWPX, false, "", DESCW);
                                 DESCTEX && DESCTEX->ok()) {
                                 CBox descText{DESCX, row.y + std::round((row.height - sc<float>(DESCTEX->m_size.y)) / 2.F), sc<float>(DESCTEX->m_size.x), sc<float>(DESCTEX->m_size.y)};
@@ -4055,7 +4055,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     const std::string LABEL = !QUERIED ? "Search, calculate or run" : (EMPTYRESULT ? g_search.query.text + "    no matches" : g_search.query.text);
     const CHyprColor  FG    = !QUERIED ? CHyprColor{1.F, 1.F, 1.F, 0.55F} : (EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F});
 
-    const int  FONTPX = std::max(1, sc<int>(std::round(15.F * SCALE)));
+    const int  FONTPX = std::max(1, sc<int>(std::round(OVERVIEW_PILL_TEXTPX * SCALE)));
     const auto TEX    = OverviewRender::text(LABEL, FG, FONTPX, false, "", sc<int>(FIELDW), QUERIED ? 600 : 0);
     if (!TEX || !TEX->ok())
         return;
