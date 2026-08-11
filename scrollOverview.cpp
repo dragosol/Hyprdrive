@@ -146,14 +146,17 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     workspaceInsertFadeProgress->setUpdateCallback([this](auto) { damage(); });
     reflowPacer->setUpdateCallback([this](auto) { damage(); });
     resultsBand->setUpdateCallback([this](auto) {
-        g_overviewResultsBandH = resultsBand->value();
+        g_search.layout.bandH = resultsBand->value();
         damage();
     });
     searchDock->setUpdateCallback([this](auto) { damage(); });
 
-    // A previous overview's band must not open the next one already pushed.
-    g_overviewResultsBandH = 0.F;
-    g_overviewSearchRowL   = OVERVIEW_SEARCH_ROWHL;
+    // A previous overview's band must not open the next one already pushed, nor
+    // its pill start docked. The published layout is the ONLY group of session
+    // state this may touch: the query and the nav zone belong to the dispatcher
+    // that asked for the overview, and a second monitor opening must not wipe
+    // the query the first one is showing.
+    g_search.resetLayout();
 
     if (!swipe)
         *scale = ScrollOverview::Config::getScale();
@@ -801,7 +804,7 @@ void CScrollOverview::updateTileHover() {
     // The pointer moved, so the pointer owns the ring again. Whatever the
     // arrows had selected keeps its role for Return and for close(); it just
     // stops being the thing drawn.
-    g_overviewKeyboardTile = false;
+    g_search.nav.keyboardTile = false;
 
     if (closing || dragActiveWindow || resizeActiveWindow || scrollingPanPointerDown) {
         TileChrome::setHovered(PHLWINDOW{});
@@ -815,9 +818,9 @@ void CScrollOverview::updateTileHover() {
     // through it would be hovering something the user cannot click.
     if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
         TileChrome::setHovered(PHLWINDOW{});
-        g_overviewNavZone = EOverviewNavZone::Result;
-        if (g_overviewAppSelection != ROW->index) {
-            g_overviewAppSelection = ROW->index;
+        g_search.nav.zone = EOverviewNavZone::Result;
+        if (g_search.nav.selection != ROW->index) {
+            g_search.nav.selection = ROW->index;
             damage();
         }
         return;
@@ -1217,7 +1220,7 @@ void CScrollOverview::performPrimaryClickAction() {
     }
 
     selectHoveredWorkspace();
-    g_overviewNavZone = EOverviewNavZone::Tile;
+    g_search.nav.zone = EOverviewNavZone::Tile;
     selectWindowAtOverviewCursor(true);
     close();
 }
@@ -2520,7 +2523,7 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
     // The results as the last frame DREW them -- the same boxes the mouse
     // hit-tests against, so the two devices cannot disagree about where a row
     // is. G5's grid cells and the list rows are both in here already.
-    for (const auto& HIT : g_searchRowHits)
+    for (const auto& HIT : g_search.layout.hits)
         targets.push_back({HIT.box, EOverviewNavZone::Result, HIT.index, {}});
 
     // Every workspace's tiles, filtered to the ones actually ON the monitor.
@@ -2546,10 +2549,10 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
 
     // Where the selection is NOW.
     CBox current;
-    switch (g_overviewNavZone) {
+    switch (g_search.nav.zone) {
         case EOverviewNavZone::Result:
             for (const auto& TARGET : targets)
-                if (TARGET.zone == EOverviewNavZone::Result && TARGET.index == g_overviewAppSelection)
+                if (TARGET.zone == EOverviewNavZone::Result && TARGET.index == g_search.nav.selection)
                     current = TARGET.box;
             break;
         case EOverviewNavZone::Tile:
@@ -2627,7 +2630,7 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
         // the right" of it -- jumped straight out of the list and into the grid.
         // Crossing between surfaces is still the point of this walk, it just has
         // to be the LAST resort rather than the first.
-        if (TARGET.zone == g_overviewNavZone && (!near || SCORE.beats(nearScore))) {
+        if (TARGET.zone == g_search.nav.zone && (!near || SCORE.beats(nearScore))) {
             nearScore = SCORE;
             near      = &TARGET;
         }
@@ -2641,8 +2644,8 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
 
     switch (best->zone) {
         case EOverviewNavZone::Desktop:
-            g_overviewNavZone      = EOverviewNavZone::Desktop;
-            g_overviewAppSelection = -1;
+            g_search.nav.zone      = EOverviewNavZone::Desktop;
+            g_search.nav.selection = -1;
             // Arrowing onto a desktop GOES there: the viewport slides and the
             // strip highlights it, so the selection is visible without the
             // strip needing a second kind of highlight of its own. Return then
@@ -2651,14 +2654,14 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
                 focusOverviewWorkspace(WORKSPACE, sc<size_t>(best->index));
             break;
         case EOverviewNavZone::Result:
-            g_overviewNavZone      = EOverviewNavZone::Result;
-            g_overviewAppSelection = best->index;
+            g_search.nav.zone      = EOverviewNavZone::Result;
+            g_search.nav.selection = best->index;
             break;
         case EOverviewNavZone::Tile:
-            g_overviewNavZone      = EOverviewNavZone::Tile;
-            g_overviewAppSelection = -1;
+            g_search.nav.zone      = EOverviewNavZone::Tile;
+            g_search.nav.selection = -1;
             closeOnWindow          = best->window;
-            g_overviewKeyboardTile = true;
+            g_search.nav.keyboardTile = true;
             break;
     }
 
@@ -3604,7 +3607,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 // Counted across every workspace, not just the focused one: the strip shows
 // matching minis from elsewhere, so "no matches" has to agree with that.
 size_t CScrollOverview::matchingWindowCount() const {
-    if (g_overviewSearch.empty())
+    if (g_search.query.text.empty())
         return 0;
 
     size_t matches = 0;
@@ -3623,7 +3626,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // G12. Cleared here rather than where the rows are drawn: every early
     // return below is a frame with no rows on it, and a stale box would hand
     // the next press a result that is no longer on screen.
-    g_searchRowHits.clear();
+    g_search.layout.hits.clear();
 
     // User, 2026-08-06: the pill fades in with the overview, and reverses if
     // the overview is toggled off mid-flight. See renderStrip for why the open
@@ -3632,7 +3635,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     if (FADE < 0.01F)
         return;
 
-    const bool QUERIED = !g_overviewSearch.empty();
+    const bool QUERIED = !g_search.query.text.empty();
 
     const size_t MATCHES = QUERIED ? matchingWindowCount() : 0;
     const auto   RESULTS = QUERIED ? overviewSearchRows() : std::vector<SSearchRow>{};
@@ -3645,10 +3648,10 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // the providers have not answered and RESULTS is empty -- so it arms the
     // flag and this spends it on the first frame that actually has a result.
     // Spending it once is what leaves a deliberate Tab back to the grid alone.
-    if (g_overviewSelectFirstPending && QUERIED && !RESULTS.empty()) {
-        g_overviewAppSelection       = 0;
-        g_overviewNavZone            = EOverviewNavZone::Result;
-        g_overviewSelectFirstPending = false;
+    if (g_search.nav.selectFirstPending && QUERIED && !RESULTS.empty()) {
+        g_search.nav.selection       = 0;
+        g_search.nav.zone            = EOverviewNavZone::Result;
+        g_search.nav.selectFirstPending = false;
     }
 
     // X21: the layout band is driven from the row count HERE, ahead of the pill
@@ -3663,7 +3666,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     if (const float TARGET = overviewResultsBandTarget(monitor, SECTIONS); std::abs(resultsBand->goal() - TARGET) > 0.5F)
         *resultsBand = TARGET;
 
-    g_overviewResultsBandH = resultsBand->value();
+    g_search.layout.bandH = resultsBand->value();
 
     // X50. The trigger is "results begin to populate", not the first keystroke:
     // EMPTYRESULT is exactly "typed, and nothing matched anywhere", so a query
@@ -3729,7 +3732,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // this evaluates to 8 + 48 + 8 = the full 64px row, so the un-queried
     // layout is unchanged by construction rather than by a special case.
     const float PILLFOOTL = PILLLOGICAL.y + 48.F + ((sc<float>(pill.y) - PILLUNDOCKEDY) / std::max(0.001F, SCALE));
-    g_overviewSearchRowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
+    g_search.layout.rowL  = std::clamp(PILLFOOTL - sc<float>(monitor->m_position.y) + OVERVIEW_SEARCH_DOCKPADL, 0.F, OVERVIEW_SEARCH_ROWHL);
 
     // X11 / X86: frosted pill -- sample the behind-chrome theme blur.
     OverviewRender::queueBlur(pill, sc<int>(std::round(pill.height / 2.F)), 2.F, FADE, false); // X87: live overview frost under the bar
@@ -3794,8 +3797,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // and its rows laid out across the rest. There is no longer a single outer
     // panel -- the cards are the surface.
     if (!SECTIONS.empty() && overviewResultsLogicalHeight(monitor) > (OVERVIEW_RESULT_PANELGAPL * 2.F) + 1.F) {
-        if (g_overviewAppSelection >= sc<int>(RESULTS.size()))
-            g_overviewAppSelection = sc<int>(RESULTS.size()) - 1;
+        if (g_search.nav.selection >= sc<int>(RESULTS.size()))
+            g_search.nav.selection = sc<int>(RESULTS.size()) - 1;
 
         constexpr float ROWHL = OVERVIEW_RESULT_ROWHL, ROWGAPL = OVERVIEW_RESULT_ROWGAPL, PANELPADL = OVERVIEW_RESULT_PANELPADL;
 
@@ -3880,9 +3883,9 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                     cell.round();
 
                     // G12, same contract as a list row: recorded as DRAWN.
-                    g_searchRowHits.emplace_back(SSearchRowHit{.box = cell, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon, .index = sc<int>(I)});
+                    g_search.layout.hits.emplace_back(SSearchRowHit{.box = cell, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon, .index = sc<int>(I)});
 
-                    const bool SELECTED = sc<int>(I) == g_overviewAppSelection;
+                    const bool SELECTED = sc<int>(I) == g_search.nav.selection;
                     if (SELECTED) {
                         CRectPassElement::SRectData sel;
                         sel.box           = cell;
@@ -3973,9 +3976,9 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
                 // G12. Recorded as DRAWN, including the rows that are not
                 // draggable: a drop onto one of those still has to be rejected,
                 // and it can only be rejected by something that knows it is there.
-                g_searchRowHits.emplace_back(SSearchRowHit{.box = row, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon, .index = sc<int>(I)});
+                g_search.layout.hits.emplace_back(SSearchRowHit{.box = row, .desktopId = RESULTS[I].app ? RESULTS[I].app->id : "", .icon = RESULTS[I].icon, .index = sc<int>(I)});
 
-                const bool SELECTED = sc<int>(I) == g_overviewAppSelection;
+                const bool SELECTED = sc<int>(I) == g_search.nav.selection;
                 if (SELECTED) {
                     CRectPassElement::SRectData sel;
                     sel.box           = row;
@@ -4049,7 +4052,7 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // inherits whatever the last card happened to fade to.
     texFade = FADE;
 
-    const std::string LABEL = !QUERIED ? "Search, calculate or run" : (EMPTYRESULT ? g_overviewSearch + "    no matches" : g_overviewSearch);
+    const std::string LABEL = !QUERIED ? "Search, calculate or run" : (EMPTYRESULT ? g_search.query.text + "    no matches" : g_search.query.text);
     const CHyprColor  FG    = !QUERIED ? CHyprColor{1.F, 1.F, 1.F, 0.55F} : (EMPTYRESULT ? CHyprColor{1.F, 0.45F, 0.45F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F});
 
     const int  FONTPX = std::max(1, sc<int>(std::round(15.F * SCALE)));
@@ -4111,7 +4114,7 @@ bool CScrollOverview::hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t
         // the active card, so it must keep its frost the whole way: section C
         // outranks this cull.
         const bool HASPROMOTED = std::ranges::any_of(workspaceImage->windows, [&](const auto& ref) { return overviewGridPromoted(getOverviewWindowToShow(ref.lock()), monitor); });
-        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor) && g_overviewSearch.empty() && !HASPROMOTED)
+        if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor) && g_search.query.text.empty() && !HASPROMOTED)
             continue;
 
         const auto workspace = workspaceImage->pWorkspace;
@@ -4205,14 +4208,14 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
         // The ring has three owners, and DRAGGED has to be one of them in its
         // own right. It used to ride the keyboard clause by accident -- a drag
         // leaves closeOnWindow on the window it picked up -- and X74 gating that
-        // clause behind g_overviewKeyboardTile took the ring off the dragged
+        // clause behind g_search.nav.keyboardTile took the ring off the dragged
         // window with it, because a drag is pointer input and clears the flag.
         //
         // It cannot come from hovered() either: updateTileHover drops the hover
         // outright while a drag is live, so the tile under the cursor is not
         // reported as hovered and the window being carried is not under the
         // cursor anyway once it has left its slot.
-        .selected             = (g_overviewKeyboardTile && g_overviewNavZone == EOverviewNavZone::Tile && closeOnWindow == window) ||
+        .selected             = (g_search.nav.keyboardTile && g_search.nav.zone == EOverviewNavZone::Tile && closeOnWindow == window) ||
             TileChrome::hovered() == window || dragged,
         .dragged              = dragged,
     });
@@ -4820,8 +4823,7 @@ void CScrollOverview::close() {
     // may survive into the next open as a phantom drop.
     ScrollOverview::Dock::dragCancel();
     ScrollOverview::Dock::setForeignInsert(-1);
-    g_resultDrag.reset();
-    g_searchRowHits.clear();
+    g_search.endInteraction();
 
     setClosing(true);
 
@@ -5029,7 +5031,7 @@ void CScrollOverview::onPreRender() {
     //
     // The EDGE, not every keystroke. Empty <-> non-empty is the only transition
     // that changes the answer, and X52 is about what a keystroke costs.
-    if (const bool QUERYEMPTY = g_overviewSearch.empty(); QUERYEMPTY != lastQueryEmpty) {
+    if (const bool QUERYEMPTY = g_search.query.text.empty(); QUERYEMPTY != lastQueryEmpty) {
         lastQueryEmpty = QUERYEMPTY;
         rebuildPending = true;
     }
@@ -5292,7 +5294,7 @@ void CScrollOverview::render() {
         const auto SINCEKEY = std::chrono::duration<double, std::milli>(Prof::clock::now() - Prof::keyAt).count();
         if (FILE* const F = std::fopen("/tmp/scrolloverview-prof.log", "a")) {
             std::fprintf(F, "q=%-6s f=%llu sinceKey=%7.2fms  FRAME=%6.2fms  bg=%6.2fms  live=%6.2fms  strip=%6.2fms  renderSearch=%6.2fms  match=%5.2fms/%llu  rows=%5.2fms  app=%5.2fms  scan=%5.2fms/%llu  TEXT[cold=%llu %6.2fms]  ICON[cold=%llu resolve=%6.2f decode=%6.2f upload=%6.2f]\n",
-                         g_overviewSearch.c_str(), (unsigned long long)Prof::frames, SINCEKEY,
+                         g_search.query.text.c_str(), (unsigned long long)Prof::frames, SINCEKEY,
                          Prof::frameNs / 1e6, Prof::bgNs / 1e6, Prof::liveNs / 1e6, Prof::stripNs / 1e6, Prof::srchNs / 1e6,
                          Prof::matchNs / 1e6, (unsigned long long)Prof::matchCalls,
                          Prof::rowsNs / 1e6, Prof::appNs / 1e6, Prof::scanNs / 1e6, (unsigned long long)Prof::scanCalls,
@@ -5306,8 +5308,8 @@ void CScrollOverview::render() {
     // G12. The dragged result follows the pointer, AFTER the dock: the whole
     // gesture is a journey from the panel to the pill, and an icon that vanished
     // under the thing it is being dropped on would read as a failed drop.
-    if (g_resultDrag && g_resultDrag->live) {
-        if (const auto TEX = OverviewRender::appIcon(g_resultDrag->icon); TEX && TEX->ok()) {
+    if (g_search.pointer.drag && g_search.pointer.drag->live) {
+        if (const auto TEX = OverviewRender::appIcon(g_search.pointer.drag->icon); TEX && TEX->ok()) {
             const float        D = std::round(48.F * sc<float>(MONITOR->m_scale));
             CTexPassElement::SRenderData ghost;
             ghost.tex = TEX;

@@ -9,54 +9,9 @@
 
 inline HANDLE SCROLLOVERVIEW_HANDLE = nullptr;
 
-// OVERVIEW_CPP_SPEC §5 F2 type-to-filter query. Written by the keyboard hook in
-// main.cpp, read by the window gate in scrollOverview.cpp.
-inline std::string g_overviewSearch;
-
-// G1 (spec 13.11): "compose/dead keys must START a search" only means something
-// if a search can be ACTIVE while the query is still empty -- Compose alone
-// types nothing. Every "is a search running" test reads this, not
-// g_overviewSearch.empty(), which cannot represent that state.
-inline bool g_searchActive = false;
-
-// OVERVIEW_CPP_SPEC §13.2 F3. Index into the ranked app results, -1 meaning
-// "no app selected, the grid owns Return". Paired with the query above: any
-// edit to the query resets it.
-inline int g_overviewAppSelection = -1;
-
-// User, 2026-08-06: "make the first search result the first thing that is
-// selected, rather than the desktops". Typing ARMS that, but the results are
-// not known at the keystroke -- the providers answer over the next frames -- so
-// the keyboard hook sets this and renderSearch spends it once there is a result
-// to select. Cleared by the spend, so a deliberate Tab back to the grid (-1) is
-// never overridden.
-inline bool g_overviewSelectFirstPending = false;
-
-// X61. Which ZONE the keyboard selection is in. The overview has three surfaces
-// the user can land on and they keep their selection in three different places
-// -- the strip in viewportCurrentWorkspace, the results in
-// g_overviewAppSelection, the tiles in closeOnWindow -- so the arrows need one
-// explicit answer to "where am I" rather than inferring it from whichever of
-// the three happens to be set. Return reads it to know what activating means,
-// and the tile border reads it so a selection that has moved to the results
-// does not leave a second highlight behind on the grid.
-enum class EOverviewNavZone : uint8_t {
-    Tile = 0,
-    Result,
-    Desktop,
-};
-inline EOverviewNavZone g_overviewNavZone = EOverviewNavZone::Tile;
-
-// X74 (user, 2026-08-06): the ring is the POINTER's, except while the keyboard
-// is the thing actually driving. The tile zone is seeded to the active window
-// on every open, so keying the ring on the zone alone drew a permanent ring
-// around the active window that the user never asked for.
-//
-// X61 is why this is a flag and not a deletion: arrowing between tiles has to
-// keep its visual, and that was itself a user complaint. Set by an arrow
-// landing on a tile, cleared by the overview opening and by ANY pointer motion
-// -- whichever device moved last owns the ring.
-inline bool g_overviewKeyboardTile = false;
+// The search query, the keyboard selection, the result drag and the layout the
+// search step publishes all live in SearchSession.hpp -- one grouped object with
+// one reset, instead of the six loose globals that used to sit here.
 
 // STANDING UX RULE (RICE_PROGRESS.md): the rice has exactly TWO motion curves,
 // mirrored in hyprland/general.lua as `appleDecel`/`appleAccel` and in the

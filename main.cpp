@@ -37,6 +37,7 @@ using namespace Hyprutils::String;
 #include "Minimize.hpp"
 #include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
+#include "SearchSession.hpp"
 #include "OverviewGesture.hpp"
 #include "OverviewRender.hpp"
 #include "SearchProviders.hpp"
@@ -293,15 +294,17 @@ bool openScrollOverview(PHLMONITOR monitor) {
 static void resetCompose();
 
 static SDispatchResult onOverviewDispatcher(std::string arg) {
-    g_overviewSearch.clear(); // every open starts unfiltered
-    g_searchActive = false;
+    // Every open starts unfiltered, on the tiles, holding nothing. ONE call:
+    // this used to be six hand-listed fields and the list was wrong twice (X61
+    // added the nav zone, G12 the result drag, neither reached every site).
+    //
+    // It runs before the action is even parsed, which is deliberate and is
+    // load-bearing for the CLOSE actions too: a toggle-off with a query typed
+    // drops the filter first, so the windows it was hiding are back in the grid
+    // for the close animation instead of popping in after it.
+    g_search.reset();
     resetCompose(); // a sequence abandoned last time must not eat the first key
-    // X61: and on the tiles, which is where the remembered selection lives.
-    g_overviewNavZone       = EOverviewNavZone::Tile;
-    g_overviewKeyboardTile  = false;
     SearchProviders::query("");
-    g_overviewAppSelection      = -1;
-    g_overviewSelectFirstPending = false;
     const auto [ACTION, TARGET] = splitOverviewArg(arg);
     const auto ACTIVE           = activeScrollOverview();
 
@@ -555,18 +558,18 @@ static void afterQueryEdit() {
 
     // X20: every keystroke starts a new provider generation. Non-blocking, so
     // this costs the keystroke nothing; results land over the next frames.
-    SearchProviders::query(g_overviewSearch);
+    SearchProviders::query(g_search.query.text);
 
     // The ranking changes under any edit, so a held index would point at a
     // different app than the one the user saw highlighted.
-    g_overviewAppSelection = -1;
+    g_search.nav.selection = -1;
 
     // ...and the new ranking's TOP result takes the selection instead of the
-    // desktops. Deferred to renderSearch because the providers have not
-    // answered yet; emptying the query hands the selection back to the tiles.
-    g_overviewSelectFirstPending = !g_overviewSearch.empty();
-    if (g_overviewSearch.empty())
-        g_overviewNavZone = EOverviewNavZone::Tile;
+    // desktops. Deferred to the search render step because the providers have
+    // not answered yet; emptying the query hands the selection back to the tiles.
+    g_search.nav.selectFirstPending = !g_search.query.text.empty();
+    if (g_search.query.text.empty())
+        g_search.nav.zone = EOverviewNavZone::Tile;
 
     for (const auto& overview : scrollOverviews())
         if (overview)
@@ -594,23 +597,23 @@ static bool handleSearchPress(uint32_t keycode) {
     if (keycode == EVDEV_KEY_ESC) {
         resetCompose();
         // X5, GNOME-style: the first ESC drops the filter, the next one leaves.
-        if (!g_searchActive) {
+        if (!g_search.query.active) {
             for (const auto& overview : scrollOverviews())
                 if (overview)
                     overview->close();
             return true;
         }
-        g_overviewSearch.clear();
-        g_searchActive = false;
+        g_search.query.text.clear();
+        g_search.query.active = false;
         afterQueryEdit();
         return true;
     }
 
     if (keycode == EVDEV_KEY_BACKSPACE) {
-        if (!g_searchActive)
+        if (!g_search.query.active)
             return false;
         resetCompose();
-        popCodepoint(g_overviewSearch);
+        popCodepoint(g_search.query.text);
         afterQueryEdit();
         return true;
     }
@@ -624,13 +627,13 @@ static bool handleSearchPress(uint32_t keycode) {
     // running. The key stays CONSUMED either way: the overview holds the
     // keyboard, so falling through would type a space into a window the user
     // cannot see.
-    if (KEY.text == " " && !g_searchActive)
+    if (KEY.text == " " && !g_search.query.active)
         return true;
 
     if (KEY.starts)
-        g_searchActive = true;
+        g_search.query.active = true;
 
-    g_overviewSearch += KEY.text;
+    g_search.query.text += KEY.text;
     afterQueryEdit();
     return true;
 }

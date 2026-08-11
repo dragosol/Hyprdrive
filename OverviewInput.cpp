@@ -51,14 +51,14 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
         }
 
         // G12. The hold has to pass BEFORE the distance is even looked at.
-        if (g_resultDrag && !g_resultDrag->desktopId.empty()) {
-            if (!g_resultDrag->live) {
-                const float HELDMS = ScrollOverview::Config::animElapsedMs(g_resultDrag->startedAt);
-                if (HELDMS >= G12_HOLD_MS && g_resultDrag->start.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
-                    g_resultDrag->live = true;
+        if (g_search.pointer.drag && !g_search.pointer.drag->desktopId.empty()) {
+            if (!g_search.pointer.drag->live) {
+                const float HELDMS = ScrollOverview::Config::animElapsedMs(g_search.pointer.drag->startedAt);
+                if (HELDMS >= G12_HOLD_MS && g_search.pointer.drag->start.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
+                    g_search.pointer.drag->live = true;
             }
 
-            if (g_resultDrag->live) {
+            if (g_search.pointer.drag->live) {
                 const auto MON = pMonitor.lock();
                 ScrollOverview::Dock::setForeignInsert(ScrollOverview::Dock::showAppsContains(MON, lastMousePosLocal) ? -1 : ScrollOverview::Dock::dropIndexAt(MON, lastMousePosLocal));
                 damage();
@@ -326,9 +326,9 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             // On the pill it pins, on Show Applications it unpins, and anywhere
             // else -- including on another result -- it is rejected outright,
             // which is what "must not create a folder or reorder anything" is.
-            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && g_resultDrag) {
-                const auto DRAG = *g_resultDrag;
-                g_resultDrag.reset();
+            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && g_search.pointer.drag) {
+                const auto DRAG = *g_search.pointer.drag;
+                g_search.pointer.drag.reset();
                 ScrollOverview::Dock::setForeignInsert(-1);
                 damage();
                 requestInputFrame();
@@ -376,7 +376,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             // panel's to define.
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
                 if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
-                    g_resultDrag =
+                    g_search.pointer.drag =
                         SResultDrag{.desktopId = ROW->desktopId, .icon = ROW->icon, .start = lastMousePosLocal, .startedAt = Time::steadyNow(), .index = ROW->index};
                     return;
                 }
@@ -677,9 +677,9 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
                 // so the grid is never unreachable by keyboard.
                 const int COUNT = sc<int>(RESULTS.size());
                 if (KEYSYM == XKB_KEY_ISO_Left_Tab)
-                    g_overviewAppSelection = g_overviewAppSelection <= -1 ? COUNT - 1 : g_overviewAppSelection - 1;
+                    g_search.nav.selection = g_search.nav.selection <= -1 ? COUNT - 1 : g_search.nav.selection - 1;
                 else
-                    g_overviewAppSelection = g_overviewAppSelection >= COUNT - 1 ? -1 : g_overviewAppSelection + 1;
+                    g_search.nav.selection = g_search.nav.selection >= COUNT - 1 ? -1 : g_search.nav.selection + 1;
 
                 damage();
                 break;
@@ -701,9 +701,9 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
                 // they want to go and launching an app instead would be a
                 // surprise.
                 int launchIdx = -1;
-                if (g_overviewNavZone == EOverviewNavZone::Result && g_overviewAppSelection >= 0 && g_overviewAppSelection < sc<int>(RESULTS.size()))
-                    launchIdx = g_overviewAppSelection;
-                else if (g_overviewNavZone != EOverviewNavZone::Desktop && !RESULTS.empty() && matchingWindowCount() == 0)
+                if (g_search.nav.zone == EOverviewNavZone::Result && g_search.nav.selection >= 0 && g_search.nav.selection < sc<int>(RESULTS.size()))
+                    launchIdx = g_search.nav.selection;
+                else if (g_search.nav.zone != EOverviewNavZone::Desktop && !RESULTS.empty() && matchingWindowCount() == 0)
                     launchIdx = 0;
 
                 activateSearchResult(launchIdx);

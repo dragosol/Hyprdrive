@@ -16,6 +16,7 @@
 #include <cstdio>
 
 #include "AppSearch.hpp"
+#include "SearchSession.hpp"
 #include "TileChrome.hpp"
 
 namespace TileChrome = ScrollOverview::TileChrome;
@@ -263,19 +264,14 @@ struct SSearchRow {
     SearchProviders::SResult provider;
 };
 
-// G6. How many results each provider offered, INCLUDING the ones the cap and
-// the trim never showed. Filled by overviewSearchRows(); read by the section
-// header to say "%d more".
-inline std::unordered_map<std::string, size_t> g_providerTotals;
-
 inline std::vector<SSearchRow> overviewSearchRows() {
     std::vector<SSearchRow> rows;
-    if (g_overviewSearch.empty())
+    if (g_search.query.text.empty())
         return rows;
 
     Prof::Timer PROF{Prof::rowsNs, Prof::rowsCalls};
 
-    for (const auto* E : AppSearch::search(g_overviewSearch, OVERVIEW_APP_RESULT_LIMIT))
+    for (const auto* E : AppSearch::search(g_search.query.text, OVERVIEW_APP_RESULT_LIMIT))
         rows.push_back({E->name, "", E->icon, E, {}});
 
     // G5: each provider gets its OWN five rows. Providers arrive in whatever
@@ -299,7 +295,7 @@ inline std::vector<SSearchRow> overviewSearchRows() {
     // G6 needs to know how many a provider ACTUALLY had, so the header can say
     // how many are not being shown. perProvider counted every result, including
     // the ones the cap skipped, so it is that total already.
-    g_providerTotals = std::move(perProvider);
+    g_search.query.providerTotals = std::move(perProvider);
     return rows;
 }
 
@@ -332,7 +328,7 @@ inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSea
         }
 
         keys.push_back(KEY);
-        const auto TOTALIT = g_providerTotals.find(KEY);
+        const auto TOTALIT = g_search.query.providerTotals.find(KEY);
 
         // G6: the header carries the PROVIDER APPLICATION's icon and name,
         // which is a different app from the one the row itself points at.
@@ -341,7 +337,7 @@ inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSea
         SSearchSection section{.title = "Applications",
                                .icon  = "applications-other",
                                .rows  = {i},
-                               .total = TOTALIT == g_providerTotals.end() ? 0 : TOTALIT->second,
+                               .total = TOTALIT == g_search.query.providerTotals.end() ? 0 : TOTALIT->second,
                                .grid  = KEY.empty()};
         if (!KEY.empty()) {
             section.title = KEY;
@@ -358,41 +354,6 @@ inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSea
 }
 
 
-// OVERVIEW_CPP_SPEC §13.4 G12. The result rows as they were last DRAWN. Same
-// contract as the dock's own menu rows: a row's box is only known inside the
-// render pass, so the hit-test answers against the last frame -- which is the
-// frame the user was looking at when they pressed.
-struct SSearchRowHit {
-    CBox        box;
-    std::string desktopId; // "" for a provider row: those are not draggable
-    std::string icon;
-    // X62. Which result this box belongs to. The hit-test existed only to
-    // reject drops before; answering the mouse means the hit has to say WHICH
-    // result was hit, in the same index space the keyboard selection uses.
-    int         index = -1;
-};
-inline std::vector<SSearchRowHit> g_searchRowHits;
-
-// G12. A result drag: press, HOLD, then move. The hold is the gate and the
-// distance is not, so a click can never turn into a drag no matter how far the
-// hand wobbles inside it.
-struct SResultDrag {
-    std::string     desktopId;
-    std::string     icon;
-    Vector2D        start;
-    Time::steady_tp startedAt;
-    bool            live = false;
-    int             index = -1; // X62: the row the PRESS landed on
-};
-inline std::optional<SResultDrag> g_resultDrag;
-
-inline constexpr float G12_HOLD_MS = 200.F;
-
-inline const SSearchRowHit* searchRowAt(const Vector2D& point) {
-    const auto IT = std::ranges::find_if(g_searchRowHits, [&](const SSearchRowHit& row) { return row.box.containsPoint(point); });
-    return IT == g_searchRowHits.end() ? nullptr : &*IT;
-}
-
 // X62. Activating a result is ONE act however it was chosen -- Return on the
 // keyboard selection, or a plain click on the row. Sharing the helper is the
 // point: G12 built the drag and left the click undefined, and a second copy of
@@ -407,7 +368,7 @@ inline bool activateSearchResult(int index) {
     if (ROW.app)
         AppSearch::launch(*ROW.app, ScrollOverview::Config::getTerminal());
     else
-        SearchProviders::activate(ROW.provider, g_overviewSearch);
+        SearchProviders::activate(ROW.provider, g_search.query.text);
 
     return true;
 }
@@ -435,7 +396,7 @@ inline bool activateSearchResult(int index) {
 inline uint64_t g_overviewFrame = 0;
 
 inline bool overviewSearchMatches(const PHLWINDOW& window) {
-    if (g_overviewSearch.empty())
+    if (g_search.query.text.empty())
         return true;
 
     Prof::Timer PROF{Prof::matchNs, Prof::matchCalls};
@@ -451,15 +412,19 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
     // and the query is 1-3 characters, so comparing it is cheaper than the
     // allocation this skips. Liveness (validMapped) stays OUTSIDE the memo, in
     // shouldShowOverviewWindow, so an unmapped window is never served from here.
-    static uint64_t                                                memoFrame = ~0ULL;
-    static std::string                                             memoQuery;
-    static std::unordered_map<Desktop::View::CWindow*, bool>       memo;
+    //
+    // The three cache fields were function-local statics of this inline
+    // function. They are session state -- they are keyed on the query -- so they
+    // live with it now; the single-instance property is unchanged, and a header
+    // that grows a second definition of this function can no longer grow a
+    // second cache with it.
+    auto& CACHE = g_search.query;
 
-    if (memoFrame != g_overviewFrame || memoQuery != g_overviewSearch) {
-        memo.clear();
-        memoFrame = g_overviewFrame;
-        memoQuery = g_overviewSearch;
-    } else if (const auto IT = memo.find(window.get()); IT != memo.end())
+    if (CACHE.memoFrame != g_overviewFrame || CACHE.memoQuery != CACHE.text) {
+        CACHE.memo.clear();
+        CACHE.memoFrame = g_overviewFrame;
+        CACHE.memoQuery = CACHE.text;
+    } else if (const auto IT = CACHE.memo.find(window.get()); IT != CACHE.memo.end())
         return IT->second;
 
     // Hyprland numbers regular workspaces from 1, which is what the extension
@@ -470,8 +435,8 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
     if (const auto APPNAME = AppSearch::appNameForClass(window->m_class); !APPNAME.empty())
         haystack += " " + APPNAME;
 
-    const bool MATCHED = AppSearch::strictMatch(g_overviewSearch, haystack);
-    memo[window.get()] = MATCHED;
+    const bool MATCHED       = AppSearch::strictMatch(CACHE.text, haystack);
+    CACHE.memo[window.get()] = MATCHED;
     return MATCHED;
 }
 
@@ -505,7 +470,7 @@ inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     // about whether a stashed window exists. The workspace-home plumbing in
     // overviewGridWindows and addOverviewWindow stays: it is what puts the
     // window on the RIGHT desktop once a query does bring it back.
-    if (g_overviewSearch.empty() && ScrollOverview::Minimize::isMinimized(WINDOW))
+    if (g_search.query.text.empty() && ScrollOverview::Minimize::isMinimized(WINDOW))
         return false;
 
     if (!overviewSearchMatches(WINDOW))
@@ -617,7 +582,7 @@ inline std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace)
 // per-workspace loops so the B1 invariant holds: render, hit-test and drag all
 // still read the same getOverviewWindowBox and cannot disagree.
 inline bool overviewGridPromotable(const PHLWINDOW& window, PHLMONITOR monitor) {
-    if (g_overviewSearch.empty() || !ScrollOverview::Config::getMissionControl() || !window || !monitor)
+    if (g_search.query.text.empty() || !ScrollOverview::Config::getMissionControl() || !window || !monitor)
         return false;
 
     if (window->m_monitor != monitor)
@@ -702,7 +667,7 @@ inline bool overviewGridPromoted(const PHLWINDOW& window, PHLMONITOR monitor) {
 // its "no matches" count both need the per-cell answer.
 inline std::vector<PHLWINDOW> overviewMainGridWindows(const PHLWORKSPACE& workspace, PHLMONITOR monitor) {
     auto windows = overviewGridWindows(workspace);
-    if (g_overviewSearch.empty() || !monitor)
+    if (g_search.query.text.empty() || !monitor)
         return windows;
 
     for (const auto& window : Desktop::windowState()->windows()) {
@@ -734,23 +699,12 @@ inline float overviewStripLogicalHeight(PHLMONITOR monitor) {
     return H > 1.F && H < sc<float>(monitor->m_size.y) / 2.F ? H : 0.F;
 }
 
-// X10: the search row above the strip. ponytail: constant 64 logical px
-// (48px pill + 8px margins); make it a config knob if anyone ever asks.
-inline constexpr float OVERVIEW_SEARCH_ROWHL = 64.F, OVERVIEW_SEARCH_DOCKPADL = 8.F;
-
-// User, 2026-08-06: "place search results higher so that there isn't an awkward
-// space between search bar and search results". The row is the full 64px while
-// the pill sits in it, and shrinks as the pill docks away under the bar, so the
-// results, the strip and the tiles all climb into the space the pill left.
-//
-// renderSearch writes this each frame from the pill's ACTUAL landed foot rather
-// than from the dock progress, because the floor is the pill itself: collapsing
-// the row outright puts the panel's head ABOVE the docked pill's foot and the
-// two overlap. That was the r1 attempt this replaces.
-inline float g_overviewSearchRowL = OVERVIEW_SEARCH_ROWHL;
-
+// X10 + the pill row's published height. OVERVIEW_SEARCH_ROWHL and the value
+// itself live in SearchSession.hpp: the row is written by the search render step
+// from the pill's ACTUAL landed foot, so it is part of the published layout and
+// not a free-standing global.
 inline float overviewSearchLogicalHeight(PHLMONITOR monitor) {
-    return monitor ? g_overviewSearchRowL : 0.F;
+    return monitor ? g_search.layout.rowL : 0.F;
 }
 
 // X50: how far down the monitor the top chrome reaches, in logical global px.
@@ -788,10 +742,10 @@ inline float overviewTopChromeBottomL(PHLMONITOR monitor) {
 
 // X21: the results panel is part of the LAYOUT STACK, not an overlay. Its band
 // sits between the search row and the strip, so a growing list pushes the strip
-// down and shrinks the grid instead of covering them. This is the EASED value
-// (X23) mirrored out of CScrollOverview::resultsBand -- the free layout helpers
-// below and the hit-test paths all read it, and none of them can reach a member.
-inline float           g_overviewResultsBandH  = 0.F;
+// down and shrinks the grid instead of covering them. The EASED value (X23) is
+// mirrored out of CScrollOverview::resultsBand into the published layout -- the
+// free layout helpers below and the hit-test paths all read it, and none of them
+// can reach a member.
 inline constexpr float OVERVIEW_RESULT_ROWHL = 34.F, OVERVIEW_RESULT_ROWGAPL = 6.F, OVERVIEW_RESULT_PANELPADL = 8.F, OVERVIEW_RESULT_PANELGAPL = 10.F;
 // X49. The results are WIDE and CATEGORISED: one rounded card per provider, the
 // provider's icon and name on the card's leading edge, its rows across the rest
@@ -804,7 +758,7 @@ inline constexpr float OVERVIEW_RESULT_SECTIONGAPL = 8.F, OVERVIEW_RESULT_HEADER
 inline constexpr float OVERVIEW_RESULT_CELLWL = 132.F, OVERVIEW_RESULT_CELLHL = 78.F, OVERVIEW_RESULT_CELLICONL = 48.F;
 
 inline float overviewResultsLogicalHeight(PHLMONITOR monitor) {
-    return monitor ? std::max(0.F, g_overviewResultsBandH) : 0.F;
+    return monitor ? std::max(0.F, g_search.layout.bandH) : 0.F;
 }
 
 // The width the result cards span: the monitor inset by the mission-control
