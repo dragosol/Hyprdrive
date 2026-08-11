@@ -5,6 +5,27 @@ runs them all (guest-side, live compositor required) and exits nonzero on any
 red. A gate that cannot run green here must not be worked around — fix the
 build or fix the gate, never the verdict.
 
+## What the suite guarantees (and what it cannot)
+
+Two properties of `suite.sh` are load-bearing. Both were added on 2026-08-11
+after a run in which 25 of 27 gates were red for one reason that none of them
+named (see "Suite integrity" at the end of this file):
+
+- **SLATE.** `gate_slate` (lib/rig.sh) puts the session back to a known state
+  before every gate: plugin loaded, overview closed, every toplevel killed,
+  exactly one output at 2560x1600, dock options at their registered defaults,
+  `anim_scale=1`, workspace 1, and the ydotool pointer scale re-MEASURED. A gate
+  that cannot get a clean slate reports `SLATE` and is red — it does not run and
+  then blame the build. Gates run on their own do not need it, but may call it.
+- **DIED.** The compositor's instance signature is compared across every gate.
+  gdm restarts Hyprland about two seconds after a crash, so a runner that only
+  reads exit codes cannot tell "this build is wrong" from "the compositor I was
+  measuring is gone". A gate whose signature changed is `DIED` and red whatever
+  it printed. `x51_text_cache` restarts it deliberately and declares that with a
+  `restarts-compositor` marker file in its gate directory; nothing else may.
+
+Row colours: green PASS/SKIP, red FAIL/SLATE, yellow DIED.
+
 | Gate | Flow | Proves (DoD) | Runtime |
 |---|---|---|---|
 | `crash_gate` | stability | dangling-listener compositor segfault ('segfault at X ip X error 14' in plugin mmap range): search open -> tight backspace loop -> mouse move must SURVIVE; 8 cl | ~4-6 min for 8 laps |
@@ -53,6 +74,7 @@ Run one gate: `scripts/gates/<name>/run.sh`. Its stdout+stderr land in
 - `x52_prof.sh` — Keystroke-to-paint profiling of the search path; needs a Prof::-instrumented build + SCROLLOVERVIEW_PROFILE=1 in the com
 - `x51_open.sh` — Cold vs warm overview-open cost from the Prof log (first open after fresh compositor vs second).
 - `x51_opens.sh` — Cold text renders per open across N successive opens — cache convergence-to-zero instrument.
+- `monitor_gone_repro.sh` — Three-step reproduction of the compositor-killer below: open the overview on an output, remove that output, `overview off`. Exit 0 = survived (fixed), 1 = died. Run over ssh; it is expected to take the session with it.
 
 ## Attic
 
@@ -92,6 +114,52 @@ delete freely — git remembers.
 - `y13_poll.sh` — GDM-restart-to-wallpaper timing instrument (survives the restart via setsid); perf question answered
 - `y13_qs.sh` — quickshell-alone wallpaper-up timing proxy; answered with y13_poll
 
+## Suite integrity (2026-08-11) — why 25 of 27 gates were red
+
+Worth reading before trusting or distrusting any table this suite prints.
+
+**The mechanism, end to end.** `g1_rig.sh run` finished with the overview still
+OPEN on its headless output. The g1 gate's EXIT trap then ran `headless_off`,
+which REMOVED that output. `IOverview::pMonitor` is a weak ref and
+`CScrollOverview::close()` dereferences it (scrollOverview.cpp:5052), so the
+overview was left pointing at freed memory — and the next `overview off`, which
+is the first line of g5's fixture, took Hyprland down with SIGSEGV. gdm's
+`start-hyprland` restarted it about two seconds later **without the user
+config**: `WARN: No config file found` in the new session's log, meaning no
+`hl.plugin.load`, no monitor rule. The remaining 22 gates then ran against a
+bare Hyprland with **no plugin loaded** and Virtual-1 at the virtio-gpu
+preferred **1280x800** instead of 2560x1600.
+
+Everything the P7 tables showed follows from that one crash:
+
+- "the dock never drew even with autohide off" (x30), "no glow" (y7), "the pill
+  never moved" (y8), "input did not land" (x50), "no accent row" (x48), "open
+  and shut are near-identical" (reopen) — there was no plugin.
+- `plugin:scrolloverview:dock:autohide is such` (x47) — `hyprctl getoption`
+  answering "no such option", for the same reason.
+- `warp landed at 622,777, not 1245,1555` (y11) — ydotool's absolute space is a
+  fixed 1280x800 grid mapped onto the output its pointer is BOUND to, so on a
+  1280x800 Virtual-1 the rig's halving lands every click at half.
+- the numbers moving run to run — a rotating wallpaper under a suite that no
+  longer had a plugin.
+
+Reproduced on every build from `1769513` (untouched parent) to `0b6782f`, and
+across a full VM reboot. `scripts/monitor_gone_repro.sh` is the three-line
+reproduction; crash reports and the pluginless session log are in
+`zrig/gatefire/`.
+
+**What changed.** The harness, not the plugin: `ov_off_settled` in front of
+every output teardown, `gate_slate` between gates, `DIED` detection in
+`suite.sh`, a MEASURED ydotool scale, and the `cp -f` that z1/z2/x28 needed to
+stage helpers onto the virtiofs share. Result on clean `0b6782f`: 27 gates, 13
+red, twice in a row with identical verdicts and no compositor death.
+
+**Still open (P0, plugin, not harness):** the crash itself. The plugin has no
+monitor-removed handler, so an overview outliving its output remains a
+compositor-killer — and `hyprctl output remove` and unplugging a DisplayPort
+cable arrive at the same `close()`. The rig now avoids the situation; nothing
+fixes it.
+
 ## Suite status (2026-08-08, Phase 1 landing)
 
 The harness is proven: `rig.sh` env discovery, headless swap, capture-liveness
@@ -103,12 +171,17 @@ gate is only trusted once it has FAILED on a known-bad build.
 Known follow-ups (tracked, not worked around):
 - `x43_raise`: the red-tile grab-point locator rejects the current overview
   render (fill 0.63, non-rectangular — it spans the real window and the card
-  tile). Retune the locator before trusting this gate.
+  tile). Retune the locator before trusting this gate. *(2026-08-11: green on
+  both runs of the post-fix pair — the locator's trouble was the pluginless
+  session, not the locator.)*
 - Pixel gates: the guest can raise a gnome-keyring "Authentication required"
-  dialog that overlaps captures. Dismiss it (Cancel) at rig start, or unlock the
-  login keyring in the guest session, before a full suite run.
+  dialog that overlaps captures. *(2026-08-11: `gate_slate` kills it, along with
+  every other stray toplevel, before each gate.)*
 - `fade_alpha`, `x51_text_cache`: NEEDS-HOST (two builds / compositor restart);
-  suite reports them SKIP (exit 3), not FAIL.
+  suite reports them SKIP (exit 3), not FAIL. *(2026-08-11: x51 now restarts gdm
+  itself — it had been invoking share/hyprrestart.sh, a HOST script whose every
+  step goes through ssh and which therefore did nothing at all from inside the
+  guest.)*
 
 ## Gate baseline notes (2026-08-08)
 

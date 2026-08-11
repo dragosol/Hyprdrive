@@ -31,9 +31,14 @@ chmod +x "$VMROOT/g"
 # The gate drives these by their /mnt/host paths; deploy fresh copies from the
 # repo, plus the lib their `source "$(dirname "$0")/lib/rig.sh"` resolves to.
 mkdir -p /mnt/host/lib || exit 1
-cp scripts/lib/rig.sh /mnt/host/lib/rig.sh || exit 1
-cp scripts/x28_fixture.sh scripts/x28_click_at.sh /mnt/host/ || exit 1
-cp scripts/x28_cell.py /mnt/host/x28_cell.py || exit 1
+# `cp -f`, not `cp`: /mnt/host is virtiofs with an id map, so a file the HOST
+# wrote is owned by root in here and plain cp -- which truncates the existing
+# inode rather than unlinking it -- gets EPERM even though the directory is
+# 0777. That is the whole of this gate's "FAIL in 0s": it died staging a
+# helper before it had measured anything (2026-08-11, zrig/gatefire/).
+cp -f scripts/lib/rig.sh /mnt/host/lib/rig.sh || exit 1
+cp -f scripts/x28_fixture.sh scripts/x28_click_at.sh /mnt/host/ || exit 1
+cp -f scripts/x28_cell.py /mnt/host/x28_cell.py || exit 1
 
 # Headless output for the whole gate: the fixture used to build it itself, but
 # rig.sh's headless_on installs an EXIT-trap swap-back, so it must live in THE

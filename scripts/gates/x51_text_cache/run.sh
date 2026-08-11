@@ -15,18 +15,26 @@ REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$REPO"
 source scripts/lib/rig.sh
 
-RESTART=/mnt/host/hyprrestart.sh
-if [ ! -f "$RESTART" ]; then
-    echo "NEEDS-HOST: $RESTART not found in the guest share -- X51 needs a compositor" >&2
-    echo "restart (cold glyph cache) before frame A and this wrapper has no other way" >&2
-    echo "to get one. Restart via share/hyprrestart.sh, then run scripts/x51_gate.sh." >&2
-    exit 3
-fi
-
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 OLD_SIG=$(rig_sig)
 
-bash "$RESTART" || { echo "FAIL: hyprrestart.sh returned nonzero" >&2; exit 1; }
+# The restart is done HERE rather than by share/hyprrestart.sh. That script is
+# the HOST's: every step of it goes through `ssh -p 2222 dragos@127.0.0.1`,
+# which from inside the guest reaches nothing at all -- it printed "old
+# signature: none", gave up, and x51 had been failing on that rather than on
+# anything to do with the glyph cache (2026-08-11, zrig/gatefire/).
+#
+# GDM, not Hyprland. Exiting Hyprland alone drops to the greeter and the session
+# never comes back, because autologin fires once per GDM START, not once per
+# session (share/hyprrestart.sh:6-10).
+#
+# The quickshell prune is not housekeeping: it writes one instance directory per
+# start, each log tens of MB, and a FULL /run/user/1000 breaks D-Bus activation
+# outright -- which silently kills every GNOME search provider and was once
+# diagnosed as a plugin bug for an hour (share/hyprrestart.sh:29-35).
+rm -rf /run/user/1000/quickshell >/dev/null 2>&1 || true
+sudo -n systemctl restart gdm \
+    || { echo "FAIL: could not restart gdm from inside the guest" >&2; exit 1; }
 
 # Wait for the NEW compositor: the instance signature must change (a restart
 # mints a new instance dir) and rig_env must find a live session.

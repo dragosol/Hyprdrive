@@ -9,3 +9,4 @@ __pycache__/
 
 # gate run artifacts
 scripts/gates/*/last.log
+scripts/gates/*/slate.log

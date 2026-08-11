@@ -38,6 +38,13 @@ RIG_CELL_PY=${RIG_CELL_PY:-$RIG_LIB_DIR/../x24_cell.py}    # dock cell predictor
 # is @120 -- override RIG_HEADLESS_MODE before headless_on if a build rejects it.)
 RIG_HEADLESS_MODE=${RIG_HEADLESS_MODE:-2560x1600@120}
 
+# The guest's real output and the mode its config pins it to. gate_slate puts
+# Virtual-1 back to exactly this before every gate: the ydotool mapping below is
+# a function of it, and a session that came up before the rule applied sits at
+# the virtio-gpu preferred 1280x800 instead [measured 2026-08-11, zrig/gatefire].
+RIG_MON_NAME=${RIG_MON_NAME:-Virtual-1}
+RIG_MON_MODE=${RIG_MON_MODE:-2560x1600@120}
+
 # ydotool keycodes [g1_rig.sh:36, x24_dock_click.sh:28]
 K_ESC=1; K_BKSP=14; K_TAB=15; K_K=37; K_SHIFT=42; K_X=45; K_SPACE=57; K_F5=63
 
@@ -101,6 +108,35 @@ ov()       { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }              # [
 cfg_dock() { _rig_need || return 1; hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }   # [z_rig.sh:14]
 cfg_ov()   { _rig_need || return 1; hyprctl eval "hl.config({plugin={scrolloverview={$1}}}) return 0" >/dev/null 2>&1; }          # [z_rig.sh:15]
 
+# `ov off` and WAIT for the close animation to actually finish.
+#
+# This is not politeness, it is the single most expensive lesson in this file.
+# An overview holds its monitor as a WEAK ref (IOverview::pMonitor) and close()
+# dereferences it (scrollOverview.cpp:5052). Remove the output while an overview
+# is still on it and the object survives pointing at freed memory; the next
+# `overview off` -- which is the first line of the NEXT gate's fixture -- takes
+# the whole compositor down with SIGSEGV inside CScrollOverview::close().
+#
+# Measured 2026-08-11 and reproduced on EVERY build from 1769513 (untouched
+# parent) to 0b6782f: g1's run phase ends without closing, g1's EXIT trap runs
+# headless_off which removes the output under it, and g5's first `ov off` kills
+# Hyprland. gdm restarts it in ~2s, so nothing in the old suite noticed: the
+# remaining 22 gates simply ran against a DIFFERENT compositor, with no plugin
+# fixtures, hyprwall re-armed, and the pointer re-bound to a 1280x800 output.
+# That is the whole of "25/27 gates fail and the numbers move every run".
+#
+# The wait scales with anim_scale because a slowmo'd rig's close takes that much
+# longer, and a headless_off that returns mid-animation is the same landmine.
+ov_off_settled() {
+    _rig_need || return 1
+    local s w
+    s=$(hyprctl getoption plugin:scrolloverview:anim_scale 2>/dev/null | head -1 | awk '{print $2+0}')
+    ov off
+    w=$(awk -v s="${s:-1}" 'BEGIN{ if (s<1) s=1; w=0.9*s; if (w>8) w=8; printf "%.2f", w }')
+    sleep "$w"
+    return 0
+}
+
 # Read a config value back to prove it landed [x47_rig.sh:108-111], full option
 # path (e.g. plugin:scrolloverview:dock:autohide). NOT safe inside `| while
 # read` (subshell swallows the failure) and NOT after `IFS=,` (the inner
@@ -113,10 +149,57 @@ opt_want() { # opt_want OPTION EXPECTED
 }
 
 # -------------------------------------------------------------------- input --
-# ydotool's absolute space is HALF this guest's 2560x1600 output, whichever
-# output is enabled [x47_rig.sh:32-33, 88-92]. All coordinates below are
-# MONITOR pixels; the halving happens here and nowhere else.
-warp() { _rig_need || return 1; ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; }
+# ydotool's absolute space is a FIXED 1280x800 grid that Hyprland stretches over
+# the output its virtual pointer is BOUND to -- not over the layout, and not over
+# whichever output happens to be enabled: measured 2026-08-11, the same
+# ydotool(640,400) lands at 1281,801 with a 2560x1600 Virtual-1, with a 1920x1080
+# headless alone, and with a 4480x1600 two-output layout. So on this guest a
+# monitor pixel is TWO ydotool units [x47_rig.sh:32-33, 88-92].
+#
+# "On this guest" is the trap, and it is not hypothetical. The binding is made
+# when the device appears, so a compositor that restarts under the suite comes
+# back with the pointer bound to Virtual-1 at its virtio-gpu preferred 1280x800
+# and the factor is ONE. That is what a whole suite run looked like on
+# 2026-08-11: y11 aimed at 1245,1555, landed at 622,777 -- exactly half -- and
+# every gate that clicks or hovers failed with it (zrig/gatefire/).
+#
+# So the factor is MEASURED, once per process, instead of assumed. All
+# coordinates below are MONITOR pixels; the conversion happens here and nowhere
+# else.
+RIG_PTR_DIV=${RIG_PTR_DIV:-}
+
+# Two probe warps and one division. The probe points are deliberately small
+# (<=500,350 ydotool units = <=1000,700 monitor px at the expected factor) so
+# neither one can land off the edge of the narrowest output this rig ever sees
+# and be CLAMPED -- a clamped sample reads back as a smaller factor and would
+# calibrate the rig into aiming short of every target.
+rig_calibrate() {
+    _rig_need || return 1
+    local ax ay bx by div
+    ydotool mousemove -a -x 100 -y 100 2>/dev/null; sleep 0.35
+    read -r ax ay <<< "$(hyprctl cursorpos 2>/dev/null | tr -d ',')"
+    ydotool mousemove -a -x 500 -y 350 2>/dev/null; sleep 0.35
+    read -r bx by <<< "$(hyprctl cursorpos 2>/dev/null | tr -d ',')"
+    div=$(awk -v ax="${ax:-0}" -v bx="${bx:-0}" -v ay="${ay:-0}" -v by="${by:-0}" 'BEGIN{
+        dx=(bx-ax)/400; dy=(by-ay)/250;
+        if (dx < 0.4 || dx > 8) exit 1;
+        if (dy > 0 && (dy/dx < 0.9 || dy/dx > 1.1)) exit 1;   # x and y must agree
+        printf "%.4f", dx }')
+    if [ -z "$div" ]; then
+        echo "rig: could not calibrate the pointer (${ax:-?},${ay:-?} -> ${bx:-?},${by:-?}) -- is ydotoold running?" >&2
+        return 1
+    fi
+    RIG_PTR_DIV=$div
+    export RIG_PTR_DIV
+}
+
+warp() { # warp X Y -- MONITOR pixels
+    _rig_need || return 1
+    [ -n "$RIG_PTR_DIV" ] || rig_calibrate || return 1
+    local wx wy
+    read -r wx wy <<< "$(awk -v x="$1" -v y="$2" -v d="$RIG_PTR_DIV" 'BEGIN{printf "%d %d", int(x/d+0.5), int(y/d+0.5)}')"
+    ydotool mousemove -a -x "$wx" -y "$wy" 2>/dev/null
+}
 
 # Warp and VERIFY the pointer landed: every silent failure this project has
 # recorded around input started with a warp that did not land where the rig
@@ -239,6 +322,12 @@ hyprwall_pause() { # hyprwall_pause [DURATION=30min]
 
 hyprwall_resume() { # [x1_stress.sh:326-327]
     _rig_need || return 1
+    # A suite run owns the timer for its WHOLE length. Every gate ships its own
+    # pause/resume pair, so gate N's resume re-armed the rotation for gate N+1's
+    # setup -- and OnActiveSec=3min means starting the timer is itself a
+    # rotation trigger. suite.sh exports this and drops it exactly once, at the
+    # end.
+    [ "${RIG_HYPRWALL_HELD:-0}" = 1 ] && return 0
     systemctl --user stop hyprwall-resume.timer 2>/dev/null
     systemctl --user start hyprwall.timer 2>/dev/null
     return 0
@@ -252,6 +341,7 @@ hyprwall_resume() { # [x1_stress.sh:326-327]
 # stalls every output including headless [g1_rig.sh:45-46].
 headless_on() {
     _rig_need || return 1
+    ov_off_settled          # never move outputs under a live overview (see ov_off_settled)
     hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1; sleep 1.2   # [x47_rig.sh:75]
     # `hyprctl output create headless` is NOT idempotent: four calls once made
     # HEADLESS-1..4 and scattered the fixture across all of them
@@ -297,6 +387,12 @@ headless_off() {
     [ "${RIG_HEADLESS:-0}" = 1 ] || return 0               # idempotent: safe from trap AND explicit call
     _rig_need || return 1
     RIG_HEADLESS=0
+    # The overview goes FIRST, before any output moves. Most rigs that leave one
+    # open leave it open on the headless output this is about to delete, and
+    # that is a compositor-killer -- see ov_off_settled for the whole story. It
+    # belongs here rather than in each rig because the trap path is exactly the
+    # one a rig aborting halfway cannot cover for itself.
+    ov_off_settled
     # Virtual-1 comes back FIRST: removing the last output while it is the only
     # enabled one leaves the session with nowhere to put its windows
     # [x47_rig.sh:49-52].
@@ -354,5 +450,103 @@ anim_restore() {
     _rig_need || return 1
     hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=1}}}) return 0" >/dev/null 2>&1    # [slowmo.sh:30, z_rig.sh:104]
     RIG_ANIM_SLOWED=0
+    return 0
+}
+
+# --------------------------------------------------------------- clean slate --
+# One gate must not be allowed to decide the next gate's verdict.
+#
+# Every item below is residue this suite has been CAUGHT measuring, not a
+# precaution: g1's three fixtures still mapped while g5 counted result cards;
+# x26's dock:autohide=false still set when x30 measured the autohide; a
+# HEADLESS output left behind by an aborted rig so the next `output create`
+# made a second one; the login-keyring prompt parked 575x154 in the middle of
+# every frame from session start; and Virtual-1 sitting at the virtio-gpu
+# preferred 1280x800 after a restart, which silently halves every click.
+#
+# suite.sh calls this between gates. A gate run on its own does not need it --
+# but it is safe to call, and a gate that is being debugged after a messy run
+# usually wants it.
+
+# Wait for a session to exist and the plugin to be in it. Used after a
+# compositor death: gdm's autologin brings Hyprland back in ~2s, but the
+# plugin, ydotoold and the shell take longer, and slating too early just
+# measures the gap.
+rig_wait_session() { # rig_wait_session [SECONDS=45]
+    local deadline=$(( SECONDS + ${1:-45} )) sig
+    while [ $SECONDS -lt $deadline ]; do
+        sig=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -1)
+        if [ -n "$sig" ]; then
+            RIG_ENV_OK=0
+            if rig_env 2>/dev/null && hyprctl plugin list 2>/dev/null | grep -q scrolloverview; then
+                sleep 3     # let ydotoold and the shell finish coming up
+                return 0
+            fi
+        fi
+        sleep 2
+    done
+    echo "rig: no live session with the plugin loaded after ${1:-45}s" >&2
+    return 1
+}
+
+gate_slate() { # gate_slate [LABEL] -- returns 1 if the session cannot be made clean
+    _rig_need || return 1
+    local label=${1:-slate}
+
+    hyprctl plugin list 2>/dev/null | grep -q scrolloverview \
+        || { echo "slate($label): the plugin is not loaded" >&2; return 1; }
+
+    # Order matters. Speed first (a slowmo'd close takes 20x as long), then the
+    # overview, then the windows, then the outputs -- moving an output under a
+    # live overview is the compositor-killer ov_off_settled documents.
+    anim_restore
+    ov_off_settled
+
+    # Every toplevel dies. In this guest they are all somebody's fixture or a
+    # stray the session raised on its own (gcr-prompter's "Unlock Login Keyring"
+    # lands dead centre of the screen and overlaps every capture -- known since
+    # 2026-08-08, and it is why this is a kill and not a filter). The shell's
+    # bar and dock are LAYER surfaces and are not in `clients`, so they stay.
+    hyprctl clients -j 2>/dev/null | python3 -c "
+import json,sys
+for c in json.load(sys.stdin):
+    if c.get('pid',0) > 0: print(c['pid'])" | xargs -r kill -9 2>/dev/null
+    sleep 1.2
+
+    # Exactly one output, at the mode the whole coordinate system assumes.
+    local m
+    for m in $(hyprctl monitors all -j 2>/dev/null | python3 -c "
+import json,sys
+print(' '.join(m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')))"); do
+        hyprctl output remove "$m" >/dev/null 2>&1; sleep 0.4
+    done
+    hyprctl eval "return hl.monitor({output = [[$RIG_MON_NAME]], mode = [[$RIG_MON_MODE]], position = [[0x0]], scale = 1, disabled = false})" >/dev/null 2>&1
+    sleep 1.5
+    RIG_HEADLESS=0
+    local got want_w rest want_h
+    got=$(hyprctl monitors -j 2>/dev/null | python3 -c "
+import json,sys
+ms=json.load(sys.stdin)
+print('%s %d %d' % (ms[0]['name'], ms[0]['width'], ms[0]['height']) if len(ms)==1 else 'none 0 0')")
+    want_w=${RIG_MON_MODE%%x*}; rest=${RIG_MON_MODE#*x}; want_h=${rest%%@*}
+    [ "$got" = "$RIG_MON_NAME $want_w $want_h" ] \
+        || { echo "slate($label): outputs are '$got', wanted '$RIG_MON_NAME $want_w $want_h'" >&2; return 1; }
+
+    # Plugin options back to their registered defaults (Config.cpp:304-530).
+    # Only the ones gates actually write; anything else a gate changes it must
+    # own, and it will show up here the first time it bites.
+    cfg_dock "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false, blur_size=-1, blur_passes=-1"
+    sleep 0.5
+    opt_want plugin:scrolloverview:dock:autohide true \
+        || { echo "slate($label): dock config did not take" >&2; return 1; }
+
+    dsp "hl.dsp.focus({workspace = 1})"; sleep 0.5
+
+    # Re-measure the pointer mapping HERE, on the known-good output, and hand it
+    # down to the gate through the environment.
+    RIG_PTR_DIV=
+    rig_calibrate || { echo "slate($label): pointer calibration failed" >&2; return 1; }
+    warp 40 40      # park it out of every fixture's way
+    sleep 0.3
     return 0
 }

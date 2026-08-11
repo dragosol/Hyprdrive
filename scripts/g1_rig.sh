@@ -95,6 +95,15 @@ run)
     # selection moved" and the phase would be measuring the wrong claim.
     key $K_TAB; key $K_BKSP; key $K_F5; sleep 1.5; shot 50-nostart
 
+    # Close before handing back. This rig used to end with the overview still
+    # up on the headless output, and the gate's EXIT trap then removed that
+    # output from under it -- which leaves the overview holding a dead monitor
+    # and makes the NEXT gate's first `ov off` segfault the compositor
+    # (scrollOverview.cpp:5052; see ov_off_settled in lib/rig.sh). headless_off
+    # now closes too, so this is belt and braces, but a rig that opens the
+    # overview should close it.
+    ov_off_settled
+
     ls -la $OUT/$TAG-*.png
     echo G1_RUN_OK
     ;;
