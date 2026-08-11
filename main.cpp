@@ -293,18 +293,29 @@ bool openScrollOverview(PHLMONITOR monitor) {
 
 static void resetCompose();
 
-static SDispatchResult onOverviewDispatcher(std::string arg) {
-    // Every open starts unfiltered, on the tiles, holding nothing. ONE call:
-    // this used to be six hand-listed fields and the list was wrong twice (X61
-    // added the nav zone, G12 the result drag, neither reached every site).
-    //
-    // It runs before the action is even parsed, which is deliberate and is
-    // load-bearing for the CLOSE actions too: a toggle-off with a query typed
-    // drops the filter first, so the windows it was hiding are back in the grid
-    // for the close animation instead of popping in after it.
+// Every open starts unfiltered, on the tiles, holding nothing. ONE call: this
+// used to be six hand-listed fields and the list was wrong twice (X61 added the
+// nav zone, G12 the result drag, neither reached every site).
+//
+// And ONE function, for the same reason at the next level up. The dispatcher
+// was the only caller until X32 put a second door on the overview -- the dock's
+// Show Applications button -- and that door went straight to openOverview(),
+// past all three lines below. The result was user-visible: type a query, click
+// a tile to close, press Show Applications, and the "fresh" overview came back
+// still filtered by the query. Anything a new session has to forget goes here,
+// not into either caller.
+void resetSearchSession() {
     g_search.reset();
     resetCompose(); // a sequence abandoned last time must not eat the first key
     SearchProviders::query("");
+}
+
+static SDispatchResult onOverviewDispatcher(std::string arg) {
+    // Ahead of parsing the action, which is deliberate and is load-bearing for
+    // the CLOSE actions too: a toggle-off with a query typed drops the filter
+    // first, so the windows it was hiding are back in the grid for the close
+    // animation instead of popping in after it.
+    resetSearchSession();
     const auto [ACTION, TARGET] = splitOverviewArg(arg);
     const auto ACTIVE           = activeScrollOverview();
 

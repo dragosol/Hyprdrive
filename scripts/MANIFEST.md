@@ -39,6 +39,7 @@ Row colours: green PASS/SKIP, red FAIL/SLATE, yellow DIED.
 | `x26` | drag-strip | X26 drag overview->dock + dock polish: P1 drop on pill minimizes; P2 near-miss 28px above pill does NOT (proves the pill's own bounds); P3 proxy shrinks by the  | ~2-3 min |
 | `x28` | dock-click | 13.9 X28 dock context menu: P1 right-click draws a plate above the pill; P2 gutter press dismisses (frame returns to base); P3 bottom row Quit closes every wind | ~3 min |
 | `x30` | dock-hover | 13.9 X30 autohide/reveal: hidden by default, pressure-threshold reveal (weak fails / lowthresh / strong passes), leave re-hides, hidden while overview open, hid | ~4 min all phases |
+| `x32_showapps_fresh` | dock-click | X32: a fresh open from the dock's Show Applications button starts CLEAN — the button is the one entry into the overview that skipped the dispatcher's search-session reset, so a query typed into a previous open came back with it. Closes by TILE CLICK, never `ov off` (that IS the dispatcher and would do the reset itself); NODRIFT floor, LIVE (the query landed), CLEAN (button frame == unfiltered), DISTINCT (button frame != queried frame) | ~1.5 min |
 | `x34_hotkeys` | dock-click | 13.9 X34: Super+1..0 (slot ten = 0 key), Shift/Ctrl families, <Super>q shortcut at 2.0s timeout — asserted as STATE (minimized sets, class counts, launches); nu | ~4-5 min |
 | `x43_raise` | click-tile | X43: clicking an overview tile RAISES the window — decided by PIXELS at the geometric overlap of two flat-colour windows, never focus (closed three times on a f | ~2 min |
 | `x46_pill_invariant` | minimize-restore | 13.12 X46: a minimize must not add a dock entry — the strip band is pixel-identical (pill extent unchanged) before/after a minimize; ABORTs (not passes) if noth | ~1.5 min |
@@ -74,6 +75,7 @@ Run one gate: `scripts/gates/<name>/run.sh`. Its stdout+stderr land in
 - `x52_prof.sh` — Keystroke-to-paint profiling of the search path; needs a Prof::-instrumented build + SCROLLOVERVIEW_PROFILE=1 in the com
 - `x51_open.sh` — Cold vs warm overview-open cost from the Prof log (first open after fresh compositor vs second).
 - `x51_opens.sh` — Cold text renders per open across N successive opens — cache convergence-to-zero instrument.
+- `x32_cell.py` — Predicts the Show Applications button's centre. Separate from x24_cell.py, which models the button as OFF (every gate using it sets show_apps_button=false) — the button is a slot of its own and teaching x24 about it would move predictions nobody asked to move.
 - `monitor_gone_repro.sh` — Three-step reproduction of the compositor-killer below: open the overview on an output, remove that output, `overview off`. Exit 0 = survived (fixed), 1 = died. Run over ssh; it is expected to take the session with it.
 
 ## Attic

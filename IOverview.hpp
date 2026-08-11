@@ -91,10 +91,20 @@ void                              registerScrollOverview(const SP<IOverview>& ov
 void                              unregisterScrollOverview(IOverview* overview);
 void                              clearScrollOverviews();
 
-// X32. Open the overview on a monitor, exactly as the dispatcher does -- the
-// Show Applications button is the first caller outside the dispatcher itself.
-// Already open, or no monitor: a no-op that reports success.
+// X32. Open the overview on a monitor -- the Show Applications button is the
+// first caller outside the dispatcher itself. Already open, or no monitor: a
+// no-op that reports success.
+//
+// This is the OPEN and nothing else. A fresh open also needs the session reset
+// below; they are separate because openOverview() is the reopen path for a
+// toggle that lands on a closing overview, and resetting there would drop the
+// filter mid-close-animation.
 bool                              openScrollOverview(PHLMONITOR monitor);
+
+// Start a NEW search session: no query, no selection, nothing held, no
+// half-typed compose sequence. What the dispatcher does before every open, for
+// the entry points that are not the dispatcher.
+void                              resetSearchSession();
 
 // Current interaction/render context. The authoritative state is the registry.
 inline SP<IOverview> g_pScrollOverview;

@@ -2709,8 +2709,20 @@ bool click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle, b
         // the overview already up there is nothing further to show yet, and it
         // deliberately does NOT toggle it shut -- a button that closes the thing
         // it is supposed to open would be worse than one that waits for G5.
-        if (!scrollOverviewForMonitor(monitor))
+        //
+        // A fresh open from the dock starts CLEAN (orchestrator, 2026-08-11).
+        // The button is the other way into the surface the dispatcher opens,
+        // and it was the only one that did not begin a new search session --
+        // so a query typed into a previous open survived a close and came back
+        // with it. The reset belongs here, at the entry point, and NOT inside
+        // openOverview(): that is also the reopen path for a toggle landing on
+        // a closing overview, where dropping the filter would pop the windows
+        // it was hiding back into a close animation already under way.
+        // Gate: scripts/gates/x32_showapps_fresh.
+        if (!scrollOverviewForMonitor(monitor)) {
+            resetSearchSession();
             openScrollOverview(monitor);
+        }
 
         return true;
     }
