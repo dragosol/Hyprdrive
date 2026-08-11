@@ -4592,21 +4592,32 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     }
 }
 
-bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) {
-    const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || closing || !surface)
-        return true;
+namespace {
+struct SSurfaceOwner {
+    PHLLS     layer;
+    PHLWINDOW windowOwner; // raw owner; the caller applies getOverviewWindowToShow
+};
+
+// The surface->owner preamble both frame-pacing entry points carried verbatim:
+// resolve a surface to the layer or window that owns it, following a popup to its
+// T1 owner. nullopt is the "not ours to pace" early-out they shared -- so their
+// identical monitor/surface/view guards collapse to `if (!OWNER) return true`,
+// and the popup fallback (a real bug magnet if the two copies ever drifted) lives
+// in one place.
+std::optional<SSurfaceOwner> resolveSurfaceOwner(const PHLMONITOR& monitor, bool closing, const SP<CWLSurfaceResource>& surface) {
+    if (!monitor || closing || !surface)
+        return std::nullopt;
 
     const auto HLSURFACE = Desktop::View::CWLSurface::fromResource(surface);
     if (!HLSURFACE)
-        return true;
+        return std::nullopt;
 
     auto view = HLSURFACE->view();
     if (!view)
-        return true;
+        return std::nullopt;
 
-    auto layerOwner  = Desktop::View::CLayerSurface::fromView(view);
-    auto windowOwner = Desktop::View::CWindow::fromView(view);
+    PHLLS     layerOwner  = Desktop::View::CLayerSurface::fromView(view);
+    PHLWINDOW windowOwner = Desktop::View::CWindow::fromView(view);
 
     if (!layerOwner && !windowOwner) {
         if (const auto POPUP = Desktop::View::CPopup::fromView(view)) {
@@ -4617,10 +4628,20 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
         }
     }
 
-    if (layerOwner)
+    return SSurfaceOwner{layerOwner, windowOwner};
+}
+} // namespace
+
+bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) {
+    const auto MONITOR = pMonitor.lock();
+    const auto OWNER   = resolveSurfaceOwner(MONITOR, closing, surface);
+    if (!OWNER)
         return true;
 
-    auto window = getOverviewWindowToShow(windowOwner);
+    if (OWNER->layer)
+        return true;
+
+    auto window = getOverviewWindowToShow(OWNER->windowOwner);
     if (g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow &&
         window == getOverviewWindowToShow(g_pointerGrabOverview->dragActiveWindow.lock()))
         return true;
@@ -4695,28 +4716,12 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
 
 bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) {
     const auto MONITOR = pMonitor.lock();
-    if (!MONITOR || closing || !surface)
+    const auto OWNER   = resolveSurfaceOwner(MONITOR, closing, surface);
+    if (!OWNER)
         return true;
 
-    const auto HLSURFACE = Desktop::View::CWLSurface::fromResource(surface);
-    if (!HLSURFACE)
-        return true;
-
-    auto view = HLSURFACE->view();
-    if (!view)
-        return true;
-
-    auto layerOwner = Desktop::View::CLayerSurface::fromView(view);
-    auto windowOwner = Desktop::View::CWindow::fromView(view);
-
-    if (!layerOwner && !windowOwner) {
-        if (const auto POPUP = Desktop::View::CPopup::fromView(view)) {
-            if (const auto T1OWNER = POPUP->getT1Owner(); T1OWNER && T1OWNER->view()) {
-                layerOwner  = Desktop::View::CLayerSurface::fromView(T1OWNER->view());
-                windowOwner = Desktop::View::CWindow::fromView(T1OWNER->view());
-            }
-        }
-    }
+    const auto layerOwner  = OWNER->layer;
+    const auto windowOwner = OWNER->windowOwner;
 
     if (layerOwner) {
         if (layerOwner->m_monitor != MONITOR)
