@@ -32,13 +32,23 @@ the Dock pane is `set`/`unset` and not a new mechanism.
     hdctl.py schema                 the schema, with live values merged in
     hdctl.py get KEY...             live values only
     hdctl.py preview KEY VALUE      hyprctl keyword -- instant, temporary
-    hdctl.py set KEY VALUE          durable: fragment write + reload
+    hdctl.py set KEY VALUE          durable: whatever this row's apply says
+    hdctl.py bulk KEY=VALUE ...     many rows at once, behind one auto-snapshot
     hdctl.py unset KEY              stop owning it (back to derived/default)
     hdctl.py raw PANE               the pane fragment's raw block
     hdctl.py raw-write PANE         stdin -> that raw block, then reload
     hdctl.py ii-set PATH VALUE      illogical-impulse's config.json + qs restart
     hdctl.py wallpaper PATH         the rice's rotation (regenerates the palette)
     hdctl.py reload                 apply whatever is on disk
+
+ONE WRITE VERB, WHATEVER THE ROW IS (Phase 12). `set` used to mean "write a
+fragment" and refused every curated row, which made "an option is one schema row"
+true for two of the four sources and false for the other two -- the Quickshell
+pane's own switches could not be written by the row that drew them. It now
+dispatches on the row's `apply` strategy: reload -> fragment, qs-restart -> ii's
+config.json, wallpaper -> the rotation, none -> the app's own store. The UI does
+not branch on source, and neither does the importer, and neither does a profile
+restore. That single verb IS the extension contract docs/EXTENDING.md documents.
 """
 import argparse
 import json
@@ -126,6 +136,40 @@ def load_store():
     return {"panes": {}}
 
 
+def atomic_json(path, obj):
+    """Written AND fsynced before the caller changes anything.
+
+    Lifted out of hdmon.py in Phase 12 because hdprof needs the same guarantee
+    for the same reason, and two implementations of "this record survives the
+    power going out" is one implementation and one hope. A revert record still in
+    the page cache when the machine goes down is not a revert record."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w") as fh:
+        json.dump(obj, fh, indent=1)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    d = os.open(str(path.parent), os.O_RDONLY)
+    try:
+        os.fsync(d)
+    finally:
+        os.close(d)
+
+
+def flock_or_none(path):
+    """One restore, whoever gets there first. flock, so a killed holder releases."""
+    import fcntl
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = path.open("w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
 def save_store(s):
     STATE.mkdir(parents=True, exist_ok=True)
     tmp = STORE.with_suffix(".json.tmp")
@@ -147,6 +191,33 @@ def entry_for(sch, key):
 def pane_of(sch, key):
     e = entry_for(sch, key)
     return e["pane"] if e else None
+
+
+def ii_get(path):
+    """A dotted path into illogical-impulse's config.json."""
+    try:
+        cur = json.loads(IICONF.read_text())
+    except (OSError, ValueError):
+        return None
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    return cur
+
+
+def curated_current(e):
+    """The live value of a row that is not a compositor option.
+
+    Three kinds and each one is read where it actually lives, never from the
+    store: the store says what the app OWNS, and a row has to show what the
+    system HAS -- they differ the moment anything else writes the file."""
+    key = e["key"]
+    if key.startswith("ii:"):
+        return ii_get(key[3:])
+    if key == "wallpaper.path":
+        return ii_get("background.wallpaperPath")
+    return load_store()["panes"].get(e["pane"], {}).get(key, e.get("default"))
 
 
 def fragment_of(sch, pane):
@@ -287,6 +358,8 @@ def cmd_schema(a):
         for e in sch["entries"]:
             if e["source"] in ("plugin", "hyprland"):
                 e["current"] = getoption(e["key"])
+            else:
+                e["current"] = curated_current(e)
         store = load_store()["panes"]
         for e in sch["entries"]:
             e["owned"] = e["key"] in store.get(e["pane"], {})
@@ -327,21 +400,73 @@ def cmd_preview(a):
     return 0
 
 
+def set_one(sch, key, value, force=False):
+    """Write one row, by whatever mechanism its apply-strategy names.
+
+    Returns the strategy used, so a bulk caller can do the expensive part
+    (a reload, a shell restart) ONCE at the end instead of per row."""
+    e = entry_for(sch, key)
+    if e is None:
+        raise SystemExit("hdctl: %s is not in the schema (run scripts/gen_schema.py)" % key)
+    if e.get("locked") and not force:
+        raise SystemExit("hdctl: %s is locked -- %s" % (key, e["locked"]))
+
+    how = e.get("apply", "reload")
+    store = load_store()
+    store["panes"].setdefault(e["pane"], {})[key] = value
+    save_store(store)
+
+    if how == "qs-restart":
+        # ii's own file. The key carries the `ii:` marker so that one glance at a
+        # schema row says which config it lands in.
+        ii_write(key[3:] if key.startswith("ii:") else key, value)
+    elif how == "wallpaper":
+        rotate(value, theme=str(load_store()["panes"].get(e["pane"], {})
+                                .get("wallpaper.theme", e.get("default", True))).lower()
+               not in ("false", "0", "no", "off"))
+    elif how == "none":
+        pass          # the store IS where this one lives (slideshow interval, ...)
+    else:
+        write_fragment(sch, e["pane"], quiet=True)
+    return how
+
+
 def cmd_set(a):
     sch = schema()
-    e = entry_for(sch, a.key)
-    if e is None:
-        raise SystemExit("hdctl: %s is not in the schema (run scripts/gen_schema.py)" % a.key)
-    if e.get("locked") and not a.force:
-        raise SystemExit("hdctl: %s is locked -- %s" % (a.key, e["locked"]))
-    if e["source"] == "curated":
-        raise SystemExit("hdctl: %s is a curated pseudo-entry; use ii-set or wallpaper" % a.key)
-    store = load_store()
-    store["panes"].setdefault(e["pane"], {})[a.key] = a.value
-    save_store(store)
-    write_fragment(sch, e["pane"])
-    if not a.no_apply:
+    how = set_one(sch, a.key, a.value, force=a.force)
+    print("hdctl: %s = %s (%s)" % (a.key, a.value, how))
+    if not a.no_apply and how == "reload":
         reload_compositor()
+    return 0
+
+
+def cmd_bulk(a):
+    """Many rows, one snapshot, one reload. THE second auto-snapshot site.
+
+    A bulk apply is where a settings app stops being undoable by memory: after
+    twelve values land in one go, "put it back" is not something a person can do
+    from the UI they just used. So it is bracketed exactly like an import --
+    snapshot before, pending record on disk, finish after."""
+    import hdprof
+    sch = schema()
+    pairs = []
+    for item in a.pairs:
+        if "=" not in item:
+            raise SystemExit("hdctl: bulk takes KEY=VALUE, got %r" % item)
+        k, _, v = item.partition("=")
+        pairs.append((k, v))
+    ref = hdprof.snapshot_before(a.reason or "bulk apply of %d values" % len(pairs))
+    print("hdctl: snapshot %s taken before %d writes" % (ref, len(pairs)))
+    used = set()
+    for k, v in pairs:
+        used.add(set_one(sch, k, v, force=a.force))
+        print("    %s = %s" % (k, v))
+    if not a.no_apply:
+        if "reload" in used:
+            reload_compositor()
+        if "qs-restart" in used:
+            hdprof.qs_restart()
+    hdprof.finish()
     return 0
 
 
@@ -400,18 +525,20 @@ def cmd_raw_write(a):
     return 0
 
 
-def cmd_ii_set(a):
+def ii_write(path, value):
     """illogical-impulse's own config.json. Not a fragment: quickshell owns it,
-    and quickshell reloads itself when it changes -- no compositor involved."""
+    and quickshell reloads itself when it changes -- no compositor involved.
+    The value is coerced to the type the file already has, because json is typed
+    and a settings row hands over a string."""
     d = json.loads(IICONF.read_text())
     cur = d
-    parts = a.path.split(".")
+    parts = path.split(".")
     for p in parts[:-1]:
         cur = cur.setdefault(p, {})
     old = cur.get(parts[-1])
-    val = a.value
+    val = value
     if isinstance(old, bool):
-        val = val.strip().lower() in ("1", "true", "yes", "on")
+        val = str(val).strip().lower() in ("1", "true", "yes", "on")
     elif isinstance(old, int) and not isinstance(old, bool):
         val = int(float(val))
     elif isinstance(old, float):
@@ -420,19 +547,32 @@ def cmd_ii_set(a):
     tmp = IICONF.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(d, indent=2) + "\n")
     os.replace(tmp, IICONF)
-    print("ii: %s = %s (was %s)" % (a.path, val, old))
-    return 0
+    print("ii: %s = %s (was %s)" % (path, val, old))
+    return val
 
 
-def cmd_wallpaper(a):
+def rotate(path, theme=True):
+    """The rice's own rotation script, which is also the wallpaper pane's write
+    path. THEME=1 is what makes the palette -- and every accent derived from it
+    -- follow the picture (Phase 10). The default rotation stays palette-neutral;
+    a swap a person asked for does not."""
     env = _env() or dict(os.environ)
-    env["WALL"] = a.path
-    env["THEME"] = "1" if a.theme else "0"
+    env["WALL"] = str(path)
+    env["THEME"] = "1" if theme else "0"
     r = subprocess.run(["bash", str(ROOT / "scripts" / "hyprwall-rotate.sh")],
                        env=env, capture_output=True, text=True)
     sys.stdout.write(r.stdout)
     sys.stderr.write(r.stderr)
     return r.returncode
+
+
+def cmd_ii_set(a):
+    ii_write(a.path, a.value)
+    return 0
+
+
+def cmd_wallpaper(a):
+    return rotate(a.path, theme=a.theme)
 
 
 def cmd_reload(a):
@@ -451,6 +591,9 @@ def main(argv):
     s.add_argument("--no-apply", action="store_true"); s.set_defaults(fn=cmd_set)
     s = sub.add_parser("unset"); s.add_argument("key")
     s.add_argument("--no-apply", action="store_true"); s.set_defaults(fn=cmd_unset)
+    s = sub.add_parser("bulk"); s.add_argument("pairs", nargs="+", metavar="KEY=VALUE")
+    s.add_argument("--reason"); s.add_argument("--force", action="store_true")
+    s.add_argument("--no-apply", action="store_true"); s.set_defaults(fn=cmd_bulk)
     s = sub.add_parser("owned"); s.set_defaults(fn=cmd_owned)
     s = sub.add_parser("raw"); s.add_argument("pane"); s.set_defaults(fn=cmd_raw)
     s = sub.add_parser("raw-write"); s.add_argument("pane")

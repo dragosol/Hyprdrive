@@ -105,3 +105,11 @@ if [ -d "$UNITS" ] && command -v systemctl >/dev/null 2>&1; then
 else
     echo "theme-sync units NOT installed (no $UNITS or no systemctl)" >&2
 fi
+
+# ---------------------------------------------------------------- profiles --
+# Phase 12. The snapshot repository has to exist BEFORE the first import or bulk
+# apply, because the whole promise is that those happen behind one -- and a
+# repository created by the first thing that needs it has no record of what the
+# system looked like before that thing ran. Idempotent: a second install just
+# says where it already is.
+python3 "$ROOT/scripts/hdprof.py" init

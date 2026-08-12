@@ -46,6 +46,7 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import hdctl  # noqa: E402  -- the compositor helpers and the fragment writer, once
+import hdprof  # noqa: E402  -- the auto-snapshot; a monitor change is one of its three sites
 
 PENDING = hdctl.STATE / "monitor-pending.json"
 LOCK = hdctl.STATE / "monitor-pending.lock"
@@ -116,22 +117,11 @@ def write_fragment(settings, quiet=False):
 
 
 # ------------------------------------------------------------------- pending --
-def atomic_json(path, obj):
-    """Written AND fsynced before the caller changes anything. A revert record
-    that is still in the page cache when the machine goes down is not a revert
-    record."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w") as fh:
-        json.dump(obj, fh, indent=1)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
-    d = os.open(str(path.parent), os.O_RDONLY)
-    try:
-        os.fsync(d)
-    finally:
-        os.close(d)
+# Written-and-fsynced-before-the-change, and the one-winner lock, both live in
+# hdctl now: hdprof needs the identical guarantee for the identical reason, and
+# the second copy of "this record survives a power cut" is the one that quietly
+# stops calling fsync. Same behaviour, one implementation [hdctl.py].
+atomic_json = hdctl.atomic_json
 
 
 def read_pending():
@@ -144,16 +134,7 @@ def read_pending():
 
 
 def _locked():
-    """One revert, whoever gets there first. flock, so a killed holder releases."""
-    import fcntl
-    LOCK.parent.mkdir(parents=True, exist_ok=True)
-    fh = LOCK.open("w")
-    try:
-        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        fh.close()
-        return None
-    return fh
+    return hdctl.flock_or_none(LOCK)
 
 
 def do_revert(why):
@@ -207,6 +188,13 @@ def cmd_apply(a):
     if a.enabled is not None:
         cur["enabled"] = a.enabled == "1"
 
+    # The profile snapshot, which is a DIFFERENT promise from the countdown below
+    # and not a duplicate of it. The countdown undoes this one change within
+    # fifteen seconds; the snapshot is what lets somebody undo it next week,
+    # together with whatever else was going on. Same function the importer and
+    # the bulk apply call [hdprof.snapshot_before].
+    hdprof.snapshot_before("monitor change on %s" % a.output)
+
     # DISK FIRST. Everything after this line can be undone by somebody who has
     # never heard of this process.
     atomic_json(PENDING, {
@@ -229,6 +217,10 @@ def cmd_apply(a):
         subprocess.Popen(["setsid", sys.executable, str(pathlib.Path(__file__).resolve()), "watch"],
                          start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # The mutation itself is complete -- the countdown is a separate, longer
+    # leash that hdmon owns. Leaving hdprof's pending record open past this point
+    # would make the next `hdprof check` undo a change that landed properly.
+    hdprof.finish()
     print("hdmon: applied %s -- %ds to confirm, or it goes back" % (a.output, a.timeout))
     return 0
 
