@@ -11,6 +11,16 @@
 
 static std::vector<SP<IOverview>> g_scrollOverviews;
 
+// The most recently registered overview, and the third of activeScrollOverview's
+// four tiers. It used to be `g_pScrollOverview`, an inline mutable global in
+// IOverview.hpp that any translation unit could assign to -- and three did, one
+// of them saving and restoring it around every render. Nothing reachable from
+// render() ever read it (the only readers are this file and the keyboard hook,
+// and onPreRender runs outside that window), so the render-time override was
+// protecting a question nobody asked from inside the answer. It is a file
+// static now: same tier, same value, no public seat.
+static SP<IOverview> g_lastRegistered;
+
 // Tells the shell (quickshell ii) to reveal bar + dock while the overview is up.
 // ponytail: one bool over the existing event socket, no new IPC channel.
 static void emitOverviewState() {
@@ -63,8 +73,8 @@ SP<IOverview> activeScrollOverview() {
             return overview;
     }
 
-    if (g_pScrollOverview && std::ranges::find(g_scrollOverviews, g_pScrollOverview) != g_scrollOverviews.end())
-        return g_pScrollOverview;
+    if (g_lastRegistered && std::ranges::find(g_scrollOverviews, g_lastRegistered) != g_scrollOverviews.end())
+        return g_lastRegistered;
 
     return g_scrollOverviews.empty() ? SP<IOverview>{} : g_scrollOverviews.front();
 }
@@ -74,7 +84,7 @@ void registerScrollOverview(const SP<IOverview>& overview) {
         return;
 
     g_scrollOverviews.emplace_back(overview);
-    g_pScrollOverview = overview;
+    g_lastRegistered = overview;
     emitOverviewState();
 }
 
@@ -100,7 +110,7 @@ void unregisterScrollOverview(IOverview* overview) {
             g_dyingOverviews.emplace_back(candidate);
 
     std::erase_if(g_scrollOverviews, [overview](const auto& candidate) { return candidate.get() == overview; });
-    g_pScrollOverview = activeScrollOverview();
+    g_lastRegistered = activeScrollOverview();
     emitOverviewState();
 
     if (!g_dyingOverviews.empty() && g_pEventLoopManager)
@@ -147,7 +157,7 @@ void dropScrollOverviewsForMonitor(PHLMONITOR monitor) {
 void clearScrollOverviews() {
     auto overviews = std::move(g_scrollOverviews);
     g_scrollOverviews.clear();
-    g_pScrollOverview.reset();
+    g_lastRegistered.reset();
     emitOverviewState();
     overviews.clear();
 }

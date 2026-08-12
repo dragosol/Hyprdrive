@@ -5647,8 +5647,8 @@ void CScrollOverview::suspendInputListeners() {
     submapMouseClickButton  = 0;
 }
 
-bool CScrollOverview::isClosing() const {
-    return closing;
+EOverviewPhase CScrollOverview::phase() const {
+    return closing ? EOverviewPhase::Closing : EOverviewPhase::Open;
 }
 
 // Entrance and exit are not the same motion, so they do not share a curve. The

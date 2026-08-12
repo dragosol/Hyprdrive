@@ -125,9 +125,9 @@ class CScrollOverview : public IOverview {
     bool         shouldSuppressRenderDamage() const override;
     void         onPreRender() override;
 
-    void         setClosing(bool closing) override;
-    bool         isClosing() const override;
-    void         reopen() override;
+    void           setClosing(bool closing) override;
+    EOverviewPhase phase() const override;
+    void           reopen() override;
 
     void         resetSwipe() override;
     void         onSwipeUpdate(double delta) override;

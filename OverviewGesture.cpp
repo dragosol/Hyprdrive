@@ -30,8 +30,10 @@ void COverviewGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
         overview->setClosing(true);
     }
 
-    m_overview          = overview;
-    g_pScrollOverview = overview;
+    // No "current overview" pointer to update: the gesture always begins on the
+    // FOCUSED monitor, which is activeScrollOverview()'s second tier, so the
+    // write this used to make could never change an answer.
+    m_overview = overview;
 }
 
 void COverviewGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {

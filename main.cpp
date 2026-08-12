@@ -149,12 +149,9 @@ static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE p
     else {
         const bool PREVRENDERINGOVERVIEW = renderingOverview;
         const auto PREVRENDERINGMONITOR  = renderingOverviewMonitor;
-        const auto PREVOVERVIEW          = g_pScrollOverview;
         renderingOverview                = true;
         renderingOverviewMonitor         = pMonitor;
-        g_pScrollOverview                = OVERVIEW;
         OVERVIEW->render();
-        g_pScrollOverview = PREVOVERVIEW;
         renderingOverviewMonitor = PREVRENDERINGMONITOR;
         renderingOverview = PREVRENDERINGOVERVIEW;
     }

@@ -10,68 +10,107 @@
 
 class CWLSurfaceResource;
 
-class IOverview {
+// An overview object exists in one of two phases, and "exists" is not one of
+// them: a closing overview stays in the registry until its animation ends
+// (the Z18 zombie class is exactly "which flag is authoritative"). Two states,
+// so there is nothing here to make unrepresentable that a bool would not --
+// what the type buys is that every consumer asks phase() instead of inventing
+// its own predicate over the registry.
+enum class EOverviewPhase {
+    Open,
+    Closing,
+};
+
+// ROLE: FRAME POLICY. What the compositor's render and damage paths are allowed
+// to do while an overview owns the monitor. This is main.cpp's seven hooks and
+// nothing else -- they never ask an overview where a tile is, and the dock and
+// the minimize flights never ask it whether a surface may have a frame.
+class IOverviewFramePolicy {
   public:
-    IOverview()          = default;
-    virtual ~IOverview() = default;
+    IOverviewFramePolicy()          = default;
+    virtual ~IOverviewFramePolicy() = default;
 
-    virtual void  render()           = 0;
-    virtual void  performPrimaryClickAction() = 0;
-    virtual void  damage()           = 0;
-    virtual void  requestInputFrame() = 0;
-    virtual bool  shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) = 0;
-    virtual bool  shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) = 0;
-    virtual bool  shouldAllowRealtimePreviewSchedule() = 0;
-    virtual bool  shouldSuppressRenderDamage() const = 0;
-    virtual void  onPreRender()      = 0;
+    virtual void render()                                                                          = 0;
+    virtual void damage()                                                                          = 0;
+    virtual void requestInputFrame()                                                               = 0;
+    virtual void onPreRender()                                                                     = 0;
+    virtual bool shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface)                         = 0;
+    virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) = 0;
+    virtual bool shouldAllowRealtimePreviewSchedule()                                              = 0;
+    virtual bool shouldSuppressRenderDamage() const                                                = 0;
 
-    virtual void  setClosing(bool closing) = 0;
+    // Set while the overview is drawing itself, so its own damage does not come
+    // back round as a reason to draw again.
+    bool blockDamageReporting = false;
+};
 
-    // A closing overview stays registered until its animation ends, so "exists"
-    // and "is open" are not the same question. Everything that decides whether
-    // to open or to close must ask this one -- otherwise a tap during the close
-    // animation reads as "already open" and is thrown away.
-    virtual bool  isClosing() const = 0;
-
-    // Reverse a close that is still animating. Cheap on purpose: the window
-    // images, the blur framebuffers and the input hooks are all still alive at
-    // this point, so this re-arms them instead of rebuilding them.
-    virtual void  reopen() = 0;
-
-    virtual void  resetSwipe()                = 0;
-    virtual void  onSwipeUpdate(double delta) = 0;
-    virtual void  onSwipeEnd()                = 0;
-
-    virtual void  close()                  = 0;
-    virtual void  selectHoveredWorkspace() = 0;
-    virtual bool  moveSelection(const std::string& direction) = 0;
-    virtual bool  windowDispatcherAction(const std::string& action) = 0;
+// ROLE: GEOMETRY. Where the overview is DRAWING things, for the code that has
+// to aim at them: the dock's minimize and restore flights, and the tile
+// bookkeeping their landings need.
+class IOverviewGeometry {
+  public:
+    IOverviewGeometry()          = default;
+    virtual ~IOverviewGeometry() = default;
 
     // X24. Where a window is DRAWN in the overview, monitor-local render px.
     // The dock is only ever on screen while the overview is, so a minimize
     // started from it has to shrink from the tile the user is looking at, not
     // from the window's real geometry underneath it.
-    virtual CBox  tileBox(const PHLWINDOW& window) const = 0;
+    virtual CBox tileBox(const PHLWINDOW& window) const = 0;
     // Z8. A GLOBAL LOGICAL box transformed into the overview's rendering of a
     // given desktop's card. The restore flight aims a MINIMIZED window here:
     // it has no tile (Y9 reveals minimized windows only under a filter), and
     // the offscreen fallback aimed at the NEXT desktop for a window whose home
     // IS the active one.
-    virtual CBox  overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const = 0;
+    virtual CBox overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const = 0;
     // Z20. Rebuild the per-card window lists from live state. setHidden fires
     // no compositor event, so a window unhidden at a flight's landing is
     // otherwise never re-added to workspaceImage->windows -- the grid and
     // hit-test see it (live iteration) while the render (list walk) does not:
     // a clickable, invisible tile.
-    virtual void  refreshWindows() = 0;
+    virtual void refreshWindows() = 0;
+};
+
+class IOverview : public IOverviewFramePolicy, public IOverviewGeometry {
+  public:
+    IOverview()          = default;
+    ~IOverview() override = default;
+
+    // ---- ROLE: LIFECYCLE ---------------------------------------------------
+    virtual EOverviewPhase phase() const = 0;
+
+    // Everything that decides whether to open or to close asks this -- otherwise
+    // a tap during the close animation reads as "already open" and is thrown
+    // away. Not virtual: there is one phase, and one way to read it off.
+    bool isClosing() const {
+        return phase() == EOverviewPhase::Closing;
+    }
+
+    virtual void setClosing(bool closing) = 0;
+
+    // Reverse a close that is still animating. Cheap on purpose: the window
+    // images, the blur framebuffers and the input hooks are all still alive at
+    // this point, so this re-arms them instead of rebuilding them.
+    virtual void reopen() = 0;
+
+    virtual void close() = 0;
+
+    // ---- ROLE: GESTURE -----------------------------------------------------
+    virtual void resetSwipe()                = 0;
+    virtual void onSwipeUpdate(double delta) = 0;
+    virtual void onSwipeEnd()                = 0;
+
+    // ---- ROLE: SELECTION ---------------------------------------------------
+    virtual void performPrimaryClickAction()                        = 0;
+    virtual void selectHoveredWorkspace()                           = 0;
+    virtual bool moveSelection(const std::string& direction)        = 0;
+    virtual bool windowDispatcherAction(const std::string& action)  = 0;
 
     // X28. Commit the overview's selection to one window and close, the way a
     // tile click does. The dock's right-click window list needs exactly this:
     // focusing the window directly would be overwritten by close()'s own
     // selection, which is also where X43's raise lives.
-    virtual bool  selectAndClose(const PHLWINDOW& window) = 0;
-
-    bool          blockDamageReporting   = false;
+    virtual bool selectAndClose(const PHLWINDOW& window) = 0;
 
     PHLMONITORREF pMonitor;
     bool          m_isSwiping = false;
@@ -116,6 +155,3 @@ bool                              openScrollOverview(PHLMONITOR monitor);
 // half-typed compose sequence. What the dispatcher does before every open, for
 // the entry points that are not the dispatcher.
 void                              resetSearchSession();
-
-// Current interaction/render context. The authoritative state is the registry.
-inline SP<IOverview> g_pScrollOverview;
