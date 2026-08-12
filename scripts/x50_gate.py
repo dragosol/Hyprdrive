@@ -44,9 +44,24 @@ def load(name):
     return np.asarray(Image.open(OUT / f"{TAG}-{name}.png").convert("RGB"), dtype=np.int16)
 
 
+# How different a pixel has to be to count. 24 was too coarse to see the thing
+# this gate is about: the search pill is a FROSTED plate over the overview's own
+# backdrop, and on this theme its body sits 4-8 units away from what is behind
+# it -- only the magnifier glyph and the query text clear 24. Measured
+# 2026-08-12 over the docked frame's own band:
+#     thresh   4      6      8     12     24
+#     dock  12710   7796   2737    923    899     <- the pill, travelled
+#     drift    54     54     53     53     50     <- the resting control
+#     nomatch   0      0      0      0      0
+#     clear     0      0      0      0      0
+# 6 is where the pill is fully visible and the controls have not moved at all;
+# 24 read the same travel as 899px and called it "it did not travel".
+DELTA = 6
+
+
 def rowprofile(a, b):
     d = np.abs(a - b).max(axis=2)[:, COL0:COL1]
-    return (d > 24).sum(axis=1)
+    return (d > DELTA).sum(axis=1)
 
 
 a0, a1 = load("00-a0"), load("01-a1")
@@ -62,10 +77,19 @@ if drift > 2000:
 
 # Control 2: the NOMATCH keystroke landed at all. It widens the pill in place,
 # so this both proves input worked AND locates the resting pill.
+#
+# Searched BELOW THE BAR, and that is not a detail. The quickshell bar is a
+# layer surface across the top of this output and its clock and CPU readouts
+# tick on their own, so the topmost changed row over the whole frame is a bar
+# pixel whenever a readout moved between the two captures. Measured 2026-08-12:
+# REST_TOP came back as 7 -- inside a 63px bar -- and the strip the gate then
+# graded was "67..3", an inverted range, which it reported as "the pill rests on
+# the bar already" and blamed on the build.
 pno = rowprofile(a1, nomatch)
 rows = np.nonzero(pno > 8)[0]
+rows = rows[rows >= BAR + 4]
 if rows.size == 0:
-    print("FAIL: the nomatch keystroke changed nothing -- input did not land")
+    print("FAIL: the nomatch keystroke changed nothing below the bar -- input did not land")
     sys.exit(1)
 REST_TOP = int(rows[0])
 TOP0, TOP1 = BAR + 4, REST_TOP - 4
