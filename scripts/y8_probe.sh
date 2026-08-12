@@ -60,6 +60,21 @@ ydotool click 0x40; sleep 0.15
 walk $GX $GY $PX $PY; sleep 0.5
 ydotool click 0x80                     # release ON the pill: flight + bounce
 
+# THE GESTURE HAS TO HAVE LANDED. Without this the gate reads "the pill never
+# moved" for a drop that never committed -- a rig fault wearing a product
+# defect's clothes -- and that is exactly the shape of the red on record
+# (peak 20-46 px against a 300 px floor, three runs, 2026-08-12). MARK on
+# special:minimized is the same ruler x24's minimize rig uses.
+sleep 1.2
+MARKWS=$(hyprctl clients -j | python3 -c "
+import json,sys
+print(next((c['workspace']['name'] for c in json.load(sys.stdin) if c['class']=='MARK'), 'GONE'))")
+if [ "$MARKWS" != "special:minimized" ]; then
+    echo "Y8 RIG FAULT: the drop did not minimize MARK (workspace=$MARKWS) -- there is no"
+    echo "landing to photograph, and a 'no bounce' verdict from here would be about the drag."
+    exit 1
+fi
+
 # The bounce starts when the flight LANDS, i.e. minimize_ms * anim_scale after
 # the release -- not at the release. A burst that stopped at the flight's end
 # would photograph everything except the thing under test.
