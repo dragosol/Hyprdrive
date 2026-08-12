@@ -322,3 +322,48 @@ out -- the check that catches a linear fade) and direction, and
 file the app actually runs on. The film keeps a veto: anything under 100 ms did
 not happen. The measured ratio is reported but not graded; two runs of the same
 build gave 23.1% and 33.4%, which is the under-read varying, not the app.
+
+## Phase 12 -- profiles, theme import, wallpaper repos (2026-08-12)
+
+Three gates, one per item, and each is a full round trip rather than a
+demonstration. None of them drives the QML: the panes are renderers over
+`hdprof.py`, `hdimport.py` and `hdwall.py`, so the gates drive those. None of
+them makes a pixel claim either -- every artefact here is a file or the
+compositor's own readback, both exact, and x61/z10 already own the photographs.
+
+| gate | clause | what it proves |
+| --- | --- | --- |
+| `x65_profile_roundtrip` | 13.9, Phase 12 item 1 | a bulk apply across THREE backends (a compositor option, a plugin key, ii's config.json), then revert -- graded on the md5 of all thirteen files in the surface AND on the live system. A named profile applied over a changed surface restores it. And an apply killed with `os._exit` after one write is undone by `hdprof check`, which the launcher runs before the window is drawn -- with a measured four seconds of nothing happening first, so "nobody else put it back" is watched rather than assumed. |
+| `x66_theme_import` | Phase 12 item 2 | dockward.conf maps to exactly the nine schema keys the gate predicts, with the values the file asks for, and `decoration:blur:enabled` is REFUSED because the schema locks it. awkward.conf's six leftovers land in the raw block byte-identical to the fixture's own lines (compared against the file by line number, indentation included), the `]]` payload does not close the Lua long string, both blocks coexist because an import appends, and `luac -p` accepts the result. One `hdprof revert` undoes the last import and leaves the first standing. |
+| `x67_wallpaper_repos` | Phase 12 item 3 | a real git clone over `file://`, a third wallpaper pushed upstream and pulled down, the active repository switched through its schema row, and the repo removed from the list and from disk. Two swaps through the pane's write path with z10's arms: matugen's primary moves, systemd starts theme-sync on its own, and the derived `col_highlight` follows. The slideshow declines a tick inside its interval and lands on the wallpaper the GATE computed for the one past it. An mp4 is drawn by mpvpaper with the palette taken from a frame, and choosing a still stops it. |
+
+### Fail-on-old, and one mutation each
+
+Absence is the cheap half and it is on record (`zrig/phase12/failonold/`): all
+three exit 1 on `adbe081` with a preflight that names the missing script. The
+half that means something is a mutation of the mechanism each gate exists to
+guard, run on HEAD:
+
+| mutation | gate | what it caught |
+| --- | --- | --- |
+| the verbatim long-bracket level stops escaping (`[[` always) | x66 | `luac: 40-hyprland.lua:48: syntax error near 'long'` -- plus the missing `]]` line and the values that never landed, because the fragment that carries them no longer parses. Three independent failures for one bug. |
+| ii's `config.json` dropped out of the config surface | x65 | "ii's value came back as 0, not 2", one file different in the md5 manifest, and both later phases red. The surface question is decided by the gate, not by the docstring. |
+| the pane's swap goes palette-neutral (`THEME=0`) | x67 | theme-sync never ran, systemd never started it, the palette did not move and the derived accent did not follow -- the whole Phase 10 chain reported as broken, which is what a swap that quietly stopped re-theming would look like. |
+
+### What x67 does with the wallpaper
+
+It moves it, on purpose, and its EXIT trap puts the picture AND the palette back
+with `THEME=1 WALL=$WALL0`. z10 is the only other gate that does this. Both must
+keep doing it: every frame-diffing gate in the suite depends on the wallpaper
+being where `pinwall.sh` left it.
+
+### What is NOT claimed
+
+The verbatim lines an import keeps are **inert**. This session's config is Lua,
+the fragments are Lua files, and 0.56 exposes no `hl.keyword` and no `hl.source`
+to hand a hyprlang line to -- checked against `/usr/share/hypr/stubs/hl.meta.lua`.
+So x66 proves the lines are kept exactly, that they are visible in the raw
+editor, and that they cannot break the config; it does not prove a `bind =` line
+does anything, because it does not. Translating them would mean a
+hyprlang-to-dispatcher table, which is the parser this phase was asked not to
+write.
