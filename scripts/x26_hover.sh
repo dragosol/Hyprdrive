@@ -20,6 +20,12 @@ off)
     mv 200 400
     sleep 1.0
     grim -o Virtual-1 $OUT/hover_off.png
+    # TWO parked frames, the same distance apart as the hover pair. The gate's
+    # idle control used to be band_diff(hover_off, hover_off) -- a file compared
+    # with ITSELF, which is 0 by construction and can never fail. A control that
+    # cannot fail is not a control; this one can.
+    sleep 1.2
+    grim -o Virtual-1 $OUT/hover_off2.png
     echo parked
     ;;
 on)

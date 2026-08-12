@@ -33,12 +33,16 @@ FIXTURE = "x24fix"
 FLY = [f"fly{i}.png" for i in range(1, 6)]
 
 
+from x26_points import pillbox        # ONE pill locator for the whole harness
+
+
 def pill(png):
-    """Same detection the X26 gate uses: the pill is the only thing brighter
-    than the overview's backdrop in the bottom band."""
-    lum = np.asarray(Image.open(png).convert("RGB")).astype(float).mean(2)
-    ys, xs = np.where(lum[1480:1600, :] > 19.3)
-    return xs.min(), ys.min() + 1480, xs.max(), ys.max() + 1480
+    """The pill's box. It used to be a private copy of the `lum > 19.3` rule,
+    and 19.3 is the luminance of the overview's own backdrop on this guest: the
+    box came back as the whole bottom band (x 0..2559, y 1480..1599), so "landed
+    in the pill" was really "landed somewhere on the screen" and could not fail.
+    x26_points.pillbox() self-calibrates against the band's median instead."""
+    return pillbox(png)
 
 
 with open("clients.json") as f:

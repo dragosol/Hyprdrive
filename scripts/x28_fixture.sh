@@ -61,6 +61,17 @@ for c in json.load(open('$OUT/fixture-clients.json')):
         print(' ', c['class'], c['address'], c['workspace']['name'])
 "
 
+# The dock the CELL PREDICTORS model: running classes and nothing else.
+# x24_cell.py / x28_cell.py compute slot centres from the class list alone, and
+# gate_slate leaves favourites, the Show Applications button and the trash ON --
+# five slots where the predictor counts two. Measured 2026-08-12: the pill is
+# then 362px wide at x1099 instead of 152px at x1204, and the click the rig
+# believed was on the fixture's icon landed on the TRASH. gate_slate puts all of
+# these back before the next gate, so turning them off here costs nothing.
+cfg_dock "show_favorites=false, show_apps_button=false, show_trash=false, show_mounts=false"
+sleep 0.6
+opt_want $RIG_KEY:dock:show_apps_button false || { echo "ABORT: dock composition did not take"; exit 1; }
+
 ov off; sleep 1.2
 ov on;  sleep 3
 grim -o $MON $OUT/base.png

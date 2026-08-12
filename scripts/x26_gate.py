@@ -13,10 +13,14 @@ P4  hovering an icon lights it and labels it; not hovering does neither.
 P5  the icon sits equidistant from the pill's top and bottom.
 """
 import json
+import os
 import sys
 
 import numpy as np
 from PIL import Image
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from x26_points import pillbox        # ONE pill locator, shared with the rig
 
 FIXTURE = "x26fix"
 ICON = 54  # dock:icon_size default; the pill is ITEM_PAD_TOP + ICON + ITEM_PAD_BOTTOM
@@ -66,11 +70,10 @@ def green(png):
 
 
 def pill(png):
-    """The pill reads as the only thing brighter than the overview's backdrop in
-    the bottom band."""
-    lum = np.asarray(Image.open(png).convert("RGB")).astype(float).mean(2)
-    ys, xs = np.where(lum[1480:1600, :] > 19.3)
-    return xs.min(), ys.min() + 1480, xs.max(), ys.max() + 1480
+    """The pill's box. x26_points.pillbox() is the one implementation -- the rig
+    aims with it and the gate grades with it, so they cannot disagree."""
+    x0, y0, x1, y1 = pillbox(png)
+    return x0, y0, x1, y1
 
 
 def band_diff(a, b, y0):
@@ -92,7 +95,7 @@ inside = POST and QX0 <= POST[0] and POST[0] + POST[2] <= QX1 + 1 and QY0 <= POS
 # The tooltip sits ABOVE the pill, the highlight inside it, so the band starts
 # well above the pill's top edge.
 hover_px = band_diff("hover_off.png", "hover_on.png", PY0 - 140)
-idle_px = band_diff("hover_off.png", "hover_off.png", PY0 - 140)
+idle_px = band_diff("hover_off.png", "hover_off2.png", PY0 - 140)
 
 ok = True
 for name, cond, detail in [
