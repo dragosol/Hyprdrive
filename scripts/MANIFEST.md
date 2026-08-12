@@ -79,6 +79,7 @@ Run one gate: `scripts/gates/<name>/run.sh`. Its stdout+stderr land in
 - `x51_opens.sh` — Cold text renders per open across N successive opens — cache convergence-to-zero instrument.
 - `x32_cell.py` — Predicts the Show Applications button's centre. Separate from x24_cell.py, which models the button as OFF (every gate using it sets show_apps_button=false) — the button is a slot of its own and teaching x24 about it would move predictions nobody asked to move.
 - `monitor_gone_repro.sh` — Three-step reproduction of the compositor-killer below: open the overview on an output, remove that output, `overview off`. Exit 0 = survived (fixed), 1 = died. Run over ssh; it is expected to take the session with it.
+- `z20_repro.sh` — Z20, "invisible tile after in-overview restore": minimize a window while the overview is up, restore it while it is still up, and assert the tile is DRAWN in its cell and that clicking that cell activates it. The cell is derived from the other window, because a locator that hunts an invisible tile cannot find it and has nothing to click. Exit 0 = does not reproduce.
 - `monitor_gone_variants.sh` — The four states the repro does not cover: the output removed while the overview is still ANIMATING open, while a search query is up, and while a dock MINIMIZE and a dock RESTORE flight are in the air. Each variant carries its own positive control (the search proves itself with a frame diff across the keystrokes; a flight proves itself by the stash, and a restore flight by the window being hidden) so a variant cannot pass by never reaching the state it names. Exit 0 = every variant survived and landed sanely, 2 = a scene could not be set up. Run over ssh.
 - `p8_ab.sh` + `p8_diff.py` — Phase-8 drag A/B: four drags (within a card, onto another desktop's strip cell, a near miss above the dock pill, onto it), each captured as frames + every window's geometry + the drop dump, then graded parent-vs-child against a same-build noise floor. Coordinates are measured ONCE and reused by every run of both builds; the wallpaper rotation is held for the whole A/B, not per run (a per-run resume rotates it under the next pass and every frame diff then measures the wallpaper -- 1.5M px of it). Needs the temporary instrumentation described in the script header; that patch is deliberately not committed.
 - `drop_table_test.cpp` — Exhaustive host-side table test for `ScrollOverview::Drop::resolve()`: 16 boolean facts, all 65536 combinations, against the pre-split branch ladder transliterated from a4189e2. Needs no compositor and no Hyprland headers. `g++ -std=c++2b -O2 -o /tmp/drop_table_test scripts/drop_table_test.cpp && /tmp/drop_table_test`.
@@ -235,42 +236,75 @@ Known follow-ups (tracked, not worked around):
   before treating the frost A/B as a trusted gate. Not a plugin frost defect --
   the plugin frost code is untouched and the behavior gate is green.
 
-## Harness follow-ups (2026-08-11, after the gate fire)
+## Harness follow-ups (2026-08-11, after the gate fire) -- ALL FOUR CLOSED
 
-Ranked. None of these is worked around anywhere; they are the next things that
-would make a suite verdict worth more.
+Kept with what closed each one rather than deleted: the next four will look
+like these, and the shape is the lesson.
 
-1. `g1_gate.py` diffs whole frames with an absolute 400 px floor, no mask and no
-   blob — and this desktop is not still. The bar clock, the CPU readouts and the
-   big desktop clock widget tick under the overview, and g1's own "no drift
-   between two idle frames" control has been measured at 2849 px on frames it
-   then graded. It reads green when g1 runs first after a compositor restart
-   (quickshell's widgets are not up yet) and red mid-suite, on the same build.
-   Mask the bar and the clock widget, dilate, take the largest connected blob.
-   Until then g1's red says nothing about the build, and a build A/B that moves
-   g1's position in the run is measuring the position.
-2. `g1_rig.sh` and `x48_rig.sh` hand-roll their headless output and never set
-   its mode, so g1/g5/x48/x50 run at the headless default 1920x1080 while every
-   cell predictor (x24_cell, x45dock_cell, x47_cell, x32_cell) hardcodes
-   2560x1600. They hand-roll it because `headless_on` installs an EXIT trap that
-   would tear the output down when the fixture script exits — so the fix is to
-   set the mode explicitly there, not to call headless_on.
-3. `gate_slate` restores the seven dock options and anim_scale that gates
-   actually write. A gate that changes anything else still owns restoring it,
-   and will find out the hard way.
-4. `z3_position_memory`'s FIRST gesture locates its drop target by taking the
-   largest blob of a broad yellow mask over the WHOLE frame, and this desktop
-   has a photograph behind the overview. On wp03 (dry golden hillsides, 5.3% of
-   its pixels inside that mask) the biggest yellow blob is the wallpaper --
-   2871 px at (1925,1217), colour [193 143 84] -- while the strip mini it
-   wanted is the third-largest at 570 px. G1 then drags the window into the
-   main card instead of onto a strip cell and the gate reports "position lost".
-   Its own G2 and G3 already search only the strip band and are unaffected.
-   Deterministic, not flaky, and NOT a build difference: identical numbers on
-   HEAD and on a4189e2 (zrig/phase8/Z3_FINDING.md). Fix: G1 searches the band,
-   or takes the largest blob whose box lands inside a strip cell. Eleven of the
-   twenty-two wallpapers score 0.0% on that mask, which is why the gate has
-   been green until now.
+1. **CLOSED b308bb7, and again 306e67f.** `g1_gate.py` diffed whole frames
+   against an absolute 400 px floor, no mask and no blob, on a desktop that is
+   not still -- its own "no drift between two idle frames" control measured
+   2849 px on frames it then graded, so the verdict was decided by whether a
+   clock edge fell in the window. It masks now: every non-fullscreen layer
+   surface out of `hyprctl layers -j` (the rig dumps it beside the frames),
+   plus a PINNED box for the ii desktop clock, which is drawn inside the
+   fullscreen background layer and therefore cannot come from layers.json. Then
+   dilate, then the largest 4-connected blob. QUIET 25000 / LOUD 50000, both set
+   outside the measured noise rather than beside it, and the hand-written box is
+   leashed at 1.5% of the frame.
+   306e67f is the SAME defect in the compose arm: `g1c_grade.py` had been
+   written by transcribing the old scheme, and it applied it to the pair where
+   the clock is most exposed -- two desktop frames ~10 s apart with nothing over
+   the widget, measured at 7911 px. Both arms call one `g1_gate.grade()` now,
+   because a doctrine kept in two copies drifts back apart, which is exactly
+   what happened here.
+2. **CLOSED f8e810a.** `g1_rig.sh` and `x48_rig.sh` hand-rolled their headless
+   output and never set its mode, so g1/g5/x48/x50 ran at the headless default
+   1920x1080 while every cell predictor assumes 2560x1600. They set the mode
+   explicitly (and verify it) where they create the output; `headless_on` still
+   cannot be used there because its EXIT trap would tear the output down when
+   the fixture script exits.
+3. **CLOSED 06dcd36 + b5cdf62.** `gate_slate` snapshots and restores all
+   seventy-nine registered plugin keys, not the eight it knew about. The
+   baseline is a snapshot of the SESSION'S own values, not Config.cpp defaults
+   -- this rice configures the plugin, and forcing defaults would re-theme the
+   session between gates. Only the keys that DRIFTED are written back:
+   `getoption` reports `set: true` for anything ever assigned, and
+   x53_compat_alias's A control requires its probe keys to be UNSET, so a slate
+   that assigned all seventy-nine turned that control red on a clean build.
+4. **CLOSED 0aafce5.** `z3_position_memory`'s G1 takes its two strip minis from
+   the STRIP BAND, as G2 and G3 already did, and only the main tile from the
+   whole frame. Its yellow mask is broad and there is a photograph behind the
+   overview; on wp03 the largest yellow blob was the wallpaper.
+
+## Harness follow-ups (2026-08-12, dangling-A2)
+
+1. **A GATE CAN BE BROKEN BY THE PASSAGE OF TIME.** `x66_theme_import` P3 asked
+   "was a snapshot committed across these two imports?" by counting
+   `hdprof list -n 50 --json` before and after. That list is CAPPED at fifty.
+   The guest's snapshot history passed fifty at 18:06 on 2026-08-12 and both
+   reads answered 50 from then on, so the check could never pass again whatever
+   the importer did -- no build changed, no harness commit touched it. FIXED
+   6b83374 with a ref that has to MOVE. **Anything that asks "how many" of a
+   paginated list is this bug**; nothing else in scripts/ currently does.
+2. **TWO CLOCKS, NOT ONE.** `x51_text_cache` was still a straddler after its bar
+   mask went in, because the ii DESKTOP clock shows through the overview's
+   wallpaper backdrop and `layers.json` cannot describe it -- it is inside the
+   fullscreen background layer. A and B are ~25 s apart, so a minute boundary
+   falls between them about forty percent of the time; measured on the failing
+   run's own frames, A read 18:38 and B read 18:39, 1675 px, none of it where
+   the plugin draws. FIXED 65ecb93. Any new whole-output gate needs BOTH masks.
+3. **Kitty fixture opacity: measured, and deliberately NOT changed.** Every
+   fixture is composited at the rice's 0.92 window opacity (custom/rules.lua:40,
+   `class = ".*"`), which `kitty -o background_opacity=1.0` does not defeat.
+   Measured, the bleed is a ~10% shift toward the wallpaper and spatially FLAT
+   (sd 0.5/255), it cancels in every A/B because the wallpaper is held, and
+   pinwall's wp17 is greyscale so it cannot fake a colour-locator hit. No red
+   traces to it and x47's TEXTURE would get WORSE with opaque fixtures, since
+   its complaint is too little structure behind the plate.
+   `zrig/danglingA2/kitty-opacity-finding.md`.
+4. **Z20 has a repro at last** and it does not reproduce: `scripts/z20_repro.sh`
+   (9c33db1), three consecutive clean runs. See the repro list above.
 
 ## Guest gate dependencies + known flakes (2026-08-09)
 
