@@ -56,17 +56,45 @@ LUA
     hyprctl getoption $RIG_KEY:dock:minimize_ms | awk '/^int:/ {print $2}' > $OUT/default_ms.txt
     hyprctl eval "return hl.plugin.$RIG_NS.configure({dock = {minimize_ms = $MS}})" >/dev/null
 
-    # THE STRETCH COMES FROM anim_scale, NOT FROM minimize_ms. Measured
-    # 2026-08-12 on 7b32fd6 (zrig/danglingA/x24probe{B,C,D}/): with
-    # dock:minimize_ms set to 2000 and read back as 2000 -- through
-    # hl.plugin.hyprdrive.configure AND through hl.config, both -- the flight is
-    # over inside 0.37 s, i.e. it still runs at the 400 ms default. With
-    # anim_scale 8 and the same key at 400 it runs 2.9 s, which is 400x8. The
-    # key is registered, readable and ignored by flightProgress at runtime;
-    # that is a plugin defect and it is ticketed
-    # (zrig/danglingA/tickets/x24_minimize_ms.md). Until it is fixed the only
-    # working slow-motion is anim_scale, and anim_slow READS IT BACK.
-    anim_slow "${X24_ANIM:-8}" || { echo "ABORT: anim_scale did not take"; exit 1; }
+    # THE STRETCH COMES FROM minimize_ms, and it always did. The note that used
+    # to sit here said the key was ignored and stretched with anim_scale
+    # instead, on the strength of two probes that timed WHEN THE FIXTURE STOPPED
+    # BEING GREEN -- which under EASE_OUT_EXPO is ~18% of the duration, not the
+    # duration. Re-measured 2026-08-12 on 3d5281c off the plugin's own draw log
+    # (zrig/danglingB/x24/ms-probe.log), through hl.config AND through
+    # hl.plugin.hyprdrive.configure, fired by the minimize dispatcher AND by a
+    # real dock click: 400 -> 415ms, 2000 -> 2056ms, 100 -> 109ms. The old
+    # probe's own numbers say the same thing once read as a fade: 0.37s at
+    # anim_scale 1 and 2.9s at anim_scale 8 are the same 18% of 2000ms and of
+    # 2000x8ms.
+    #
+    # It still takes anim_scale ON TOP, and for a reason that has nothing to do
+    # with the key working: EXPO fades the proxy as it flies, and the green
+    # blob the gate hunts stops being green early. The mask wants G > 150; a
+    # proxy at alpha `a` over this backdrop reads G ~ 225a + 30, so it is
+    # findable only while a > 0.53, i.e. while easeOutExpo < 0.47, i.e. over the
+    # first ~11% of ANY flight however long. Eight whole-output grims cost
+    # ~0.36s each, so the camera needs 3.1s inside that first 11% -- ~29s of
+    # flight to keep all eight, ~16s to keep five, and the gate needs three.
+    # minimize_ms alone cannot get there: it is capped at 2000ms (Config.cpp).
+    #
+    # So the flight duration is set as high as the key allows and anim_scale
+    # multiplies it up to a FIXED target, computed from what the key actually
+    # reads back rather than assumed -- the day minimize_ms changes (X24 moved
+    # the default 400 -> 220) this rig keeps filming the same 16 seconds.
+    MS_EFF=$(hyprctl getoption $RIG_KEY:dock:minimize_ms | head -1 | awk '{print $2+0}')
+    # MS=0 is the negative control -- no flight at all -- and there is nothing
+    # to stretch; 1 keeps the arithmetic below defined and the scale at 1.
+    [ "${MS_EFF:-0}" -gt 0 ] || MS_EFF=${X24_TARGET_MS:-9600}
+    # 9600ms, and the window is narrow at both ends. The eight frames start
+    # ~0.32s after the click and end ~1.83s after it, so the flight has to be
+    # long enough that the FIRST is still within 25% of the tile (P2 -> D >
+    # 7.8s) and short enough that the LAST has reached the pill's own columns
+    # with its foot above the plate (P6 -> D < 10.7s). Both bounds are expo on
+    # this fixture's geometry, measured 2026-08-12.
+    ANIM=$(python3 -c "import math;print(max(1, math.ceil(${X24_TARGET_MS:-9600} / $MS_EFF)))")
+    echo "stretch: minimize_ms readback ${MS_EFF}ms x anim_scale $ANIM = $((MS_EFF * ANIM))ms of flight"
+    anim_slow "$ANIM" || { echo "ABORT: anim_scale did not take"; exit 1; }
     ov on; sleep 1.5
     for _ in $(seq 20); do ydotool key 14:1 14:0; done; sleep 0.5
     grim -o "${RIG_MON:-Virtual-1}" $OUT/open.png
@@ -76,6 +104,16 @@ fi
 
 # Coordinates are SCREEN px; rig.sh's warp() owns the ydotool halving.
 warp $1 $2; sleep 0.4
+
+# The icon this run is aiming at, for P6. The gate used to ask whether the last
+# measurable proxy was inside the PILL's columns, and that is unanswerable for a
+# tall window: it shrinks toward a 54px icon, so its foot crosses the plate's top
+# edge (which the same predicate requires it to stay above) while its centre is
+# still 300px short of a one-slot pill's left edge -- measured 2026-08-12, the
+# two halves want E >= 0.89 and E < 0.83 of the same frame. The flight's promise
+# is X46's: it flies into THE APP'S OWN ICON. That is this coordinate, and
+# progress toward it is what the frames can carry honestly.
+printf '%s %s\n' "$1" "$2" > $OUT/icon.txt
 
 # The control frame is shot with the pointer already parked on the icon, so the
 # tile it measures is the tile the flight actually starts from -- hover ease and
@@ -102,11 +140,17 @@ echo "pointer parked at $(hyprctl cursorpos)"
 # It is also what the hover panel's 120ms grace needs to expire in.
 # 0.25s of a 2400ms flight is t=0.10, which the cubic has barely moved.
 sleep 0.25
-# Eight frames, not five: a whole-output grim costs ~0.36s here, so five of them
-# cover 1.8s of a flight that is 400ms x anim_scale = 3.2s long.
-for i in 1 2 3 4 5 6 7 8; do grim -o "${RIG_MON:-Virtual-1}" $OUT/fly$i.png; done
+# Ten frames, not five: a whole-output grim costs ~0.20s here, so five of them
+# cover 1.0s of a 9.6s stretched flight and ten cover 2.0s -- far enough in that
+# P6's last measurable proxy has covered ~79% of the way to the icon rather than
+# the 72% eight frames reach, which is too close to its own floor to survive
+# run-to-run jitter.
+for i in 1 2 3 4 5 6 7 8 9 10; do grim -o "${RIG_MON:-Virtual-1}" $OUT/fly$i.png; done
 sleep 2.0
 grim -o "${RIG_MON:-Virtual-1}" $OUT/landed.png
+# Nothing here stretches anim_scale any more, but an earlier rig that died mid-
+# run can have left it stretched, and the frame budget above is arithmetic on a
+# 2400ms flight. Put the clock back either way.
 anim_restore
 hyprctl clients -j > $OUT/clients.json
 # The dock's hover preview panel is held out for the whole flight and shows a

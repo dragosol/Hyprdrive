@@ -427,8 +427,25 @@ static void registerConfigValuesFor() {
                                    SFloatValueOptions{.min = 0.05F, .max = 1.F}));
     addKey(makeShared<CIntValue>(KEY("dock:corner_radius"), "hyprgnomedock: pill corner radius", 24,
                                  SIntValueOptions{.min = 0}));
-    // X24. 220ms because the standing Apple-motion rule puts entrances at ~300ms
-    // and makes exits 20-30% faster; a minimize is an exit.
+    // 400ms, both directions: GNOME's MINIMIZE_WINDOW_ANIMATION_TIME, extracted
+    // from the host's windowManager.js, and the number the SPEC settles on.
+    //
+    // The comment that used to sit here said "220ms because the standing
+    // Apple-motion rule puts entrances at ~300ms and makes exits 20-30%
+    // faster", and it was X24's, written before Y5. Spec 13.14 Y5 supersedes it
+    // in as many words -- *"This SUPERSEDES X54(a) 'it wants to be shorter':
+    // expo covers ~97% of the travel in the first third of its duration, so
+    // 400ms expo is TIGHTER in hand than the 220ms bezier it replaces while
+    // being the host's own number. The two requests are not in conflict once
+    // the curve is the host's."* The user's own words behind Y5 are "same
+    // animations, same fade out/in, same speed... as gnome", which is what
+    // decides a tie with a general rule. 400 is also inside the standing
+    // 200-400ms band.
+    //
+    // So the number stays and the note is the thing that was wrong. It cost a
+    // round: the key was changed to 220 on the strength of this comment, and
+    // the spec says the comment is the stale half. x24_flight_gate.py P7
+    // asserts THIS number, from the spec, for the same reason.
     addKey(makeShared<CIntValue>(KEY("dock:minimize_ms"),
                                  "hyprgnomedock: minimize/restore flight duration, 0 to teleport (Y5: GNOME's MINIMIZE_WINDOW_ANIMATION_TIME)", 400,
                                  SIntValueOptions{.min = 0, .max = 2000}));

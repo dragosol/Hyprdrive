@@ -157,11 +157,24 @@ case "$W" in
     wf-recorder -f $OUT/z5.mp4 -c libvpx-vp9 -r 30 >$OUT/z5-wfr.log 2>&1 & WFR=$!
     sleep 2.5
     ydotool mousemove -a -x 640 -y 778 2>/dev/null; sleep 0.4
+    # The spam has to land INSIDE a flight's lifetime or there is no reversal to
+    # grade, so the spacing comes from the shipping duration instead of a magic
+    # 0.15: a click every ~40% of a flight. It was tuned by hand against 400ms
+    # and would have stopped reversing anything the day that number moved (X24
+    # took it to 220 -- 0.09 of jitter plus 0.15 of sleep is 240ms, one whole
+    # flight and then some). z5log asserts >= 2 reversals, so a rig that misses
+    # the window says so rather than passing on an empty film.
+    MS=$(hyprctl getoption $RIG_KEY:dock:minimize_ms | head -1 | awk '{print $2+0}')
+    [ "${MS:-0}" -gt 0 ] || MS=220
+    GAPMS=$((MS * 40 / 100))
+    JITTER=$(python3 -c "print(f'{max(0.005, $GAPMS/1000*0.2):.3f}')")
+    REST=$(python3 -c "print(f'{max(0.01, $GAPMS/1000*0.4):.3f}')")
+    echo "z5 spam: minimize_ms=$MS, click every ${GAPMS}ms (jitter ${JITTER}s x3 + rest ${REST}s)"
     for i in 1 2 3; do
       ydotool click 0x40
-      for d in 2 -2 1; do ydotool mousemove -a -x $((640+d)) -y $((778-d)) 2>/dev/null; sleep 0.03; done
+      for d in 2 -2 1; do ydotool mousemove -a -x $((640+d)) -y $((778-d)) 2>/dev/null; sleep $JITTER; done
       ydotool click 0x80
-      sleep 0.15
+      sleep $REST
     done
     sleep 4
     kill -INT $WFR 2>/dev/null; wait $WFR 2>/dev/null
