@@ -40,19 +40,12 @@ alive_or_die "after g1 fixture"
 step G1_RUN_OK     bash scripts/g1_rig.sh run "$TAG" || exit 1
 alive_or_die "after g1 run"
 
-# g1_gate.py hardcodes the HOST path /home/dragos/hyprvm/share/g1; in the guest
-# that same directory is /mnt/host/g1. Bridge with a symlink, never by editing
-# the grader.
-SHARE=/home/dragos/hyprvm/share
-if [ ! -e "$SHARE/g1/$TAG-00-ctrlA.png" ]; then
-    mkdir -p /home/dragos/hyprvm 2>/dev/null
-    [ -e "$SHARE" ] || ln -s /mnt/host "$SHARE" 2>/dev/null
-fi
-if [ ! -e "$SHARE/g1/$TAG-00-ctrlA.png" ]; then
-    echo "NEEDS-HOST: g1_gate.py reads $SHARE/g1 and this guest cannot map it onto /mnt/host/g1" >&2
-    exit 3
-fi
-python3 scripts/g1_gate.py "$TAG" || exit 1
+# g1_gate.py takes the frames dir as its second argument (it still defaults to
+# the HOST path so a host-side re-grade needs no arguments). The symlink bridge
+# this used to need is gone: a gate that depends on /home/dragos/hyprvm/share
+# existing inside the guest reports NEEDS-HOST for a reason that has nothing to
+# do with the build.
+python3 scripts/g1_gate.py "$TAG" /mnt/host/g1 || exit 1
 
 # --- last clause: compose (g1c, reuses the fixture + mon file) ---------------
 step G1C_RUN_OK bash scripts/g1c_rig.sh "$CTAG" || exit 1
