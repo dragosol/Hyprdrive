@@ -1916,107 +1916,96 @@ bool CScrollOverview::moveScrollingStackSelection(bool next) {
     return false;
 }
 
-void CScrollOverview::endWindowDrag() {
-    // Before anything below reads a slot: the D5 return seed wants this window's
-    // slot in the FULL grid, not the gap it has been leaving open.
-    g_dragReflowExcluded = nullptr;
+// The live handles a drop needs, filled in by the three gather steps below in
+// the order endWindowDrag() runs them. The pure half -- what to DO with them --
+// is ScrollOverview::Drop::resolve(facts) in DropDecision.hpp.
+struct SOverviewDropSite {
+    ScrollOverview::Drop::SFacts facts;
 
-    const auto WINDOW = getOverviewWindowToShow(drag.activeWindow.lock());
-    const auto TARGET = WINDOW ? WINDOW->layoutTarget() : nullptr;
-    const auto SPACE  = TARGET ? TARGET->space() : nullptr;
-    const auto ALGO   = SPACE ? SPACE->algorithm() : nullptr;
+    // stage 1
+    PHLWINDOW              window;
+    SP<Layout::ITarget>    target;
+    SP<Layout::CSpace>     space;
+    SP<Layout::CAlgorithm> algo;
+    CScrollOverview*       dropOverview = nullptr;
+    PHLMONITOR             dropMonitor;
+    Vector2D               dropPointLocal;
 
-    const auto          targetOverview = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
-    auto*               dropOverview   = targetOverview ? dynamic_cast<CScrollOverview*>(targetOverview.get()) : nullptr;
+    // stage 2
+    size_t                              dropWorkspaceIdx = 0;
+    PHLWORKSPACE                        dropWorkspace;
+    Layout::Tiled::CScrollingAlgorithm* dropScrollingAlgo = nullptr;
+    bool                                dropScrollingPrimaryHorizontal = false;
+    PHLWORKSPACE                        originalWorkspace;
+    CBox                                dragBox;
 
-    const auto          DROPMONITOR       = dropOverview ? dropOverview->pMonitor.lock() : PHLMONITOR{};
-    const auto          DROPPOINTLOCAL    = getOverviewMousePosLocal(DROPMONITOR);
+    // stage 3
+    PHLWINDOW                   sourceFullscreenWindow;
+    PHLMONITOR                  monitor;
+    PHLWORKSPACE                activeWorkspaceBeforeDrop;
+    PHLWORKSPACE                dropActiveWorkspaceBeforeDrop;
+    int                         dropSide = 0;
+    CDropIndicator::SDropAnchor dropAnchor;
+    std::string                 dropDirection;
+};
 
-    // OVERVIEW_CPP_SPEC X26. Released on the dock: minimize, and nothing below
+// Stage 1. The window that was dragged, its layout handles, and the overview
+// the button came up over. Deliberately asks nothing about a workspace: a
+// release on the dock pill returns before that question is worth money.
+void CScrollOverview::gatherDropSite(SOverviewDropSite& site) {
+    site.window = getOverviewWindowToShow(drag.activeWindow.lock());
+    site.target = site.window ? site.window->layoutTarget() : nullptr;
+    site.space  = site.target ? site.target->space() : nullptr;
+    site.algo   = site.space ? site.space->algorithm() : nullptr;
+
+    const auto TARGETOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
+    site.dropOverview         = TARGETOVERVIEW ? dynamic_cast<CScrollOverview*>(TARGETOVERVIEW.get()) : nullptr;
+
+    site.dropMonitor    = site.dropOverview ? site.dropOverview->pMonitor.lock() : PHLMONITOR{};
+    site.dropPointLocal = getOverviewMousePosLocal(site.dropMonitor);
+
+    site.facts.haveWindow = static_cast<bool>(site.window);
+    site.facts.haveTarget = static_cast<bool>(site.target);
+    // OVERVIEW_CPP_SPEC X26. Released on the dock: minimize, and nothing else
     // runs -- the window must not also be moved to whatever card the pill floats
     // over. Everything else about a missed drop is unchanged, because
     // workspaceAtOverviewDropPoint already answers nullptr over the pill.
-    if (WINDOW && ScrollOverview::Dock::pillContains(DROPMONITOR, DROPPOINTLOCAL)) {
-        // Y5/Y8. Was a bare Minimize::minimize, which is exactly what X54's
-        // "everything that minimizes must come through these" forbids -- so a
-        // window dropped on the dock TELEPORTED while a clicked one flew. Now it
-        // flies like every other minimize, and `true` asks the icon it lands in
-        // to bounce once.
-        ScrollOverview::Dock::minimizeWithFlight(DROPMONITOR, WINDOW, true);
-        clearDragPending();
-        damage();
-        if (dropOverview && dropOverview != this)
-            dropOverview->damage();
-        return;
-    }
+    // Asked only with a window in hand, as the guard it replaced was.
+    site.facts.overPill = site.window && ScrollOverview::Dock::pillContains(site.dropMonitor, site.dropPointLocal);
+}
 
-    const bool          RETILEONEND       = drag.startedTiled && TARGET && SPACE && ALGO;
-    size_t              dropWorkspaceIdx  = 0;
-    const auto          DROPWORKSPACE     = dropOverview ? dropOverview->workspaceAtOverviewDropPoint(DROPPOINTLOCAL, &dropWorkspaceIdx, WINDOW) : PHLWORKSPACE{};
-    const auto          DROPSCROLLINGALGO  = overviewScrollingAlgorithmForWorkspace(DROPWORKSPACE);
-    const bool          DROPSCROLLINGLAYOUT = DROPSCROLLINGALGO != nullptr;
-    const bool          DROPSCROLLINGPRIMARYHORIZONTAL =
-        DROPSCROLLINGALGO && DROPSCROLLINGALGO->m_scrollingData && DROPSCROLLINGALGO->m_scrollingData->controller &&
-        DROPSCROLLINGALGO->m_scrollingData->controller->isPrimaryHorizontal();
-    const auto          ORIGINALWORKSPACE = drag.originalWorkspace.lock();
-    const bool          MOVEWORKSPACE    = DROPWORKSPACE && DROPWORKSPACE != ORIGINALWORKSPACE;
-    const auto          DRAGBOX          = DROPWORKSPACE ? dropOverview->draggedWindowBoxFor(WINDOW, dropWorkspaceIdx, DROPPOINTLOCAL, dragEffectiveGrabRatio()) : CBox{};
-    int                 dropSide         = 0;
-    CDropIndicator::SDropAnchor dropAnchor;
-    std::string         dropDirection;
+// Stage 2. Which workspace the cursor is over and what kind of layout it runs.
+void CScrollOverview::gatherDropWorkspace(SOverviewDropSite& site) {
+    site.dropWorkspace = site.dropOverview ? site.dropOverview->workspaceAtOverviewDropPoint(site.dropPointLocal, &site.dropWorkspaceIdx, site.window) : PHLWORKSPACE{};
+    site.dropScrollingAlgo = overviewScrollingAlgorithmForWorkspace(site.dropWorkspace);
+    site.dropScrollingPrimaryHorizontal = site.dropScrollingAlgo && site.dropScrollingAlgo->m_scrollingData && site.dropScrollingAlgo->m_scrollingData->controller &&
+        site.dropScrollingAlgo->m_scrollingData->controller->isPrimaryHorizontal();
+    site.originalWorkspace = drag.originalWorkspace.lock();
+    site.dragBox = site.dropWorkspace ? site.dropOverview->draggedWindowBoxFor(site.window, site.dropWorkspaceIdx, site.dropPointLocal, dragEffectiveGrabRatio()) : CBox{};
 
-    if (!DROPWORKSPACE) {
-        // OVERVIEW_CPP_SPEC D5. Nothing below this runs, so the window keeps its
-        // workspace, position and size — the drop is correctly a no-op. Without
-        // the seed below the tile still teleports home in one frame (measured:
-        // 326 px in 1 frame at 60fps), which reads as a glitch rather than a
-        // rejected drop. U4's reflow already eases a tile from wherever it is to
-        // its slot, so hand it the proxy's box and it carries the return.
-        if (const auto MON = pMonitor.lock(); WINDOW && MON) {
-            if (CBox slot; overviewGridSlot(WINDOW, MON, slot)) {
-                const auto  WSIDX    = dragWorkspaceIndex(WINDOW);
-                const auto  FLOATBOX = draggedWindowBox(WSIDX);
-                const float SCALEDIV = std::max(scale->value(), 0.01F) * std::max(MON->m_scale, 0.01F);
+    site.facts.haveDropWorkspace = static_cast<bool>(site.dropWorkspace);
+    site.facts.retileOnEnd       = drag.startedTiled && site.target && site.space && site.algo;
+    site.facts.moveWorkspace     = site.dropWorkspace && site.dropWorkspace != site.originalWorkspace;
+    site.facts.startedTiled      = drag.startedTiled;
+    site.facts.scrollingLayout   = site.dropScrollingAlgo != nullptr;
+    site.facts.haveOriginalBox   = !drag.originalBox.empty();
+}
 
-                g_gridReflows[WINDOW.get()] =
-                    SGridReflow{WINDOW, CBox{overviewPointToGlobal(WSIDX, FLOATBOX.pos()), FLOATBOX.size() * (1.F / SCALEDIV)}, slot, Time::steadyNow(), g_overviewFrame, false};
-                g_gridReflowActive = true;
-            }
-        }
+// Stage 3. The anchor window under the cursor, and everything the commit has to
+// have read BEFORE it starts moving things: the source workspace's fullscreen
+// window and both monitors' active workspaces.
+void CScrollOverview::gatherDropAnchor(SOverviewDropSite& site) {
+    site.sourceFullscreenWindow =
+        site.originalWorkspace ? getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(site.originalWorkspace)) : PHLWINDOW{};
+    site.facts.restoreSourceFullscreenFocus = site.window && site.window->m_isFloating && site.facts.moveWorkspace &&
+        shouldShowOverviewWindow(site.sourceFullscreenWindow) && site.sourceFullscreenWindow != site.window &&
+        site.sourceFullscreenWindow->m_workspace == site.originalWorkspace && Fullscreen::controller()->isFullscreen(site.sourceFullscreenWindow);
 
-        clearDragPending();
-        damage();
-        if (dropOverview && dropOverview != this)
-            dropOverview->damage();
-        return;
-    }
+    const bool DROPSIDEHORIZONTAL = site.dropOverview->layout != ScrollOverview::Config::ELayout::HORIZONTAL || site.dropScrollingPrimaryHorizontal;
 
-    const auto SOURCEFULLSCREENWINDOW = ORIGINALWORKSPACE ? getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(ORIGINALWORKSPACE)) : PHLWINDOW{};
-    const bool RESTORESOURCEFULLSCREENFOCUS = WINDOW && WINDOW->m_isFloating && MOVEWORKSPACE && shouldShowOverviewWindow(SOURCEFULLSCREENWINDOW) &&
-        SOURCEFULLSCREENWINDOW != WINDOW && SOURCEFULLSCREENWINDOW->m_workspace == ORIGINALWORKSPACE && Fullscreen::controller()->isFullscreen(SOURCEFULLSCREENWINDOW);
-
-    const bool DROPSIDEHORIZONTAL = dropOverview->layout != ScrollOverview::Config::ELayout::HORIZONTAL || DROPSCROLLINGPRIMARYHORIZONTAL;
-
-    const auto MONITOR = pMonitor.lock();
-    const auto ACTIVEWORKSPACEBEFOREDROP = MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{};
-    const auto DROPACTIVEWORKSPACEBEFOREDROP = DROPMONITOR ? DROPMONITOR->m_activeWorkspace : PHLWORKSPACE{};
-    const auto RESTOREACTIVEWORKSPACE = [&]() {
-        if (MONITOR && ACTIVEWORKSPACEBEFOREDROP && MONITOR->m_activeWorkspace != ACTIVEWORKSPACEBEFOREDROP)
-            MONITOR->changeWorkspace(ACTIVEWORKSPACEBEFOREDROP, false, true, true);
-        if (DROPMONITOR && DROPMONITOR != MONITOR && DROPACTIVEWORKSPACEBEFOREDROP && DROPMONITOR->m_activeWorkspace != DROPACTIVEWORKSPACEBEFOREDROP)
-            DROPMONITOR->changeWorkspace(DROPACTIVEWORKSPACEBEFOREDROP, false, true, true);
-    };
-    const auto RESTOREVIEWPORTWORKSPACE = [&]() {
-        if (!ACTIVEWORKSPACEBEFOREDROP)
-            return;
-
-        for (size_t i = 0; i < images.size(); ++i) {
-            if (images[i] && images[i]->pWorkspace == ACTIVEWORKSPACEBEFOREDROP) {
-                viewportCurrentWorkspace = i;
-                return;
-            }
-        }
-    };
+    site.monitor                       = pMonitor.lock();
+    site.activeWorkspaceBeforeDrop     = site.monitor ? site.monitor->m_activeWorkspace : PHLWORKSPACE{};
+    site.dropActiveWorkspaceBeforeDrop = site.dropMonitor ? site.dropMonitor->m_activeWorkspace : PHLWORKSPACE{};
 
     // Z3. Whether the drop point can be read as a point INSIDE the destination
     // card, which is the only thing that makes mapping the cursor into that
@@ -2040,142 +2029,231 @@ void CScrollOverview::endWindowDrag() {
     // card box": the strip band deliberately OVERLAPS the tiles it floats above,
     // which workspaceAtOverviewDropPoint already has to say out loud for the
     // same reason.
-    bool       dropPointMapsIntoCard = false;
-    if (DROPMONITOR) {
-        const auto WORKSPACEBOX =
-            getOverviewWorkspaceBox(DROPMONITOR, dropOverview->scale->value(), dropOverview->viewOffset->value(),
-                                    dropOverview->workspaceOverviewOffset(dropWorkspaceIdx, dropOverview->activeWorkspaceIndex(),
-                                                                         getWorkspaceRenderedPitch(DROPMONITOR, dropOverview->scale->value(), dropOverview->layout)),
-                                    dropOverview->layout);
-        dropPointMapsIntoCard = overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, DROPMONITOR) && !dropOverview->workspaceAtStripPoint(DROPPOINTLOCAL);
+    if (site.dropMonitor) {
+        const auto WORKSPACEBOX = getOverviewWorkspaceBox(
+            site.dropMonitor, site.dropOverview->scale->value(), site.dropOverview->viewOffset->value(),
+            site.dropOverview->workspaceOverviewOffset(site.dropWorkspaceIdx, site.dropOverview->activeWorkspaceIndex(),
+                                                       getWorkspaceRenderedPitch(site.dropMonitor, site.dropOverview->scale->value(), site.dropOverview->layout)),
+            site.dropOverview->layout);
+        site.facts.dropPointMapsIntoCard =
+            overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, site.dropMonitor) && !site.dropOverview->workspaceAtStripPoint(site.dropPointLocal);
 
         if (DROPSIDEHORIZONTAL) {
-            if (DROPPOINTLOCAL.x < WORKSPACEBOX.x)
-                dropSide = -1;
-            else if (DROPPOINTLOCAL.x > WORKSPACEBOX.x + WORKSPACEBOX.width)
-                dropSide = 1;
+            if (site.dropPointLocal.x < WORKSPACEBOX.x)
+                site.dropSide = -1;
+            else if (site.dropPointLocal.x > WORKSPACEBOX.x + WORKSPACEBOX.width)
+                site.dropSide = 1;
         } else {
-            if (DROPPOINTLOCAL.y < WORKSPACEBOX.y)
-                dropSide = -1;
-            else if (DROPPOINTLOCAL.y > WORKSPACEBOX.y + WORKSPACEBOX.height)
-                dropSide = 1;
+            if (site.dropPointLocal.y < WORKSPACEBOX.y)
+                site.dropSide = -1;
+            else if (site.dropPointLocal.y > WORKSPACEBOX.y + WORKSPACEBOX.height)
+                site.dropSide = 1;
         }
     }
 
-    if (DROPWORKSPACE) {
-        dropOverview->lastMousePosLocal = DROPPOINTLOCAL;
-        dropAnchor                      = dropOverview->dropAnchorAtOverviewCursorOnWorkspace(dropWorkspaceIdx, WINDOW, this);
+    // The one write in the gathering half, and it is an argument hand-off:
+    // dropAnchorAtOverviewCursorOnWorkspace reads the destination overview's
+    // cursor rather than taking a point.
+    site.dropOverview->lastMousePosLocal = site.dropPointLocal;
+    site.dropAnchor                      = site.dropOverview->dropAnchorAtOverviewCursorOnWorkspace(site.dropWorkspaceIdx, site.window, this);
+    site.dropDirection                   = site.dropAnchor.direction;
+
+    site.facts.haveAnchor           = static_cast<bool>(site.dropAnchor.window);
+    site.facts.haveDirection        = !site.dropDirection.empty();
+    site.facts.onScrollingCrossAxis = site.dropScrollingPrimaryHorizontal ? site.dropDirection == "u" || site.dropDirection == "d" :
+                                                                           site.dropDirection == "l" || site.dropDirection == "r";
+    // The two queries below are asked under exactly the guards the branches
+    // that used to ask them asked under. They are reads, but a refactor that
+    // quietly starts calling layoutTarget() or isFullscreen() on windows the
+    // old code never asked about is not a refactor.
+    site.facts.anchorHasLayoutTarget =
+        site.facts.haveAnchor && site.facts.haveDirection && !site.facts.scrollingLayout && static_cast<bool>(site.dropAnchor.window->layoutTarget());
+    site.facts.anchorFullscreen = site.facts.scrollingLayout && site.facts.haveAnchor && site.facts.onScrollingCrossAxis &&
+        Fullscreen::controller()->isFullscreen(site.dropAnchor.window);
+}
+
+void CScrollOverview::commitDropMinimize(const SOverviewDropSite& site) {
+    // Y5/Y8. Was a bare Minimize::minimize, which is exactly what X54's
+    // "everything that minimizes must come through these" forbids -- so a
+    // window dropped on the dock TELEPORTED while a clicked one flew. Now it
+    // flies like every other minimize, and `true` asks the icon it lands in
+    // to bounce once.
+    ScrollOverview::Dock::minimizeWithFlight(site.dropMonitor, site.window, true);
+    clearDragPending();
+    damage();
+    if (site.dropOverview && site.dropOverview != this)
+        site.dropOverview->damage();
+}
+
+void CScrollOverview::commitDropCancel(const SOverviewDropSite& site) {
+    // OVERVIEW_CPP_SPEC D5. Nothing is moved, so the window keeps its
+    // workspace, position and size — the drop is correctly a no-op. Without
+    // the seed below the tile still teleports home in one frame (measured:
+    // 326 px in 1 frame at 60fps), which reads as a glitch rather than a
+    // rejected drop. U4's reflow already eases a tile from wherever it is to
+    // its slot, so hand it the proxy's box and it carries the return.
+    if (const auto MON = pMonitor.lock(); site.window && MON) {
+        if (CBox slot; overviewGridSlot(site.window, MON, slot)) {
+            const auto  WSIDX    = dragWorkspaceIndex(site.window);
+            const auto  FLOATBOX = draggedWindowBox(WSIDX);
+            const float SCALEDIV = std::max(scale->value(), 0.01F) * std::max(MON->m_scale, 0.01F);
+
+            g_gridReflows[site.window.get()] = SGridReflow{site.window, CBox{overviewPointToGlobal(WSIDX, FLOATBOX.pos()), FLOATBOX.size() * (1.F / SCALEDIV)}, slot,
+                                                          Time::steadyNow(), g_overviewFrame, false};
+            g_gridReflowActive               = true;
+        }
     }
 
-    const auto DROPANCHOR = dropAnchor.window;
-    dropDirection         = dropAnchor.direction;
-    const bool DROPPINGONSCROLLINGCROSSAXIS =
-        DROPSCROLLINGPRIMARYHORIZONTAL ? dropDirection == "u" || dropDirection == "d" : dropDirection == "l" || dropDirection == "r";
+    clearDragPending();
+    damage();
+    if (site.dropOverview && site.dropOverview != this)
+        site.dropOverview->damage();
+}
 
-    if (DROPSCROLLINGLAYOUT && DROPANCHOR && DROPPINGONSCROLLINGCROSSAXIS && Fullscreen::controller()->isFullscreen(DROPANCHOR)) {
+void CScrollOverview::commitDrop(const SOverviewDropSite& site, const ScrollOverview::Drop::SDecision& DECISION) {
+    const auto  WINDOW        = site.window;
+    const auto& TARGET        = site.target;
+    const auto& SPACE         = site.space;
+    const auto  DROPWORKSPACE = site.dropWorkspace;
+    const auto  DROPMONITOR   = site.dropMonitor;
+    const auto  MONITOR       = site.monitor;
+    const auto  DROPANCHOR    = site.dropAnchor.window;
+    auto* const dropOverview  = site.dropOverview;
+
+    const auto RESTOREACTIVEWORKSPACE = [&]() {
+        if (MONITOR && site.activeWorkspaceBeforeDrop && MONITOR->m_activeWorkspace != site.activeWorkspaceBeforeDrop)
+            MONITOR->changeWorkspace(site.activeWorkspaceBeforeDrop, false, true, true);
+        if (DROPMONITOR && DROPMONITOR != MONITOR && site.dropActiveWorkspaceBeforeDrop && DROPMONITOR->m_activeWorkspace != site.dropActiveWorkspaceBeforeDrop)
+            DROPMONITOR->changeWorkspace(site.dropActiveWorkspaceBeforeDrop, false, true, true);
+    };
+    const auto RESTOREVIEWPORTWORKSPACE = [&]() {
+        if (!site.activeWorkspaceBeforeDrop)
+            return;
+
+        for (size_t i = 0; i < images.size(); ++i) {
+            if (images[i] && images[i]->pWorkspace == site.activeWorkspaceBeforeDrop) {
+                viewportCurrentWorkspace = i;
+                return;
+            }
+        }
+    };
+
+    if (DECISION.clearAnchorFullscreen) {
         Fullscreen::controller()->setFullscreenMode(DROPANCHOR, Fullscreen::FSMODE_NONE);
-        if (const auto ANCHORDATA = DROPSCROLLINGALGO->dataFor(DROPANCHOR->layoutTarget()); ANCHORDATA) {
+        if (const auto ANCHORDATA = site.dropScrollingAlgo->dataFor(DROPANCHOR->layoutTarget()); ANCHORDATA) {
             if (const auto ANCHORCOL = ANCHORDATA->column.lock())
                 ANCHORCOL->setColumnWidth(1.F);
         }
     }
 
-    if (RETILEONEND && MOVEWORKSPACE) {
-        Desktop::globalWindowController()->moveWindowToWorkspace(WINDOW, DROPWORKSPACE);
-        RESTOREACTIVEWORKSPACE();
+    using enum ScrollOverview::Drop::EAction;
+    using EPlacement = ScrollOverview::Drop::EPlacement;
 
-        if (DROPSCROLLINGLAYOUT) {
-            if (!dropPointMapsIntoCard)
-                moveOverviewScrollingTargetToWorkspaceEdge(TARGET, 1);
-            else if (DROPANCHOR && !dropDirection.empty())
-                moveOverviewTargetNextToWindow(TARGET, DROPANCHOR, dropDirection);
-            else if (!DROPANCHOR)
-                moveOverviewScrollingTargetToWorkspaceEdge(TARGET, dropSide);
+    switch (DECISION.action) {
+        case RetileMove: {
+            Desktop::globalWindowController()->moveWindowToWorkspace(WINDOW, DROPWORKSPACE);
+            RESTOREACTIVEWORKSPACE();
+
+            switch (DECISION.placement) {
+                case EPlacement::ScrollEdgeFar: moveOverviewScrollingTargetToWorkspaceEdge(TARGET, 1); break;
+                case EPlacement::NextToAnchor: moveOverviewTargetNextToWindow(TARGET, DROPANCHOR, site.dropDirection); break;
+                case EPlacement::ScrollEdgeSide: moveOverviewScrollingTargetToWorkspaceEdge(TARGET, site.dropSide); break;
+                default: break;
+            }
+
+            TARGET->rememberFloatingSize(drag.originalFloatSize);
+            RESTOREACTIVEWORKSPACE();
+            RESTOREVIEWPORTWORKSPACE();
+            break;
         }
+        case RetileLocal: {
+            TARGET->damageEntire();
 
-        TARGET->rememberFloatingSize(drag.originalFloatSize);
-        RESTOREACTIVEWORKSPACE();
-        RESTOREVIEWPORTWORKSPACE();
-    } else if (RETILEONEND) {
-        TARGET->damageEntire();
+            switch (DECISION.placement) {
+                case EPlacement::SwitchTargets:
+                    DROPANCHOR->layoutTarget()->damageEntire();
+                    g_layoutManager->switchTargets(TARGET, DROPANCHOR->layoutTarget(), true);
+                    DROPANCHOR->layoutTarget()->damageEntire();
+                    break;
+                case EPlacement::NextToAnchor: moveOverviewTargetNextToWindow(TARGET, DROPANCHOR, site.dropDirection); break;
+                case EPlacement::ScrollEdgeSide: moveOverviewScrollingTargetToWorkspaceEdge(TARGET, site.dropSide); break;
+                default: break;
+            }
 
-        if (DROPANCHOR && !dropDirection.empty() && !DROPSCROLLINGLAYOUT && DROPANCHOR->layoutTarget()) {
-            DROPANCHOR->layoutTarget()->damageEntire();
-            g_layoutManager->switchTargets(TARGET, DROPANCHOR->layoutTarget(), true);
-            DROPANCHOR->layoutTarget()->damageEntire();
-        } else if (DROPANCHOR && !dropDirection.empty())
-            moveOverviewTargetNextToWindow(TARGET, DROPANCHOR, dropDirection);
-        else if (DROPSCROLLINGLAYOUT && !DROPANCHOR)
-            moveOverviewScrollingTargetToWorkspaceEdge(TARGET, dropSide);
+            TARGET->rememberFloatingSize(drag.originalFloatSize);
+            TARGET->warpPositionSize();
+            TARGET->damageEntire();
 
-        TARGET->rememberFloatingSize(drag.originalFloatSize);
-        TARGET->warpPositionSize();
-        TARGET->damageEntire();
+            Desktop::focusState()->fullWindowFocus(WINDOW, Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
 
-        Desktop::focusState()->fullWindowFocus(WINDOW, Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
-
-        if (const auto WORKSPACE = SPACE->workspace())
-        WORKSPACE->updateWindows();
-    } else if (WINDOW && MOVEWORKSPACE) {
-        Desktop::globalWindowController()->moveWindowToWorkspace(WINDOW, DROPWORKSPACE);
-        RESTOREACTIVEWORKSPACE();
-        if (TARGET) {
-            // X41/X42: the proxy box is the MISSION-CONTROL SLOT, i.e. real size
-            // x bestScale (overviewGridLayout), so descaling it by the overview
-            // and monitor scale alone still commits a shrunken window. bestScale
-            // is capped at 1.0, which is why uniform fixture tiles never caught
-            // this and only a large window shows it. A drag moves a window; it
-            // must never resize it.
-            const bool HAVEORIGINAL = !drag.originalBox.empty();
-            const auto GLOBALSIZE =
-                HAVEORIGINAL ? drag.originalBox.size() :
-                               DRAGBOX.size() * (1.F / (std::max(dropOverview->scale->value(), 0.01F) * std::max(DROPMONITOR ? DROPMONITOR->m_scale : 1.F, 0.01F)));
-            // X42: a strip-mini drop targets a card that is off-screen by
-            // construction, so there is no in-card point to map the cursor to.
-            // Keeping the window where it already was is what stops every
-            // arrival stacking up on the workspace centre.
-            auto GLOBALBOX = dropPointMapsIntoCard ? CBox{dropOverview->overviewPointToGlobal(dropWorkspaceIdx, DRAGBOX.pos()), GLOBALSIZE} :
-                HAVEORIGINAL                           ? CBox{drag.originalBox.pos(), GLOBALSIZE} :
-                                                         centerBoxInWorkspace(CBox{Vector2D{}, GLOBALSIZE}, DROPWORKSPACE, DROPMONITOR);
-            GLOBALBOX = clampBoxToWorkspace(GLOBALBOX, DROPWORKSPACE, DROPMONITOR, WINDOW->getRealBorderSize());
+            if (const auto WORKSPACE = SPACE->workspace())
+                WORKSPACE->updateWindows();
+            break;
+        }
+        case FloatMove: {
+            Desktop::globalWindowController()->moveWindowToWorkspace(WINDOW, DROPWORKSPACE);
+            RESTOREACTIVEWORKSPACE();
+            if (TARGET) {
+                // X41/X42: the proxy box is the MISSION-CONTROL SLOT, i.e. real size
+                // x bestScale (overviewGridLayout), so descaling it by the overview
+                // and monitor scale alone still commits a shrunken window. bestScale
+                // is capped at 1.0, which is why uniform fixture tiles never caught
+                // this and only a large window shows it. A drag moves a window; it
+                // must never resize it.
+                const auto GLOBALSIZE = DECISION.useOriginalBox ?
+                    drag.originalBox.size() :
+                    site.dragBox.size() * (1.F / (std::max(dropOverview->scale->value(), 0.01F) * std::max(DROPMONITOR ? DROPMONITOR->m_scale : 1.F, 0.01F)));
+                // X42: a strip-mini drop targets a card that is off-screen by
+                // construction, so there is no in-card point to map the cursor to.
+                // Keeping the window where it already was is what stops every
+                // arrival stacking up on the workspace centre.
+                auto GLOBALBOX = DECISION.mapPointIntoCard ? CBox{dropOverview->overviewPointToGlobal(site.dropWorkspaceIdx, site.dragBox.pos()), GLOBALSIZE} :
+                    DECISION.useOriginalBox                ? CBox{drag.originalBox.pos(), GLOBALSIZE} :
+                                                             centerBoxInWorkspace(CBox{Vector2D{}, GLOBALSIZE}, DROPWORKSPACE, DROPMONITOR);
+                GLOBALBOX      = clampBoxToWorkspace(GLOBALBOX, DROPWORKSPACE, DROPMONITOR, WINDOW->getRealBorderSize());
 
 
+                TARGET->setPositionGlobal(GLOBALBOX);
+                TARGET->warpPositionSize();
+            }
+
+            RESTOREACTIVEWORKSPACE();
+            RESTOREVIEWPORTWORKSPACE();
+            break;
+        }
+        case FloatLocal: {
+            const auto workspaceIdx = dragWorkspaceIndex(WINDOW);
+
+            const auto FLOATBOX  = draggedWindowBox(workspaceIdx);
+            const auto GLOBALPOS = overviewPointToGlobal(workspaceIdx, FLOATBOX.pos());
+            // X41: same mission-control-slot descaling bug as the branch above. This
+            // is the path a CANCELLED drag takes when the button comes up over the
+            // window's own card, so committing the slot size shrinks it every time.
+            const auto GLOBALSIZE = DECISION.useOriginalBox ?
+                drag.originalBox.size() :
+                FLOATBOX.size() * (1.F / (std::max(scale->value(), 0.01F) * std::max(MONITOR ? MONITOR->m_scale : 1.F, 0.01F)));
+            auto       GLOBALBOX  = CBox{GLOBALPOS, GLOBALSIZE};
+            const auto WORKSPACE  = workspaceIdx < images.size() && images[workspaceIdx] ? images[workspaceIdx]->pWorkspace : WINDOW->m_workspace;
+
+            GLOBALBOX = clampBoxToWorkspace(GLOBALBOX, WORKSPACE, MONITOR, WINDOW->getRealBorderSize());
+
+            TARGET->damageEntire();
             TARGET->setPositionGlobal(GLOBALBOX);
             TARGET->warpPositionSize();
+            TARGET->damageEntire();
+            break;
         }
-
-        RESTOREACTIVEWORKSPACE();
-        RESTOREVIEWPORTWORKSPACE();
-    } else if (TARGET && !drag.startedTiled) {
-        const auto workspaceIdx = dragWorkspaceIndex(WINDOW);
-
-        const auto FLOATBOX   = draggedWindowBox(workspaceIdx);
-        const auto GLOBALPOS  = overviewPointToGlobal(workspaceIdx, FLOATBOX.pos());
-        // X41: same mission-control-slot descaling bug as the branch above. This
-        // is the path a CANCELLED drag takes when the button comes up over the
-        // window's own card, so committing the slot size shrinks it every time.
-        const auto GLOBALSIZE = drag.originalBox.empty() ?
-            FLOATBOX.size() * (1.F / (std::max(scale->value(), 0.01F) * std::max(MONITOR ? MONITOR->m_scale : 1.F, 0.01F))) :
-            drag.originalBox.size();
-        auto       GLOBALBOX  = CBox{GLOBALPOS, GLOBALSIZE};
-        const auto WORKSPACE  = workspaceIdx < images.size() && images[workspaceIdx] ? images[workspaceIdx]->pWorkspace : WINDOW->m_workspace;
-
-        GLOBALBOX = clampBoxToWorkspace(GLOBALBOX, WORKSPACE, MONITOR, WINDOW->getRealBorderSize());
-
-        TARGET->damageEntire();
-        TARGET->setPositionGlobal(GLOBALBOX);
-        TARGET->warpPositionSize();
-        TARGET->damageEntire();
+        default: break;
     }
 
-    if (RESTORESOURCEFULLSCREENFOCUS) {
-        const bool POSTHIDDENEVENT = MONITOR && ORIGINALWORKSPACE == MONITOR->m_activeWorkspace;
+    if (DECISION.restoreSourceFullscreenFocus) {
+        const bool POSTHIDDENEVENT = MONITOR && site.originalWorkspace == MONITOR->m_activeWorkspace;
 
         if (POSTHIDDENEVENT) {
-            closeOnWindow = SOURCEFULLSCREENWINDOW;
-            rememberSelection(SOURCEFULLSCREENWINDOW);
-            focusOverviewFullscreenWindowIfActiveWorkspace(SOURCEFULLSCREENWINDOW, ORIGINALWORKSPACE, MONITOR);
-            emitFullscreenVisibilityState(SOURCEFULLSCREENWINDOW, true);
+            closeOnWindow = site.sourceFullscreenWindow;
+            rememberSelection(site.sourceFullscreenWindow);
+            focusOverviewFullscreenWindowIfActiveWorkspace(site.sourceFullscreenWindow, site.originalWorkspace, MONITOR);
+            emitFullscreenVisibilityState(site.sourceFullscreenWindow, true);
         }
     }
 
@@ -2192,6 +2270,32 @@ void CScrollOverview::endWindowDrag() {
         dropOverview->rebuildPending = true;
         dropOverview->damage();
     }
+}
+
+// Gather, decide, commit -- and ask the pure resolver after each gathering
+// stage, so the two early exits are the same ladder the final one is rather
+// than a second copy of it.
+void CScrollOverview::endWindowDrag() {
+    // Before anything below reads a slot: the D5 return seed wants this window's
+    // slot in the FULL grid, not the gap it has been leaving open.
+    g_dragReflowExcluded = nullptr;
+
+    SOverviewDropSite site;
+
+    gatherDropSite(site);
+    if (ScrollOverview::Drop::resolve(site.facts).action == ScrollOverview::Drop::EAction::Minimize) {
+        commitDropMinimize(site);
+        return;
+    }
+
+    gatherDropWorkspace(site);
+    if (ScrollOverview::Drop::resolve(site.facts).action == ScrollOverview::Drop::EAction::CancelToGrid) {
+        commitDropCancel(site);
+        return;
+    }
+
+    gatherDropAnchor(site);
+    commitDrop(site, ScrollOverview::Drop::resolve(site.facts));
 }
 
 void CScrollOverview::endWindowResize() {
@@ -2494,24 +2598,16 @@ size_t CScrollOverview::dragWorkspaceIndex(PHLWINDOW window) const {
 // and grid cells, window tiles. An arrow then picks the nearest box in that
 // direction. Crossing from one surface to the next costs nothing because it is
 // the same geometry either way, which is what "arrow through everything" means.
-bool CScrollOverview::moveSelection(const std::string& direction) {
-    const auto MONITOR = pMonitor.lock();
-    if (!MONITOR)
-        return false;
+struct SOverviewNavTarget {
+    CBox             box;
+    EOverviewNavZone zone;
+    int              index = -1; // Desktop: workspace index. Result: result index.
+    PHLWINDOW        window;     // Tile
+};
 
-    const bool LEFT = direction == "left", RIGHT = direction == "right", UP = direction == "up", DOWN = direction == "down";
-    if (!LEFT && !RIGHT && !UP && !DOWN)
-        return false;
-
-    struct SNavTarget {
-        CBox             box;
-        EOverviewNavZone zone;
-        int              index = -1; // Desktop: workspace index. Result: result index.
-        PHLWINDOW        window;     // Tile
-    };
-
-    std::vector<SNavTarget> targets;
-
+// Everything on screen an arrow can land on, in one list of boxes. Reads
+// state; changes none.
+void CScrollOverview::collectNavTargets(PHLMONITOR MONITOR, std::vector<SOverviewNavTarget>& targets) const {
     for (size_t i = 0; i < images.size(); ++i) {
         if (!images[i] || !images[i]->pWorkspace)
             continue;
@@ -2544,10 +2640,11 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
         }
     }
 
-    if (targets.empty())
-        return false;
+}
 
-    // Where the selection is NOW.
+// Where the selection is NOW. Empty when the zone has nothing selected in it,
+// which is what the caller's "land somewhere" fallback keys off.
+CBox CScrollOverview::currentNavBox(const std::vector<SOverviewNavTarget>& targets, PHLMONITOR MONITOR) const {
     CBox current;
     switch (g_search.nav.zone) {
         case EOverviewNavZone::Result:
@@ -2561,13 +2658,13 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
             break;
         case EOverviewNavZone::Desktop: current = stripCellBox(viewportCurrentWorkspace, MONITOR, scale->value()); break;
     }
+    return current;
+}
 
-    // No selection yet -- the first arrow press has to land SOMEWHERE or the
-    // overview is unreachable by keyboard until the mouse has been used, which
-    // is the defect this whole item exists to fix.
-    if (current.width <= 1.F || current.height <= 1.F)
-        current = targets.front().box;
-
+// The pick, and it is a pure function of the boxes: no compositor state, no
+// members, so the walk can be reasoned about (and one day tabled) on its own.
+static const SOverviewNavTarget* pickNavTarget(const std::vector<SOverviewNavTarget>& targets, const CBox& current, EOverviewNavZone zone, bool LEFT, bool RIGHT,
+                                               bool DOWN) {
     const Vector2D CUR = current.middle();
 
     // Ordering, in this order and for this reason:
@@ -2598,10 +2695,10 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
         }
     };
 
-    const SNavTarget* best = nullptr;
-    SScore            bestScore;
-    const SNavTarget* near = nullptr;
-    SScore            nearScore;
+    const SOverviewNavTarget* best = nullptr;
+    SScore                    bestScore;
+    const SOverviewNavTarget* near = nullptr;
+    SScore                    nearScore;
 
     for (const auto& TARGET : targets) {
         const Vector2D CENTER  = TARGET.box.middle();
@@ -2630,15 +2727,39 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
         // the right" of it -- jumped straight out of the list and into the grid.
         // Crossing between surfaces is still the point of this walk, it just has
         // to be the LAST resort rather than the first.
-        if (TARGET.zone == g_search.nav.zone && (!near || SCORE.beats(nearScore))) {
+        if (TARGET.zone == zone && (!near || SCORE.beats(nearScore))) {
             nearScore = SCORE;
             near      = &TARGET;
         }
     }
 
-    if (near)
-        best = near;
+    return near ? near : best;
+}
 
+bool CScrollOverview::moveSelection(const std::string& direction) {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return false;
+
+    const bool LEFT = direction == "left", RIGHT = direction == "right", UP = direction == "up", DOWN = direction == "down";
+    if (!LEFT && !RIGHT && !UP && !DOWN)
+        return false;
+
+    std::vector<SOverviewNavTarget> targets;
+    collectNavTargets(MONITOR, targets);
+
+    if (targets.empty())
+        return false;
+
+    CBox current = currentNavBox(targets, MONITOR);
+
+    // No selection yet -- the first arrow press has to land SOMEWHERE or the
+    // overview is unreachable by keyboard until the mouse has been used, which
+    // is the defect this whole item exists to fix.
+    if (current.width <= 1.F || current.height <= 1.F)
+        current = targets.front().box;
+
+    const auto* const best = pickNavTarget(targets, current, g_search.nav.zone, LEFT, RIGHT, DOWN);
     if (!best)
         return false;
 
@@ -3332,42 +3453,14 @@ PHLWINDOW CScrollOverview::windowAtStripPoint(const Vector2D& point, CBox* miniB
     return nullptr;
 }
 
-void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now) {
-    if (!monitor || overviewStripLogicalHeight(monitor) <= 0.F)
-        return;
+// X3: the reference wraps the whole strip in ONE rounded container panel
+// (ii/modules/ii/overview/OverviewWidget.qml:126-135) -- padding 10, radius
+// largeWorkspaceRadius + padding, a translucent surface colour. Drawn once,
+// before the cells, so the cells read as sitting on it.
+void CScrollOverview::renderStripPanel(PHLMONITOR monitor, float renderScale, const SStripStyle& STYLE) {
+    const float FADE  = STYLE.fade;
+    const int   ROUND = STYLE.round;
 
-    // User, 2026-08-06: the strip FADES in, and a toggle halfway through
-    // reverses the fade. Driven off the open scale the overview already
-    // animates, so the reversal is not a second state that could disagree with
-    // the first -- the close retargets that scale from wherever it is and this
-    // follows. Everything the strip draws is multiplied by it, minis included.
-    const float FADE = overviewGridProgress(renderScale);
-    if (FADE < 0.01F)
-        return;
-
-    auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->drag.activeWindow ? g_pointerGrabOverview : this;
-    const auto DRAGGED     = getOverviewWindowToShow(dragContext->drag.activeWindow.lock());
-
-    size_t hoveredIdx = images.size();
-    if (DRAGGED && isOverviewPointerOnMonitor(monitor)) {
-        const auto HOVERED = workspaceAtStripPoint(lastMousePosLocal, &hoveredIdx);
-
-        // X3 delta 5: the reference sets hoveredWhileDragging only when the cell is
-        // NOT the drag's own source workspace (OverviewWidget.qml:215). Dropping a
-        // window back where it came from is a no-op, so it must not light up as a
-        // target. Only the HIGHLIGHT is suppressed -- the cell stays a live drop
-        // target, exactly as the reference still claims it.
-        if (HOVERED && HOVERED == dragContext->drag.originalWorkspace.lock())
-            hoveredIdx = images.size();
-    }
-
-    const auto CARDROUND = getOverviewCardRounding(monitor, renderScale);
-    const int  ROUND      = CARDROUND.rounding;
-
-    // X3: the reference wraps the whole strip in ONE rounded container panel
-    // (ii/modules/ii/overview/OverviewWidget.qml:126-135) -- padding 10, radius
-    // largeWorkspaceRadius + padding, a translucent surface colour. Drawn once,
-    // before the cells, so the cells read as sitting on it.
     if (!images.empty()) {
         const auto FIRSTLOGICAL = stripCellLogicalBox(0);
         const auto LASTLOGICAL  = stripCellLogicalBox(images.size() - 1);
@@ -3414,64 +3507,58 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
                 // private chrome FB or the strip changes strength whenever the
                 // capture is missing.
                 const int CHROME_PASSES = ScrollOverview::Config::getValue<int>("decoration:blur:passes");
-                OverviewRender::queueBlur(PANEL, PANELROUND, CARDROUND.power, FADE, true, CHROME_PASSES);
+                OverviewRender::queueBlur(PANEL, PANELROUND, STYLE.power, FADE, true, CHROME_PASSES);
 
                 CRectPassElement::SRectData panel;
                 panel.box           = PANEL;
                 panel.color = INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.25F * FADE} : INACTIVE.m_colors[0].modifyA(0.25F * FADE);
                 panel.round         = PANELROUND;
-                panel.roundingPower = CARDROUND.power;
+                panel.roundingPower = STYLE.power;
                 g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(panel));
             }
         }
     }
+}
 
-    // X3: the reference rounds only the GRID's outer corners at the large
-    // radius and every inner corner at verysmall (OverviewWidget.qml:171-175).
-    // The strip is one row, so cell 0 is large on its left corners, the last
-    // cell large on its right, and every facing corner is tight.
-    //
-    // CRectPassElement carries ONE radius, so the asymmetry is drawn as two
-    // rects of the SAME box clipped to opposite halves. The clips do not
-    // overlap, which is the point: a translucent backdrop drawn twice over the
-    // same pixel would blend to the wrong alpha.
-    //
-    // ponytail: the inner radius is the reference's verysmall:large ratio
-    // (8:23) applied to whatever the outer radius resolves to, rather than a
-    // literal 8. E8-c pinned the outer radius to the live desktop curve, so a
-    // hardcoded inner would stop tracking the theme the moment that changes.
-    const int INNERROUND = std::max(1, sc<int>(std::round(sc<float>(ROUND) * 8.F / 23.F)));
+// X3: the reference rounds only the GRID's outer corners at the large
+// radius and every inner corner at verysmall (OverviewWidget.qml:171-175).
+// The strip is one row, so cell 0 is large on its left corners, the last
+// cell large on its right, and every facing corner is tight.
+//
+// CRectPassElement carries ONE radius, so the asymmetry is drawn as two
+// rects of the SAME box clipped to opposite halves. The clips do not
+// overlap, which is the point: a translucent backdrop drawn twice over the
+// same pixel would blend to the wrong alpha.
+void CScrollOverview::renderStripCellRect(const CBox& cell, const CHyprColor& color, bool largeLeft, bool largeRight, const SStripStyle& STYLE) const {
+    if (largeLeft == largeRight) {
+        CRectPassElement::SRectData r;
+        r.box           = cell;
+        r.color         = color;
+        r.round         = largeLeft ? STYLE.round : STYLE.innerRound;
+        r.roundingPower = STYLE.power;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
+        return;
+    }
 
-    auto addCellRect = [&](const CBox& cell, const CHyprColor& color, bool largeLeft, bool largeRight) {
-        if (largeLeft == largeRight) {
-            CRectPassElement::SRectData r;
-            r.box           = cell;
-            r.color         = color;
-            r.round         = largeLeft ? ROUND : INNERROUND;
-            r.roundingPower = CARDROUND.power;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
-            return;
-        }
+    const float MID = sc<float>(cell.x) + std::round(sc<float>(cell.width) / 2.F);
 
-        const float MID = sc<float>(cell.x) + std::round(sc<float>(cell.width) / 2.F);
+    for (int half = 0; half < 2; ++half) {
+        const bool LEFT = half == 0;
 
-        for (int half = 0; half < 2; ++half) {
-            const bool LEFT = half == 0;
-
-            CRectPassElement::SRectData r;
-            r.box           = cell;
-            r.color         = color;
-            r.round         = (LEFT ? largeLeft : largeRight) ? ROUND : INNERROUND;
-            r.roundingPower = CARDROUND.power;
-            r.clipBox       = LEFT ? CBox{sc<float>(cell.x), sc<float>(cell.y), MID - sc<float>(cell.x), sc<float>(cell.height)} :
-                                     CBox{MID, sc<float>(cell.y), sc<float>(cell.x) + sc<float>(cell.width) - MID, sc<float>(cell.height)};
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
-        }
-    };
+        CRectPassElement::SRectData r;
+        r.box           = cell;
+        r.color         = color;
+        r.round         = (LEFT ? largeLeft : largeRight) ? STYLE.round : STYLE.innerRound;
+        r.roundingPower = STYLE.power;
+        r.clipBox       = LEFT ? CBox{sc<float>(cell.x), sc<float>(cell.y), MID - sc<float>(cell.x), sc<float>(cell.height)} :
+                                 CBox{MID, sc<float>(cell.y), sc<float>(cell.x) + sc<float>(cell.width) - MID, sc<float>(cell.height)};
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
+    }
+}
 
     // X3: a 2px accent border on a cell, the reference's border.width 2. Used
     // both for the focused desktop (OverviewWidget.qml:432-433) and for the
-    // drag-hover state (OverviewWidget.qml:179-180) -- one lambda so the two
+    // drag-hover state (OverviewWidget.qml:179-180) -- one function so the two
     // cannot drift apart.
     // BUG (user, 2026-08-02): this used ONE radius for every cell, so the
     // outline traced a shape the cell underneath does not have -- large curves
@@ -3486,25 +3573,154 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     // highlight and the tile ring now all read general:col.active_border, so a
     // theme switch moves them together. The 2026-08-03 white is superseded
     // here deliberately; do not restore it as a regression fix.
-    auto addCellBorder = [&](const CBox& cell, bool largeLeft, bool largeRight) {
-        const auto OUTLINE = ScrollOverview::Config::highlightColor();
-        const int BORDER = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
-        // Inset by the full stroke width: renderBorder centres nothing, it grows
-        // outward from the box, so the box has to be the INNER rectangle for the
-        // stroke to land inside the tile. Radii shrink with it or the curve would
-        // no longer be concentric with the fill's.
-        const CBox INNER = cell.copy().expand(-BORDER);
+void CScrollOverview::renderStripCellBorder(PHLMONITOR monitor, const CBox& cell, bool largeLeft, bool largeRight, const SStripStyle& STYLE) const {
+    const auto OUTLINE = ScrollOverview::Config::highlightColor();
+    const int  BORDER  = std::max(1, sc<int>(std::round(2.F * monitor->m_scale)));
+    // Inset by the full stroke width: renderBorder centres nothing, it grows
+    // outward from the box, so the box has to be the INNER rectangle for the
+    // stroke to land inside the tile. Radii shrink with it or the curve would
+    // no longer be concentric with the fill's.
+    const CBox INNER = cell.copy().expand(-BORDER);
 
-        g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewSplitBorderPassElement>(COverviewSplitBorderPassElement::SData{
-            .box           = INNER,
-            .color         = ::Config::CGradientValueData{OUTLINE.modifyA(1.F)},
-            .roundLeft     = std::max(0, (largeLeft ? ROUND : INNERROUND) - BORDER),
-            .roundRight    = std::max(0, (largeRight ? ROUND : INNERROUND) - BORDER),
-            .roundingPower = CARDROUND.power,
-            .borderSize    = BORDER,
-            .a             = FADE,
-        }));
-    };
+    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewSplitBorderPassElement>(COverviewSplitBorderPassElement::SData{
+        .box           = INNER,
+        .color         = ::Config::CGradientValueData{OUTLINE.modifyA(1.F)},
+        .roundLeft     = std::max(0, (largeLeft ? STYLE.round : STYLE.innerRound) - BORDER),
+        .roundRight    = std::max(0, (largeRight ? STYLE.round : STYLE.innerRound) - BORDER),
+        .roundingPower = STYLE.power,
+        .borderSize    = BORDER,
+        .a             = STYLE.fade,
+    }));
+}
+
+// One strip cell: backdrop, workspace number, the minis of every window on it,
+// and the hover/active outlines. Drawn in this order for a reason -- the
+// outlines have to land on top of a cell full of previews.
+void CScrollOverview::renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, const CBox& CELL, const PHLWINDOW& DRAGGED, bool hovered, float renderScale,
+                                      const Time::steady_tp& now, const SStripStyle& STYLE) {
+    const auto& wimg = images[workspaceIdx];
+    const float FADE = STYLE.fade;
+
+    renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false, FADE);
+
+    // X4: the cell backdrop is themed from general:col.inactive_border, the
+    // mirror of the hover tint's col.active_border below. Only the hue is
+    // inherited; alpha stays at the tuned 0.38. Black is the no-theme fallback.
+    const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
+
+    const bool ATLEFT  = workspaceIdx == 0;
+    const bool ATRIGHT = workspaceIdx + 1 == images.size();
+
+    renderStripCellRect(CELL, INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.38F * FADE} : INACTIVE.m_colors[0].modifyA(0.38F * FADE), ATLEFT, ATRIGHT, STYLE);
+
+    // X3: the deprecated overview centres a large, faint workspace number in
+    // every cell (ii/modules/ii/overview/OverviewWidget.qml:182-193): 250px
+    // type at the overview's own scale, i.e. 250/1600 = 15.6% of a cell's
+    // height, DemiBold, foreground at alpha 0.2. Reproduced as a fraction of
+    // the strip cell so it tracks the strip instead of a fixed pixel size.
+    // ponytail: white is the colour source. Hyprland exposes no foreground
+    // text colour to inherit -- the same gap renderSearch's FG lives with.
+    const auto NUMTEX = OverviewRender::text(std::to_string(wimg->pWorkspace->m_id), CHyprColor{1.F, 1.F, 1.F, 0.20F},
+                                                    std::max(1, sc<int>(std::round(sc<float>(CELL.height) * 0.156F))), false, "", 0, 600);
+    if (NUMTEX && NUMTEX->ok()) {
+        CBox numBox = {
+            CELL.x + std::round((sc<float>(CELL.width) - sc<float>(NUMTEX->m_size.x)) / 2.F),
+            CELL.y + std::round((sc<float>(CELL.height) - sc<float>(NUMTEX->m_size.y)) / 2.F),
+            sc<float>(NUMTEX->m_size.x),
+            sc<float>(NUMTEX->m_size.y),
+        };
+
+        CTexPassElement::SRenderData num;
+        num.tex = NUMTEX;
+        num.box = numBox.round();
+        num.a   = FADE;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(num));
+    }
+
+    const float MINIRENDERSCALE = renderScale * sc<float>(CELL.width) / std::max(1.F, sc<float>(monitor->m_size.x) * monitor->m_scale);
+
+    for (const auto& windowRef : wimg->windows) {
+        const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
+        if (!shouldShowOverviewWindow(WINDOW) || WINDOW == DRAGGED)
+            continue;
+
+        const auto MINI = stripMiniBox(CELL, WINDOW, monitor);
+
+        if (MINI.width < 2 || MINI.height < 2 || MINI.intersection(CELL).empty())
+            continue;
+
+        renderWindowLive(monitor, WINDOW, MINI.copy().round(), MINIRENDERSCALE, now, &CELL, false, FADE);
+    }
+
+    if (hovered) {
+        // X4: the hover tint is themed, from the same general:col.active_border
+        // that DropIndicator already reads. White is only the fallback for a
+        // theme that defines no gradient.
+        const auto ACCENT = ScrollOverview::Config::highlightColor();
+
+        renderStripCellRect(CELL, ACCENT.modifyA(0.22F * FADE), ATLEFT, ATRIGHT, STYLE);
+
+        // X3 delta 3: the reference borders the hovered cell as well as
+        // tinting it. Drawn after the tint and after the minis, so the drop
+        // target reads as a target even over a cell full of previews.
+        renderStripCellBorder(monitor, CELL, ATLEFT, ATRIGHT, STYLE);
+    }
+
+    // X3: the reference marks the focused desktop with a 2px accent border
+    // drawn over the windows (OverviewWidget.qml:414-436, colSecondary).
+    // The accent here is general:col.active_border -- the same source the
+    // hover tint above reads, so both follow the theme (X4).
+    // ponytail: no slide between cells. The reference animates x/y because
+    // its indicator is one moving item; here the cell rects are already
+    // laid out, so the border simply draws on whichever cell is active.
+    if (monitor->m_activeWorkspace && wimg->pWorkspace->m_id == monitor->m_activeWorkspace->m_id) {
+        renderStripCellBorder(monitor, CELL, ATLEFT, ATRIGHT, STYLE);
+    }
+}
+
+// The strip: one container panel, then one pass per cell. The style the two
+// share is resolved once here; nothing else about the order moved.
+void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now) {
+    if (!monitor || overviewStripLogicalHeight(monitor) <= 0.F)
+        return;
+
+    // User, 2026-08-06: the strip FADES in, and a toggle halfway through
+    // reverses the fade. Driven off the open scale the overview already
+    // animates, so the reversal is not a second state that could disagree with
+    // the first -- the close retargets that scale from wherever it is and this
+    // follows. Everything the strip draws is multiplied by it, minis included.
+    const float FADE = overviewGridProgress(renderScale);
+    if (FADE < 0.01F)
+        return;
+
+    auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->drag.activeWindow ? g_pointerGrabOverview : this;
+    const auto DRAGGED     = getOverviewWindowToShow(dragContext->drag.activeWindow.lock());
+
+    size_t hoveredIdx = images.size();
+    if (DRAGGED && isOverviewPointerOnMonitor(monitor)) {
+        const auto HOVERED = workspaceAtStripPoint(lastMousePosLocal, &hoveredIdx);
+
+        // X3 delta 5: the reference sets hoveredWhileDragging only when the cell is
+        // NOT the drag's own source workspace (OverviewWidget.qml:215). Dropping a
+        // window back where it came from is a no-op, so it must not light up as a
+        // target. Only the HIGHLIGHT is suppressed -- the cell stays a live drop
+        // target, exactly as the reference still claims it.
+        if (HOVERED && HOVERED == dragContext->drag.originalWorkspace.lock())
+            hoveredIdx = images.size();
+    }
+
+    const auto  CARDROUND = getOverviewCardRounding(monitor, renderScale);
+    SStripStyle style;
+    style.round = CARDROUND.rounding;
+    style.power = CARDROUND.power;
+    style.fade  = FADE;
+    // ponytail: the inner radius is the reference's verysmall:large ratio
+    // (8:23) applied to whatever the outer radius resolves to, rather than a
+    // literal 8. E8-c pinned the outer radius to the live desktop curve, so a
+    // hardcoded inner would stop tracking the theme the moment that changes.
+    style.innerRound = std::max(1, sc<int>(std::round(sc<float>(style.round) * 8.F / 23.F)));
+
+    renderStripPanel(monitor, renderScale, style);
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
@@ -3515,82 +3731,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         if (CELL.width <= 1 || !overviewBoxIntersectsMonitor(CELL, monitor))
             continue;
 
-        renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false, FADE);
-
-        // X4: the cell backdrop is themed from general:col.inactive_border, the
-        // mirror of the hover tint's col.active_border below. Only the hue is
-        // inherited; alpha stays at the tuned 0.38. Black is the no-theme fallback.
-        const auto INACTIVE = ScrollOverview::Config::getValue<::Config::CGradientValueData>("general:col.inactive_border");
-
-        const bool ATLEFT  = workspaceIdx == 0;
-        const bool ATRIGHT = workspaceIdx + 1 == images.size();
-
-        addCellRect(CELL, INACTIVE.m_colors.empty() ? CHyprColor{0.F, 0.F, 0.F, 0.38F * FADE} : INACTIVE.m_colors[0].modifyA(0.38F * FADE), ATLEFT, ATRIGHT);
-
-        // X3: the deprecated overview centres a large, faint workspace number in
-        // every cell (ii/modules/ii/overview/OverviewWidget.qml:182-193): 250px
-        // type at the overview's own scale, i.e. 250/1600 = 15.6% of a cell's
-        // height, DemiBold, foreground at alpha 0.2. Reproduced as a fraction of
-        // the strip cell so it tracks the strip instead of a fixed pixel size.
-        // ponytail: white is the colour source. Hyprland exposes no foreground
-        // text colour to inherit -- the same gap renderSearch's FG lives with.
-        const auto NUMTEX = OverviewRender::text(std::to_string(wimg->pWorkspace->m_id), CHyprColor{1.F, 1.F, 1.F, 0.20F},
-                                                        std::max(1, sc<int>(std::round(sc<float>(CELL.height) * 0.156F))), false, "", 0, 600);
-        if (NUMTEX && NUMTEX->ok()) {
-            CBox numBox = {
-                CELL.x + std::round((sc<float>(CELL.width) - sc<float>(NUMTEX->m_size.x)) / 2.F),
-                CELL.y + std::round((sc<float>(CELL.height) - sc<float>(NUMTEX->m_size.y)) / 2.F),
-                sc<float>(NUMTEX->m_size.x),
-                sc<float>(NUMTEX->m_size.y),
-            };
-
-            CTexPassElement::SRenderData num;
-            num.tex = NUMTEX;
-            num.box = numBox.round();
-            num.a   = FADE;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(num));
-        }
-
-        const float MINIRENDERSCALE = renderScale * sc<float>(CELL.width) / std::max(1.F, sc<float>(monitor->m_size.x) * monitor->m_scale);
-
-        for (const auto& windowRef : wimg->windows) {
-            const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
-            if (!shouldShowOverviewWindow(WINDOW) || WINDOW == DRAGGED)
-                continue;
-
-            const auto MINI = stripMiniBox(CELL, WINDOW, monitor);
-
-            if (MINI.width < 2 || MINI.height < 2 || MINI.intersection(CELL).empty())
-                continue;
-
-            renderWindowLive(monitor, WINDOW, MINI.copy().round(), MINIRENDERSCALE, now, &CELL, false, FADE);
-        }
-
-        if (workspaceIdx == hoveredIdx) {
-            // X4: the hover tint is themed, from the same general:col.active_border
-            // that DropIndicator already reads. White is only the fallback for a
-            // theme that defines no gradient.
-            const auto ACCENT = ScrollOverview::Config::highlightColor();
-
-            addCellRect(CELL, ACCENT.modifyA(0.22F * FADE), ATLEFT, ATRIGHT);
-
-            // X3 delta 3: the reference borders the hovered cell as well as
-            // tinting it. Drawn after the tint and after the minis, so the drop
-            // target reads as a target even over a cell full of previews.
-            addCellBorder(CELL, ATLEFT, ATRIGHT);
-        }
-
-        // X3: the reference marks the focused desktop with a 2px accent border
-        // drawn over the windows (OverviewWidget.qml:414-436, colSecondary).
-        // The accent here is general:col.active_border -- the same source the
-        // hover tint above reads, so both follow the theme (X4).
-        // ponytail: no slide between cells. The reference animates x/y because
-        // its indicator is one moving item; here the cell rects are already
-        // laid out, so the border simply draws on whichever cell is active.
-        if (monitor->m_activeWorkspace && wimg->pWorkspace->m_id == monitor->m_activeWorkspace->m_id) {
-            addCellBorder(CELL, ATLEFT, ATRIGHT);
-        }
-
+        renderStripCell(monitor, workspaceIdx, CELL, DRAGGED, workspaceIdx == hoveredIdx, renderScale, now, style);
     }
 }
 

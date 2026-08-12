@@ -18,10 +18,21 @@
 
 #include "Config.hpp"
 #include "DropIndicator.hpp"
+#include "DropDecision.hpp"
 #include "IOverview.hpp"
 
 class CMonitor;
 struct wl_event_source;
+
+// The live half of a released drag -- the window, the destination overview, the
+// anchor under the cursor. Defined in scrollOverview.cpp beside the only code
+// that fills it in; declared here because the gather/commit steps are private
+// members. The DECISION taken from it is the pure half, in DropDecision.hpp.
+struct SOverviewDropSite;
+
+// One thing an arrow key can land on: a strip cell, a search result, or a tile.
+// Same shape, same collect-then-pick split as the drop above.
+struct SOverviewNavTarget;
 
 class CScrollOverview : public IOverview {
   public:
@@ -79,7 +90,23 @@ class CScrollOverview : public IOverview {
     CBox         stripMiniBox(const CBox& cell, PHLWINDOW window, PHLMONITOR monitor) const;
     PHLWINDOW    windowAtStripPoint(const Vector2D& point, CBox* miniBox = nullptr) const;
     void         focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx);
+    // Everything the strip's cells and its container panel share: the two radii
+    // (outer corners large, facing corners tight), the rounding power, and the
+    // open/close fade every one of them multiplies its alpha by.
+    struct SStripStyle {
+        int   round      = 0;
+        int   innerRound = 1;
+        float power      = 2.F;
+        float fade       = 1.F;
+    };
     void         renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now);
+    void         renderStripPanel(PHLMONITOR monitor, float renderScale, const SStripStyle& style);
+    void         renderStripCellRect(const CBox& cell, const CHyprColor& color, bool largeLeft, bool largeRight, const SStripStyle& style) const;
+    void         renderStripCellBorder(PHLMONITOR monitor, const CBox& cell, bool largeLeft, bool largeRight, const SStripStyle& style) const;
+    void         renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, const CBox& cell, const PHLWINDOW& dragged, bool hovered, float renderScale,
+                                 const Time::steady_tp& now, const SStripStyle& style);
+    void         collectNavTargets(PHLMONITOR monitor, std::vector<SOverviewNavTarget>& targets) const;
+    CBox         currentNavBox(const std::vector<SOverviewNavTarget>& targets, PHLMONITOR monitor) const;
     void         renderSearch(PHLMONITOR monitor, float renderScale);
     void   moveViewportWorkspace(bool up);
     void   trackpadSwipeLayout(const PHLWORKSPACE target, const double delta);
@@ -122,6 +149,16 @@ class CScrollOverview : public IOverview {
     void      beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOrigin = nullptr);
     void      updateWindowDrag();
     void      endWindowDrag();
+    // The three gathering stages of a drop, in the order endWindowDrag() runs
+    // them: each one only asks what the stage before it did not already settle,
+    // because a release on the dock pill has to return before a workspace is
+    // queried and the anchor query writes the destination's cursor.
+    void      gatherDropSite(SOverviewDropSite& site);
+    void      gatherDropWorkspace(SOverviewDropSite& site);
+    void      gatherDropAnchor(SOverviewDropSite& site);
+    void      commitDropMinimize(const SOverviewDropSite& site);
+    void      commitDropCancel(const SOverviewDropSite& site);
+    void      commitDrop(const SOverviewDropSite& site, const ScrollOverview::Drop::SDecision& decision);
     float     dragMiniProgress() const;
     float     dragRecentreProgress() const;
     Vector2D  dragEffectiveGrabRatio() const;
