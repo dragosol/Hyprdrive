@@ -253,6 +253,7 @@ ApplicationWindow {
                             if (!p) return null;
                             if (p.id === "monitors") return monitorsC;
                             if (p.id === "profiles") return profilesC;
+                            if (p.id === "wallpaper") return wallpaperC;
                             return schemaC;
                         }
 
@@ -302,6 +303,7 @@ ApplicationWindow {
                     }
                     Component { id: monitorsC; MonitorsPane {} }
                     Component { id: profilesC; ProfilesPane {} }
+                    Component { id: wallpaperC; WallpaperPane {} }
 
                     StyledText {
                         anchors.centerIn: parent

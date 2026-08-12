@@ -106,6 +106,19 @@ else
     echo "theme-sync units NOT installed (no $UNITS or no systemctl)" >&2
 fi
 
+# --------------------------------------------------------------- slideshow --
+# Phase 12. The unit is laid down but NOT enabled: whether a slideshow runs is a
+# setting (wallpaper.mode), and `hdwall slideshow` is the one thing that reads
+# that setting and starts or stops the timer accordingly. Enabling it here would
+# be the installer overriding a preference it has not read.
+if [ -f "$UNITS/hyprdrive-slideshow.timer" ] && command -v systemctl >/dev/null 2>&1; then
+    mkdir -p "$SYSTEMD_DEST"
+    sed "s|@REPO@|$ROOT|g" "$UNITS/hyprdrive-slideshow.service" > "$SYSTEMD_DEST/hyprdrive-slideshow.service"
+    cp "$UNITS/hyprdrive-slideshow.timer" "$SYSTEMD_DEST/hyprdrive-slideshow.timer"
+    systemctl --user daemon-reload
+    python3 "$ROOT/scripts/hdwall.py" slideshow
+fi
+
 # ---------------------------------------------------------------- profiles --
 # Phase 12. The snapshot repository has to exist BEFORE the first import or bulk
 # apply, because the whole promise is that those happen behind one -- and a

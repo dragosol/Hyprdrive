@@ -39,6 +39,14 @@ Singleton {
     readonly property string hdctl: `${root.repo}/scripts/hdctl.py`
     readonly property string hdmon: `${root.repo}/scripts/hdmon.py`
     readonly property string hdprof: `${root.repo}/scripts/hdprof.py`
+    readonly property string hdwall: `${root.repo}/scripts/hdwall.py`
+
+    // Wallpapers. The repository list is data rather than a setting, so it lives
+    // here and not in the schema; the mode, the interval and "the theme follows"
+    // are settings and are ordinary schema rows.
+    property var wallRepos: []
+    property var wallList: []
+    property string wallCurrent: ""
 
     function entriesFor(pane) {
         if (!root.schema) return [];
@@ -137,6 +145,47 @@ Singleton {
 
     property var importReport: null
 
+    // ------------------------------------------------------------ wallpaper --
+    function wallRefresh() {
+        if (!root.repo) return;
+        wallReposProc.running = true;
+        wallListProc.running = true;
+    }
+
+    // Not `hdctl set wallpaper.path`, and the difference matters: that row's
+    // apply-strategy would take the theme flag from the store, which is right,
+    // but the pane also has to refresh its own grid afterwards. Same script
+    // underneath either way -- hyprwall-rotate.sh, THEME from the setting.
+    function wallSet(path) {
+        root.status = `wallpaper -> ${path}`;
+        wallProc.command = ["python3", root.hdwall, "set", path];
+        wallProc.running = true;
+    }
+
+    function wallRepoAdd(name, source) {
+        root.status = `adding ${name}`;
+        wallProc.command = ["python3", root.hdwall, "repo-add", name, source];
+        wallProc.running = true;
+    }
+
+    function wallRepoRemove(name) {
+        root.status = `removing ${name}`;
+        wallProc.command = ["python3", root.hdwall, "repo-remove", name];
+        wallProc.running = true;
+    }
+
+    function wallRepoPull(name) {
+        root.status = `pulling ${name}`;
+        wallProc.command = ["python3", root.hdwall, "repo-pull", name];
+        wallProc.running = true;
+    }
+
+    // Called after the slideshow rows change: it only starts or stops the timer,
+    // because the tick re-reads the settings itself.
+    function wallSlideshowSync() {
+        wallSyncProc.running = true;
+    }
+
     // ---------------------------------------------------------------- reads --
     function refresh() {
         if (!root.repo) return;
@@ -196,6 +245,7 @@ Singleton {
                 root.refresh();
                 root.refreshMonitors();
                 root.refreshProfiles();
+                root.wallRefresh();
             }
         }
     }
@@ -255,7 +305,13 @@ Singleton {
     Timer {
         id: refreshTimer
         interval: 350          // the reload has to land first
-        onTriggered: { root.refresh(); root.refreshMonitors(); root.refreshProfiles(); }
+        onTriggered: {
+            root.refresh();
+            root.refreshMonitors();
+            root.refreshProfiles();
+            root.wallRefresh();
+            root.wallSlideshowSync();
+        }
     }
 
     Process {
@@ -299,6 +355,49 @@ Singleton {
             onStreamFinished: {
                 try { root.importReport = JSON.parse(text); }
                 catch (e) { root.status = "that file did not parse: " + e; }
+            }
+        }
+        stderr: StdioCollector {
+            onStreamFinished: { if (text.trim()) root.status = text.trim(); }
+        }
+    }
+
+    Process {
+        id: wallReposProc
+        command: ["python3", root.hdwall, "repos", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { root.wallRepos = JSON.parse(text); } catch (e) { root.wallRepos = []; }
+            }
+        }
+    }
+
+    Process {
+        id: wallListProc
+        command: ["python3", root.hdwall, "list", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const d = JSON.parse(text);
+                    root.wallList = d.wallpapers ?? [];
+                    root.wallCurrent = d.current ?? "";
+                } catch (e) { root.wallList = []; }
+            }
+        }
+    }
+
+    Process {
+        id: wallSyncProc
+        command: ["python3", root.hdwall, "slideshow"]
+        stdout: StdioCollector { onStreamFinished: root.status = text.trim().split("\n").pop() }
+    }
+
+    Process {
+        id: wallProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.status = text.trim().split("\n").pop();
+                refreshTimer.restart();
             }
         }
         stderr: StdioCollector {

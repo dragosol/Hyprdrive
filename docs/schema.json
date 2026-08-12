@@ -5,14 +5,15 @@
  "counts": {
   "plugin": 79,
   "hyprland": 353,
-  "curated": 10,
-  "total": 442,
+  "curated": 13,
+  "total": 445,
   "per_pane": {
    "overview": 32,
    "blur": 24,
    "dock": 39,
    "hyprland": 337,
-   "quickshell": 10
+   "wallpaper": 5,
+   "quickshell": 8
   }
  },
  "panes": [
@@ -57,6 +58,13 @@
    "icon": "widgets",
    "fragment": null,
    "blurb": "illogical-impulse's own knobs, written to its config.json."
+  },
+  {
+   "id": "wallpaper",
+   "title": "Wallpaper",
+   "icon": "wallpaper",
+   "fragment": null,
+   "blurb": "Local folders and cloned repositories, one picture or a slideshow. The palette follows whatever is up."
   },
   {
    "id": "profiles",
@@ -5055,22 +5063,60 @@
   },
   {
    "key": "wallpaper.path",
-   "pane": "quickshell",
+   "pane": "wallpaper",
    "type": "path",
    "widget": "path",
    "apply": "wallpaper",
    "default": "",
-   "description": "The wallpaper. Setting it runs the rice's own rotation, which regenerates ii's matugen palette -- which is what makes the accents follow (Phase 10).",
+   "description": "The wallpaper. Setting it runs the rice's own rotation, which regenerates ii's matugen palette -- which is what makes the accents follow (Phase 10). A video path is handed to mpvpaper and the palette comes from a frame of it.",
    "source": "curated"
   },
   {
    "key": "wallpaper.theme",
-   "pane": "quickshell",
+   "pane": "wallpaper",
    "type": "bool",
    "widget": "switch",
    "apply": "none",
    "default": true,
    "description": "Regenerate the palette when the wallpaper changes (THEME=1). Off swaps the image and leaves every accent where it is.",
+   "source": "curated"
+  },
+  {
+   "key": "wallpaper.repo",
+   "pane": "wallpaper",
+   "type": "string",
+   "widget": "choice",
+   "apply": "none",
+   "default": "local",
+   "dynamic_choices": "hdwall repos",
+   "description": "Which repository the pane browses and the slideshow walks. A repository is a directory: add a path for a local one, a git URL to clone a remote one. The list is not a schema choice because it is data -- the pane fills this dropdown from `hdwall repos`.",
+   "source": "curated"
+  },
+  {
+   "key": "wallpaper.mode",
+   "pane": "wallpaper",
+   "type": "string",
+   "widget": "choice",
+   "apply": "none",
+   "default": "off",
+   "choices": [
+    "off",
+    "ordered",
+    "random"
+   ],
+   "description": "Off is one wallpaper until you change it. Ordered walks the repository in name order; random picks another one each time. Both re-derive the palette if wallpaper.theme is on, so the whole desktop follows the slideshow.",
+   "source": "curated"
+  },
+  {
+   "key": "wallpaper.interval",
+   "pane": "wallpaper",
+   "type": "int",
+   "widget": "slider",
+   "apply": "none",
+   "default": 15,
+   "min": 1,
+   "max": 240,
+   "description": "Minutes between slideshow changes. The timer wakes once a minute and reads this, so a change takes effect immediately and nothing has to be restarted.",
    "source": "curated"
   },
   {
