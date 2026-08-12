@@ -17,7 +17,7 @@ source scripts/lib/rig.sh
 rig_env || exit 1
 
 OUT=/mnt/host/x34shots
-STORE=$HOME/.local/state/scrolloverview/favorites
+STORE=$RIG_FAV
 
 # x34_gate.py hardcodes the HOST's view of the share (/home/dragos/hyprvm/share);
 # grading now runs in the guest, where the share is /mnt/host. Alias, never edit

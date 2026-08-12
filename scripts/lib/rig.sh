@@ -30,6 +30,19 @@
 # ---------------------------------------------------------------- constants --
 # Source-time computation only (allowed side effect: env/vars).
 RIG_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# THE plugin identity. One constant; everything the gates say about the plugin
+# -- its name in `hyprctl plugin list`, its Lua namespace, its config-key
+# prefix, its .so, its favorites store -- is DERIVED from it. Before this,
+# sixty-odd literals across twenty gates each spelled the name out, which made
+# the Phase-9 rename a rename of the harness as much as of the plugin, and a
+# harness edited in the same commit as the thing it measures proves nothing.
+# Override for a one-off run against a differently-named build: RIG_NS=... gate.
+RIG_NS=${RIG_NS:-scrolloverview}
+RIG_KEY=plugin:$RIG_NS                                          # config-key prefix
+RIG_SO=$RIG_NS.so                                               # built artifact
+RIG_FAV=${XDG_STATE_HOME:-$HOME/.local/state}/$RIG_NS/favorites # dock favorites store
+export RIG_NS RIG_KEY RIG_SO RIG_FAV
 RIG_CELL_PY=${RIG_CELL_PY:-$RIG_LIB_DIR/../x24_cell.py}    # dock cell predictor [x24_cell.py:1-9]
 # Headless output mode. The dock geometry the cell predictor computes and the
 # ydotool half-space rule are both functions of THIS mode, so the headless
@@ -104,9 +117,9 @@ alive_or_die() { # alive_or_die [LABEL]
 # goes through hl.dispatch / hl.config, and config is READ BACK (opt_want).
 hl()       { _rig_need || return 1; hyprctl eval "$1"; }                     # raw eval, output kept (readbacks, multi-line Lua)
 dsp()      { _rig_need || return 1; hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }   # [x47_rig.sh:30]
-ov()       { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }              # [x47_rig.sh:31]
-cfg_dock() { _rig_need || return 1; hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }   # [z_rig.sh:14]
-cfg_ov()   { _rig_need || return 1; hyprctl eval "hl.config({plugin={scrolloverview={$1}}}) return 0" >/dev/null 2>&1; }          # [z_rig.sh:15]
+ov()       { dsp "hl.plugin.$RIG_NS.overview([[$1]])"; }              # [x47_rig.sh:31]
+cfg_dock() { _rig_need || return 1; hyprctl eval "hl.config({plugin={$RIG_NS={dock={$1}}}}) return 0" >/dev/null 2>&1; }   # [z_rig.sh:14]
+cfg_ov()   { _rig_need || return 1; hyprctl eval "hl.config({plugin={$RIG_NS={$1}}}) return 0" >/dev/null 2>&1; }          # [z_rig.sh:15]
 
 # `ov off` and WAIT for the close animation to actually finish.
 #
@@ -130,7 +143,7 @@ cfg_ov()   { _rig_need || return 1; hyprctl eval "hl.config({plugin={scrolloverv
 ov_off_settled() {
     _rig_need || return 1
     local s w
-    s=$(hyprctl getoption plugin:scrolloverview:anim_scale 2>/dev/null | head -1 | awk '{print $2+0}')
+    s=$(hyprctl getoption $RIG_KEY:anim_scale 2>/dev/null | head -1 | awk '{print $2+0}')
     ov off
     w=$(awk -v s="${s:-1}" 'BEGIN{ if (s<1) s=1; w=0.9*s; if (w>8) w=8; printf "%.2f", w }')
     sleep "$w"
@@ -138,7 +151,8 @@ ov_off_settled() {
 }
 
 # Read a config value back to prove it landed [x47_rig.sh:108-111], full option
-# path (e.g. plugin:scrolloverview:dock:autohide). NOT safe inside `| while
+# path -- build it from the identity constant, e.g. "$RIG_KEY:dock:autohide".
+# NOT safe inside `| while
 # read` (subshell swallows the failure) and NOT after `IFS=,` (the inner
 # `read -r` inherits it and stops splitting) [x47_rig.sh:132-137].
 opt_want() { # opt_want OPTION EXPECTED
@@ -437,10 +451,10 @@ pipeline_live_or_die() { # pipeline_live_or_die OUTDIR TAG
 # click spacing and the gate tests nothing [z_rig.sh:148-151].
 anim_slow() { # anim_slow FACTOR
     _rig_need || return 1
-    hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=$1}}}) return 0" >/dev/null 2>&1   # [z_rig.sh:15, slowmo.sh:13]
+    hyprctl eval "hl.config({plugin={$RIG_NS={anim_scale=$1}}}) return 0" >/dev/null 2>&1   # [z_rig.sh:15, slowmo.sh:13]
     sleep 0.6
     local rb
-    rb=$(hyprctl getoption plugin:scrolloverview:anim_scale | head -1 | awk '{print $2}')
+    rb=$(hyprctl getoption $RIG_KEY:anim_scale | head -1 | awk '{print $2}')
     awk -v a="${rb:-x}" -v b="$1" 'BEGIN{exit (a+0==b+0)?0:1}' \
         || { echo "rig: anim_scale readback '$rb', wanted $1" >&2; return 1; }
     RIG_ANIM_SLOWED=1
@@ -448,7 +462,7 @@ anim_slow() { # anim_slow FACTOR
 
 anim_restore() {
     _rig_need || return 1
-    hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=1}}}) return 0" >/dev/null 2>&1    # [slowmo.sh:30, z_rig.sh:104]
+    hyprctl eval "hl.config({plugin={$RIG_NS={anim_scale=1}}}) return 0" >/dev/null 2>&1    # [slowmo.sh:30, z_rig.sh:104]
     RIG_ANIM_SLOWED=0
     return 0
 }
@@ -478,7 +492,7 @@ rig_wait_session() { # rig_wait_session [SECONDS=45]
         sig=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -1)
         if [ -n "$sig" ]; then
             RIG_ENV_OK=0
-            if rig_env 2>/dev/null && hyprctl plugin list 2>/dev/null | grep -q scrolloverview; then
+            if rig_env 2>/dev/null && hyprctl plugin list 2>/dev/null | grep -q "$RIG_NS"; then
                 sleep 3     # let ydotoold and the shell finish coming up
                 return 0
             fi
@@ -493,7 +507,7 @@ gate_slate() { # gate_slate [LABEL] -- returns 1 if the session cannot be made c
     _rig_need || return 1
     local label=${1:-slate}
 
-    hyprctl plugin list 2>/dev/null | grep -q scrolloverview \
+    hyprctl plugin list 2>/dev/null | grep -q "$RIG_NS" \
         || { echo "slate($label): the plugin is not loaded" >&2; return 1; }
 
     # Order matters. Speed first (a slowmo'd close takes 20x as long), then the
@@ -537,7 +551,7 @@ print('%s %d %d' % (ms[0]['name'], ms[0]['width'], ms[0]['height']) if len(ms)==
     # own, and it will show up here the first time it bites.
     cfg_dock "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false, blur_size=-1, blur_passes=-1"
     sleep 0.5
-    opt_want plugin:scrolloverview:dock:autohide true \
+    opt_want $RIG_KEY:dock:autohide true \
         || { echo "slate($label): dock config did not take" >&2; return 1; }
 
     dsp "hl.dsp.focus({workspace = 1})"; sleep 0.5

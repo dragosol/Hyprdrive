@@ -72,7 +72,7 @@ echo "monitor: $MON ${W}x${H}"
 # non-legacy parsers" on stderr and returns 0, so a rig that used it configured
 # nothing and said nothing. Config goes through cfg_dock() (hl.config), and
 # want() reads the value back (rig.sh opt_want) to prove it landed.
-want() { opt_want "plugin:scrolloverview:dock:$1" "$2" || { echo "ABORT: dock:$1 readback failed"; exit 1; }; }
+want() { opt_want "$RIG_KEY:dock:$1" "$2" || { echo "ABORT: dock:$1 readback failed"; exit 1; }; }
 
 # THE DOCK HOLDS RUNNING CLASSES AND NOTHING ELSE for this run. x47_cell.py
 # predicts icon centres from the class list, and a rig that had to model the

@@ -30,7 +30,7 @@ rig_env || exit 1
 TAG=${1:?usage: y9_rig.sh <tag>}
 OUT=/mnt/host/y9; mkdir -p $OUT
 
-mini() { dsp "hl.plugin.scrolloverview.minimize($1)"; }
+mini() { dsp "hl.plugin.$RIG_NS.minimize($1)"; }
 
 restore() {
     ov off

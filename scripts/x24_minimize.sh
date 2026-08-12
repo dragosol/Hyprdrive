@@ -14,7 +14,7 @@ rig_env || exit 1
 OUT=/mnt/host/x24; mkdir -p $OUT
 
 # dsp() comes from rig.sh
-mini() { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.minimize([[$1]]))" 2>&1; }
+mini() { hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.minimize([[$1]]))" 2>&1; }
 snap() { hyprctl clients -j > "$1"; }
 
 pkill -x kitty 2>/dev/null; sleep 1.5

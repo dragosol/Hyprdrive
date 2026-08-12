@@ -23,7 +23,7 @@ print(m['name'], m['width'], m['height'])")"
 # dsp() comes from lib/rig.sh. warp() below deliberately SHADOWS rig.sh's: this
 # rig always slept 0.3 after each move and that timing must not change. The
 # halving lives in this body, so nothing is halved twice.
-tog()  { dsp "hl.plugin.scrolloverview.overview([[toggle]])"; }
+tog()  { dsp "hl.plugin.$RIG_NS.overview([[toggle]])"; }
 warp() { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; sleep 0.3; }
 park() { warp $((W / 2)) $((H / 3)); }
 shot() { sleep 0.6; grim -o "$MON" $OUT/$1.png; }
@@ -32,7 +32,7 @@ case "${1:?usage: reopen_rig.sh <fixture|run>}" in
 
 fixture)
     hyprwall_pause 40min
-    dsp "hl.plugin.scrolloverview.overview([[off]])"; sleep 1.0
+    dsp "hl.plugin.$RIG_NS.overview([[off]])"; sleep 1.0
     pkill -f kitty 2>/dev/null; sleep 1.0
     for i in 1 2; do
         setsid -f kitty --override background=#20${i}0${i}0 -o confirm_os_window_close=0 \
@@ -45,7 +45,7 @@ fixture)
 
 run)
     # 1. OPEN -- the reference for "the overview is up".
-    dsp "hl.plugin.scrolloverview.overview([[off]])"; sleep 1.5
+    dsp "hl.plugin.$RIG_NS.overview([[off]])"; sleep 1.5
     tog; sleep 3.0; park; sleep 1.0; shot open
 
     # 2. SHUT -- close and let it finish. The reference for "it went away".
@@ -65,7 +65,7 @@ run)
     tog
     sleep 3.0; park; sleep 1.0; shot reversed
 
-    dsp "hl.plugin.scrolloverview.overview([[off]])"
+    dsp "hl.plugin.$RIG_NS.overview([[off]])"
     echo "REOPEN rig done -> $OUT"
     ;;
 

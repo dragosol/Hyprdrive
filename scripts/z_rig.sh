@@ -9,7 +9,7 @@ cp "$RIG_LIB_DIR/../x24_cell.py" /mnt/host/ 2>/dev/null
 W=$1
 
 cfg(){ cfg_dock "$1"; }
-scale(){ hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=$1}}}) return 0" >/dev/null 2>&1; }   # NOT rig.sh anim_slow: its readback sleep would shift z4's click timing
+scale(){ hyprctl eval "hl.config({plugin={$RIG_NS={anim_scale=$1}}}) return 0" >/dev/null 2>&1; }   # NOT rig.sh anim_slow: its readback sleep would shift z4's click timing
 ws(){ hyprctl dispatch "hl.dsp.focus({workspace = $1})" >/dev/null 2>&1; sleep 0.8; }
 # killothers comes from rig.sh (identical -9 sweep); the keep-class is passed.
 # Nautilus gets D-Bus-activated back to life BETWEEN a single startup sweep and
@@ -128,8 +128,8 @@ case "$W" in
     # whose landing never restored geometry -- each cycle shrank the window
     # x0.82 and the layout target drifted (user screenshots, 2026-08-08).
     ws 1; spawn
-    hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[on]]))" >/dev/null 2>&1; sleep 1.5
-    hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[off]]))" >/dev/null 2>&1; sleep 1.5
+    hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.overview([[on]]))" >/dev/null 2>&1; sleep 1.5
+    hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.overview([[off]]))" >/dev/null 2>&1; sleep 1.5
     BOX0=$(hyprctl clients -j | python3 -c "import json,sys; c=[x for x in json.load(sys.stdin) if x['class']=='zfix'][0]; print(c['at'],c['size'])")
     FAIL=0
     for i in 1 2 3; do

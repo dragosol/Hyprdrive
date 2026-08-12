@@ -25,7 +25,7 @@ print(m['name'], m['width'], m['height'])")"
 
 # `hyprctl keyword` is gone in 0.56 and exits 0 having changed nothing -- see
 # x27_capture.sh, where that cost a whole run.
-key()  { hyprctl eval "return hl.config({ plugin = { scrolloverview = { dock = { $1 = $2 } } } })" >/dev/null; }
+key()  { hyprctl eval "return hl.config({ plugin = { $RIG_NS = { dock = { $1 = $2 } } } })" >/dev/null; }
 shot() { grim -o "$MON" $OUT/$1.png; }
 
 # ydotool's ABSOLUTE motion is 1:1 with the output here. The half-space note in

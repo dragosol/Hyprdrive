@@ -77,13 +77,13 @@ echo "AFTER-CLICK1  $(state)"
 
 # The dock is drawn by the overview pass, so the overview has to be up for the
 # icon to exist at all. A click that minimized everything may have closed it.
-hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[on]]))" >/dev/null 2>&1; sleep 1.5
+hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.overview([[on]]))" >/dev/null 2>&1; sleep 1.5
 
 echo "== plain click 2 (expect: ALL THREE back)"
 click $AX $AY
 echo "AFTER-CLICK2  $(state)"
 
-hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[on]]))" >/dev/null 2>&1; sleep 1.5
+hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.overview([[on]]))" >/dev/null 2>&1; sleep 1.5
 F0=$(focused)
 echo "== ctrl+click (expect: NOTHING stashed, focus moves)"
 click $AX $AY ctrl

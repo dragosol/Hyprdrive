@@ -31,6 +31,6 @@ sleep 1.2
 
 grim -o $MON $OUT/$NAME.png
 hyprctl clients -j > $OUT/clients-$NAME.json
-FAV="${XDG_STATE_HOME:-$HOME/.local/state}/scrolloverview/favorites"
+FAV="$RIG_FAV"
 cp "$FAV" $OUT/favorites-$NAME.txt 2>/dev/null || : > $OUT/favorites-$NAME.txt
 echo "CLICK_OK $BTN $X $Y -> $NAME"

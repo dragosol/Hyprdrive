@@ -36,7 +36,7 @@ print(' '.join(sorted(c['title'] for c in json.load(sys.stdin) if c['class']=='Y
 # The first run clicked Nautilus for exactly this reason.
 pkill -f nautilus >/dev/null 2>&1; sleep 1.5
 
-hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[on]]))" >/dev/null 2>&1; sleep 2
+hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.overview([[on]]))" >/dev/null 2>&1; sleep 2
 echo "start focus=$(focused)"
 for i in 1 2 3 4; do
     # RE-AIM EVERY TIME. Reusing a hit target computed before the first click is
@@ -44,7 +44,7 @@ for i in 1 2 3 4; do
     # it and every later click then lands on a neighbour.
     read -r AX AY <<< "$(hyprctl clients -j | python3 /mnt/host/x47_cell.py Y4A)"
     click $AX $AY
-    hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[on]]))" >/dev/null 2>&1; sleep 0.8
+    hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.overview([[on]]))" >/dev/null 2>&1; sleep 0.8
     echo "ctrl+click $i at $AX,$AY -> focus=$(focused)"
 done
-hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[off]]))" >/dev/null 2>&1
+hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.overview([[off]]))" >/dev/null 2>&1

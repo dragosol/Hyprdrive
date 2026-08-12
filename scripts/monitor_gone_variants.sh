@@ -144,7 +144,7 @@ ADDR=$(hyprctl activewindow -j | python3 -c "import json,sys; print(json.load(sy
 [ -n "$ADDR" ] || { echo "  ABORT: nothing focused"; exit 2; }
 cfg_dock "minimize_ms=6000"; sleep 0.4
 ov on; sleep 2
-dsp "hl.plugin.scrolloverview.minimize([[window]])"
+dsp "hl.plugin.$RIG_NS.minimize([[window]])"
 sleep 1.0                             # 6s flight: this is mid-air
 # Positive control: the stash happens the instant the flight starts, so this is
 # how the rig knows there IS a flight to remove the monitor under.
@@ -161,7 +161,7 @@ fi
 
 # Put it back, no flight, so V4 starts from a known state.
 cfg_dock "minimize_ms=0"; sleep 0.4
-dsp "hl.plugin.scrolloverview.minimize([[restore]])"; sleep 1.5
+dsp "hl.plugin.$RIG_NS.minimize([[restore]])"; sleep 1.5
 
 # ------------------------------------------------------- V4: restore flight --
 echo "V4 restore flight in the air"
@@ -170,11 +170,11 @@ hyprctl eval "return hl.dispatch(hl.dsp.focus({window = [[class:kitty]]}))" >/de
 ADDR=$(hyprctl activewindow -j | python3 -c "import json,sys; print(json.load(sys.stdin).get('address',''))")
 [ -n "$ADDR" ] || { echo "  ABORT: nothing focused"; exit 2; }
 cfg_dock "minimize_ms=0"; sleep 0.4
-dsp "hl.plugin.scrolloverview.minimize([[window]])"; sleep 1.5
+dsp "hl.plugin.$RIG_NS.minimize([[window]])"; sleep 1.5
 [ "$(client "$ADDR" workspace)" = "special:minimized" ] || { echo "  ABORT: V4 setup did not minimize"; exit 2; }
 cfg_dock "minimize_ms=6000"; sleep 0.4
 ov on; sleep 2
-dsp "hl.plugin.scrolloverview.minimize([[restore]])"
+dsp "hl.plugin.$RIG_NS.minimize([[restore]])"
 sleep 1.0                             # mid-air, window HIDDEN
 # Positive control: with the overview up a restore flight HIDES the real window
 # for its whole length (restoreForFlight), so hidden=True is the flight itself.

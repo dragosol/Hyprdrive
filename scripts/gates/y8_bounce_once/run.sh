@@ -24,7 +24,7 @@ trap 'headless_off; hyprwall_resume' EXIT
 hyprwall_pause 90min
 
 echo "=== setup ==="
-dsp "hl.plugin.scrolloverview.minimize([[restore]])"; sleep 2
+dsp "hl.plugin.$RIG_NS.minimize([[restore]])"; sleep 2
 bash scripts/z3_setup.sh || { echo "Y8 ABORT -- z3_setup failed"; exit 1; }
 
 read -r _ TX TY _ _ _ <<< "$(python3 scripts/z3_blobs.py /mnt/host/z3/view-ws1.png red)"

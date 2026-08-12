@@ -15,13 +15,13 @@ set -u
 source "$(dirname "$0")/lib/rig.sh"
 rig_env || exit 1
 OUT=/mnt/host/x34shots
-STORE=$HOME/.local/state/scrolloverview/favorites
+STORE=$RIG_FAV
 mkdir -p $OUT
 
-key()   { hyprctl eval "return hl.config({ plugin = { scrolloverview = { dock = { $1 = $2 } } } })" >/dev/null; }
+key()   { hyprctl eval "return hl.config({ plugin = { $RIG_NS = { dock = { $1 = $2 } } } })" >/dev/null; }
 warp()  { ydotool mousemove -a -x $(( $1 / 2 )) -y $(( $2 / 2 )) 2>/dev/null; sleep 0.25; }
 dsp()   { hyprctl eval "return hl.dispatch($1)" >/dev/null; }
-hot()   { dsp "hl.plugin.scrolloverview.hotkey([[$1]])"; }
+hot()   { dsp "hl.plugin.$RIG_NS.hotkey([[$1]])"; }
 nclass(){ hyprctl clients -j | python3 -c "import json,sys; print(sum(1 for c in json.load(sys.stdin) if c['class']=='$1'))"; }
 verdict(){ if [ "$2" = "$3" ]; then echo "PASS $1: $2"; else echo "FAIL $1: got [$2] want [$3]"; fi; }
 
@@ -61,7 +61,7 @@ seed11)
 fixture)
     hyprwall_pause 40min
 
-    dsp "hl.plugin.scrolloverview.overview([[off]])" 2>/dev/null
+    dsp "hl.plugin.$RIG_NS.overview([[off]])" 2>/dev/null
     sleep 0.5
     pkill -x nautilus 2>/dev/null; pkill -x gnome-calculator 2>/dev/null
     pkill -f kitty 2>/dev/null; sleep 1.0

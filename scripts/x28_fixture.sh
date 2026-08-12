@@ -34,7 +34,7 @@ m=json.load(sys.stdin)[0]; print('MON %s %d %d' % (m['name'], m['width'], m['hei
 cat $OUT/monitor.txt
 
 # The favourites store starts empty, or the toggle's direction is unknowable.
-rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/scrolloverview/favorites"
+rm -f "$RIG_FAV"
 
 spawn() { # class
     dsp "hl.dsp.focus({monitor = \"$MON\"})"; sleep 0.15

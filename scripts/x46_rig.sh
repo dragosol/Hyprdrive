@@ -60,7 +60,7 @@ import json,sys
 print(next((c['address'] for c in json.load(sys.stdin) if c['class']=='X46A'), ''))")
 [ -n "$A" ] || { echo "ABORT: no X46A window"; exit 1; }
 dsp "hl.dsp.focus({ window = [[address:$A]] })"; sleep 0.6
-dsp "hl.plugin.scrolloverview.minimize([[window]])"; sleep 1.5
+dsp "hl.plugin.$RIG_NS.minimize([[window]])"; sleep 1.5
 
 N=$(minimized_total)
 echo "minimized now: $N"

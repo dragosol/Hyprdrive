@@ -9,7 +9,7 @@
 #
 # anim_scale, not a faster camera. The bounce is 420ms at BOUNCE_MS and grim
 # cannot be trusted to catch a shape that short; the dock funnels every timed
-# thing through elapsedMs, which divides by plugin:scrolloverview:anim_scale, so
+# thing through elapsedMs, which divides by the plugin anim_scale key, so
 # scaling once slows the flight AND the bounce together and the shape is
 # unchanged. Restored on the way out.
 #
@@ -27,13 +27,13 @@ GAP=${Y8_GAP:-0.20}
 read -r MON W H <<< "$(hyprctl monitors -j | python3 -c "
 import json,sys
 m=json.load(sys.stdin)[0]; print(m['name'], m['width'], m['height'])")"
-anim() { hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=$1}}}) return 0" >/dev/null 2>&1; }
+anim() { hyprctl eval "hl.config({plugin={$RIG_NS={anim_scale=$1}}}) return 0" >/dev/null 2>&1; }
 
 restore() { anim 1; cfg_dock "autohide=true"; }
 trap restore EXIT
 
 cfg_dock "autohide=false"; anim $SCALE; sleep 0.8
-echo "anim_scale=$(hyprctl getoption plugin:scrolloverview:anim_scale | head -1)"
+echo "anim_scale=$(hyprctl getoption $RIG_KEY:anim_scale | head -1)"
 
 # THE PILL'S OWN ROWS, plus a little headroom. The first cut of this probe took
 # the 48px strip ABOVE the pill and measured nothing at all across 60 frames:
@@ -69,7 +69,7 @@ for i in $(seq 0 $((FRAMES - 1))); do
 done
 
 # Put the window back so the next rig starts from a normal desktop.
-hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.minimize([[restore]]))" >/dev/null 2>&1
+hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.minimize([[restore]]))" >/dev/null 2>&1
 sleep 2
 echo "frames: $(ls $OUT/f*.png | wc -l)"
 echo Y8_PROBE_OK

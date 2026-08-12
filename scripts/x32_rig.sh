@@ -58,8 +58,8 @@ echo "monitor: $MON ${W}x${H}"
 # cell prediction has as few slots as possible to be wrong about.
 cfg_dock "autohide=false, show_favorites=false, show_apps_button=true, show_trash=false, show_mounts=false"
 sleep 0.8
-opt_want plugin:scrolloverview:dock:show_apps_button true || { echo "ABORT: show_apps_button did not take"; exit 1; }
-opt_want plugin:scrolloverview:dock:autohide         false || { echo "ABORT: autohide did not take"; exit 1; }
+opt_want $RIG_KEY:dock:show_apps_button true || { echo "ABORT: show_apps_button did not take"; exit 1; }
+opt_want $RIG_KEY:dock:autohide         false || { echo "ABORT: autohide did not take"; exit 1; }
 
 dsp "hl.dsp.focus({monitor = \"$MON\"})"; sleep 0.3
 dsp "hl.dsp.focus({workspace = 1})"; sleep 0.4

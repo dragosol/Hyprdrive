@@ -53,8 +53,8 @@ LUA
     # Record the SHIPPING duration before overriding it, and put it back at the
     # end of the run rather than hard-coding it here -- otherwise the second run
     # in a compositor session would read the rig's own leftover as "the default".
-    hyprctl getoption plugin:scrolloverview:dock:minimize_ms | awk '/^int:/ {print $2}' > $OUT/default_ms.txt
-    hyprctl eval "return hl.plugin.scrolloverview.configure({dock = {minimize_ms = $MS}})" >/dev/null
+    hyprctl getoption $RIG_KEY:dock:minimize_ms | awk '/^int:/ {print $2}' > $OUT/default_ms.txt
+    hyprctl eval "return hl.plugin.$RIG_NS.configure({dock = {minimize_ms = $MS}})" >/dev/null
     ov on; sleep 1.5
     for _ in $(seq 20); do ydotool key 14:1 14:0; done; sleep 0.5
     grim -o "${RIG_MON:-Virtual-1}" $OUT/open.png
@@ -80,5 +80,5 @@ for i in 1 2 3 4 5; do grim -o "${RIG_MON:-Virtual-1}" $OUT/fly$i.png; done
 sleep 2.0
 grim -o "${RIG_MON:-Virtual-1}" $OUT/landed.png
 hyprctl clients -j > $OUT/clients.json
-hyprctl eval "return hl.plugin.scrolloverview.configure({dock = {minimize_ms = $(cat $OUT/default_ms.txt)}})" >/dev/null
+hyprctl eval "return hl.plugin.$RIG_NS.configure({dock = {minimize_ms = $(cat $OUT/default_ms.txt)}})" >/dev/null
 echo "clicked $1,$2"

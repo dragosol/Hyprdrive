@@ -48,7 +48,7 @@ print(next((m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEA
 
 # ov() comes from rig.sh (verbatim-equivalent). key() stays LOCAL: rig.sh's
 # key() sleeps 0.30 built-in, and P3's 70ms keystroke pacing is the phase.
-nav()  { hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.navigate([[$1]]))" >/dev/null 2>&1; }
+nav()  { hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.navigate([[$1]]))" >/dev/null 2>&1; }
 key()  { ydotool key "$1:1" "$1:0" 2>/dev/null; }
 whl()  { ydotool mousemove -w -x 0 -y "$1" 2>/dev/null; }
 mv2()  { warp "$1" "$2"; }    # rig.sh warp owns the ydotool halving now
