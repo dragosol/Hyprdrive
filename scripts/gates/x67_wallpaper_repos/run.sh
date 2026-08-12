@@ -195,6 +195,26 @@ GOT=$(jq -r '.background.wallpaperPath' "$IICFG")
 echo "    the slideshow advanced to $(basename "$GOT"), predicted $(basename "$WANT")"
 [ "$GOT" = "$WANT" ] || bad "P3: ordered mode did not land on the next wallpaper by name"
 
+# The other mode. Ordered is graded on the exact answer; random cannot be, so it
+# is graded on the two things that ARE true of it -- it moves, and it moves to
+# something out of this repository. A randomiser that stood still and one that
+# wandered off the repository are the two ways this can be wrong.
+python3 scripts/hdctl.py set wallpaper.mode random | sed 's/^/    /'
+python3 - <<'RND' >/dev/null
+import json, pathlib
+p = pathlib.Path.home() / ".local/state/hyprdrive/wallpapers.json"
+d = json.loads(p.read_text()); d["last"] = 0
+p.write_text(json.dumps(d, indent=1))
+RND
+BEFORE=$(jq -r '.background.wallpaperPath' "$IICFG")
+python3 scripts/hdwall.py tick 2>&1 | sed 's/^/    /'
+sleep 3
+AFTER=$(jq -r '.background.wallpaperPath' "$IICFG")
+echo "    random: $(basename "$BEFORE") -> $(basename "$AFTER")"
+[ "$AFTER" != "$BEFORE" ] || bad "P3: random mode did not move off the wallpaper it was on"
+python3 scripts/hdwall.py list --repo x67 --json | grep -q "\"$AFTER\"" \
+    || bad "P3: random mode picked something that is not in the repository ($AFTER)"
+
 python3 scripts/hdctl.py set wallpaper.mode off >/dev/null
 python3 scripts/hdwall.py slideshow | sed 's/^/    /'
 systemctl --user is-active hyprdrive-slideshow.timer >/dev/null \
