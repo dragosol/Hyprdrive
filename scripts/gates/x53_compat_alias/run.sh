@@ -61,6 +61,13 @@ trap cleanup EXIT
 # before every gate anyway, so this only matters for a standalone run.
 gate_slate x53_compat_alias >/dev/null 2>&1 || { echo "FAIL could not slate the session"; exit 1; }
 
+# This gate deliberately changes NO plugin option that gate_slate does not
+# restore. It reloads the config twice and puts the file back, and that is all.
+# gate_slate restores seven dock options and anim_scale; minimize_ms is not one
+# of them, and an earlier cut of this gate set it to 0 for a flight it then
+# waited 1.5s for anyway -- four gates downstream, y8_bounce_once measures a
+# bounce that begins when that flight LANDS. A gate owns what it changes, and
+# the cheapest way to own this one was not to change it.
 # ------------------------------------------------------------------ preflight --
 [ -f "$LOG" ] || { bad "no $LOG -- this build has no compat layer"; exit 1; }
 hyprctl getoption "$RIG_KEY:mission_control_gap" 2>/dev/null | grep -q '^int' \
@@ -143,7 +150,6 @@ print(next((c['workspace']['name'] for c in json.load(sys.stdin) if c['address']
 WS0=$(ws); say "B: fixture starts on $WS0"
 [ "$WS0" = "special:minimized" ] && bad "B control: the fixture was already minimized"
 
-cfg_dock "minimize_ms=0"; sleep 0.4
 dsp "hl.plugin.scrolloverview.overview([[on]])"; sleep 2.0
 dsp "hl.plugin.scrolloverview.minimize([[window]])"; sleep 1.5
 WS1=$(ws); say "B: after the OLD name's minimize the fixture is on $WS1 (wanted special:minimized)"
