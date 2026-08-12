@@ -91,6 +91,17 @@ void                              registerScrollOverview(const SP<IOverview>& ov
 void                              unregisterScrollOverview(IOverview* overview);
 void                              clearScrollOverviews();
 
+// P0. Drop every overview standing on a monitor that is going away -- and any
+// whose monitor has already gone, so this is idempotent and self-healing rather
+// than one output's special case.
+//
+// An overview used to outlive its output: nothing tore it down, so it stayed in
+// the registry holding a dead PHLMONITORREF and the next close() walked it
+// (`closeOnWindow->m_workspace == pMonitor->m_activeWorkspace`) and took the
+// compositor with it. `hyprctl output remove` and a user pulling a DisplayPort
+// cable arrive at the same place. Wired to monitor.removed in PLUGIN_INIT.
+void                              dropScrollOverviewsForMonitor(PHLMONITOR monitor);
+
 // X32. Open the overview on a monitor -- the Show Applications button is the
 // first caller outside the dispatcher itself. Already open, or no monitor: a
 // no-op that reports success.

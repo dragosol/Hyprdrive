@@ -1,4 +1,5 @@
 #include "IOverview.hpp"
+#include "globals.hpp"
 
 #include <algorithm>
 
@@ -104,6 +105,43 @@ void unregisterScrollOverview(IOverview* overview) {
 
     if (!g_dyingOverviews.empty() && g_pEventLoopManager)
         g_pEventLoopManager->doLater([] { g_dyingOverviews.clear(); });
+}
+
+// P0. See the declaration in IOverview.hpp for the defect. The teardown goes
+// through unregisterScrollOverview -- the park above -- and NOT through a direct
+// erase, because this runs inside the monitor.removed emit: dropping the last
+// reference here would run ~CScrollOverview, destroying animated variables and
+// event listeners, from inside a signal callback. That is the same shape as the
+// close-animation crash the park was added for, so it gets the same answer, and
+// an overview whose monitor died mid-open needs it most: `scale` is still live.
+//
+// No close ANIMATION, deliberately: the animation is a thing drawn on an output,
+// and the output is what just went away.
+void dropScrollOverviewsForMonitor(PHLMONITOR monitor) {
+    if (!monitor)
+        return;
+
+    // Collected first: unregisterScrollOverview mutates the vector being walked.
+    std::vector<IOverview*> doomed;
+    for (const auto& overview : g_scrollOverviews) {
+        if (!overview)
+            continue;
+        const auto OVERVIEWMONITOR = overview->pMonitor.lock();
+        if (!OVERVIEWMONITOR || OVERVIEWMONITOR == monitor)
+            doomed.emplace_back(overview.get());
+    }
+
+    if (doomed.empty())
+        return;
+
+    for (auto* const overview : doomed)
+        unregisterScrollOverview(overview);
+
+    // The render hooks go on with the first overview and have to come off with
+    // the last -- removeOverview()'s tail, minus the damage: the monitor this
+    // ran for is the one leaving.
+    if (g_scrollOverviews.empty())
+        disableScrollOverviewHooks();
 }
 
 void clearScrollOverviews() {

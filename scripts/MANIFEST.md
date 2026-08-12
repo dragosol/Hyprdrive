@@ -77,6 +77,7 @@ Run one gate: `scripts/gates/<name>/run.sh`. Its stdout+stderr land in
 - `x51_opens.sh` — Cold text renders per open across N successive opens — cache convergence-to-zero instrument.
 - `x32_cell.py` — Predicts the Show Applications button's centre. Separate from x24_cell.py, which models the button as OFF (every gate using it sets show_apps_button=false) — the button is a slot of its own and teaching x24 about it would move predictions nobody asked to move.
 - `monitor_gone_repro.sh` — Three-step reproduction of the compositor-killer below: open the overview on an output, remove that output, `overview off`. Exit 0 = survived (fixed), 1 = died. Run over ssh; it is expected to take the session with it.
+- `monitor_gone_variants.sh` — The four states the repro does not cover: the output removed while the overview is still ANIMATING open, while a search query is up, and while a dock MINIMIZE and a dock RESTORE flight are in the air. Each variant carries its own positive control (the search proves itself with a frame diff across the keystrokes; a flight proves itself by the stash, and a restore flight by the window being hidden) so a variant cannot pass by never reaching the state it names. Exit 0 = every variant survived and landed sanely, 2 = a scene could not be set up. Run over ssh.
 
 ## Attic
 
@@ -156,11 +157,18 @@ every output teardown, `gate_slate` between gates, `DIED` detection in
 stage helpers onto the virtiofs share. Result on clean `0b6782f`: 27 gates, 13
 red, twice in a row with identical verdicts and no compositor death.
 
-**Still open (P0, plugin, not harness):** the crash itself. The plugin has no
-monitor-removed handler, so an overview outliving its output remains a
-compositor-killer — and `hyprctl output remove` and unplugging a DisplayPort
-cable arrive at the same `close()`. The rig now avoids the situation; nothing
-fixes it.
+**Closed 2026-08-12 (P0, plugin):** the crash itself. The plugin now hooks
+`monitor.removed` and drops every overview standing on the leaving output
+through `dropScrollOverviewsForMonitor` — the manager's existing dying-overview
+park, so the destructor runs a tick later instead of inside the signal callback.
+`close()` additionally no-ops on a dead monitor as a failsafe, and dock flights
+are settled at the same moment (a restore flight hides its real window for the
+length of the animation, so one that never lands is a window the user cannot get
+back). `monitor_gone_repro.sh` goes 1 → 0 across the fix and
+`monitor_gone_variants.sh` covers mid-open, mid-search and both flight
+directions; evidence in `zrig/p0monitor/`. The rig's `ov_off_settled` /
+`headless_off` ordering stays: it is still the right order, it is simply no
+longer load-bearing.
 
 ## Suite status (2026-08-08, Phase 1 landing)
 

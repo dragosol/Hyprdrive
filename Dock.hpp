@@ -205,4 +205,12 @@ void feedPointerMotion(const Vector2D& delta);
 void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand = false);
 void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window);
 
+// P0. Land every flight where it stands. A flight's boxes are monitor-local
+// RENDER px of the output it started on and it only advances inside that
+// output's dock render, so one left in the air across a monitor change is drawn
+// against the wrong origin -- or, if its output was the one drawing it, never
+// lands at all, and a restore that never lands leaves its window STASHED:
+// hidden, unfocusable, gone. Called from the monitor-removed teardown.
+void settleFlights();
+
 }

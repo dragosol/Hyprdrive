@@ -1094,6 +1094,25 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         ScrollOverview::Dock::render(MONITOR);
     });
 
+    // P0. An overview must not outlive its output. Nothing used to tear one
+    // down when its monitor went away, so it stayed in the registry holding a
+    // dead PHLMONITORREF and the next `overview off` dereferenced it inside
+    // close() -- a SIGSEGV, which gdm then papered over by bringing the session
+    // straight back WITHOUT the user's config, so the damage outlived the crash.
+    // `hyprctl output remove` and a user unplugging a display raise this same
+    // event, and it is the one Hyprland's own monitor-reference holders listen
+    // to. It is deliberately NOT emitted while the compositor is shutting down,
+    // which is what keeps this from queueing a deferred destroy that would never
+    // run -- PLUGIN_EXIT owns teardown there.
+    //
+    // Flights first: they are settled while the overview is still registered, so
+    // an unhidden window is re-added to the draw list it is about to leave with
+    // rather than after it.
+    static auto MONITORGONE = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
+        ScrollOverview::Dock::settleFlights();
+        dropScrollOverviewsForMonitor(monitor);
+    });
+
     ScrollOverview::Config::registerDispatcher("overview", ::onOverviewDispatcher);
     ScrollOverview::Config::registerDispatcher("navigate", ::onNavigateDispatcher);
     ScrollOverview::Config::registerDispatcher("window", ::onWindowDispatcher);

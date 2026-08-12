@@ -4964,6 +4964,22 @@ void CScrollOverview::close() {
 
     setClosing(true);
 
+    // P0 failsafe. The monitor-removed teardown in PLUGIN_INIT is the fix; this
+    // is the belt behind it, because a close() that reads a dead monitor kills
+    // the compositor and there is no cheaper way to be sure no path ever gets
+    // here. AFTER setClosing, so the state teardown that call owns -- the
+    // shared-state handover, the submap, a held scrolling pan -- still runs;
+    // everything BELOW is the part that wants the monitor: its active workspace,
+    // its logical pitch, changeWorkspace. With the output gone there is no close
+    // animation to play and nothing to play it on, so skip to the teardown the
+    // animation's end callback would have reached -- parked and freed one tick
+    // later, exactly as it would have been. A silent no-op close on a dead
+    // monitor is the correct answer; a crash is not.
+    if (!pMonitor.lock()) {
+        removeOverview(this);
+        return;
+    }
+
     const auto SELECTEDWORKSPACE =
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
 

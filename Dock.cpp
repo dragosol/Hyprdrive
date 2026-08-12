@@ -3545,6 +3545,56 @@ float dragGlow(PHLMONITOR monitor, const SLayout& layout, const Vector2D& mouse)
     return std::clamp((sc<float>(mouse.y) - BANDTOP) / (PILLTOP - BANDTOP), 0.F, 1.F);
 }
 
+// P0. The monitor-removed settle -- see Dock.hpp for why a flight cannot be
+// left in the air across a monitor change. Same landing guarantees the render
+// loop gives (Z17/Z18): a restore's window comes back unhidden at full alpha
+// with its animations warped to the layout's own goal, and a minimize hands off
+// the focus it was deliberately holding for the length of the animation. No
+// landing hold -- Z4's two held frames bridge one render to the next, and this
+// runs between frames with no next one promised on that output.
+//
+// Deliberately EVERY flight, not just the leaving monitor's. By monitor.removed
+// Hyprland has already moved the workspaces off it, so a window can no longer be
+// attributed to the output its flight was aimed at; settling a flight on a
+// surviving output costs one skipped animation during a hotplug, which is the
+// cheaper of the two wrong answers.
+void settleFlights() {
+    if (g_flights.empty())
+        return;
+
+    bool unhid = false;
+
+    for (auto& flight : g_flights) {
+        const auto WINDOW = flight.window.lock();
+        if (!WINDOW)
+            continue;
+
+        if (!flight.isRestore()) {
+            Minimize::handoffMinimizedFocus(WINDOW);
+            continue;
+        }
+
+        if (WINDOW->isHidden()) {
+            WINDOW->setHidden(false);
+            unhid = true;
+        }
+
+        warpRestoredWindowAnims(WINDOW);
+        WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
+    }
+
+    g_flights.clear();
+
+    // Z20: setHidden fires no compositor event, so an overview's draw list is
+    // never told and the window becomes a clickable, invisible tile.
+    if (unhid) {
+        for (const auto& OVERVIEW : scrollOverviews()) {
+            if (OVERVIEW)
+                OVERVIEW->refreshWindows();
+        }
+    }
+}
+
 void render(PHLMONITOR monitor) {
     // Y6/Y8. Retire what has run its course before anything asks whether the
     // dock still needs frames.
