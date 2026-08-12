@@ -32,7 +32,9 @@ VERSION_SCRIPT = scripts/generate-plugin-version.sh
 .PHONY: all check clean FORCE
 
 # An undefined symbol is a lazy-bind compositor kill (three same-day incidents
-# recorded in symcheck.sh's header), so the check IS part of the build.
+# recorded in symcheck.sh's header), so the check IS part of the build. So is
+# keycheck: a config key read through the deprecated alias resolves, returns the
+# default forever and reports nothing -- see that script's header.
 all: hyprdrive.so check
 
 hyprdrive.so: $(OBJS)
@@ -51,6 +53,7 @@ FORCE:
 
 check: hyprdrive.so
 	bash scripts/symcheck.sh
+	bash scripts/keycheck.sh
 
 clean:
 	rm -rf .build hyprdrive.so

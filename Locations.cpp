@@ -23,10 +23,10 @@ namespace ScrollOverview::Locations {
 
 namespace {
 
-    constexpr const char* KEY_SHOW_TRASH  = "plugin:scrolloverview:dock:show_trash";
-    constexpr const char* KEY_SHOW_MOUNTS = "plugin:scrolloverview:dock:show_mounts";
-    constexpr const char* KEY_MOUNTS_NET  = "plugin:scrolloverview:dock:show_mounts_network";
-    constexpr const char* KEY_MOUNTS_ONLY_MOUNTED = "plugin:scrolloverview:dock:show_mounts_only_mounted";
+    constexpr const char* KEY_SHOW_TRASH  = "plugin:hyprdrive:dock:show_trash";
+    constexpr const char* KEY_SHOW_MOUNTS = "plugin:hyprdrive:dock:show_mounts";
+    constexpr const char* KEY_MOUNTS_NET  = "plugin:hyprdrive:dock:show_mounts_network";
+    constexpr const char* KEY_MOUNTS_ONLY_MOUNTED = "plugin:hyprdrive:dock:show_mounts_only_mounted";
 
     constexpr const char* TRASH_URI = "trash:///";
 

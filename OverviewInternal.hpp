@@ -1801,7 +1801,7 @@ inline void moveOverviewTargetNextToWindow(const SP<Layout::ITarget>& target, co
 // the surfaces whose box intersects the backdrop, or bake a second optimized FB
 // that includes it instead of paying per-frame.
 inline void blockOverviewLayerBlurOptimization(size_t firstElement) {
-    if (!ScrollOverview::Config::getValue<bool>("plugin:scrolloverview:live_layer_frost"))
+    if (!ScrollOverview::Config::getValue<bool>("plugin:hyprdrive:live_layer_frost"))
         return;
 
     auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;

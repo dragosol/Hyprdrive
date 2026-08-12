@@ -242,28 +242,28 @@ constexpr float WIGGLE_PERIOD_MS = 3000.F;
 constexpr float WIGGLE_FRACTION  = 1.F / 6.F;
 constexpr float WIGGLE_DEGREES   = 15.F;
 
-constexpr const char* KEY_ENABLED    = "plugin:scrolloverview:dock:enabled";
-constexpr const char* KEY_ICON_SIZE  = "plugin:scrolloverview:dock:icon_size";
-constexpr const char* KEY_FRACTION   = "plugin:scrolloverview:dock:height_fraction";
-constexpr const char* KEY_RADIUS     = "plugin:scrolloverview:dock:corner_radius";
-constexpr const char* KEY_BG_COLOR   = "plugin:scrolloverview:dock:background_color";
-constexpr const char* KEY_BG_OPACITY = "plugin:scrolloverview:dock:background_opacity";
-constexpr const char* KEY_BLUR_SIZE   = "plugin:scrolloverview:dock:blur_size";
-constexpr const char* KEY_BLUR_PASSES = "plugin:scrolloverview:dock:blur_passes";
-constexpr const char* KEY_BLUR_BRIGHT = "plugin:scrolloverview:dock:blur_brightness";
-constexpr const char* KEY_BLUR_NOISE  = "plugin:scrolloverview:dock:blur_noise";
-constexpr const char* KEY_BLUR_CONTR  = "plugin:scrolloverview:dock:blur_contrast";
-constexpr const char* KEY_BLUR_VIBR   = "plugin:scrolloverview:dock:blur_vibrancy";
-constexpr const char* KEY_MINIMIZE_MS = "plugin:scrolloverview:dock:minimize_ms";
+constexpr const char* KEY_ENABLED    = "plugin:hyprdrive:dock:enabled";
+constexpr const char* KEY_ICON_SIZE  = "plugin:hyprdrive:dock:icon_size";
+constexpr const char* KEY_FRACTION   = "plugin:hyprdrive:dock:height_fraction";
+constexpr const char* KEY_RADIUS     = "plugin:hyprdrive:dock:corner_radius";
+constexpr const char* KEY_BG_COLOR   = "plugin:hyprdrive:dock:background_color";
+constexpr const char* KEY_BG_OPACITY = "plugin:hyprdrive:dock:background_opacity";
+constexpr const char* KEY_BLUR_SIZE   = "plugin:hyprdrive:dock:blur_size";
+constexpr const char* KEY_BLUR_PASSES = "plugin:hyprdrive:dock:blur_passes";
+constexpr const char* KEY_BLUR_BRIGHT = "plugin:hyprdrive:dock:blur_brightness";
+constexpr const char* KEY_BLUR_NOISE  = "plugin:hyprdrive:dock:blur_noise";
+constexpr const char* KEY_BLUR_CONTR  = "plugin:hyprdrive:dock:blur_contrast";
+constexpr const char* KEY_BLUR_VIBR   = "plugin:hyprdrive:dock:blur_vibrancy";
+constexpr const char* KEY_MINIMIZE_MS = "plugin:hyprdrive:dock:minimize_ms";
 
 // X30, all four read off the reference: `autohide` true / `dock-fixed` false,
 // `require-pressure-to-show` true at `pressure-threshold` 100.0, `show-delay`
 // 0.25, `hide-delay` 0.20, `animation-time` 0.20.
-constexpr const char* KEY_AUTOHIDE     = "plugin:scrolloverview:dock:autohide";
-constexpr const char* KEY_PRESSURE     = "plugin:scrolloverview:dock:pressure_threshold";
-constexpr const char* KEY_SHOW_DELAY   = "plugin:scrolloverview:dock:show_delay_ms";
-constexpr const char* KEY_HIDE_DELAY   = "plugin:scrolloverview:dock:hide_delay_ms";
-constexpr const char* KEY_AUTOHIDE_MS  = "plugin:scrolloverview:dock:autohide_ms";
+constexpr const char* KEY_AUTOHIDE     = "plugin:hyprdrive:dock:autohide";
+constexpr const char* KEY_PRESSURE     = "plugin:hyprdrive:dock:pressure_threshold";
+constexpr const char* KEY_SHOW_DELAY   = "plugin:hyprdrive:dock:show_delay_ms";
+constexpr const char* KEY_HIDE_DELAY   = "plugin:hyprdrive:dock:hide_delay_ms";
+constexpr const char* KEY_AUTOHIDE_MS  = "plugin:hyprdrive:dock:autohide_ms";
 
 // X31, one key per reference setting: `show-running`, the two that gate the
 // badge (`show-icons-notifications-counter` AND `show-icons-emblems` -- D2D
@@ -272,34 +272,34 @@ constexpr const char* KEY_AUTOHIDE_MS  = "plugin:scrolloverview:dock:autohide_ms
 // colour are keys too because `custom-theme-customize-running-dots` is FALSE in
 // the reference, which means "take the theme's numbers" -- so the theme's
 // numbers are the defaults and the key is where a different theme would land.
-constexpr const char* KEY_SHOW_RUNNING  = "plugin:scrolloverview:dock:running_indicator";
-constexpr const char* KEY_DOT_COLOR     = "plugin:scrolloverview:dock:indicator_color";
-constexpr const char* KEY_DOT_SIZE      = "plugin:scrolloverview:dock:indicator_size";
-constexpr const char* KEY_BADGE         = "plugin:scrolloverview:dock:notification_counter";
-constexpr const char* KEY_EMBLEMS       = "plugin:scrolloverview:dock:emblems";
-constexpr const char* KEY_DANCE_URGENT  = "plugin:scrolloverview:dock:dance_urgent";
-constexpr const char* KEY_URGENT_NOTIFY = "plugin:scrolloverview:dock:urgent_notify";
+constexpr const char* KEY_SHOW_RUNNING  = "plugin:hyprdrive:dock:running_indicator";
+constexpr const char* KEY_DOT_COLOR     = "plugin:hyprdrive:dock:indicator_color";
+constexpr const char* KEY_DOT_SIZE      = "plugin:hyprdrive:dock:indicator_size";
+constexpr const char* KEY_BADGE         = "plugin:hyprdrive:dock:notification_counter";
+constexpr const char* KEY_EMBLEMS       = "plugin:hyprdrive:dock:emblems";
+constexpr const char* KEY_DANCE_URGENT  = "plugin:hyprdrive:dock:dance_urgent";
+constexpr const char* KEY_URGENT_NOTIFY = "plugin:hyprdrive:dock:urgent_notify";
 
 // X32, one key per reference setting: `show-favorites`, `show-show-apps-button`,
 // `show-apps-at-top` and `show-apps-always-in-the-edge`. The last two are a PAIR
 // and the reference sets them false/true, which on a bottom dock puts the button
 // at the right-hand edge, past everything else.
-constexpr const char* KEY_SHOW_FAVORITES = "plugin:scrolloverview:dock:show_favorites";
-constexpr const char* KEY_SHOW_APPS      = "plugin:scrolloverview:dock:show_apps_button";
-constexpr const char* KEY_SHOW_APPS_TOP  = "plugin:scrolloverview:dock:show_apps_at_top";
-constexpr const char* KEY_SHOW_APPS_EDGE = "plugin:scrolloverview:dock:show_apps_always_in_the_edge";
+constexpr const char* KEY_SHOW_FAVORITES = "plugin:hyprdrive:dock:show_favorites";
+constexpr const char* KEY_SHOW_APPS      = "plugin:hyprdrive:dock:show_apps_button";
+constexpr const char* KEY_SHOW_APPS_TOP  = "plugin:hyprdrive:dock:show_apps_at_top";
+constexpr const char* KEY_SHOW_APPS_EDGE = "plugin:hyprdrive:dock:show_apps_always_in_the_edge";
 
 // GNOME's own Show Applications artwork. A key rather than a constant because it
 // is the one part of the button a theme changes.
-constexpr const char* KEY_SHOW_APPS_ICON = "plugin:scrolloverview:dock:show_apps_icon";
+constexpr const char* KEY_SHOW_APPS_ICON = "plugin:hyprdrive:dock:show_apps_icon";
 
 // X33. Scroll, middle-click, and the workspace scoping X31 left alone.
-constexpr const char* KEY_SCROLL_ACTION = "plugin:scrolloverview:dock:scroll_action";
-constexpr const char* KEY_MIDDLE_CLICK  = "plugin:scrolloverview:dock:middle_click_action";
-constexpr const char* KEY_SHIFT_MIDDLE  = "plugin:scrolloverview:dock:shift_middle_click_action";
-constexpr const char* KEY_ISOLATE_WS    = "plugin:scrolloverview:dock:isolate_workspaces";
-constexpr const char* KEY_ISOLATE_LOCATIONS = "plugin:scrolloverview:dock:isolate_locations";
-constexpr const char* KEY_AGNOSTIC_URG  = "plugin:scrolloverview:dock:workspace_agnostic_urgent";
+constexpr const char* KEY_SCROLL_ACTION = "plugin:hyprdrive:dock:scroll_action";
+constexpr const char* KEY_MIDDLE_CLICK  = "plugin:hyprdrive:dock:middle_click_action";
+constexpr const char* KEY_SHIFT_MIDDLE  = "plugin:hyprdrive:dock:shift_middle_click_action";
+constexpr const char* KEY_ISOLATE_WS    = "plugin:hyprdrive:dock:isolate_workspaces";
+constexpr const char* KEY_ISOLATE_LOCATIONS = "plugin:hyprdrive:dock:isolate_locations";
+constexpr const char* KEY_AGNOSTIC_URG  = "plugin:hyprdrive:dock:workspace_agnostic_urgent";
 
 // X34, one key per reference setting: `hot-keys`, `hotkeys-overlay`,
 // `hotkeys-show-dock`, `shortcut-timeout` 2.0. The ACCELERATORS themselves are
@@ -307,10 +307,10 @@ constexpr const char* KEY_AGNOSTIC_URG  = "plugin:scrolloverview:dock:workspace_
 // gsettings because GNOME's `Main.wm.addKeybinding` reads them from there, and
 // under Hyprland the config's own `bind` lines ARE that store. A second copy
 // inside the plugin could only disagree with the one the compositor obeys.
-constexpr const char* KEY_HOT_KEYS       = "plugin:scrolloverview:dock:hot_keys";
-constexpr const char* KEY_HOTKEY_OVERLAY = "plugin:scrolloverview:dock:hotkeys_overlay";
-constexpr const char* KEY_HOTKEY_DOCK    = "plugin:scrolloverview:dock:hotkeys_show_dock";
-constexpr const char* KEY_SHORTCUT_SECS  = "plugin:scrolloverview:dock:shortcut_timeout";
+constexpr const char* KEY_HOT_KEYS       = "plugin:hyprdrive:dock:hot_keys";
+constexpr const char* KEY_HOTKEY_OVERLAY = "plugin:hyprdrive:dock:hotkeys_overlay";
+constexpr const char* KEY_HOTKEY_DOCK    = "plugin:hyprdrive:dock:hotkeys_show_dock";
+constexpr const char* KEY_SHORTCUT_SECS  = "plugin:hyprdrive:dock:shortcut_timeout";
 
 // `const NUM_HOTKEYS = 10` -- the reference binds ten keys and numbers ten
 // icons, and the eleventh icon onwards gets neither.
@@ -1768,7 +1768,7 @@ CBox restoreForFlight(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& i
 // moves ~900px between two 30fps film frames and no pixel metric can tell that
 // from a teleport. Plain fopen because the plugin's Log::logger is dead
 // (separate inline instance under -fno-gnu-unique).
-constexpr const char* KEY_FLIGHT_LOG = "plugin:scrolloverview:dock:flight_log";
+constexpr const char* KEY_FLIGHT_LOG = "plugin:hyprdrive:dock:flight_log";
 
 static void zdbg(const char* fmt, ...) {
     if (!Config::getValue<bool>(KEY_FLIGHT_LOG))

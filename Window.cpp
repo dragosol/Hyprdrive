@@ -146,7 +146,7 @@ static void prefilterOverviewWindowTextures(const PHLWINDOW& window, PHLMONITOR 
     // ponytail: default 0.55 is just above the measured 0.5 boundary where
     // bilinear leaves the area-average ideal. Above it the copy would buy
     // nothing. 0 disables the prefilter entirely.
-    const double MINIFY_THRESHOLD = ScrollOverview::Config::getValue<float>("plugin:scrolloverview:prefilter_below");
+    const double MINIFY_THRESHOLD = ScrollOverview::Config::getValue<float>("plugin:hyprdrive:prefilter_below");
 
     if (!window || !monitor || minify <= 0.0 || minify > MINIFY_THRESHOLD)
         return;
