@@ -234,6 +234,19 @@ would make a suite verdict worth more.
 3. `gate_slate` restores the seven dock options and anim_scale that gates
    actually write. A gate that changes anything else still owns restoring it,
    and will find out the hard way.
+4. `z3_position_memory`'s FIRST gesture locates its drop target by taking the
+   largest blob of a broad yellow mask over the WHOLE frame, and this desktop
+   has a photograph behind the overview. On wp03 (dry golden hillsides, 5.3% of
+   its pixels inside that mask) the biggest yellow blob is the wallpaper --
+   2871 px at (1925,1217), colour [193 143 84] -- while the strip mini it
+   wanted is the third-largest at 570 px. G1 then drags the window into the
+   main card instead of onto a strip cell and the gate reports "position lost".
+   Its own G2 and G3 already search only the strip band and are unaffected.
+   Deterministic, not flaky, and NOT a build difference: identical numbers on
+   HEAD and on a4189e2 (zrig/phase8/Z3_FINDING.md). Fix: G1 searches the band,
+   or takes the largest blob whose box lands inside a strip cell. Eleven of the
+   twenty-two wallpapers score 0.0% on that mask, which is why the gate has
+   been green until now.
 
 ## Guest gate dependencies + known flakes (2026-08-09)
 
