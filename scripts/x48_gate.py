@@ -34,6 +34,7 @@ Blobs, never bounding boxes of a whole colour mask: the fixture red is in the
 main tile AND in the strip mini, so a bbox over all of it spans nearly the whole
 screen and cannot move whatever the compositor does.
 """
+import json
 import sys
 import pathlib
 import numpy as np
@@ -41,12 +42,46 @@ from PIL import Image
 
 OUT = pathlib.Path(__file__).resolve().parent / "x48"
 S = 4                      # label on a 4x downsample; there is no scipy here
-ACCENT = (0x50, 0x45, 0x36)  # general:col.active_border 77504536, alpha forced to 1
 
 
 def load(tag, name):
     p = OUT / f"{tag}-{name}.png"
     return np.asarray(Image.open(p).convert("RGB")).astype(int)
+
+
+def accent(out):
+    """The colour the plugin actually draws a SELECTION with, read back from the
+    frame's own session -- never spelled out here.
+
+    Two separate ways the literal (0x50, 0x45, 0x36) had gone stale:
+
+      * it is `general:col.active_border` as matugen derived it from ONE
+        wallpaper, and matugen re-derives the palette from whatever picture is
+        up. On wp17 -- the greyscale image pinwall.sh pins precisely so colour
+        locators are safe -- col.active_border is 77424753;
+      * and since X56 the selection is not drawn with col.active_border at all.
+        Config.cpp's highlightColor() prefers `plugin:hyprdrive:col_highlight`
+        (matugen's `primary`, currently ffadc6ff) and only falls back to
+        col.active_border when that key is UNSET, which it signals with alpha 0.
+
+    A locator looking for the old brown found nothing on any frame, and "no
+    selection on any frame" reads exactly like a build that stopped drawing
+    selections. So this mirrors highlightColor() over the two files the x48
+    fixture dumps beside the frames.
+    """
+    for name, need_alpha in (("highlight.json", True), ("accent.json", False)):
+        p = out / name
+        if not p.exists():
+            continue
+        v = int(json.loads(p.read_text())["gradient"].split()[0], 16)   # AARRGGBB
+        if need_alpha and (v >> 24) & 0xFF == 0:
+            continue        # alpha 0 means UNSET -- fall through, as the plugin does
+        return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+    raise SystemExit("no highlight.json/accent.json next to the frames -- rerun the "
+                     "x48 fixture, which is what writes them")
+    g = json.loads(p.read_text())["gradient"].split()[0]
+    v = int(g, 16)                       # AARRGGBB; alpha is forced to 1 on the selection
+    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
 
 
 def blobs(mask, limit=4):
@@ -82,6 +117,8 @@ def red(im):
 def main(tag):
     a0, a1, b = load(tag, "00-a0"), load(tag, "01-a1"), load(tag, "20-b")
     H = a0.shape[0]
+    ACCENT = accent(OUT)
+    print(f"accent   #{ACCENT[0]:02x}{ACCENT[1]:02x}{ACCENT[2]:02x}  (read back from accent.json)")
     fails = []
 
     # The overview's own extent: the largest non-black blob, i.e. the wallpaper

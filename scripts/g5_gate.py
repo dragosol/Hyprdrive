@@ -28,8 +28,11 @@ the one OPAQUE accent rect on screen. Tolerance 3, not 16 -- the card's own
 background is the INACTIVE colour at alpha 0.55 and lands within 16 of the
 accent, so a loose mask returns the card merged with its selection (x49_gate.py
 measured 1356x120 where a row is 28px). Intersected with the change-since-rest
-mask because this theme's accent is a dark warm brown the wallpaper is full of.
+mask because the accent is a low-saturation grey the wallpaper is full of. The
+accent itself is READ BACK from accent.json, never spelled out: matugen
+re-derives it from whatever wallpaper is up.
 """
+import json
 import sys
 import pathlib
 import numpy as np
@@ -37,19 +40,49 @@ from PIL import Image
 
 OUT = pathlib.Path(__file__).resolve().parent / "g5"
 S = 4                        # label on a 4x downsample; there is no scipy here
-ACCENT = (0x50, 0x45, 0x36)  # general:col.active_border 77504536, alpha forced to 1
 TAGS = [f"1{i:02d}-t{i:02d}" for i in range(1, 11)]
 
-# A row is ~1664 logical px wide and a cell ~132, so any run wider than this is
-# a real selection and anything thinner is a speck of matching wallpaper. Set
-# well under a cell's rendered width (~108px at the rig's 0.82 scale) so the
-# NARROW shape is findable at all -- a threshold tuned for rows would make the
-# grid invisible and score a working build as unchanged.
-MINRUN = 50
+# The floor between "a selection" and "a speck of chrome in the same colour".
+# Measured on this fixture at 2560x1600: static panel chrome 2432 px, smallest
+# real selection (an app cell) 7360 px, a selected provider row 32336 px.
+MINAREA = 4000
 
 
 def load(tag, name):
     return np.asarray(Image.open(OUT / f"{tag}-{name}.png").convert("RGB")).astype(int)
+def accent(out):
+    """The colour the plugin actually draws a SELECTION with, read back from the
+    frame's own session -- never spelled out here.
+
+    Two separate ways the literal (0x50, 0x45, 0x36) had gone stale:
+
+      * it is `general:col.active_border` as matugen derived it from ONE
+        wallpaper, and matugen re-derives the palette from whatever picture is
+        up. On wp17 -- the greyscale image pinwall.sh pins precisely so colour
+        locators are safe -- col.active_border is 77424753;
+      * and since X56 the selection is not drawn with col.active_border at all.
+        Config.cpp's highlightColor() prefers `plugin:hyprdrive:col_highlight`
+        (matugen's `primary`, currently ffadc6ff) and only falls back to
+        col.active_border when that key is UNSET, which it signals with alpha 0.
+
+    A locator looking for the old brown found nothing on any frame, and "no
+    selection on any frame" reads exactly like a build that stopped drawing
+    selections. So this mirrors highlightColor() over the two files the x48
+    fixture dumps beside the frames.
+    """
+    for name, need_alpha in (("highlight.json", True), ("accent.json", False)):
+        p = out / name
+        if not p.exists():
+            continue
+        v = int(json.loads(p.read_text())["gradient"].split()[0], 16)   # AARRGGBB
+        if need_alpha and (v >> 24) & 0xFF == 0:
+            continue        # alpha 0 means UNSET -- fall through, as the plugin does
+        return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+    raise SystemExit("no highlight.json/accent.json next to the frames -- rerun the "
+                     "x48 fixture, which is what writes them")
+    g = json.loads(p.read_text())["gradient"].split()[0]
+    v = int(g, 16)                       # AARRGGBB; alpha is forced to 1 on the selection
+    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
 
 
 def overview_extent(base):
@@ -91,40 +124,67 @@ def longest_run(line):
     return (int(xs[starts[i]]), int(lens[i]))
 
 
-def selection(frame, base):
-    """The opaque accent rect, or None. Accepts BOTH shapes G5 can draw.
+def dilate(mask, n):
+    out = mask.copy()
+    for _ in range(n):
+        pd = np.pad(out, 1, constant_values=False)
+        out = (pd[:-2, 1:-1] | pd[2:, 1:-1] | pd[1:-1, :-2] | pd[1:-1, 2:] | pd[1:-1, 1:-1])
+    return out
 
-    Graded by the LONGEST CONTIGUOUS RUN per scanline, never by the extent of
-    all matching pixels. The first draft used the extent and it was wrong on
-    exactly the shape this gate exists to find: a selected CELL is 110px wide
-    with its own 39px icon drawn on top, so the accent survives as two ~44px
-    halves, and the extent then stretched from a stray matching pixel at x=556
-    to another at x=1284 and reported the cell as 396..729px wide -- a number
-    that grew as the selection walked right. A run is immune to that.
+
+def selection(frame, base, ACCENT):
+    """The selected item's box, or None. Accepts BOTH shapes G5 can draw.
+
+    The LARGEST CONNECTED COMPONENT of the highlight mask, dilated -- the
+    standing pixel doctrine, and it is what makes this locator work at all.
+    Earlier drafts took the extent of every matching scanline run, and the
+    highlight colour is not unique on the frame: measured 2026-08-12, the
+    results panel carries a static L of the same colour near its foot
+    (208x12 and 12x96 at y~824-956, present on every t-frame). A row-extent
+    locator merged that with the real selection 800px above it, failed its own
+    "one selection, not a merged stack" height bound, and reported NO SELECTION
+    ON ANY FRAME -- which reads exactly like a build that stopped drawing them.
+
+    MINAREA is the floor between the two populations, both measured on the same
+    ten frames: the static L is 2432 px, the smallest real selection (an app
+    cell) is 7360 px, and a selected provider row is 32336 px.
     """
     near = np.ones(frame.shape[:2], bool)
     for c in range(3):
         near &= np.abs(frame[:, :, c] - ACCENT[c]) < 3
     m = near & (np.abs(frame - base).max(axis=2) > 10)
 
-    runs = [longest_run(m[y]) for y in range(m.shape[0])]
-    dense = np.where(np.array([r[1] for r in runs]) > MINRUN)[0]
-    if dense.size == 0:
+    small = dilate(m[::S, ::S], 1)
+    seen = np.zeros_like(small)
+    best, best_n = None, 0
+    for sy, sx in zip(*np.where(small)):
+        if seen[sy, sx]:
+            continue
+        stack, comp = [(sy, sx)], []
+        seen[sy, sx] = True
+        while stack:
+            y, x = stack.pop()
+            comp.append((y, x))
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= ny < small.shape[0] and 0 <= nx < small.shape[1] \
+                        and small[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    stack.append((ny, nx))
+        if len(comp) > best_n:
+            best, best_n = comp, len(comp)
+    if best is None or best_n * S * S < MINAREA:
         return None
-    y0, y1 = int(dense[0]), int(dense[-1])
-    # One selection, not a merged stack. A cell is ~64px tall at the rig's
-    # scale and a row ~28px; anything past 100 is two things joined.
-    if not (18 <= y1 - y0 + 1 <= 100):
-        return None
-    # The widest scanline is the selection's unobstructed edge: a cell's top
-    # band above its icon, a row's band above its label.
-    best = max(runs[y0:y1 + 1], key=lambda r: r[1])
-    return (best[0], y0, best[1], y1 - y0 + 1)
+    a = np.array(best)
+    return (int(a[:, 1].min()) * S, int(a[:, 0].min()) * S,
+            int(a[:, 1].max() - a[:, 1].min() + 1) * S,
+            int(a[:, 0].max() - a[:, 0].min() + 1) * S)
 
 
 def main(tag):
     a0, a1 = load(tag, "00-a0"), load(tag, "01-a1")
     H, W = a0.shape[:2]
+    ACC = accent(OUT)
+    print(f"accent   #{ACC[0]:02x}{ACC[1]:02x}{ACC[2]:02x}  (read back from accent.json)")
     fails = []
 
     ext = overview_extent(a0)
@@ -147,7 +207,7 @@ def main(tag):
         except FileNotFoundError:
             continue
         live = max(live, int((np.abs(f - a0).max(axis=2) > 10).sum()))
-        sels[name] = selection(f, a0)
+        sels[name] = selection(f, a0, ACC)
 
     print(f"LIVE     largest t-frame diff vs a0 {live} px")
     if live < W * H * 0.01:
@@ -173,10 +233,19 @@ def main(tag):
         print("CAPS     no more than the old SHARED cap of 5 is reachable")
         fails.append("CAPS")
 
+    # ASPECT, not a fraction of the overview's width. "A row is more than 55% of
+    # the card" was measured against a number nothing in the layout is tied to:
+    # the selected row is 908px inside an 1800px card = 50.4%, so the check sat
+    # 5 points off the value it was grading and would have flipped with the
+    # window count. Shape is what the claim is actually about, and the two
+    # populations are nowhere near each other -- measured on this fixture, a
+    # cell is 116x72 (w/h 1.6) and a row is 908x36 (w/h 25.2). The thresholds
+    # below sit in the empty middle of that gap and depend on no layout number.
     shortest = min(d[3] for d in distinct)
-    cells = [d for d in distinct if d[2] < OVW * 0.25 and d[3] >= shortest * 1.8]
-    rows = [d for d in distinct if d[2] >= OVW * 0.55]
-    print(f"GRID     shortest selection {shortest}px tall; {len(cells)} cell-shaped, {len(rows)} row-shaped")
+    cells = [d for d in distinct if d[2] <= d[3] * 3.0]
+    rows = [d for d in distinct if d[2] >= d[3] * 6.0]
+    print(f"GRID     shortest selection {shortest}px tall; {len(cells)} cell-shaped "
+          f"(w/h <= 3), {len(rows)} row-shaped (w/h >= 6)")
     if not cells:
         print("GRID     nothing narrow-and-tall -- the apps are still a list")
         fails.append("GRID")
