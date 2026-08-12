@@ -111,9 +111,33 @@ if MODE == 'z5log':
     sys.exit(1 if worst > 40 else 0)
 
 if MODE == 'z5':
-    JUMP_PX = 350
     MIN_AREA = 15000   # ignore dock-cell-sized blobs: identity flips to the
                        # dock cell are legit (fade-out done), not teleports
+
+    # THE LIMIT IS THE CURVE'S OWN WORST FRAME, not a round number.
+    #
+    # 350px was one, and the shipping animation goes through it every time it is
+    # sampled slightly late: the flight is EASE_OUT_EXPO over dock:minimize_ms
+    # (400ms, spec 13.14 Y5), the film is 30fps (z_rig.sh's wf-recorder -r 30),
+    # so ONE frame at the start of a flight covers E(1/30 / 0.4) = 1 - 2^(-0.83)
+    # = 0.44 of the whole distance. Measured 2026-08-12 on four runs of two
+    # builds -- 216px, 281px, 295px, 401px, every one of them at the second
+    # frame of the FIRST minimize and none of them a reversal -- and the 401 is
+    # frame 91->92 of B2: box (640,376,756,472) -> (916,888,264,248), a proxy
+    # shrinking 756px wide to 264 while its centre falls 400px. That is the
+    # animation working.
+    #
+    # So the limit is derived per run from what the film itself shows: the
+    # distance the flight has to cover (rest centre -> the dock's own preview,
+    # both already located below) times the curve's first-frame share, with half
+    # again for sampling jitter. On this fixture that is ~610px, and the defect
+    # this arm exists to catch -- a reversal RESTARTING FROM THE ICON, which is
+    # the whole distance in one frame -- is ~920px, so the gap is real. The arm
+    # that carries the claim precisely is z5log, on the plugin's own boxes;
+    # pixels at 30fps cannot separate a fast curve from a jump on their own.
+    FILM_FPS      = 30.0    # z_rig.sh: wf-recorder -f ... -r 30
+    FLIGHT_MS     = 400.0   # Config.cpp dock:minimize_ms, the shipping default
+    JITTER_FACTOR = 1.5
 
     # ...and MIN_AREA was not enough, because the dock cell is not what the dock
     # draws. A MINIMIZED window is drawn LIVE in the pill (X25 SPreview), and on
@@ -142,6 +166,17 @@ if MODE == 'z5':
     DOCKPREVIEW = (int(_b[0]) - PAD, int(_b[1]) - PAD, int(_b[2]) + 2 * PAD, int(_b[3]) + 2 * PAD)
     print(f'z5: dock live preview excluded from the green search: {DOCKPREVIEW}')
 
+    # The flight's own length, off this film: where the fixture rests before the
+    # first click (the biggest blob outside the dock) to where it is going (the
+    # dock preview located above).
+    rest = max((largest_green(p, DOCKPREVIEW) for p in frames[:20]), key=lambda b: (b[2] * b[3]) if b else -1)
+    assert rest, 'no fixture green before the first click -- the film does not start on a window'
+    DIST = (((rest[0] + rest[2] / 2.0) - (_b[0] + _b[2] / 2.0)) ** 2 + ((rest[1] + rest[3] / 2.0) - (_b[1] + _b[3] / 2.0)) ** 2) ** 0.5
+    FIRST_FRAME_SHARE = 1.0 - 2.0 ** (-10.0 * (1000.0 / FILM_FPS) / FLIGHT_MS)
+    JUMP_PX = JITTER_FACTOR * DIST * FIRST_FRAME_SHARE
+    print(f'z5: the flight covers {DIST:.0f}px, one film frame is {FIRST_FRAME_SHARE * 100:.0f}% of it on '
+          f'EASE_OUT_EXPO at {FLIGHT_MS:.0f}ms, limit {JUMP_PX:.0f}px (x{JITTER_FACTOR} for sampling)')
+
     last, worst = None, (0.0, -1)
     for i, p in enumerate(frames):
         b = largest_green(p, DOCKPREVIEW)
@@ -154,5 +189,5 @@ if MODE == 'z5':
             if d > worst[0]:
                 worst = (d, i)
         last = c
-    print(f'z5 {"FAIL" if worst[0] > JUMP_PX else "PASS"}: worst jump {worst[0]:.0f}px at frame {worst[1]} (limit {JUMP_PX})')
+    print(f'z5 {"FAIL" if worst[0] > JUMP_PX else "PASS"}: worst jump {worst[0]:.0f}px at frame {worst[1]} (limit {JUMP_PX:.0f})')
     sys.exit(1 if worst[0] > JUMP_PX else 0)
