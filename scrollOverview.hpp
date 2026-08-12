@@ -34,6 +34,81 @@ struct SOverviewDropSite;
 // Same shape, same collect-then-pick split as the drop above.
 struct SOverviewNavTarget;
 
+// Everything the overview makes visible while it is up, and puts back when it
+// is not: surface visible-regions it clears, windows it unhides, layers it
+// lifts above fullscreen. Three save-and-restore vectors that used to be three
+// members of the god object with three force* and three restore* methods, and
+// the restores were three consecutive lines of an eight-call destructor litany
+// -- a shape that only stays correct while nobody adds a fourth thing or an
+// early return.
+//
+// The destructor is the guarantee, not the mechanism: ~CScrollOverview still
+// calls restoreAll() at exactly the point the three restores used to run,
+// because their position in that litany is load-bearing (they run before
+// images.clear() drops the textures and before the cursor override comes off).
+// restoreAll() empties the vectors, so the destructor that follows finds
+// nothing to do -- and a future path that forgets to call it no longer leaks a
+// hidden window.
+class CForcedVisibility {
+  public:
+    ~CForcedVisibility() { restoreAll(); }
+
+    void forceSurface(SP<CWLSurfaceResource> surface);
+    void forceWindowSurfaces(PHLWINDOW window);
+    void forceWindow(PHLWINDOW window);
+    void forceLayersAboveFullscreen(PHLMONITOR monitor);
+    void restoreAll();
+
+  private:
+    void restoreSurfaces();
+    void restoreWindows();
+    void restoreLayers();
+
+    struct SSurface {
+        WP<CWLSurfaceResource> surface;
+        CRegion                visibleRegion;
+    };
+    struct SWindow {
+        PHLWINDOWREF window;
+        bool         hidden = false;
+    };
+    struct SLayer {
+        PHLLSREF layer;
+        bool     aboveFullscreen = true;
+        float    alpha           = 1.F;
+    };
+
+    std::vector<SSurface> m_surfaces;
+    std::vector<SWindow>  m_windows;
+    std::vector<SLayer>   m_layers;
+};
+
+// The overview's blur/frost caches and the state that says whether they are
+// still good for this frame. Grouped so "is the frost cache valid" is one
+// object's question instead of eight loose members of the god object.
+//
+// releaseGL() is explicit and NOT the destructor: dropping a framebuffer needs
+// the EGL context current, which only ~CScrollOverview knows it has made. The
+// destructor drops the shared pointers and nothing else, which is exactly what
+// the old code did to cardWallpaperFB.
+struct COverviewFrostCache {
+    bool     overviewDirty       = true;
+    bool     backdropDirty       = true;
+    bool     overviewStateValid  = false;
+    float    lastOverviewScale   = 1.F;
+    int      lastBackdropWallpaperMode = -1;
+    Vector2D lastOverviewViewOffset    = Vector2D{};
+
+    SP<Render::IFramebuffer> backdropFB;
+    SP<Render::IFramebuffer> cardWallpaperFB;
+
+    void releaseGL() {
+        if (backdropFB)
+            backdropFB->release();
+        backdropFB.reset();
+    }
+};
+
 class CScrollOverview : public IOverview {
   public:
     CScrollOverview(PHLWORKSPACE startedOn_, bool swipe = false, PHLMONITOR monitor = {});
@@ -172,13 +247,6 @@ class CScrollOverview : public IOverview {
     void      focusMostVisibleScrollingWindow(const PHLWORKSPACE& workspace);
     bool      moveScrollingColumnSelection(bool next);
     bool      moveScrollingStackSelection(bool next);
-    void   forceSurfaceVisibility(SP<CWLSurfaceResource> surface);
-    void   forceWindowSurfaceVisibility(PHLWINDOW window);
-    void   forceWindowVisible(PHLWINDOW window);
-    void   forceLayersAboveFullscreen();
-    void   restoreForcedSurfaceVisibility();
-    void   restoreForcedWindowVisibility();
-    void   restoreForcedLayerVisibility();
     void   applyWorkspaceAnimationOverrides();
     void   restoreWorkspaceAnimationOverrides();
     void   forceWorkspaceAlphaVisible();
@@ -211,14 +279,8 @@ class CScrollOverview : public IOverview {
     // the window list is not rebuilt on its own, so the edge has to be noticed.
     // Starts true because every open starts unfiltered (main.cpp:282).
     bool   lastQueryEmpty           = true;
-    bool   overviewBlurDirty        = true;
-    bool   backdropBlurDirty        = true;
-    bool   overviewBlurStateValid   = false;
-    float  lastOverviewBlurScale    = 1.F;
-    int    lastBackdropWallpaperMode = -1;
-    Vector2D lastOverviewBlurViewOffset = Vector2D{};
-    SP<Render::IFramebuffer> backdropBlurFB;
-    SP<Render::IFramebuffer> cardWallpaperFB;
+
+    COverviewFrostCache frost;
 
     struct SWorkspaceImage {
         PHLWORKSPACE              pWorkspace;
@@ -334,24 +396,7 @@ class CScrollOverview : public IOverview {
     std::vector<PHLWORKSPACE>        gapWorkspaces;
     ScrollOverview::Config::ELayout  layout = ScrollOverview::Config::ELayout::VERTICAL;
 
-    struct SForcedSurfaceVisibility {
-        WP<CWLSurfaceResource> surface;
-        CRegion               visibleRegion;
-    };
-    std::vector<SForcedSurfaceVisibility> forcedSurfaceVisibility;
-
-    struct SForcedWindowVisibility {
-        PHLWINDOWREF window;
-        bool         hidden = false;
-    };
-    std::vector<SForcedWindowVisibility> forcedWindowVisibility;
-
-    struct SForcedLayerVisibility {
-        PHLLSREF layer;
-        bool     aboveFullscreen = true;
-        float    alpha           = 1.F;
-    };
-    std::vector<SForcedLayerVisibility> forcedLayerVisibility;
+    CForcedVisibility forced;
 
     struct SWorkspaceAnimationConfig {
         std::string                                      name;

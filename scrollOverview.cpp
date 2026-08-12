@@ -39,18 +39,14 @@ CScrollOverview::~CScrollOverview() {
         wl_event_source_remove(realtimePreviewTimer);
         realtimePreviewTimer = nullptr;
     }
-    if (backdropBlurFB)
-        backdropBlurFB->release();
-    backdropBlurFB.reset();
+    frost.releaseGL();
     OverviewWindow::releaseTexturePrefilterCache();
     const auto MONITOR = pMonitor.lock();
     const auto WORKSPACE = MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{};
     emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(WORKSPACE, Desktop::focusState()->window()), false);
     restoreWorkspaceAnimationOverrides();
     restoreInputConfigOverrides();
-    restoreForcedSurfaceVisibility();
-    restoreForcedWindowVisibility();
-    restoreForcedLayerVisibility();
+    forced.restoreAll();
     images.clear(); // otherwise we get a vram leak
     trailingWorkspace.reset();
     gapWorkspaces.clear();
@@ -230,22 +226,22 @@ void CScrollOverview::updateCardWallpaperFB(PHLMONITOR monitor, const Time::stea
     const auto FBSIZE     = monitor->m_pixelSize;
     const auto RENDERSIZE = monitor->m_transformedSize;
     const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
-    if (!cardWallpaperFB)
-        cardWallpaperFB = g_pHyprRenderer->createFB("scrolloverview_card_wallpaper");
+    if (!frost.cardWallpaperFB)
+        frost.cardWallpaperFB = g_pHyprRenderer->createFB("scrolloverview_card_wallpaper");
 
-    if (!cardWallpaperFB || !cardWallpaperFB->isAllocated() || cardWallpaperFB->m_size != FBSIZE || cardWallpaperFB->m_drmFormat != FBFORMAT) {
-        if (cardWallpaperFB)
-            cardWallpaperFB->release();
-        if (!cardWallpaperFB || !cardWallpaperFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), FBFORMAT))
+    if (!frost.cardWallpaperFB || !frost.cardWallpaperFB->isAllocated() || frost.cardWallpaperFB->m_size != FBSIZE || frost.cardWallpaperFB->m_drmFormat != FBFORMAT) {
+        if (frost.cardWallpaperFB)
+            frost.cardWallpaperFB->release();
+        if (!frost.cardWallpaperFB || !frost.cardWallpaperFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), FBFORMAT))
             return;
     }
 
-    cardWallpaperFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
+    frost.cardWallpaperFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
 
     const CRegion fullDamage{CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y}};
 
     {
-        auto bindCard = g_pHyprRenderer->bindTempFB(cardWallpaperFB);
+        auto bindCard = g_pHyprRenderer->bindTempFB(frost.cardWallpaperFB);
 
         // The frame damage can be tiny on an idle frame, and queued surface
         // elements are culled against it -- which left this FB black except the
@@ -273,47 +269,47 @@ void CScrollOverview::updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperM
     if (!monitor || wallpaperMode == 1 || !ScrollOverview::Config::getBlur())
         return;
 
-    if (lastBackdropWallpaperMode != wallpaperMode) {
-        backdropBlurDirty         = true;
-        lastBackdropWallpaperMode = wallpaperMode;
+    if (frost.lastBackdropWallpaperMode != wallpaperMode) {
+        frost.backdropDirty         = true;
+        frost.lastBackdropWallpaperMode = wallpaperMode;
     }
 
     const auto FBSIZE     = monitor->m_pixelSize;
     const auto RENDERSIZE = monitor->m_transformedSize;
     const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
-    if (!backdropBlurFB)
-        backdropBlurFB = g_pHyprRenderer->createFB("scrolloverview_backdrop_blur");
+    if (!frost.backdropFB)
+        frost.backdropFB = g_pHyprRenderer->createFB("scrolloverview_backdrop_blur");
 
-    if (!backdropBlurFB || !backdropBlurFB->isAllocated() || backdropBlurFB->m_size != FBSIZE || backdropBlurFB->m_drmFormat != FBFORMAT) {
-        if (backdropBlurFB)
-            backdropBlurFB->release();
-        if (!backdropBlurFB || !backdropBlurFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), FBFORMAT))
+    if (!frost.backdropFB || !frost.backdropFB->isAllocated() || frost.backdropFB->m_size != FBSIZE || frost.backdropFB->m_drmFormat != FBFORMAT) {
+        if (frost.backdropFB)
+            frost.backdropFB->release();
+        if (!frost.backdropFB || !frost.backdropFB->alloc(sc<int>(FBSIZE.x), sc<int>(FBSIZE.y), FBFORMAT))
             return;
-        backdropBlurDirty = true;
+        frost.backdropDirty = true;
     }
 
-    if (!backdropBlurDirty)
+    if (!frost.backdropDirty)
         return;
 
     if (g_pHyprRenderer->m_renderData.currentFB)
-        backdropBlurFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
+        frost.backdropFB->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
 
     const CRegion fullDamage{CBox{0, 0, RENDERSIZE.x, RENDERSIZE.y}};
 
     {
-        auto bindBackdrop = g_pHyprRenderer->bindTempFB(backdropBlurFB);
+        auto bindBackdrop = g_pHyprRenderer->bindTempFB(frost.backdropFB);
         g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 1.F}}, fullDamage);
         renderGlobalWallpaper(monitor, now);
         OverviewRender::flushPass(monitor);
     }
 
     auto blurDamage = fullDamage;
-    const auto BLURREDTEX = g_pHyprRenderer->blurFramebuffer(backdropBlurFB, 1.F, &blurDamage);
+    const auto BLURREDTEX = g_pHyprRenderer->blurFramebuffer(frost.backdropFB, 1.F, &blurDamage);
     if (!BLURREDTEX || !BLURREDTEX->m_size.x || !BLURREDTEX->m_size.y)
         return;
 
     {
-        auto bindBackdrop = g_pHyprRenderer->bindTempFB(backdropBlurFB);
+        auto bindBackdrop = g_pHyprRenderer->bindTempFB(frost.backdropFB);
         g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 0.F}}, fullDamage);
 
         const auto SAVEDTRANSFORM = BLURREDTEX->m_transform;
@@ -332,14 +328,14 @@ void CScrollOverview::updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperM
             fullDamage);
     }
 
-    backdropBlurDirty = false;
+    frost.backdropDirty = false;
 }
 
 void CScrollOverview::renderBackdropBlurCache(PHLMONITOR monitor) {
-    if (!monitor || !backdropBlurFB || !backdropBlurFB->isAllocated() || !backdropBlurFB->getTexture())
+    if (!monitor || !frost.backdropFB || !frost.backdropFB->isAllocated() || !frost.backdropFB->getTexture())
         return;
 
-    const auto TEX = backdropBlurFB->getTexture();
+    const auto TEX = frost.backdropFB->getTexture();
     const CRegion fullDamage{CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y}};
 
     g_pHyprRenderer->draw(
@@ -2791,7 +2787,7 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
 }
 
 
-void CScrollOverview::forceSurfaceVisibility(SP<CWLSurfaceResource> surface) {
+void CForcedVisibility::forceSurface(SP<CWLSurfaceResource> surface) {
     if (!surface)
         return;
 
@@ -2799,22 +2795,22 @@ void CScrollOverview::forceSurfaceVisibility(SP<CWLSurfaceResource> surface) {
     if (!HLSURFACE)
         return;
 
-    for (auto& entry : forcedSurfaceVisibility) {
+    for (auto& entry : m_surfaces) {
         if (entry.surface.lock() == surface) {
             HLSURFACE->m_visibleRegion = {};
             return;
         }
     }
 
-    forcedSurfaceVisibility.push_back({surface, HLSURFACE->m_visibleRegion});
+    m_surfaces.push_back({surface, HLSURFACE->m_visibleRegion});
     HLSURFACE->m_visibleRegion = {};
 }
 
-void CScrollOverview::forceWindowSurfaceVisibility(PHLWINDOW window) {
+void CForcedVisibility::forceWindowSurfaces(PHLWINDOW window) {
     if (!window || !window->wlSurface() || !window->wlSurface()->resource())
         return;
 
-    window->wlSurface()->resource()->breadthfirst([this](SP<CWLSurfaceResource> surface, const Vector2D&, void*) { forceSurfaceVisibility(surface); }, nullptr);
+    window->wlSurface()->resource()->breadthfirst([this](SP<CWLSurfaceResource> surface, const Vector2D&, void*) { forceSurface(surface); }, nullptr);
 
     if (window->m_isX11 || !window->m_popupHead)
         return;
@@ -2823,17 +2819,17 @@ void CScrollOverview::forceWindowSurfaceVisibility(PHLWINDOW window) {
         if (!popup || !popup->aliveAndVisible() || !popup->wlSurface() || !popup->wlSurface()->resource())
             return;
 
-        popup->wlSurface()->resource()->breadthfirst([this](SP<CWLSurfaceResource> surface, const Vector2D&, void*) { forceSurfaceVisibility(surface); }, nullptr);
+        popup->wlSurface()->resource()->breadthfirst([this](SP<CWLSurfaceResource> surface, const Vector2D&, void*) { forceSurface(surface); }, nullptr);
     }, nullptr);
 }
 
-void CScrollOverview::forceWindowVisible(PHLWINDOW window) {
+void CForcedVisibility::forceWindow(PHLWINDOW window) {
     if (!window)
         return;
 
     constexpr auto FULLSCREENALPHA = Desktop::View::WINDOW_ALPHA_FULLSCREEN;
 
-    for (auto& entry : forcedWindowVisibility) {
+    for (auto& entry : m_windows) {
         if (entry.window == window) {
             window->m_hidden = false;
             window->alpha(FULLSCREENALPHA)->setValueAndWarp(1.F);
@@ -2841,7 +2837,7 @@ void CScrollOverview::forceWindowVisible(PHLWINDOW window) {
         }
     }
 
-    auto& entry                  = forcedWindowVisibility.emplace_back();
+    auto& entry                  = m_windows.emplace_back();
     entry.window                 = window;
     entry.hidden                 = window->m_hidden;
 
@@ -2849,17 +2845,17 @@ void CScrollOverview::forceWindowVisible(PHLWINDOW window) {
     window->alpha(FULLSCREENALPHA)->setValueAndWarp(1.F);
 }
 
-void CScrollOverview::forceLayersAboveFullscreen() {
-    if (!pMonitor)
+void CForcedVisibility::forceLayersAboveFullscreen(PHLMONITOR monitor) {
+    if (!monitor)
         return;
 
     for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_TOP, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY}) {
-        for (const auto& ls : pMonitor->m_layerSurfaceLayers[LAYER]) {
+        for (const auto& ls : monitor->m_layerSurfaceLayers[LAYER]) {
             if (!ls)
                 continue;
 
             bool known = false;
-            for (auto& entry : forcedLayerVisibility) {
+            for (auto& entry : m_layers) {
                 if (entry.layer == ls) {
                     known = true;
                     break;
@@ -2868,7 +2864,7 @@ void CScrollOverview::forceLayersAboveFullscreen() {
 
 			auto& lsAlpha = ls->alpha()[Desktop::View::LS_ALPHA_FADE];
             if (!known)
-                forcedLayerVisibility.push_back({ls, ls->m_aboveFullscreen, lsAlpha->value()});
+                m_layers.push_back({ls, ls->m_aboveFullscreen, lsAlpha->value()});
 
             if (!ls->m_aboveFullscreen)
                 ls->m_aboveFullscreen = true;
@@ -2879,8 +2875,8 @@ void CScrollOverview::forceLayersAboveFullscreen() {
     }
 }
 
-void CScrollOverview::restoreForcedSurfaceVisibility() {
-    for (auto& entry : forcedSurfaceVisibility) {
+void CForcedVisibility::restoreSurfaces() {
+    for (auto& entry : m_surfaces) {
         const auto SURFACE = entry.surface.lock();
         if (!SURFACE)
             continue;
@@ -2892,13 +2888,13 @@ void CScrollOverview::restoreForcedSurfaceVisibility() {
         HLSURFACE->m_visibleRegion = entry.visibleRegion;
     }
 
-    forcedSurfaceVisibility.clear();
+    m_surfaces.clear();
 }
 
-void CScrollOverview::restoreForcedWindowVisibility() {
+void CForcedVisibility::restoreWindows() {
     std::vector<SP<Desktop::View::CGroup>> groupsToRefresh;
 
-    for (auto& entry : forcedWindowVisibility) {
+    for (auto& entry : m_windows) {
         const auto WINDOW = entry.window.lock();
         if (!WINDOW)
             continue;
@@ -2921,11 +2917,11 @@ void CScrollOverview::restoreForcedWindowVisibility() {
             group->updateWindowVisibility();
     }
 
-    forcedWindowVisibility.clear();
+    m_windows.clear();
 }
 
-void CScrollOverview::restoreForcedLayerVisibility() {
-    for (auto& entry : forcedLayerVisibility) {
+void CForcedVisibility::restoreLayers() {
+    for (auto& entry : m_layers) {
         if (!entry.layer)
             continue;
 
@@ -2943,7 +2939,16 @@ void CScrollOverview::restoreForcedLayerVisibility() {
         entryLsAlpha->setValueAndWarp(visible ? 1.F : 0.F);
     }
 
-    forcedLayerVisibility.clear();
+    m_layers.clear();
+}
+
+// The order the destructor used to spell out three lines at a time. Idempotent:
+// each restore clears its own vector, so calling it again -- or letting the
+// destructor call it -- does nothing.
+void CForcedVisibility::restoreAll() {
+    restoreSurfaces();
+    restoreWindows();
+    restoreLayers();
 }
 
 void CScrollOverview::applyWorkspaceAnimationOverrides() {
@@ -3171,14 +3176,14 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
     // FB into the card box with shader round/roundingPower. The corners are
     // genuinely clipped and antialiased against whatever is behind them --
     // shadow included -- which no painted-on mask could match exactly.
-    if (WORKSPACEALPHA >= 0.999F && cardWallpaperFB && cardWallpaperFB->isAllocated() && cardWallpaperFB->getTexture()) {
+    if (WORKSPACEALPHA >= 0.999F && frost.cardWallpaperFB && frost.cardWallpaperFB->isAllocated() && frost.cardWallpaperFB->getTexture()) {
         const auto    CARDROUND = getOverviewCardRounding(monitor, ScrollOverview::Config::getScale());
         const auto    BOXPX     = WORKSPACEBOX.copy().round();
         const CRegion DMG{BOXPX};
 
         g_pHyprRenderer->draw(
             CTexPassElement::SRenderData{
-                .tex           = cardWallpaperFB->getTexture(),
+                .tex           = frost.cardWallpaperFB->getTexture(),
                 .box           = BOXPX,
                 .a             = 1.F,
                 .damage        = DMG,
@@ -4456,8 +4461,8 @@ void CScrollOverview::renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, con
     if (!window)
         return;
 
-    forceWindowVisible(window);
-    forceWindowSurfaceVisibility(window);
+    forced.forceWindow(window);
+    forced.forceWindowSurfaces(window);
     // E8-f: renderWindow multiplies the texture by the WORKSPACE alpha, so a
     // workspace sitting at 0 draws this window's border and nothing else. The
     // window's own alpha is already forced per frame right above; forcing the
@@ -4611,11 +4616,11 @@ void CScrollOverview::requestInputFrame() {
 }
 
 void CScrollOverview::markBlurDirty() {
-    overviewBlurDirty = true;
+    frost.overviewDirty = true;
 }
 
 void CScrollOverview::markBackdropBlurDirty() {
-    backdropBlurDirty = true;
+    frost.backdropDirty = true;
 }
 
 bool CScrollOverview::shouldAllowRealtimePreviewFrame() const {
@@ -5296,7 +5301,7 @@ void CScrollOverview::onPreRender() {
         damage();
     }
 
-    forceLayersAboveFullscreen();
+    forced.forceLayersAboveFullscreen(pMonitor.lock());
     updateWorkspaceOverflow();
 
     if (closing)
@@ -5465,18 +5470,18 @@ void CScrollOverview::render() {
     const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE, layout);
 
     const auto VIEWOFFSET = viewOffset->value();
-    if (!overviewBlurStateValid || std::abs(lastOverviewBlurScale - SCALE) > 0.001F || lastOverviewBlurViewOffset.distanceSq(VIEWOFFSET) > 0.001F) {
+    if (!frost.overviewStateValid || std::abs(frost.lastOverviewScale - SCALE) > 0.001F || frost.lastOverviewViewOffset.distanceSq(VIEWOFFSET) > 0.001F) {
         markBlurDirty();
-        overviewBlurStateValid     = true;
-        lastOverviewBlurScale      = SCALE;
-        lastOverviewBlurViewOffset = VIEWOFFSET;
+        frost.overviewStateValid     = true;
+        frost.lastOverviewScale      = SCALE;
+        frost.lastOverviewViewOffset = VIEWOFFSET;
     }
 
     const auto WALLPAPERMODE = ScrollOverview::Config::getWallpaperMode();
 
     if (ScrollOverview::Config::getBlur() && WALLPAPERMODE != 1) {
         updateBackdropBlurCache(MONITOR, WALLPAPERMODE, NOW);
-        if (backdropBlurFB && backdropBlurFB->isAllocated() && backdropBlurFB->getTexture())
+        if (frost.backdropFB && frost.backdropFB->isAllocated() && frost.backdropFB->getTexture())
             renderBackdropBlurCache(MONITOR);
         else
             renderGlobalWallpaper(MONITOR, NOW);
@@ -5518,13 +5523,13 @@ void CScrollOverview::render() {
     }
 
     const bool NEEDS_PRECOMPUTED_BLUR = hasVisiblePrecomputedBlurWindow(MONITOR, ACTIVEIDX, PITCH, SCALE);
-    if (NEEDS_PRECOMPUTED_BLUR && overviewBlurDirty)
+    if (NEEDS_PRECOMPUTED_BLUR && frost.overviewDirty)
         g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
 
     OverviewRender::flushPass(MONITOR);
 
     if (NEEDS_PRECOMPUTED_BLUR)
-        overviewBlurDirty = false;
+        frost.overviewDirty = false;
 
     {
         Prof::Timer PROFLIVE{Prof::liveNs, Prof::liveCalls};
