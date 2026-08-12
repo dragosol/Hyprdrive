@@ -7,6 +7,10 @@
 # seventy-nine that exist. A file nobody can forget to update beats a file
 # somebody is asked to remember.
 #
+# The PARSE itself now lives in scripts/lib/configkeys.py, because Phase 11's
+# settings schema mirrors the same registrations and a second copy of this regex
+# is a second thing to forget. Two generators, one mirror.
+#
 #   scripts/gen_keys_table.sh          rewrite docs/CONFIG.md
 #   scripts/gen_keys_table.sh --check  exit 1 if docs/CONFIG.md is out of date
 #
@@ -18,77 +22,20 @@ OUT=$ROOT/docs/CONFIG.md
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 
-python3 - "$ROOT/Config.cpp" > "$TMP" <<'PY'
-import re
+PYTHONPATH=$ROOT/scripts/lib python3 - "$ROOT/Config.cpp" > "$TMP" <<'PY'
 import sys
+from configkeys import parse
 
-src = open(sys.argv[1]).read()
-body = src.split("static void registerConfigValuesFor()", 1)[1]
-
-# Each registration is one makeShared<CxxxValue>(...) argument list; they are
-# wrapped over several lines, so flatten and split on the constructor name.
-flat = re.sub(r"\s+", " ", body)
-calls = re.findall(r'makeShared<(C\w+Value)>\(\s*KEY\("([^"]+)"\)\s*,\s*"((?:[^"\\]|\\.|"\s*")*)"\s*,\s*(.*?)\)\s*\)\s*;', flat)
-
-TYPE = {"CIntValue": "int", "CFloatValue": "float", "CBoolValue": "bool", "CStringValue": "string",
-        "CColorValue": "color", "CGradientValue": "color/gradient"}
-
-
-def clean_desc(d):
-    # Adjacent string literals in the source are one description.
-    return re.sub(r'"\s*"', "", d).replace("\\\"", '"').strip()
-
-
-def split_default(rest):
-    """The default value, and the min/max options that follow it, if any."""
-    depth = 0
-    for i, ch in enumerate(rest):
-        if ch in "({[":
-            depth += 1
-        elif ch in ")}]":
-            depth -= 1
-        elif ch == "," and depth == 0:
-            return rest[:i].strip(), rest[i + 1:].strip()
-    return rest.strip(), ""
-
-
-def num(v):
-    """0.82F -> 0.82, 20.F -> 20, 1.F -> 1."""
-    v = re.sub(r"([0-9.])F$", r"\1", v.strip())
-    return v[:-1] if v.endswith(".") else v
-
-
-def pretty_default(v, kind):
-    v = v.strip()
-    v = re.sub(r'^Hyprlang::STRING\{"(.*)"\}$', r'"\1"', v)
-    v = re.sub(r"^\(Hyprlang::INT\)", "", v)
-    m = re.match(r"^CHyprColor\{(.*)\}$", v)
-    if m:
-        return "rgba(" + ", ".join(num(x) for x in m.group(1).split(",")) + ")"
-    return (num(v) if kind in ("int", "float") else v) or "-"
-
-
-def pretty_range(opts):
-    lo = re.search(r"\.min\s*=\s*([-\w.]+)", opts)
-    hi = re.search(r"\.max\s*=\s*([-\w.]+)", opts)
-    if not lo and not hi:
-        return ""
-    if lo and hi:
-        return f"{num(lo.group(1))} .. {num(hi.group(1))}"
-    return f">= {num(lo.group(1))}" if lo else f"<= {num(hi.group(1))}"
-
+keys = parse(sys.argv[1])
 
 PREFIX = "plugin:hyprdrive:"
 LEGACY_PREFIX = "plugin:scrolloverview:"
 sections = {}
-for kind, tail, desc, rest in calls:
-    section, _, name = tail.rpartition(":")
-    default, opts = split_default(rest)
-    sections.setdefault(section or "", []).append(
-        (name, TYPE.get(kind, kind), pretty_default(default, TYPE.get(kind, "")), pretty_range(opts), clean_desc(desc)))
+for k in keys:
+    sections.setdefault(k.section, []).append(k)
 
 TITLES = {"": "General", "input": "input", "dock": "dock", "shadow": "shadow"}
-total = sum(len(v) for v in sections.values())
+total = len(keys)
 
 print("# Hyprdrive configuration keys")
 print()
@@ -113,8 +60,8 @@ for section in ("", "input", "dock", "shadow"):
     print()
     print("| key | type | default | range | description |")
     print("| --- | --- | --- | --- | --- |")
-    for name, kind, default, rng, desc in sections[section]:
-        print(f"| `{name}` | {kind} | `{default}` | {rng} | {desc} |")
+    for k in sections[section]:
+        print(f"| `{k.name}` | {k.type} | `{k.default}` | {k.range} | {k.description} |")
     print()
 PY
 

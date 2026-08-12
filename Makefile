@@ -34,7 +34,9 @@ VERSION_SCRIPT = scripts/generate-plugin-version.sh
 # An undefined symbol is a lazy-bind compositor kill (three same-day incidents
 # recorded in symcheck.sh's header), so the check IS part of the build. So is
 # keycheck: a config key read through the deprecated alias resolves, returns the
-# default forever and reports nothing -- see that script's header.
+# default forever and reports nothing -- see that script's header. And so is the
+# schema: it MIRRORS Config.cpp for the settings app, and an unrefreshed mirror
+# is an option the app cannot reach and nobody is told about.
 all: hyprdrive.so check
 
 hyprdrive.so: $(OBJS)
@@ -54,6 +56,8 @@ FORCE:
 check: hyprdrive.so
 	bash scripts/symcheck.sh
 	bash scripts/keycheck.sh
+	bash scripts/gen_keys_table.sh --check
+	python3 scripts/gen_schema.py --check
 
 clean:
 	rm -rf .build hyprdrive.so
