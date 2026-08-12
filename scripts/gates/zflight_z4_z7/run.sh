@@ -76,6 +76,22 @@ film_arm z4t
 run_arm  z4c
 film_arm z5
 
+# z5log rides on the z5 run: same clicks, same flights, the other instrument.
+# The film says the picture was continuous; the plugin's own drawn-box log says
+# the REVERSAL continued the old flight instead of restarting it, which is the
+# claim, and which no 30fps pixel metric can carry (a 400ms EASE_OUT_EXPO moves
+# ~900px between two frames). z_rig truncates /tmp/ovdbg.log at the top of the
+# z5 arm, so what it grades is this arm's flights and nothing else.
+if [ "${VERDICT[z5]}" = PASS ] || [ "${VERDICT[z5]}" = FAIL ]; then
+    if python3 scripts/zflight_gate.py z5log; then
+        VERDICT[z5log]=PASS
+    else
+        VERDICT[z5log]=FAIL; FAIL=1
+    fi
+else
+    VERDICT[z5log]="SKIP (z5 rig fault)"
+fi
+
 echo
-for a in z7 z6 z4 z4t z4c z5; do printf '%-4s %s\n' "$a" "${VERDICT[$a]:-SKIP}"; done
+for a in z7 z6 z4 z4t z4c z5 z5log; do printf '%-6s %s\n' "$a" "${VERDICT[$a]:-SKIP}"; done
 exit $FAIL

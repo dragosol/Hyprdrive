@@ -57,7 +57,7 @@ Row colours: green PASS/SKIP, red FAIL/SLATE, yellow DIED.
 | `z2_preview_click_goto` | dock-click | Z2 (user report 2026-08-07): clicking the dock preview goes to that window — view lands on its desktop AND it is focused; control click at the same height but o | ~1 min |
 | `z3_position_memory` | drag-strip | Z3 (user report 2026-08-07): strip moves after the first must still remember coordinates — G1 main tile -> off-screen desktop mini (always worked, keep), G2 str | ~3 min |
 | `z10_theme_adopt` | config | Phase 10 theme adoption, end to end: a wallpaper swap through the rice's own rotation script (`THEME=1`) must repaint the dock pill AND the overview strip ring with no compositor restart and nobody typing anything — asserted by requiring the systemd path unit to have fired (service InvocationID changes, theme-sync's log grows) rather than by the gate not calling it. Two-sided in one run: P1 inherits (dock delta 14.54 over a backdrop control of 0.00, cos 1.000 against the move the palette predicts; ring 1311 -> 0 old, 0 -> 1310 new), P2 pins the dock's accent keys in a later-sorting fragment (dock delta 0.00 while the overview still repaints). Red two ways on the old world and they fail differently: with nothing installed the overview arms pass on Hyprland's own config-file auto-reload and the dock arms sit at 0.00 (`zrig/phase10/z10-on-parent.log`); with the derived fragment present and the sync off, BOTH accents freeze (`z10-stale-pin.log`) | ~4 min |
-| `zflight_z4_z7` | minimize-restore | z4: no hole at restore landing (green area never dips below 25% of steady after first exceeding 50%); z4t: tiled window's restore flies to its tile, not the sta | ~3-4 min for all six arms |
+| `zflight_z4_z7` | minimize-restore | z4: no hole at restore landing (green area never dips below 25% of steady after first exceeding 50%); z4t: tiled window's restore flies to its tile, not the sta | ~3-4 min for all seven arms |
 
 Run one gate: `scripts/gates/<name>/run.sh`. Its stdout+stderr land in
 `scripts/gates/<name>/last.log` when run through the suite.
@@ -310,6 +310,28 @@ like these, and the shape is the lesson.
 
 - The film gates (z4/z4t/z5) need `ffmpeg` in the guest; the pixel graders need
   `python3-pillow` + `python3-numpy`. Install once per guest.
+- `zflight_z4_z7 :: z5` grades the film with the DOCK'S OWN LIVE PREVIEW of the
+  fixture excluded. A minimized window is drawn in the pill (X25), and on this
+  fixture that preview is 212x132 = 27952px of fixture green -- nearly twice the
+  15000px floor that was meant to keep dock-sized blobs out. Measured on 3d5281c
+  (`zrig/danglingB/z5/z5-controls.log`): when the flying proxy fades at frame
+  111 the crown passes to that still preview and the two centres are 924px
+  apart, which is the "teleport" this arm reported for a week. Excluding it
+  takes the worst jump to 209px, the restore flight's own expo step. The
+  rectangle is measured off the film's still tail, not predicted, and the arm
+  refuses to grade a film whose tail is not still. Same class of fault as
+  x24's hover-panel read (f7fe954): one green fixture, several dock surfaces
+  showing it.
+- `zflight_z4_z7 :: z5log` is the seventh arm and rides on the z5 run: the same
+  clicks graded through the plugin's own drawn-box log, which is the only
+  instrument that can separate a 400ms EASE_OUT_EXPO from a teleport at 30fps.
+  It existed in `zflight_gate.py` and nothing had ever called it. `z_rig.sh`
+  truncates `/tmp/ovdbg.log` at the top of the z5 arm (zdbg APPENDS, and every
+  earlier arm runs with `flight_log=true`), and the log is kept beside the film
+  as `z5-flight.log`. Both arms carry mutation controls in
+  `zrig/danglingB/z5/z5-controls.log`: a same-size 700px displacement in one
+  film frame FAILs the pixel arm (650px), and a first-draw-after-a-reversal
+  moved 200px behind the old flight's last box FAILs the log arm (+200.0px).
 - `zflight_z4_z7 :: z4c` is flaky at its precondition ("minimize 1 missed" --
   the first click misses the predicted dock cell; ~1 in 3 standalone runs is
   clean, and when it runs the geometry is invariant). Rig-hardening follow-up

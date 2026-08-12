@@ -8,7 +8,14 @@ reads as exactly such a dip.
 
 z5: continuity under spam. The largest green blob's centroid must never jump
 more than JUMP_PX between consecutive frames it exists in -- the pre-fix build
-restarted a reversed flight from the icon, a ~700px teleport.
+restarted a reversed flight from the icon, a ~700px teleport. The dock's own
+live preview of the fixture is excluded first; it is a second green image of the
+same window and the crown passing to it is not motion (see the z5 block).
+
+z5log: the same claim, on the instrument that can actually carry it -- the
+plugin's own drawn-box log. Pixels cannot separate a 400ms EASE_OUT_EXPO from a
+teleport at 30fps; the log can, and it is what proves a reversal CONTINUES the
+old flight rather than restarting it.
 """
 import glob, sys
 sys.path.insert(0, '/home/dragos/hyprvm')  # blob.py copied here
@@ -61,8 +68,18 @@ if MODE == 'z5log':
     # pre-fix build restarted from the icon (~700px away); a screenshot metric
     # cannot make this call because a 400ms EASE_OUT_EXPO legitimately moves
     # ~900px between two 30fps film frames.
+    #
+    # The plugin's zdbg writes /tmp/ovdbg.log, in the guest, always. The host
+    # path below it is where this arm used to be read from when the grader ran
+    # host-side; kept as a fallback so a host-side replay of a copied log still
+    # works. FLIGHT_LOG overrides both, which is what the mutation control uses.
+    import os as _os
     import re as _re
-    lines = open('/home/dragos/hyprvm/share/zrig/ovdbg.log').read().splitlines()
+    _cands = [p for p in (_os.environ.get('FLIGHT_LOG'), '/tmp/ovdbg.log',
+                          '/home/dragos/hyprvm/share/zrig/ovdbg.log') if p]
+    _log = next((p for p in _cands if _os.path.exists(p)), None)
+    assert _log, 'no flight log: %s -- dock:flight_log was never on' % (_cands,)
+    lines = open(_log).read().splitlines()
     draws, reversals = [], []
     for i, l in enumerate(lines):
         if l.startswith('draw ') or l.startswith('drive '):
@@ -97,9 +114,37 @@ if MODE == 'z5':
     JUMP_PX = 350
     MIN_AREA = 15000   # ignore dock-cell-sized blobs: identity flips to the
                        # dock cell are legit (fade-out done), not teleports
+
+    # ...and MIN_AREA was not enough, because the dock cell is not what the dock
+    # draws. A MINIMIZED window is drawn LIVE in the pill (X25 SPreview), and on
+    # this fixture that preview is 212x132 = 27952px of fixture green -- nearly
+    # twice the floor. Measured 2026-08-12 on 3d5281c: the flying proxy fades
+    # out at frame 111 and `largest_green` hands the crown to that still preview
+    # at (1282,1430); the flight's last centre was (1000,550); the distance
+    # between them is 924px, which is the number this arm had been reporting as
+    # a teleport. Same class of fault as x24's, whose flight gate was reading
+    # the hover PREVIEW PANEL (f7fe954) -- one green fixture, several dock
+    # surfaces showing it.
+    #
+    # So the dock's own preview is excluded. Its rectangle is MEASURED off the
+    # film rather than predicted: the rig asserts the film ends with the fixture
+    # minimized, so the tail of every z5 film is the dock holding a still image
+    # of it, and a box that is identical across the last TAIL frames is that
+    # image by construction. If the tail is NOT still the film did not end where
+    # the rig says it did, and this says so instead of measuring the wrong thing.
+    TAIL, PAD = 20, 8
+    tail = [largest_green(p) for p in frames[-TAIL:]]
+    assert all(b is not None for b in tail), \
+        'no fixture green in the last %d frames -- the film does not end on a minimized fixture' % TAIL
+    assert max(max(abs(int(b[k]) - int(tail[-1][k])) for k in range(4)) for b in tail) <= 4, \
+        'the last %d frames are not still (%s) -- nothing to identify the dock preview by' % (TAIL, set(tail))
+    _b = tail[-1]
+    DOCKPREVIEW = (int(_b[0]) - PAD, int(_b[1]) - PAD, int(_b[2]) + 2 * PAD, int(_b[3]) + 2 * PAD)
+    print(f'z5: dock live preview excluded from the green search: {DOCKPREVIEW}')
+
     last, worst = None, (0.0, -1)
     for i, p in enumerate(frames):
-        b = largest_green(p)
+        b = largest_green(p, DOCKPREVIEW)
         if b is None or b[2] * b[3] < MIN_AREA:
             last = None
             continue
