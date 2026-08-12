@@ -78,16 +78,16 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
                 return false;
 
             beginScrollingPan(WORKSPACE);
-            scrollingPanLastMouseLocal = point;
+            pan.lastMouseLocal = point;
             updateScrollingPan();
             return true;
         };
 
-        // submapMouseClickPending IS a held button, exactly like dragPendingPrimary.
+        // submapMouseClickPending IS a held button, exactly like drag.pendingPrimary.
         // Without it here, any pointer transit over a top layer (the bar -- and
         // ydotool absolute moves slam through the corner every step) silently
         // cleared the pending press and no submap drag could ever start.
-        if (!dragPendingPrimary && !submapMouseClickPending && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
+        if (!drag.pendingPrimary && !submapMouseClickPending && !resize.pointerDown && !pan.pointerDown && !drag.activeWindow && !resize.activeWindow && isPointerOnTopLayer(pMonitor.lock())) {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
             return;
@@ -101,17 +101,17 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
         // the drop path and E6's click path.
         const auto beginDragAtStart = [this]() {
             CBox       mini;
-            const auto STRIPWINDOW = windowAtStripPoint(dragStartMouseLocal, &mini);
+            const auto STRIPWINDOW = windowAtStripPoint(drag.startMouseLocal, &mini);
             if (STRIPWINDOW)
                 beginWindowDrag(STRIPWINDOW, &mini);
             else
-                beginWindowDrag(windowAtOverviewPoint(dragStartMouseLocal));
+                beginWindowDrag(windowAtOverviewPoint(drag.startMouseLocal));
         };
 
         if (submapMouseClickPending) {
-            const bool DRAGTHRESHOLDREACHED = dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ;
+            const bool DRAGTHRESHOLDREACHED = drag.startMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ;
 
-            if (submapMouseClickButton == MAIN_BUTTON && !dragActiveWindow && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
+            if (submapMouseClickButton == MAIN_BUTTON && !drag.activeWindow && !pan.pointerDown && DRAGTHRESHOLDREACHED) {
                 // OVERVIEW_CPP_SPEC 13.5 X16. Do NOT clear the pending press here.
                 // finishWindowDragOrClick() turns a drag that ends near its start back
                 // into a click, but shouldRunDefaultClickAction() needs the pending
@@ -119,50 +119,50 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
                 // recovery path fell through to "not our click" and the press vanished:
                 // no focus, no close, overview left open. The committed-drag path
                 // already calls clearSubmapMouseClickPending() after endWindowDrag().
-                // Safe to keep set: the !dragActiveWindow guard above stops a re-drag,
+                // Safe to keep set: the !drag.activeWindow guard above stops a re-drag,
                 // and the SECONDARY branches below require a different button.
 
                 if (!INVERT_DRAG_MODE)
                     beginDragAtStart();
                 else
-                    beginScrollingPanAtPoint(dragStartMouseLocal);
+                    beginScrollingPanAtPoint(drag.startMouseLocal);
             }
 
-            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && !INVERT_DRAG_MODE && !scrollingPanPointerDown && DRAGTHRESHOLDREACHED) {
-                if (beginScrollingPanAtPoint(dragStartMouseLocal)) {
+            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && !INVERT_DRAG_MODE && !pan.pointerDown && DRAGTHRESHOLDREACHED) {
+                if (beginScrollingPanAtPoint(drag.startMouseLocal)) {
                     submapMouseClickPending = false;
                     submapMouseClickButton  = 0;
                 }
             }
 
-            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && INVERT_DRAG_MODE && !dragActiveWindow && DRAGTHRESHOLDREACHED) {
+            if (submapMouseClickButton == SECONDARY_DRAG_BUTTON && INVERT_DRAG_MODE && !drag.activeWindow && DRAGTHRESHOLDREACHED) {
                 submapMouseClickPending = false;
                 submapMouseClickButton  = 0;
                 beginDragAtStart();
             }
         }
 
-        if (dragPendingPrimary) {
-            if (!dragActiveWindow && !scrollingPanPointerDown && dragStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ) {
+        if (drag.pendingPrimary) {
+            if (!drag.activeWindow && !pan.pointerDown && drag.startMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ) {
                 if (!INVERT_DRAG_MODE) {
                     beginDragAtStart();
                 } else
-                    beginScrollingPanAtPoint(dragStartMouseLocal);
+                    beginScrollingPanAtPoint(drag.startMouseLocal);
             }
         }
 
-        if (dragActiveWindow)
+        if (drag.activeWindow)
             updateWindowDrag();
 
-        if (resizePointerDown && resizePendingWindow) {
-            if (!resizeActiveWindow && resizeStartMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
+        if (resize.pointerDown && resize.pendingWindow) {
+            if (!resize.activeWindow && resize.startMouseLocal.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
                 beginWindowResize();
 
-            if (resizeActiveWindow)
+            if (resize.activeWindow)
                 updateWindowResize();
         }
 
-        if (scrollingPanPointerDown)
+        if (pan.pointerDown)
             updateScrollingPan();
 
         //  highlightHoverDebug();
@@ -188,7 +188,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 g_pointerGrabOverview = nullptr;
         });
 
-        if (!dragPendingPrimary && !resizePointerDown && !scrollingPanPointerDown && !dragActiveWindow && !resizeActiveWindow && isPointerOnTopLayer(pMonitor.lock())) {
+        if (!drag.pendingPrimary && !resize.pointerDown && !pan.pointerDown && !drag.activeWindow && !resize.activeWindow && isPointerOnTopLayer(pMonitor.lock())) {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
             return;
@@ -222,7 +222,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
 
             submapMouseClickPending = true;
             submapMouseClickButton  = button;
-            dragStartMouseLocal     = lastMousePosLocal;
+            drag.startMouseLocal     = lastMousePosLocal;
             return true;
         };
         const auto     shouldRunDefaultClickAction = [&](uint32_t button) {
@@ -253,8 +253,8 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             // is a press-duration test, not a bigger number.
             const float CLICK_MAX_DRAG_DISTANCE = ScrollOverview::Config::getDragThreshold() * 3.F * (pMonitor ? pMonitor->m_scale : 1.F);
 
-            if (dragActiveWindow) {
-                if (dragStartMouseLocal.distanceSq(lastMousePosLocal) < CLICK_MAX_DRAG_DISTANCE * CLICK_MAX_DRAG_DISTANCE) {
+            if (drag.activeWindow) {
+                if (drag.startMouseLocal.distanceSq(lastMousePosLocal) < CLICK_MAX_DRAG_DISTANCE * CLICK_MAX_DRAG_DISTANCE) {
                     clearDragPending();
 
                     if (allowClick)
@@ -300,7 +300,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                                    : event.button == MAIN_BUTTON   ? ScrollOverview::DockInput::EButton::Main
                                                                    : ScrollOverview::DockInput::EButton::Other;
 
-            if (ScrollOverview::DockInput::handleMenu(DOCKMONITOR, DOCKPOINT, ROLE, PRESSED, static_cast<bool>(dragActiveWindow), false).claimed) {
+            if (ScrollOverview::DockInput::handleMenu(DOCKMONITOR, DOCKPOINT, ROLE, PRESSED, static_cast<bool>(drag.activeWindow), false).claimed) {
                 lastMousePosLocal = DOCKPOINT;
                 return;
             }
@@ -361,7 +361,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             // window-drag guard. Same dock the plain desktop drives; the ladder
             // and the reasons for its order live in DockInput.
             if (const auto CLAIM = ScrollOverview::DockInput::handlePill(pMonitor.lock(), lastMousePosLocal, ScrollOverview::DockInput::EButton::Main,
-                                                         event.state == WL_POINTER_BUTTON_STATE_PRESSED, static_cast<bool>(dragActiveWindow));
+                                                         event.state == WL_POINTER_BUTTON_STATE_PRESSED, static_cast<bool>(drag.activeWindow));
                 CLAIM.claimed) {
                 if (CLAIM.needsFrame) {
                     damage();
@@ -400,15 +400,15 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 if (beginSubmapMouseClickPending(event.button))
                     return;
 
-                dragPendingPrimary  = true;
-                dragStartMouseLocal = lastMousePosLocal;
+                drag.pendingPrimary  = true;
+                drag.startMouseLocal = lastMousePosLocal;
                 return;
             }
 
             TileChrome::setPressed(PHLWINDOW{}, false);
 
-            const bool WASPANNING = scrollingPanPointerDown;
-            if (scrollingPanPointerDown)
+            const bool WASPANNING = pan.pointerDown;
+            if (pan.pointerDown)
                 endScrollingPan();
 
             finishWindowDragOrClick(event.button, !WASPANNING);
@@ -425,7 +425,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 const auto WORKSPACE = workspaceAtPanPoint(lastMousePosLocal);
 
                 if (!isWorkspaceScrolling(WORKSPACE)) {
-                    scrollingPanPointerDown = false;
+                    pan.pointerDown = false;
                     return;
                 }
 
@@ -434,8 +434,8 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             }
 
             if (submapMouseClickPending && submapMouseClickButton == event.button) {
-                const bool WASPANNING = scrollingPanPointerDown;
-                if (scrollingPanPointerDown)
+                const bool WASPANNING = pan.pointerDown;
+                if (pan.pointerDown)
                     endScrollingPan();
 
                 if (!WASPANNING)
@@ -446,7 +446,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 return;
             }
 
-            if (scrollingPanPointerDown)
+            if (pan.pointerDown)
                 endScrollingPan();
             return;
         }
@@ -460,8 +460,8 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 size_t resizeWorkspace = 0;
                 const auto window      = windowAtOverviewCursor(&resizeWorkspace);
                 if (!shouldShowOverviewWindow(window) || shouldShowPinnedFloatingOverviewWindow(window)) {
-                    resizePointerDown = false;
-                    resizePendingWindow.reset();
+                    resize.pointerDown = false;
+                    resize.pendingWindow.reset();
                     return;
                 }
 
@@ -473,22 +473,22 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                     workspaceOverviewOffset(resizeWorkspace, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
                 const auto WINDOWBOX = getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
 
-                resizePointerDown    = true;
-                resizeStartMouseLocal = lastMousePosLocal;
-                resizePendingWindow   = window;
-                resizeWorkspaceIdx    = resizeWorkspace;
-                resizeCorner          = Layout::cornerFromBox(WINDOWBOX, lastMousePosLocal);
+                resize.pointerDown    = true;
+                resize.startMouseLocal = lastMousePosLocal;
+                resize.pendingWindow   = window;
+                resize.workspaceIdx    = resizeWorkspace;
+                resize.corner          = Layout::cornerFromBox(WINDOWBOX, lastMousePosLocal);
                 return;
             }
 
-            if (resizeActiveWindow) {
+            if (resize.activeWindow) {
                 endWindowResize();
                 clearSubmapMouseClickPending();
                 return;
             }
 
-            resizePointerDown = false;
-            resizePendingWindow.reset();
+            resize.pointerDown = false;
+            resize.pendingWindow.reset();
 
             shouldRunDefaultClickAction(event.button);
             return;
@@ -503,7 +503,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             if (beginSubmapMouseClickPending(event.button))
                 return;
 
-            dragStartMouseLocal = lastMousePosLocal;
+            drag.startMouseLocal = lastMousePosLocal;
             beginWindowDrag(windowAtOverviewCursor());
             return;
         }

@@ -204,40 +204,73 @@ class CScrollOverview : public IOverview {
     Vector2D                         lastMousePosLocal = Vector2D{}; // monitor-local pixel space
 
     PHLWINDOWREF                     closeOnWindow;
-    PHLWINDOWREF                     dragActiveWindow;
-    PHLWORKSPACEREF                  dragOriginalWorkspace;
-    PHLWORKSPACEREF                  scrollingPanWorkspace;
-    PHLWINDOWREF                     scrollingPanInitialWindow;
-    PHLWINDOWREF                     resizePendingWindow;
-    PHLWINDOWREF                     resizeActiveWindow;
-
-    Vector2D                         dragStartMouseLocal   = Vector2D{};
-    Vector2D                         dragGrabOffsetLocal   = Vector2D{};
-    Vector2D                         dragGrabRatio         = Vector2D{0.5, 0.5};
-    bool                             dragMiniOver          = false;
-    float                            dragMiniFrom          = 0.F;
-    Time::steady_tp                  dragMiniChangedAt     = {};
-    bool                             dragRecentreOver      = false;
-    float                            dragRecentreFrom      = 0.F;
-    Time::steady_tp                  dragRecentreChangedAt = {};
-    Vector2D                         dragOriginalFloatSize = Vector2D{};
-    Vector2D                         dragOriginalTapeTranslation = Vector2D{};
-    Vector2D                         resizeStartMouseLocal = Vector2D{};
-    Vector2D                         resizeLastMouseLocal  = Vector2D{};
-    Vector2D                         scrollingPanLastMouseLocal = Vector2D{};
-    CBox                             dragOriginalBox            = CBox{};
-    CBox                             dragOriginalVisualBox      = CBox{};
-    CBox                             dragOriginalOverviewBox    = CBox{};
-    CBox                             dragOriginalOverviewHitbox = CBox{};
-    CBox                             resizeOriginalBox          = CBox{};
     WORKSPACEID                      focusSyncedFromWorkspaceID = WORKSPACE_INVALID;
-    size_t                           resizeWorkspaceIdx     = 0;
-    Layout::eRectCorner              resizeCorner           = Layout::CORNER_NONE;
-    bool                             dragPendingPrimary    = false;
-    bool                             resizePointerDown     = false;
-    bool                             scrollingPanPointerDown = false;
+
+    // ---------------------------------------------------------------- gestures
+    // The pointer gestures the overview owns, one struct each, because a
+    // field's name no longer has to carry its owner: `drag.originalBox` and
+    // `resize.originalBox` used to be `dragOriginalBox` and `resizeOriginalBox`
+    // in one flat list of 31, and which of the three a given member belonged to
+    // was a prefix convention rather than a fact the compiler knew.
+    //
+    // NOT a std::variant, deliberately, and this is the phase's one scope-down:
+    // the three are not mutually exclusive here. drag and resize hang off
+    // DIFFERENT mouse buttons (MAIN vs RESIZE, OverviewInput.cpp:309/454) and
+    // neither begin path guards on the other, so holding both buttons runs
+    // beginWindowDrag() and beginWindowResize() over the same window and
+    // onMouseMove() then updates both in one event (OverviewInput.cpp:154-163).
+    // A variant makes that state unrepresentable -- which is the point of a
+    // variant, and is also a behaviour change, which this phase is not allowed
+    // to make. Grouping is the part that is free.
+
+    struct SWindowDrag {
+        PHLWINDOWREF    activeWindow;
+        PHLWORKSPACEREF originalWorkspace;
+        // Also the SUBMAP click's press point (beginSubmapMouseClickPending):
+        // one press starts either gesture and the threshold is measured from
+        // the same coordinate, so there is one field, not two.
+        Vector2D        startMouseLocal         = Vector2D{};
+        Vector2D        grabOffsetLocal         = Vector2D{};
+        Vector2D        grabRatio               = Vector2D{0.5, 0.5};
+        bool            miniOver                = false;
+        float           miniFrom                = 0.F;
+        Time::steady_tp miniChangedAt           = {};
+        bool            recentreOver            = false;
+        float           recentreFrom            = 0.F;
+        Time::steady_tp recentreChangedAt       = {};
+        Vector2D        originalFloatSize       = Vector2D{};
+        Vector2D        originalTapeTranslation = Vector2D{};
+        CBox            originalBox             = CBox{};
+        CBox            originalVisualBox       = CBox{};
+        CBox            originalOverviewBox     = CBox{};
+        CBox            originalOverviewHitbox  = CBox{};
+        bool            pendingPrimary          = false;
+        bool            startedTiled            = false;
+    };
+
+    struct SWindowResize {
+        PHLWINDOWREF        pendingWindow;
+        PHLWINDOWREF        activeWindow;
+        Vector2D            startMouseLocal = Vector2D{};
+        Vector2D            lastMouseLocal  = Vector2D{};
+        CBox                originalBox     = CBox{};
+        size_t              workspaceIdx    = 0;
+        Layout::eRectCorner corner          = Layout::CORNER_NONE;
+        bool                pointerDown     = false;
+    };
+
+    struct SPan {
+        PHLWORKSPACEREF workspace;
+        PHLWINDOWREF    initialWindow;
+        Vector2D        lastMouseLocal = Vector2D{};
+        bool            pointerDown    = false;
+    };
+
+    SWindowDrag                      drag;
+    SWindowResize                    resize;
+    SPan                             pan;
+
     bool                             submapMouseClickPending = false;
-    bool                             dragStartedTiled      = false;
     bool                             emittingFullscreenVisibilityState = false;
     bool                             inputConfigOverridden = false;
     bool                             realtimePreviewTimerArmed = false;

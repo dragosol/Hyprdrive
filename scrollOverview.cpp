@@ -806,7 +806,7 @@ void CScrollOverview::updateTileHover() {
     // stops being the thing drawn.
     g_search.nav.keyboardTile = false;
 
-    if (closing || dragActiveWindow || resizeActiveWindow || scrollingPanPointerDown) {
+    if (closing || drag.activeWindow || resize.activeWindow || pan.pointerDown) {
         TileChrome::setHovered(PHLWINDOW{});
         return;
     }
@@ -896,7 +896,7 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
     if (!overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, MONITOR))
         return result;
 
-    if (!DRAGCONTEXT->dragStartedTiled)
+    if (!DRAGCONTEXT->drag.startedTiled)
         return result;
 
     const auto boxesForWindow = [&](const PHLWINDOW& window) {
@@ -927,18 +927,18 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
     DRAGCONTEXT->refreshDragOriginalOverviewBoxes();
 
     const auto ORIGINALHITBOX =
-        DRAGCONTEXT->dragOriginalOverviewHitbox.empty() ? DRAGCONTEXT->dragOriginalOverviewBox : DRAGCONTEXT->dragOriginalOverviewHitbox;
-    if (ignoredWindow && !DRAGCONTEXT->dragOriginalOverviewBox.empty() && ORIGINALHITBOX.containsPoint(lastMousePosLocal) &&
-        WORKSPACE == DRAGCONTEXT->dragOriginalWorkspace.lock()) {
-        setAnchor(result, ignoredWindow, DRAGCONTEXT->dragOriginalOverviewBox);
+        DRAGCONTEXT->drag.originalOverviewHitbox.empty() ? DRAGCONTEXT->drag.originalOverviewBox : DRAGCONTEXT->drag.originalOverviewHitbox;
+    if (ignoredWindow && !DRAGCONTEXT->drag.originalOverviewBox.empty() && ORIGINALHITBOX.containsPoint(lastMousePosLocal) &&
+        WORKSPACE == DRAGCONTEXT->drag.originalWorkspace.lock()) {
+        setAnchor(result, ignoredWindow, DRAGCONTEXT->drag.originalOverviewBox);
         return result;
     }
 
     const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACE);
     const bool PRIMARYHORIZONTAL = ALGO && ALGO->m_scrollingData && ALGO->m_scrollingData->controller && ALGO->m_scrollingData->controller->isPrimaryHorizontal();
     const auto pointsToOriginalStackSlot = [&](const PHLWINDOW& anchor, const std::string& direction) {
-        if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller || !ignoredWindow || DRAGCONTEXT->dragOriginalOverviewBox.empty() ||
-            WORKSPACE != DRAGCONTEXT->dragOriginalWorkspace.lock() || !anchor || !anchor->layoutTarget() || !ignoredWindow->layoutTarget())
+        if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller || !ignoredWindow || DRAGCONTEXT->drag.originalOverviewBox.empty() ||
+            WORKSPACE != DRAGCONTEXT->drag.originalWorkspace.lock() || !anchor || !anchor->layoutTarget() || !ignoredWindow->layoutTarget())
             return false;
 
         const auto ANCHORDATA  = ALGO->dataFor(anchor->layoutTarget());
@@ -963,8 +963,8 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
         return (ANCHORPREVIOUS && direction == "r") || (!ANCHORPREVIOUS && direction == "l");
     };
     const auto pointsToOriginalColumnSlot = [&](const PHLWINDOW& anchor, const std::string& direction) {
-        if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller || !ignoredWindow || DRAGCONTEXT->dragOriginalOverviewBox.empty() ||
-            WORKSPACE != DRAGCONTEXT->dragOriginalWorkspace.lock() || !anchor || !anchor->layoutTarget() || !ignoredWindow->layoutTarget())
+        if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller || !ignoredWindow || DRAGCONTEXT->drag.originalOverviewBox.empty() ||
+            WORKSPACE != DRAGCONTEXT->drag.originalWorkspace.lock() || !anchor || !anchor->layoutTarget() || !ignoredWindow->layoutTarget())
             return false;
 
         const auto ANCHORDATA   = ALGO->dataFor(anchor->layoutTarget());
@@ -990,7 +990,7 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
     };
     const auto normalizeOriginalSlotAnchor = [&]() {
         if (pointsToOriginalStackSlot(result.window, result.direction) || pointsToOriginalColumnSlot(result.window, result.direction))
-            setAnchor(result, ignoredWindow, DRAGCONTEXT->dragOriginalOverviewBox);
+            setAnchor(result, ignoredWindow, DRAGCONTEXT->drag.originalOverviewBox);
     };
 
     float bestDistanceSq = std::numeric_limits<float>::max();
@@ -1280,15 +1280,15 @@ Vector2D CScrollOverview::overviewPointToGlobal(size_t workspaceIdx, const Vecto
 }
 
 CBox CScrollOverview::draggedWindowBox(size_t workspaceIdx) const {
-    const auto WINDOW  = getOverviewWindowToShow(dragActiveWindow.lock());
+    const auto WINDOW  = getOverviewWindowToShow(drag.activeWindow.lock());
     const auto MONITOR = pMonitor.lock();
     if (!WINDOW || !MONITOR || workspaceIdx >= images.size())
         return {};
 
     const auto WORKSPACE_OFFSET = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
     auto       box               = getOverviewDragWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACE_OFFSET, layout);
-    box.x = lastMousePosLocal.x - dragGrabOffsetLocal.x;
-    box.y = lastMousePosLocal.y - dragGrabOffsetLocal.y;
+    box.x = lastMousePosLocal.x - drag.grabOffsetLocal.x;
+    box.y = lastMousePosLocal.y - drag.grabOffsetLocal.y;
 
     return box;
 }
@@ -1312,16 +1312,16 @@ CBox CScrollOverview::draggedWindowBoxFor(PHLWINDOW window, size_t workspaceIdx,
 // cursor still finishes the shrink.
 float CScrollOverview::dragMiniProgress() const {
     const int   DURATION = ScrollOverview::Config::getDragMiniMs();
-    const float TARGET   = dragMiniOver ? 1.F : 0.F;
+    const float TARGET   = drag.miniOver ? 1.F : 0.F;
     if (DURATION <= 0)
         return TARGET;
 
-    const float ELAPSED = ScrollOverview::Config::animElapsedMs(dragMiniChangedAt);
+    const float ELAPSED = ScrollOverview::Config::animElapsedMs(drag.miniChangedAt);
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
     if (T < 1.F)
         g_gridReflowActive = true; // rides the overview's existing next-frame request
 
-    return dragMiniFrom + (TARGET - dragMiniFrom) * T;
+    return drag.miniFrom + (TARGET - drag.miniFrom) * T;
 }
 
 // X3 delta 6. The reference slides the proxy's grab point to its centre while it
@@ -1339,28 +1339,28 @@ float CScrollOverview::dragMiniProgress() const {
 // different curves is worse than the deviation.
 float CScrollOverview::dragRecentreProgress() const {
     const int   DURATION = ScrollOverview::Config::getDragRecentreMs();
-    const float TARGET   = dragRecentreOver ? 1.F : 0.F;
+    const float TARGET   = drag.recentreOver ? 1.F : 0.F;
     if (DURATION <= 0)
         return TARGET;
 
-    const float ELAPSED = ScrollOverview::Config::animElapsedMs(dragRecentreChangedAt);
+    const float ELAPSED = ScrollOverview::Config::animElapsedMs(drag.recentreChangedAt);
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
     if (T < 1.F)
         g_gridReflowActive = true; // rides the overview's existing next-frame request
 
-    return dragRecentreFrom + (TARGET - dragRecentreFrom) * T;
+    return drag.recentreFrom + (TARGET - drag.recentreFrom) * T;
 }
 
 Vector2D CScrollOverview::dragEffectiveGrabRatio() const {
     const float T = std::clamp(dragRecentreProgress(), 0.F, 1.F);
     return Vector2D{
-        std::clamp(dragGrabRatio.x, 0.0, 1.0) + (0.5 - std::clamp(dragGrabRatio.x, 0.0, 1.0)) * T,
-        std::clamp(dragGrabRatio.y, 0.0, 1.0) + (0.5 - std::clamp(dragGrabRatio.y, 0.0, 1.0)) * T,
+        std::clamp(drag.grabRatio.x, 0.0, 1.0) + (0.5 - std::clamp(drag.grabRatio.x, 0.0, 1.0)) * T,
+        std::clamp(drag.grabRatio.y, 0.0, 1.0) + (0.5 - std::clamp(drag.grabRatio.y, 0.0, 1.0)) * T,
     };
 }
 
 CBox CScrollOverview::draggedWindowGlobalBox() const {
-    const auto WINDOW  = getOverviewWindowToShow(dragActiveWindow.lock());
+    const auto WINDOW  = getOverviewWindowToShow(drag.activeWindow.lock());
     const auto MONITOR = pMonitor.lock();
     if (!WINDOW || !MONITOR)
         return {};
@@ -1388,10 +1388,10 @@ CBox CScrollOverview::draggedWindowGlobalBox() const {
 }
 
 void CScrollOverview::refreshDragOriginalOverviewBoxes() {
-    const auto WINDOW    = getOverviewWindowToShow(dragActiveWindow.lock());
-    const auto WORKSPACE = dragOriginalWorkspace.lock();
+    const auto WINDOW    = getOverviewWindowToShow(drag.activeWindow.lock());
+    const auto WORKSPACE = drag.originalWorkspace.lock();
     const auto MONITOR   = pMonitor.lock();
-    if (!WINDOW || !WORKSPACE || !MONITOR || dragOriginalVisualBox.empty() || dragOriginalBox.empty())
+    if (!WINDOW || !WORKSPACE || !MONITOR || drag.originalVisualBox.empty() || drag.originalBox.empty())
         return;
 
     size_t workspaceIdx = images.size();
@@ -1407,10 +1407,10 @@ void CScrollOverview::refreshDragOriginalOverviewBoxes() {
 
     Vector2D tapeDelta;
     if (const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACE); ALGO && ALGO->m_scrollingData && ALGO->m_scrollingData->controller)
-        tapeDelta = ALGO->m_scrollingData->controller->getCameraTranslation(ALGO->usableArea()) - dragOriginalTapeTranslation;
+        tapeDelta = ALGO->m_scrollingData->controller->getCameraTranslation(ALGO->usableArea()) - drag.originalTapeTranslation;
 
-    auto visualBox = dragOriginalVisualBox;
-    auto hitbox    = dragOriginalBox;
+    auto visualBox = drag.originalVisualBox;
+    auto hitbox    = drag.originalBox;
     visualBox.translate(tapeDelta);
     hitbox.translate(tapeDelta);
 
@@ -1426,19 +1426,19 @@ void CScrollOverview::refreshDragOriginalOverviewBoxes() {
     // never fired, so every drag, however short, fell through to anchor selection
     // and swapped the window into another tiling slot. Both windows then took
     // their new slots' sizes -- the user sees "dragging resizes my windows".
-    dragOriginalOverviewBox    = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, true, &visualBox);
-    dragOriginalOverviewHitbox = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, false, &hitbox);
+    drag.originalOverviewBox    = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, true, &visualBox);
+    drag.originalOverviewHitbox = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout, false, &hitbox);
 }
 
 CBox CScrollOverview::resizedWindowBox() const {
-    const auto WINDOW  = getOverviewWindowToShow(resizeActiveWindow.lock());
+    const auto WINDOW  = getOverviewWindowToShow(resize.activeWindow.lock());
     const auto MONITOR = pMonitor.lock();
-    if (!WINDOW || !MONITOR || resizeWorkspaceIdx >= images.size() || !WINDOW->m_isFloating)
+    if (!WINDOW || !MONITOR || resize.workspaceIdx >= images.size() || !WINDOW->m_isFloating)
         return {};
 
     const float SCALEFACTOR = std::max(scale->value(), 0.01F) * std::max(MONITOR->m_scale, 0.01F);
     const auto  TARGET      = WINDOW->layoutTarget();
-    const auto  DELTA       = lastMousePosLocal - resizeStartMouseLocal;
+    const auto  DELTA       = lastMousePosLocal - resize.startMouseLocal;
 
     Vector2D    minSizePx   = Vector2D{1.F, 1.F};
     if (TARGET) {
@@ -1452,13 +1452,13 @@ CBox CScrollOverview::resizedWindowBox() const {
             maxSizePx = Vector2D{std::max(minSizePx.x, sc<double>(MAXSIZE->x * SCALEFACTOR)), std::max(minSizePx.y, sc<double>(MAXSIZE->y * SCALEFACTOR))};
     }
 
-    auto box = resizedOverviewBoxFromCorner(resizeOriginalBox, DELTA, resizeCorner, minSizePx, maxSizePx);
+    auto box = resizedOverviewBoxFromCorner(resize.originalBox, DELTA, resize.corner, minSizePx, maxSizePx);
 
-    const auto WORKSPACEOFFSET = workspaceOverviewOffset(resizeWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
+    const auto WORKSPACEOFFSET = workspaceOverviewOffset(resize.workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
     const auto WORKSPACEBOX = getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
     const auto BORDERMARGIN = WINDOW->getRealBorderSize() * MONITOR->m_scale * scale->value();
 
-    return clampResizedOverviewBoxToWorkspace(box, WORKSPACEBOX, resizeCorner, BORDERMARGIN);
+    return clampResizedOverviewBoxToWorkspace(box, WORKSPACEBOX, resize.corner, BORDERMARGIN);
 }
 
 void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOrigin) {
@@ -1482,15 +1482,15 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
     }
 
     const auto TARGET             = WINDOW->layoutTarget();
-    dragStartedTiled              = !TARGET->floating();
-    dragOriginalFloatSize         = TARGET->lastFloatingSize();
-    dragOriginalTapeTranslation  = Vector2D{};
-    dragOriginalWorkspace         = WINDOW->m_workspace;
-    dragOriginalBox               = TARGET->position();
-    dragOriginalVisualBox         = WINDOW->m_group ? TARGET->position() : WINDOW->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    dragOriginalOverviewBox       = CBox{};
-    dragOriginalOverviewHitbox    = CBox{};
-    dragActiveWindow              = WINDOW;
+    drag.startedTiled              = !TARGET->floating();
+    drag.originalFloatSize         = TARGET->lastFloatingSize();
+    drag.originalTapeTranslation  = Vector2D{};
+    drag.originalWorkspace         = WINDOW->m_workspace;
+    drag.originalBox               = TARGET->position();
+    drag.originalVisualBox         = WINDOW->m_group ? TARGET->position() : WINDOW->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    drag.originalOverviewBox       = CBox{};
+    drag.originalOverviewHitbox    = CBox{};
+    drag.activeWindow              = WINDOW;
 
 
     const auto MONITOR = pMonitor.lock();
@@ -1501,30 +1501,30 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
         // window would occupy in a card that may be off-screen.
         const auto WINDOWBOX       = stripMiniOrigin ? *stripMiniOrigin :
                                                        getOverviewDragWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
-        dragGrabOffsetLocal        = dragStartMouseLocal - WINDOWBOX.pos();
-        dragGrabRatio              = Vector2D{
-            WINDOWBOX.width > 0.0 ? dragGrabOffsetLocal.x / WINDOWBOX.width : 0.5,
-            WINDOWBOX.height > 0.0 ? dragGrabOffsetLocal.y / WINDOWBOX.height : 0.5,
+        drag.grabOffsetLocal        = drag.startMouseLocal - WINDOWBOX.pos();
+        drag.grabRatio              = Vector2D{
+            WINDOWBOX.width > 0.0 ? drag.grabOffsetLocal.x / WINDOWBOX.width : 0.5,
+            WINDOWBOX.height > 0.0 ? drag.grabOffsetLocal.y / WINDOWBOX.height : 0.5,
         };
         if (const auto ALGO = overviewScrollingAlgorithmForWorkspace(WINDOW->m_workspace); ALGO && ALGO->m_scrollingData && ALGO->m_scrollingData->controller)
-            dragOriginalTapeTranslation = ALGO->m_scrollingData->controller->getCameraTranslation(ALGO->usableArea());
+            drag.originalTapeTranslation = ALGO->m_scrollingData->controller->getCameraTranslation(ALGO->usableArea());
         refreshDragOriginalOverviewBoxes();
     } else {
-        dragGrabOffsetLocal = Vector2D{};
-        dragGrabRatio       = Vector2D{0.5, 0.5};
+        drag.grabOffsetLocal = Vector2D{};
+        drag.grabRatio       = Vector2D{0.5, 0.5};
     }
 
     // A strip grab is already at mini scale, so it starts there and grows on the
     // way into the main area instead of popping to full size for one frame.
-    dragMiniOver      = stripMiniOrigin != nullptr;
-    dragMiniFrom      = dragMiniOver ? 1.F : 0.F;
-    dragMiniChangedAt = Time::steadyNow();
+    drag.miniOver      = stripMiniOrigin != nullptr;
+    drag.miniFrom      = drag.miniOver ? 1.F : 0.F;
+    drag.miniChangedAt = Time::steadyNow();
 
     // The grab starts at the fraction the cursor actually pressed (D1); the
     // updateWindowDrag() below is what notices a drop target and starts the slide.
-    dragRecentreOver      = false;
-    dragRecentreFrom      = 0.F;
-    dragRecentreChangedAt = Time::steadyNow();
+    drag.recentreOver      = false;
+    drag.recentreFrom      = 0.F;
+    drag.recentreChangedAt = Time::steadyNow();
 
     // Last, after refreshDragOriginalOverviewBoxes() above has read the boxes it
     // needs out of the full grid.
@@ -1535,9 +1535,9 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
 }
 
 void CScrollOverview::beginWindowResize() {
-    const auto WINDOW  = getOverviewWindowToShow(resizePendingWindow.lock());
+    const auto WINDOW  = getOverviewWindowToShow(resize.pendingWindow.lock());
     const auto MONITOR = pMonitor.lock();
-    if (!shouldShowOverviewWindow(WINDOW) || shouldShowPinnedFloatingOverviewWindow(WINDOW) || !WINDOW->layoutTarget() || !MONITOR || resizeWorkspaceIdx >= images.size())
+    if (!shouldShowOverviewWindow(WINDOW) || shouldShowPinnedFloatingOverviewWindow(WINDOW) || !WINDOW->layoutTarget() || !MONITOR || resize.workspaceIdx >= images.size())
         return;
 
     closeOnWindow = WINDOW;
@@ -1546,25 +1546,25 @@ void CScrollOverview::beginWindowResize() {
     for (size_t i = 0; i < images.size(); ++i) {
         if (images[i]->pWorkspace == WINDOW->m_workspace) {
             viewportCurrentWorkspace = i;
-            resizeWorkspaceIdx       = i;
+            resize.workspaceIdx       = i;
             break;
         }
     }
 
-    const auto WORKSPACEOFFSET = workspaceOverviewOffset(resizeWorkspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
-    resizeOriginalBox   = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
-    resizeActiveWindow  = WINDOW;
-    resizeLastMouseLocal = lastMousePosLocal;
+    const auto WORKSPACEOFFSET = workspaceOverviewOffset(resize.workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
+    resize.originalBox   = getOverviewWindowBox(WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
+    resize.activeWindow  = WINDOW;
+    resize.lastMouseLocal = lastMousePosLocal;
 
     updateWindowResize();
 }
 
 void CScrollOverview::updateWindowDrag() {
-    if (!dragActiveWindow)
+    if (!drag.activeWindow)
         return;
 
     size_t     dropWorkspaceIdx = 0;
-    const auto DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx, getOverviewWindowToShow(dragActiveWindow.lock()));
+    const auto DROPWORKSPACE    = workspaceAtOverviewDropPoint(lastMousePosLocal, &dropWorkspaceIdx, getOverviewWindowToShow(drag.activeWindow.lock()));
 
     // D'1/D'2: mini scale means "over a strip cell or a foreign card", i.e.
     // anywhere that is not the main area. Keyed off the VIEWPORT workspace, not
@@ -1578,18 +1578,18 @@ void CScrollOverview::updateWindowDrag() {
     const bool OVERDOCK = ScrollOverview::Dock::pillContains(pMonitor.lock(), lastMousePosLocal);
 
     const auto VIEWPORTWORKSPACE = viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
-    if (const bool OVERFOREIGN = OVERDOCK || (DROPWORKSPACE && DROPWORKSPACE != VIEWPORTWORKSPACE); OVERFOREIGN != dragMiniOver) {
-        dragMiniFrom      = dragMiniProgress(); // from where it actually is, not from the end
-        dragMiniOver      = OVERFOREIGN;
-        dragMiniChangedAt = Time::steadyNow();
+    if (const bool OVERFOREIGN = OVERDOCK || (DROPWORKSPACE && DROPWORKSPACE != VIEWPORTWORKSPACE); OVERFOREIGN != drag.miniOver) {
+        drag.miniFrom      = dragMiniProgress(); // from where it actually is, not from the end
+        drag.miniOver      = OVERFOREIGN;
+        drag.miniChangedAt = Time::steadyNow();
     }
 
     // X3 delta 6. Any drop target, own workspace included -- the reference's
     // "tiles" DropArea spans the whole main area (WindowTiles.qml:444-452).
-    if (const bool OVERTARGET = OVERDOCK || DROPWORKSPACE != nullptr; OVERTARGET != dragRecentreOver) {
-        dragRecentreFrom      = dragRecentreProgress(); // from where it actually is
-        dragRecentreOver      = OVERTARGET;
-        dragRecentreChangedAt = Time::steadyNow();
+    if (const bool OVERTARGET = OVERDOCK || DROPWORKSPACE != nullptr; OVERTARGET != drag.recentreOver) {
+        drag.recentreFrom      = dragRecentreProgress(); // from where it actually is
+        drag.recentreOver      = OVERTARGET;
+        drag.recentreChangedAt = Time::steadyNow();
     }
 
     for (const auto& overview : scrollOverviews()) {
@@ -1602,11 +1602,11 @@ void CScrollOverview::updateWindowDrag() {
 }
 
 void CScrollOverview::updateWindowResize() {
-    const auto WINDOW  = getOverviewWindowToShow(resizeActiveWindow.lock());
+    const auto WINDOW  = getOverviewWindowToShow(resize.activeWindow.lock());
     const auto TARGET  = WINDOW ? WINDOW->layoutTarget() : nullptr;
     const auto MONITOR = pMonitor.lock();
 
-    if (!WINDOW || !TARGET || !MONITOR || resizeWorkspaceIdx >= images.size())
+    if (!WINDOW || !TARGET || !MONITOR || resize.workspaceIdx >= images.size())
         return;
 
     TARGET->damageEntire();
@@ -1614,20 +1614,20 @@ void CScrollOverview::updateWindowResize() {
     if (WINDOW->m_isFloating) {
         const auto RESIZEDBOX  = resizedWindowBox();
         const auto SCALEFACTOR = std::max(scale->value(), 0.01F) * std::max(MONITOR->m_scale, 0.01F);
-        const auto GLOBALBOX   = CBox{overviewPointToGlobal(resizeWorkspaceIdx, RESIZEDBOX.pos()), RESIZEDBOX.size() * (1.F / SCALEFACTOR)};
+        const auto GLOBALBOX   = CBox{overviewPointToGlobal(resize.workspaceIdx, RESIZEDBOX.pos()), RESIZEDBOX.size() * (1.F / SCALEFACTOR)};
 
         TARGET->rememberFloatingSize(GLOBALBOX.size());
         TARGET->setPositionGlobal(GLOBALBOX);
         TARGET->warpPositionSize();
     } else {
-        const auto DELTALOCAL = lastMousePosLocal - resizeLastMouseLocal;
+        const auto DELTALOCAL = lastMousePosLocal - resize.lastMouseLocal;
         const auto SAFEFACTOR = std::max(scale->value(), 0.01F) * std::max(MONITOR->m_scale, 0.01F);
         const auto DELTAGLOBAL = DELTALOCAL * (1.F / SAFEFACTOR);
 
         if (std::abs(DELTAGLOBAL.x) > 0.01F || std::abs(DELTAGLOBAL.y) > 0.01F) {
-            g_layoutManager->resizeTarget(DELTAGLOBAL, TARGET, resizeCorner);
+            g_layoutManager->resizeTarget(DELTAGLOBAL, TARGET, resize.corner);
             syncWorkspaceGeometry(TARGET->workspace());
-            resizeLastMouseLocal = lastMousePosLocal;
+            resize.lastMouseLocal = lastMousePosLocal;
         }
     }
 
@@ -1637,20 +1637,20 @@ void CScrollOverview::updateWindowResize() {
 
 void CScrollOverview::clearDragPending() {
     g_dragReflowExcluded        = nullptr;
-    dragPendingPrimary          = false;
-    dragActiveWindow.reset();
-    dragOriginalWorkspace.reset();
-    dragStartedTiled            = false;
-    dragOriginalFloatSize       = Vector2D{};
-    dragOriginalTapeTranslation = Vector2D{};
-    dragGrabOffsetLocal         = Vector2D{};
-    dragGrabRatio               = Vector2D{0.5, 0.5};
-    dragRecentreOver            = false;
-    dragRecentreFrom            = 0.F;
-    dragOriginalBox             = CBox{};
-    dragOriginalVisualBox       = CBox{};
-    dragOriginalOverviewBox     = CBox{};
-    dragOriginalOverviewHitbox  = CBox{};
+    drag.pendingPrimary          = false;
+    drag.activeWindow.reset();
+    drag.originalWorkspace.reset();
+    drag.startedTiled            = false;
+    drag.originalFloatSize       = Vector2D{};
+    drag.originalTapeTranslation = Vector2D{};
+    drag.grabOffsetLocal         = Vector2D{};
+    drag.grabRatio               = Vector2D{0.5, 0.5};
+    drag.recentreOver            = false;
+    drag.recentreFrom            = 0.F;
+    drag.originalBox             = CBox{};
+    drag.originalVisualBox       = CBox{};
+    drag.originalOverviewBox     = CBox{};
+    drag.originalOverviewHitbox  = CBox{};
 }
 
 void CScrollOverview::updateScrollingPan() {
@@ -1658,14 +1658,14 @@ void CScrollOverview::updateScrollingPan() {
     if (!MONITOR)
         return;
 
-    const auto WORKSPACE = scrollingPanWorkspace.lock();
+    const auto WORKSPACE = pan.workspace.lock();
     const auto ALGO      = overviewScrollingAlgorithmForWorkspace(WORKSPACE);
     if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller) {
-        scrollingPanLastMouseLocal = lastMousePosLocal;
+        pan.lastMouseLocal = lastMousePosLocal;
         return;
     }
 
-    const auto DELTALOCAL = lastMousePosLocal - scrollingPanLastMouseLocal;
+    const auto DELTALOCAL = lastMousePosLocal - pan.lastMouseLocal;
     const auto SAFEFACTOR = std::max(scale->value(), 0.01F) * std::max(MONITOR->m_scale, 0.01F);
     const auto DELTAGLOBAL = DELTALOCAL * (1.F / SAFEFACTOR);
     const auto DELTA       = ALGO->m_scrollingData->controller->isPrimaryHorizontal() ? DELTAGLOBAL.x : DELTAGLOBAL.y;
@@ -1675,7 +1675,7 @@ void CScrollOverview::updateScrollingPan() {
         ALGO->m_scrollingData->controller->setOffset(OFFSET);
         ALGO->m_scrollingData->lockedCameraOffset = OFFSET;
         ALGO->m_scrollingData->recalculate(true);
-        scrollingPanLastMouseLocal = lastMousePosLocal;
+        pan.lastMouseLocal = lastMousePosLocal;
         markBlurDirty();
         damage();
     }
@@ -1686,14 +1686,14 @@ void CScrollOverview::beginScrollingPan(PHLWORKSPACE workspace) {
     if (!ALGO)
         return;
 
-    scrollingPanPointerDown    = true;
-    scrollingPanWorkspace      = workspace;
-    scrollingPanLastMouseLocal = lastMousePosLocal;
-    scrollingPanInitialWindow  = getOverviewWindowToShow(closeOnWindow.lock());
-    if (!scrollingPanInitialWindow || scrollingPanInitialWindow->m_workspace != workspace)
-        scrollingPanInitialWindow = getOverviewWindowToShow(Desktop::focusState()->window());
-    if (scrollingPanInitialWindow && scrollingPanInitialWindow->m_workspace != workspace)
-        scrollingPanInitialWindow.reset();
+    pan.pointerDown    = true;
+    pan.workspace      = workspace;
+    pan.lastMouseLocal = lastMousePosLocal;
+    pan.initialWindow  = getOverviewWindowToShow(closeOnWindow.lock());
+    if (!pan.initialWindow || pan.initialWindow->m_workspace != workspace)
+        pan.initialWindow = getOverviewWindowToShow(Desktop::focusState()->window());
+    if (pan.initialWindow && pan.initialWindow->m_workspace != workspace)
+        pan.initialWindow.reset();
 
     ALGO->m_scrollingData->lockedCameraOffset = ALGO->m_scrollingData->controller->getOffset();
 
@@ -1702,7 +1702,7 @@ void CScrollOverview::beginScrollingPan(PHLWORKSPACE workspace) {
 }
 
 void CScrollOverview::endScrollingPan() {
-    const auto WORKSPACE = scrollingPanWorkspace.lock();
+    const auto WORKSPACE = pan.workspace.lock();
     const auto ALGO      = overviewScrollingAlgorithmForWorkspace(WORKSPACE);
     if (ALGO) {
         const double OFFSET = clampOverviewScrollingOffset(ALGO, ALGO->m_scrollingData->controller->getOffset());
@@ -1711,12 +1711,12 @@ void CScrollOverview::endScrollingPan() {
         ALGO->m_scrollingData->recalculate();
     }
 
-    scrollingPanPointerDown    = false;
-    scrollingPanLastMouseLocal = Vector2D{};
-    scrollingPanWorkspace.reset();
+    pan.pointerDown    = false;
+    pan.lastMouseLocal = Vector2D{};
+    pan.workspace.reset();
 
     focusMostVisibleScrollingWindow(WORKSPACE);
-    scrollingPanInitialWindow.reset();
+    pan.initialWindow.reset();
 }
 
 void CScrollOverview::focusMostVisibleScrollingWindow(const PHLWORKSPACE& workspace) {
@@ -1735,7 +1735,7 @@ void CScrollOverview::focusMostVisibleScrollingWindow(const PHLWORKSPACE& worksp
     if (ALGO)
         WORKSPACEBOX.translate(MONITOR->m_position);
 
-    const auto preferredWindow = getOverviewWindowToShow(scrollingPanInitialWindow.lock());
+    const auto preferredWindow = getOverviewWindowToShow(pan.initialWindow.lock());
     if (shouldShowOverviewWindow(preferredWindow) && preferredWindow->m_workspace == workspace && !preferredWindow->m_isFloating && preferredWindow->layoutTarget()) {
         const auto WINDOWBOX   = preferredWindow->layoutTarget()->position();
         const auto AREA        = overviewBoxArea(WINDOWBOX);
@@ -1921,7 +1921,7 @@ void CScrollOverview::endWindowDrag() {
     // slot in the FULL grid, not the gap it has been leaving open.
     g_dragReflowExcluded = nullptr;
 
-    const auto WINDOW = getOverviewWindowToShow(dragActiveWindow.lock());
+    const auto WINDOW = getOverviewWindowToShow(drag.activeWindow.lock());
     const auto TARGET = WINDOW ? WINDOW->layoutTarget() : nullptr;
     const auto SPACE  = TARGET ? TARGET->space() : nullptr;
     const auto ALGO   = SPACE ? SPACE->algorithm() : nullptr;
@@ -1950,7 +1950,7 @@ void CScrollOverview::endWindowDrag() {
         return;
     }
 
-    const bool          RETILEONEND       = dragStartedTiled && TARGET && SPACE && ALGO;
+    const bool          RETILEONEND       = drag.startedTiled && TARGET && SPACE && ALGO;
     size_t              dropWorkspaceIdx  = 0;
     const auto          DROPWORKSPACE     = dropOverview ? dropOverview->workspaceAtOverviewDropPoint(DROPPOINTLOCAL, &dropWorkspaceIdx, WINDOW) : PHLWORKSPACE{};
     const auto          DROPSCROLLINGALGO  = overviewScrollingAlgorithmForWorkspace(DROPWORKSPACE);
@@ -1958,7 +1958,7 @@ void CScrollOverview::endWindowDrag() {
     const bool          DROPSCROLLINGPRIMARYHORIZONTAL =
         DROPSCROLLINGALGO && DROPSCROLLINGALGO->m_scrollingData && DROPSCROLLINGALGO->m_scrollingData->controller &&
         DROPSCROLLINGALGO->m_scrollingData->controller->isPrimaryHorizontal();
-    const auto          ORIGINALWORKSPACE = dragOriginalWorkspace.lock();
+    const auto          ORIGINALWORKSPACE = drag.originalWorkspace.lock();
     const bool          MOVEWORKSPACE    = DROPWORKSPACE && DROPWORKSPACE != ORIGINALWORKSPACE;
     const auto          DRAGBOX          = DROPWORKSPACE ? dropOverview->draggedWindowBoxFor(WINDOW, dropWorkspaceIdx, DROPPOINTLOCAL, dragEffectiveGrabRatio()) : CBox{};
     int                 dropSide         = 0;
@@ -2093,7 +2093,7 @@ void CScrollOverview::endWindowDrag() {
                 moveOverviewScrollingTargetToWorkspaceEdge(TARGET, dropSide);
         }
 
-        TARGET->rememberFloatingSize(dragOriginalFloatSize);
+        TARGET->rememberFloatingSize(drag.originalFloatSize);
         RESTOREACTIVEWORKSPACE();
         RESTOREVIEWPORTWORKSPACE();
     } else if (RETILEONEND) {
@@ -2108,7 +2108,7 @@ void CScrollOverview::endWindowDrag() {
         else if (DROPSCROLLINGLAYOUT && !DROPANCHOR)
             moveOverviewScrollingTargetToWorkspaceEdge(TARGET, dropSide);
 
-        TARGET->rememberFloatingSize(dragOriginalFloatSize);
+        TARGET->rememberFloatingSize(drag.originalFloatSize);
         TARGET->warpPositionSize();
         TARGET->damageEntire();
 
@@ -2126,16 +2126,16 @@ void CScrollOverview::endWindowDrag() {
             // is capped at 1.0, which is why uniform fixture tiles never caught
             // this and only a large window shows it. A drag moves a window; it
             // must never resize it.
-            const bool HAVEORIGINAL = !dragOriginalBox.empty();
+            const bool HAVEORIGINAL = !drag.originalBox.empty();
             const auto GLOBALSIZE =
-                HAVEORIGINAL ? dragOriginalBox.size() :
+                HAVEORIGINAL ? drag.originalBox.size() :
                                DRAGBOX.size() * (1.F / (std::max(dropOverview->scale->value(), 0.01F) * std::max(DROPMONITOR ? DROPMONITOR->m_scale : 1.F, 0.01F)));
             // X42: a strip-mini drop targets a card that is off-screen by
             // construction, so there is no in-card point to map the cursor to.
             // Keeping the window where it already was is what stops every
             // arrival stacking up on the workspace centre.
             auto GLOBALBOX = dropPointMapsIntoCard ? CBox{dropOverview->overviewPointToGlobal(dropWorkspaceIdx, DRAGBOX.pos()), GLOBALSIZE} :
-                HAVEORIGINAL                           ? CBox{dragOriginalBox.pos(), GLOBALSIZE} :
+                HAVEORIGINAL                           ? CBox{drag.originalBox.pos(), GLOBALSIZE} :
                                                          centerBoxInWorkspace(CBox{Vector2D{}, GLOBALSIZE}, DROPWORKSPACE, DROPMONITOR);
             GLOBALBOX = clampBoxToWorkspace(GLOBALBOX, DROPWORKSPACE, DROPMONITOR, WINDOW->getRealBorderSize());
 
@@ -2146,7 +2146,7 @@ void CScrollOverview::endWindowDrag() {
 
         RESTOREACTIVEWORKSPACE();
         RESTOREVIEWPORTWORKSPACE();
-    } else if (TARGET && !dragStartedTiled) {
+    } else if (TARGET && !drag.startedTiled) {
         const auto workspaceIdx = dragWorkspaceIndex(WINDOW);
 
         const auto FLOATBOX   = draggedWindowBox(workspaceIdx);
@@ -2154,9 +2154,9 @@ void CScrollOverview::endWindowDrag() {
         // X41: same mission-control-slot descaling bug as the branch above. This
         // is the path a CANCELLED drag takes when the button comes up over the
         // window's own card, so committing the slot size shrinks it every time.
-        const auto GLOBALSIZE = dragOriginalBox.empty() ?
+        const auto GLOBALSIZE = drag.originalBox.empty() ?
             FLOATBOX.size() * (1.F / (std::max(scale->value(), 0.01F) * std::max(MONITOR ? MONITOR->m_scale : 1.F, 0.01F))) :
-            dragOriginalBox.size();
+            drag.originalBox.size();
         auto       GLOBALBOX  = CBox{GLOBALPOS, GLOBALSIZE};
         const auto WORKSPACE  = workspaceIdx < images.size() && images[workspaceIdx] ? images[workspaceIdx]->pWorkspace : WINDOW->m_workspace;
 
@@ -2195,14 +2195,14 @@ void CScrollOverview::endWindowDrag() {
 }
 
 void CScrollOverview::endWindowResize() {
-    const auto WINDOW  = getOverviewWindowToShow(resizeActiveWindow.lock());
+    const auto WINDOW  = getOverviewWindowToShow(resize.activeWindow.lock());
     const auto TARGET  = WINDOW ? WINDOW->layoutTarget() : nullptr;
     const auto MONITOR = pMonitor.lock();
 
-    if (WINDOW && TARGET && WINDOW->m_isFloating && resizeWorkspaceIdx < images.size()) {
+    if (WINDOW && TARGET && WINDOW->m_isFloating && resize.workspaceIdx < images.size()) {
         const auto RESIZEDBOX  = resizedWindowBox();
         const auto SCALEFACTOR = std::max(scale->value(), 0.01F) * std::max(MONITOR ? MONITOR->m_scale : 1.F, 0.01F);
-        auto       GLOBALBOX   = CBox{overviewPointToGlobal(resizeWorkspaceIdx, RESIZEDBOX.pos()), RESIZEDBOX.size() * (1.F / SCALEFACTOR)};
+        auto       GLOBALBOX   = CBox{overviewPointToGlobal(resize.workspaceIdx, RESIZEDBOX.pos()), RESIZEDBOX.size() * (1.F / SCALEFACTOR)};
 
         TARGET->damageEntire();
         TARGET->rememberFloatingSize(GLOBALBOX.size());
@@ -2211,12 +2211,12 @@ void CScrollOverview::endWindowResize() {
         TARGET->damageEntire();
     }
 
-    resizePointerDown = false;
-    resizePendingWindow.reset();
-    resizeActiveWindow.reset();
-    resizeOriginalBox  = CBox{};
-    resizeLastMouseLocal = Vector2D{};
-    resizeCorner       = Layout::CORNER_NONE;
+    resize.pointerDown = false;
+    resize.pendingWindow.reset();
+    resize.activeWindow.reset();
+    resize.originalBox  = CBox{};
+    resize.lastMouseLocal = Vector2D{};
+    resize.corner       = Layout::CORNER_NONE;
     rebuildPending     = true;
     damage();
 }
@@ -3115,7 +3115,7 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         const bool PROMOTED = overviewGridPromoted(window, monitor);
         if (!PROMOTED && !shouldShowOverviewWindow(window))
             return;
-        if (dragActiveWindow && window == getOverviewWindowToShow(dragActiveWindow.lock()))
+        if (drag.activeWindow && window == getOverviewWindowToShow(drag.activeWindow.lock()))
             return;
 
         if (!WORKSPACEVISIBLE && !PROMOTED)
@@ -3144,8 +3144,8 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         if (hasRunningWorkspaceAnimation())
             return;
 
-        auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
-        const auto DRAGGED     = getOverviewWindowToShow(dragContext->dragActiveWindow.lock());
+        auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->drag.activeWindow ? g_pointerGrabOverview : this;
+        const auto DRAGGED     = getOverviewWindowToShow(dragContext->drag.activeWindow.lock());
         if (!DRAGGED)
             return;
 
@@ -3345,8 +3345,8 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
     if (FADE < 0.01F)
         return;
 
-    auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
-    const auto DRAGGED     = getOverviewWindowToShow(dragContext->dragActiveWindow.lock());
+    auto*      dragContext = g_pointerGrabOverview && g_pointerGrabOverview->drag.activeWindow ? g_pointerGrabOverview : this;
+    const auto DRAGGED     = getOverviewWindowToShow(dragContext->drag.activeWindow.lock());
 
     size_t hoveredIdx = images.size();
     if (DRAGGED && isOverviewPointerOnMonitor(monitor)) {
@@ -3357,7 +3357,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         // window back where it came from is a no-op, so it must not light up as a
         // target. Only the HIGHLIGHT is suppressed -- the cell stays a live drop
         // target, exactly as the reference still claims it.
-        if (HOVERED && HOVERED == dragContext->dragOriginalWorkspace.lock())
+        if (HOVERED && HOVERED == dragContext->drag.originalWorkspace.lock())
             hoveredIdx = images.size();
     }
 
@@ -4207,8 +4207,8 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
 }
 
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
-    auto*      dragOwner = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
-    const auto WINDOW    = getOverviewWindowToShow(dragOwner->dragActiveWindow.lock());
+    auto*      dragOwner = g_pointerGrabOverview && g_pointerGrabOverview->drag.activeWindow ? g_pointerGrabOverview : this;
+    const auto WINDOW    = getOverviewWindowToShow(dragOwner->drag.activeWindow.lock());
     if (!shouldShowOverviewWindow(WINDOW) || !WINDOW->m_workspace)
         return;
 
@@ -4235,7 +4235,7 @@ bool CScrollOverview::hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t
     if (!monitor)
         return false;
 
-    const auto DRAGGEDWINDOW = getOverviewWindowToShow(dragActiveWindow.lock());
+    const auto DRAGGEDWINDOW = getOverviewWindowToShow(drag.activeWindow.lock());
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& workspaceImage = images[workspaceIdx];
@@ -4294,7 +4294,7 @@ void CScrollOverview::renderPinnedFloatingWindows(PHLMONITOR monitor, float over
         const auto window = getOverviewWindowToShow(windowRef.lock());
         if (!shouldShowPinnedFloatingOverviewWindow(window))
             continue;
-        if (dragActiveWindow && window == getOverviewWindowToShow(dragActiveWindow.lock()))
+        if (drag.activeWindow && window == getOverviewWindowToShow(drag.activeWindow.lock()))
             continue;
 
         if (window->m_monitor != monitor)
@@ -4571,7 +4571,7 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
     const auto ACTIVEIDX = activeWorkspaceIndex();
     const auto SCALE     = scale->value();
     const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE, layout);
-    const auto DRAGGED   = getOverviewWindowToShow(dragActiveWindow.lock());
+    const auto DRAGGED   = getOverviewWindowToShow(drag.activeWindow.lock());
 
     const auto isVisibleAnimatedWindow = [&](const PHLWINDOW& window, float workspaceOffset) {
         if (!shouldShowOverviewWindow(window) || window == DRAGGED)
@@ -4643,7 +4643,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     const auto ACTIVEIDX = activeWorkspaceIndex();
     const auto SCALE     = scale->value();
     const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE, layout);
-    const auto DRAGGED   = getOverviewWindowToShow(dragActiveWindow.lock());
+    const auto DRAGGED   = getOverviewWindowToShow(drag.activeWindow.lock());
     const bool CANFRAMETHROTTLEDWINDOWS = closing || shouldAllowRealtimePreviewFrame();
     bool       sentThrottledWindowFrame = false;
 
@@ -4782,8 +4782,8 @@ bool CScrollOverview::shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, co
         return true;
 
     auto window = getOverviewWindowToShow(OWNER->windowOwner);
-    if (g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow &&
-        window == getOverviewWindowToShow(g_pointerGrabOverview->dragActiveWindow.lock()))
+    if (g_pointerGrabOverview && g_pointerGrabOverview->drag.activeWindow &&
+        window == getOverviewWindowToShow(g_pointerGrabOverview->drag.activeWindow.lock()))
         return true;
 
     if (!window || window->m_monitor != MONITOR)
@@ -4880,8 +4880,8 @@ bool CScrollOverview::shouldHandleSurfaceDamage(SP<CWLSurfaceResource> surface) 
         return true;
 
     auto window = getOverviewWindowToShow(windowOwner);
-    if (g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow &&
-        window == getOverviewWindowToShow(g_pointerGrabOverview->dragActiveWindow.lock())) {
+    if (g_pointerGrabOverview && g_pointerGrabOverview->drag.activeWindow &&
+        window == getOverviewWindowToShow(g_pointerGrabOverview->drag.activeWindow.lock())) {
         const auto DRAGBOX = g_pointerGrabOverview->draggedWindowGlobalBox();
         if (!DRAGBOX.empty() && !DRAGBOX.intersection(MONITOR->logicalBox()).empty())
             damage();
@@ -5311,7 +5311,7 @@ void CScrollOverview::render() {
 
     ++g_overviewFrame;
 
-    if (g_pointerGrabOverview && g_pointerGrabOverview != this && g_pointerGrabOverview->dragActiveWindow && isOverviewPointerOnMonitor(MONITOR))
+    if (g_pointerGrabOverview && g_pointerGrabOverview != this && g_pointerGrabOverview->drag.activeWindow && isOverviewPointerOnMonitor(MONITOR))
         lastMousePosLocal = getOverviewMousePosLocal(MONITOR);
 
     const bool PREVBLOCKSURFACEFEEDBACK       = g_pHyprRenderer->m_bBlockSurfaceFeedback;
@@ -5437,7 +5437,7 @@ void CScrollOverview::render() {
     // overview owns the monitor, so the pill is still drawn exactly once.
     // Y7. The pill glows as a dragged window nears it; the dock computes the
     // distance itself, this only says whether a drag is happening at all.
-    ScrollOverview::Dock::setWindowDragActive(dragActiveWindow.operator bool());
+    ScrollOverview::Dock::setWindowDragActive(drag.activeWindow.operator bool());
     ScrollOverview::Dock::render(MONITOR);
 
     // X52. One line per frame after a keystroke: the frame that PAINTS the new
@@ -5494,7 +5494,7 @@ void CScrollOverview::setClosing(bool closing_) {
 // are constructor-bound lambdas, so dropping them would make reopen() a rebuild
 // of six closures instead of the clearing of one bool.
 void CScrollOverview::suspendInputListeners() {
-    if (scrollingPanPointerDown)
+    if (pan.pointerDown)
         endScrollingPan();
     clearDragPending();
     submapMouseClickPending = false;
