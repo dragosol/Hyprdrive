@@ -110,6 +110,85 @@ if MODE == 'z5log':
     print(f'z5log {verdict}: {len(reversals)} reversals, worst regression toward the far end {worst:.1f}px (limit 40; continuation is negative)')
     sys.exit(1 if worst > 40 else 0)
 
+if MODE == 'z5phase':
+    # The same clicks again, read as a STATE MACHINE rather than as boxes.
+    # FlightController writes a typed transition for every flight it creates,
+    # advances, lands or aborts, so the claims below are read off the log
+    # directly instead of being inferred from what was drawn:
+    #
+    #   1. every flight that is armed is ACCOUNTED FOR -- it either reaches Done
+    #      (it landed, or something aborted it, and either way the landing ran)
+    #      or it is superseded by a named successor, which is what a reversal
+    #      does: the old flight hands its drawn box and its hidden lease to the
+    #      new one and stops existing. A flight that is neither is the strand
+    #      class (Z9/Z18: a window left hidden, stashed, or mid-geometry) and
+    #      there is no phase for it. Three flights per z5 run, two of them
+    #      superseded, one landing -- that is what a spam of three clicks IS;
+    #   2. every landing runs the invariant and passes it (value == goal, and on
+    #      a floating window the layout target too) -- Z18b was exactly this
+    #      check failing silently on the second cycle;
+    #   3. no reversal is a silent bail: a reverse that FOUND a flight either
+    #      swaps it (a new flight seeded from the old one) or completes it on the
+    #      spot. Both bails that used to live there ended in the wrong state.
+    import os as _os
+    import re as _re
+    _cands = [p for p in (_os.environ.get('FLIGHT_LOG'), '/tmp/ovdbg.log',
+                          '/home/dragos/hyprvm/share/zrig/ovdbg.log') if p]
+    _log = next((p for p in _cands if _os.path.exists(p)), None)
+    assert _log, 'no flight log: %s -- dock:flight_log was never on' % (_cands,)
+    lines = open(_log).read().splitlines()
+
+    armed, done, lands, bad_land = {}, set(), {}, []
+    superseded = set()   # flights a reversal consumed, by the successor's own line
+    reversals, unresolved = [], []
+    for i, l in enumerate(lines):
+        if l.startswith('phase '):
+            m = _re.search(r'id=(\d+).*?(?:(\w+)->)?(Armed|Flying|LandingBridge|Done)\b', l)
+            if not m:
+                continue
+            fid, to = int(m.group(1)), m.group(3)
+            if to == 'Armed':
+                armed[fid] = i
+                old = _re.search(r'reason=reversal-of-(\d+)', l)
+                if old:
+                    superseded.add(int(old.group(1)))
+            elif to == 'Done':
+                done.add(fid)
+        elif l.startswith('land '):
+            m = _re.search(r'id=(\d+)', l)
+            if m:
+                fid = int(m.group(1))
+                lands[fid] = l
+                if 'ok=0' in l:
+                    bad_land.append(l)
+        elif l.startswith('reverse') and 'found=1' in l:
+            reversals.append(i)
+
+    for r in reversals:
+        # what the reversal did, in the two lines after it
+        window = '\n'.join(lines[r + 1:r + 3])
+        if 'reason=reversal-of-' in window or 'reason=reversed-while-landing' in window:
+            continue
+        unresolved.append(lines[r])
+
+    stranded = sorted(set(armed) - done - superseded)
+    ok = bool(armed) and bool(reversals) and not stranded and not bad_land and not unresolved
+    print(f'z5phase {"PASS" if ok else "FAIL"}: {len(armed)} flights armed, {len(done)} landed, '
+          f'{len(superseded)} superseded by a reversal, {len(stranded)} unaccounted for; '
+          f'{len(reversals)} reversals ({len(unresolved)} that neither swapped nor completed), '
+          f'{len(lands)} landings ({len(bad_land)} failed their invariant)')
+    for l in bad_land[:3]:
+        print('  landing invariant FAILED: ' + l)
+    for l in unresolved[:3]:
+        print('  reversal neither swapped nor completed: ' + l)
+    if stranded:
+        print('  armed, never landed, never superseded: %s' % stranded[:8])
+    if not armed:
+        print('  no flights in the log at all -- flight_log off, or the clicks missed')
+    if not reversals:
+        print('  no reversal found -- the spam did not land inside a flight, so this proves nothing')
+    sys.exit(0 if ok else 1)
+
 if MODE == 'z5':
     MIN_AREA = 15000   # ignore dock-cell-sized blobs: identity flips to the
                        # dock cell are legit (fade-out done), not teleports

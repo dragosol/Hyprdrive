@@ -2,6 +2,8 @@
 
 #include "globals.hpp"
 
+#include <hyprland/src/helpers/time/Time.hpp>  // Time::steady_tp: the frame clock a flight draw is stamped with
+
 #include <string>
 #include <vector>
 
@@ -205,12 +207,34 @@ void feedPointerMotion(const Vector2D& delta);
 void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand = false);
 void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window);
 
-// P0. Land every flight where it stands. A flight's boxes are monitor-local
-// RENDER px of the output it started on and it only advances inside that
-// output's dock render, so one left in the air across a monitor change is drawn
-// against the wrong origin -- or, if its output was the one drawing it, never
-// lands at all, and a restore that never lands leaves its window STASHED:
-// hidden, unfocusable, gone. Called from the monitor-removed teardown.
-void settleFlights();
+// P0's settleFlights lived here. It is Flight::abortAll(reason) now --
+// FlightController.hpp -- because "land every flight where it stands" and "land
+// this flight because it arrived" want the same landing, and having two of them
+// is how the monitor-removed path ended up missing a driven restore's geometry
+// write-back.
+
+// ---- what the FLIGHT module calls back into the dock ----------------------
+// The dock owns the pill, the render context and the hover panel; the flight
+// owns the animation. These four are the seam, and they are declared here rather
+// than left in the anonymous namespace because FlightController.cpp is a
+// different translation unit now.
+
+// X54. Bring the pill out NOW, skipping show_delay: a flight is shorter than the
+// delay, so "ask nicely and wait" meant the animation was over before the dock
+// arrived -- and render() returns early on an empty pill, so it was never drawn.
+void revealNow(PHLMONITOR monitor);
+
+// Y8/Z10. Hop the icon that is receiving something, once, on acknowledgement.
+void armBounce(const std::string& wmClass);
+
+// Z15. A flight click kills the Y1 hover panel INSTANTLY -- leaving it alive
+// re-eased it from a stale parked box, which read as "a panel dragged from the
+// bottom of the screen" under the restore.
+void dismissHoverPanelNow();
+
+// Y5. Draw one flight frame: the REAL window, live, through the same path the
+// overview draws a tile with. `now` and `ownsPass` are this frame's render
+// context, which only the dock knows.
+void drawFlightSurface(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, float alpha, const Time::steady_tp& now, bool ownsPass);
 
 }

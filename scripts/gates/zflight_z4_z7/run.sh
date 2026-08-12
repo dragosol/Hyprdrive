@@ -82,16 +82,25 @@ film_arm z5
 # claim, and which no 30fps pixel metric can carry (a 400ms EASE_OUT_EXPO moves
 # ~900px between two frames). z_rig truncates /tmp/ovdbg.log at the top of the
 # z5 arm, so what it grades is this arm's flights and nothing else.
+# ...and z5phase reads the same run a third way: as the FLIGHT STATE MACHINE's
+# own transition log. z5/z5log both grade BOXES -- where the proxy was drawn --
+# and the class of bug that produced the Z4-Z20 saga is a flight left in a state
+# nobody landed: hidden, stashed, mid-geometry. That has no box at all. This arm
+# asks whether every flight armed reached Done, whether every landing passed its
+# invariant, and whether any reversal bailed silently.
 if [ "${VERDICT[z5]}" = PASS ] || [ "${VERDICT[z5]}" = FAIL ]; then
-    if python3 scripts/zflight_gate.py z5log; then
-        VERDICT[z5log]=PASS
-    else
-        VERDICT[z5log]=FAIL; FAIL=1
-    fi
+    for arm in z5log z5phase; do
+        if python3 scripts/zflight_gate.py $arm; then
+            VERDICT[$arm]=PASS
+        else
+            VERDICT[$arm]=FAIL; FAIL=1
+        fi
+    done
 else
     VERDICT[z5log]="SKIP (z5 rig fault)"
+    VERDICT[z5phase]="SKIP (z5 rig fault)"
 fi
 
 echo
-for a in z7 z6 z4 z4t z4c z5 z5log; do printf '%-6s %s\n' "$a" "${VERDICT[$a]:-SKIP}"; done
+for a in z7 z6 z4 z4t z4c z5 z5log z5phase; do printf '%-8s %s\n' "$a" "${VERDICT[$a]:-SKIP}"; done
 exit $FAIL

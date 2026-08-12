@@ -34,6 +34,7 @@ using namespace Hyprutils::String;
 #include "AppSearch.hpp"
 #include "Config.hpp"
 #include "Dock.hpp"
+#include "FlightController.hpp"
 #include "DockInput.hpp"
 #include "LauncherEntry.hpp"
 #include "Minimize.hpp"
@@ -1013,6 +1014,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // rest of the codebase only ever knows the new name. ONE RELEASE.
         ScrollOverview::Compat::adoptLegacyValues();
 
+        // A reload rebuilds the dock's whole layout under whatever is flying,
+        // and a flight's boxes are the OLD layout's -- its icon target can move,
+        // shrink, or stop existing. Land them first, with the landing every
+        // other end of a flight gets, rather than let one chase an icon that is
+        // no longer there. Cheap: with nothing in the air it returns at once.
+        ScrollOverview::Flight::abortAll("config-reload");
+
         for (const auto& MONITOR : State::monitorState()->monitors())
             ScrollOverview::Dock::damageIfChanged(MONITOR);
     });
@@ -1117,7 +1125,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // an unhidden window is re-added to the draw list it is about to leave with
     // rather than after it.
     static auto MONITORGONE = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
-        ScrollOverview::Dock::settleFlights();
+        ScrollOverview::Flight::abortAll("monitor-removed");
         dropScrollOverviewsForMonitor(monitor);
     });
 
@@ -1152,6 +1160,11 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pTapSuperButtonHook.reset();
 
     g_unloading = true;
+    // FIRST: a flight in the air at unload is a window that is hidden, stashed,
+    // or mid-geometry with nothing left to finish it -- the plugin's code IS the
+    // thing that would have landed it. hyprpm reloads this plugin in-process, so
+    // "the session is ending anyway" is not true here.
+    ScrollOverview::Flight::abortAll("plugin-exit");
     // The D-Bus worker outlives the overview otherwise, and hyprpm reloads the
     // plugin in-process.
     AppSearch::shutdownIconIndex();
