@@ -121,9 +121,17 @@ sleep 2.4
 # windows -- measured: with blank fixtures the band's two control frames are
 # BYTE-IDENTICAL, so a blur of any radius over them is a no-op and a blur_size
 # A/B could not fail. Static, not ticking: LIVE must stay the counter's alone.
+# BAND WIDTH IS THE CALIBRATION. The plate's backdrop is the desktop-strip MINI
+# of this window, not the window: a ~900px-tall fixture is drawn into ~130px of
+# panel, so a stripe pattern that alternates every ROW arrives as flat grey.
+# Measured 2026-08-12 on 7b32fd6 with one-row stripes: the backdrop behind the
+# plate scored HF-y 1.02 against the gate's own >2.0 precondition, so TEXTURE
+# failed and BLURS was grading a smear of nothing -- which is exactly what
+# TEXTURE exists to catch. Five-row bands survive the same downscale at roughly
+# 15px each. Static, not ticking: LIVE must stay the counter's alone.
 FILL='clear'
 [ "${X47_STRIPES:-0}" = 1 ] && FILL='i=0; while [ $i -lt 40 ]; do
-    if [ $((i%2)) = 0 ]; then printf "\033[107m%*s\033[0m\n" 200 ""
+    if [ $(( (i/5) % 2 )) = 0 ]; then printf "\033[107m%*s\033[0m\n" 200 ""
     else printf "\033[40m%*s\033[0m\n" 200 ""; fi; i=$((i+1)); done; sleep infinity'
 for i in 1 2; do
     setsid kitty -c NONE --class X47A -o background='#101820' -o background_opacity=1.0 \

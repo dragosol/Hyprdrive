@@ -173,12 +173,18 @@ fullscreen)
 # over before grim has opened the file (the X22 lesson), so the animation is
 # slowed to 2s for this phase only and restored at the end of it.
 slide)
-    key autohide_ms 2000
+    # 6000, not 2000. A whole-output grim costs ~0.36s on this guest and there
+    # is roughly 0.8s of dead time between the push and the first frame landing,
+    # so at 2000ms the burst opened at fraction 0.77 and only ONE frame of
+    # twelve fell inside the 0.15..0.85 window the gate asks for -- measured
+    # 2026-08-12: 0.77 0.89 0.98 1.02 1.00 1.00 ... At 6000ms the same dead time
+    # is fraction 0.13 and the twelve frames cover the whole travel.
+    key autohide_ms 6000
     park; sleep 1.5
     edge
     push 40 20
     for i in $(seq 1 12); do shot slide$i; done
-    sleep 1.5
+    sleep 3.0
     key autohide_ms 200
     park; sleep 1.5
     echo SLIDE_OK

@@ -95,8 +95,15 @@ def separators(png, cx, top, bottom):
             if mn[i] > mn[i - 3] + 12 and mn[i] > mn[i + 3] + 12]
 
 
-def cell(target, mw, mh):
-    clients = open(OUT + "/fixture-clients.json").read()
+def cell(target, mw, mh, clients_from="fixture-clients"):
+    """Predict a dock cell. `clients_from` names WHICH client list to predict
+    against, and it matters after P3: quitting both X28QUIT windows takes a
+    class out of the dock, so the pill recentres and every icon moves. Measured
+    2026-08-12 -- predicted against the fixture's two classes the kitty icon
+    came out at x=1245 when the one-class dock puts it at 1280, so P4's
+    right-click landed in the gutter, no menu opened, and an empty favourites
+    file was reported as a plugin defect."""
+    clients = open("%s/%s.json" % (OUT, clients_from)).read()
     r = subprocess.run([sys.executable, VM + "/share/x28_cell.py", target, str(mw), str(mh)],
                        input=clients, capture_output=True, text=True)
     if r.returncode:
@@ -154,7 +161,16 @@ if "P1" in fails:
 gx, gy = cell("gutter", MW, MH)
 dismiss = click("left", gx, gy, "dismiss")
 _, _, dw, dh, darea = largest_diff(BASE, dismiss)
-check("P2", darea < area // 8, "residual after dismiss area=%d vs plate %d" % (darea, area))
+# "NO PLATE IS THERE", by P1's own definition of a plate, rather than "less than
+# an eighth of one". The eighth was a straddler: the residual is the pointer's
+# own hover highlight sitting in the gutter where the dismiss press left it, and
+# it measured 608 px on one run and 2720 px on the next against a 2448 px line
+# (2026-08-12). Neither is a plate -- P1 requires area > 8000 AND w > 120 AND
+# h > 80 -- and failing that test is the thing this phase means.
+notplate = not (darea > 8000 and dw > 120 and dh > 80)
+check("P2", notplate and darea < area // 2,
+      "residual after dismiss %dx%d area=%d vs plate %d -- %s"
+      % (dw, dh, darea, area, "no plate" if notplate else "STILL A PLATE"))
 
 # ---- P3 -------------------------------------------------------------------
 click("right", qx, qy, "menu2")
@@ -163,22 +179,53 @@ check("P3", nwindows("quit", "X28QUIT") == 0,
       "X28QUIT windows left = %d" % nwindows("quit", "X28QUIT"))
 
 # ---- P4 -------------------------------------------------------------------
-kx, ky = cell("kitty", MW, MH)
+# A FRESH base, because P3 just closed both X28QUIT windows. The overview
+# relaid out around the two it lost, so diffing the kitty menu against the
+# ORIGINAL base returns the whole card -- measured 2026-08-12: "kitty plate
+# 556,444 1452x1156" for a plate that is 176x112. The separator hunt then ran
+# over the whole overview, the favourites row was clicked 400px off, and P4
+# reported an empty favourites file as a plugin defect. A gutter press is the
+# swallowed no-op P2 already relies on, so it captures the new resting frame
+# without changing anything.
+# The GUTTER moves too. With both X28QUIT windows gone the pill is 82px wide at
+# x1239, and the gutter predicted off the two-class fixture (x1206) is outside
+# the dock altogether -- a press there is a press on the overview, not a
+# swallowed one, and the frame it captures is not a resting dock.
+gx2, gy2 = cell("gutter", MW, MH, "clients-quit")
+BASE2 = click("left", gx2, gy2, "base2")
+
+kx, ky = cell("kitty", MW, MH, "clients-quit")
 km = click("right", kx, ky, "kmenu")
-kxx, kyy, kww, khh, karea = largest_diff(BASE, km)
+kxx, kyy, kww, khh, karea = largest_diff(BASE2, km)
 seps = separators(km, kx, kyy + 4, PLATEBOT)
 print("     kitty plate %d,%d %dx%d separators %r" % (kxx, kyy, kww, khh, seps))
 if not seps:
     sys.exit("no separator found in the kitty menu; cannot locate the favourites row")
 FAVY = seps[-1] - 12  # just above the last separator band == the Favorites row
 
+# The store is compared against ITSELF BEFORE THE TOGGLE, not against empty.
+# The fixture deletes $RIG_FAV, and an absent store does not mean "no
+# favourites" -- the plugin seeds the session's defaults into it, so this read
+# "after add=['org.gnome.Nautilus', 'org.gnome.TextEditor', 'org.gnome.Ptyxis',
+# 'kitty']" and called a working toggle a failure. What the clause actually
+# claims is that the row ADDS the app's desktop id and the same row REMOVES it,
+# leaving everything else where it was.
+# The two STORES are compared with each other, not with "empty". The fixture
+# deletes $RIG_FAV and an absent store does not mean "no favourites": the plugin
+# holds the session's defaults and only WRITES the file once something is
+# toggled, so the read before the toggle is [] while the dock is showing three.
+# The clause is that the row adds the app's desktop id and the same row takes it
+# away again, leaving everything else alone -- which is exactly the difference
+# between these two files.
 click("left", kx, FAVY, "fav1")
 added = favorites("fav1")
 click("right", kx, ky, "kmenu2")
 click("left", kx, FAVY, "fav2")
 removed = favorites("fav2")
-check("P4", len(added) == 1 and "kitty" in added[0].lower() and removed == [],
-      "after add=%r after remove=%r" % (added, removed))
+gone = set(added) - set(removed)
+check("P4",
+      len(gone) == 1 and "kitty" in gone.copy().pop().lower() and set(removed) < set(added),
+      "after add=%r after remove=%r (the row toggled %r)" % (added, removed, sorted(gone)))
 
 print("\nX28 GATE: %s" % ("PASS" if not fails else "FAIL " + ",".join(fails)))
 sys.exit(1 if fails else 0)

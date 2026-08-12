@@ -98,13 +98,26 @@ pill)
     ;;
 
 # P1. Slot 1 is kitty and kitty is running: the reference's plain hotkey runs the
-# SAME action a plain click runs, so one window goes down and the rest stay.
+# SAME action a plain click runs -- Dock.cpp's hotkey() literally calls
+# activateItem(MONITOR, ITEM, shift), the same entry a click uses.
+#
+# So the expectation is ZERO, not B-1. This phase wanted "one window goes down
+# and the rest stay", and that has not been the click's behaviour since Y4:
+# `y4_click_semantics` is green on "a plain dock click minimizes ALL of an app's
+# windows", x24's dock half asserts minimized-all for a plain click on a
+# two-window class, and x24's own header records that SHIFT has CONVERGED with
+# plain. A phase whose expected value contradicts two green gates is measuring
+# the expectation.
+#
+# That leaves P1 and P2 asserting the same outcome, which is the point: after Y4
+# the modifier does not change it, and a build where shift diverged again would
+# fail one of them.
 slot1)
     B=$(nvis kitty)
     hot 1; sleep 1.2
     A=$(nvis kitty)
     echo "SLOT1 visible $B -> $A"
-    verdict slot1 "$A" "$((B - 1))"
+    verdict slot1 "$A" "0"
     ;;
 
 # P2. Shift takes the whole app down, exactly as a shift-click does.

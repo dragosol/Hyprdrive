@@ -12,10 +12,22 @@ from PIL import Image
 S = 4
 
 
-def largest_green(png):
-    """(x, y, w, h) of the biggest green blob, or None."""
+def largest_green(png, exclude=None):
+    """(x, y, w, h) of the biggest green blob, or None.
+
+    `exclude` is an optional (x, y, w, h) rectangle whose pixels are dropped
+    before labelling. X24's flight needs it: the dock holds its hover PREVIEW
+    PANEL out for the whole flight (Dock.cpp:1240, "a flight HOLDS the dock
+    out"), the panel is showing a thumbnail of the very window in flight, and
+    once the shrinking proxy is smaller than the panel the largest green blob is
+    the panel -- a box that does not move, in five frames running, which reads
+    as a teleport.
+    """
     im = np.asarray(Image.open(png).convert("RGB")).astype(int)
     mask = (im[:, :, 1] > 150) & (im[:, :, 0] < 110) & (im[:, :, 2] < 110)
+    if exclude:
+        ex, ey, ew, eh = exclude
+        mask[max(0, ey):ey + eh, max(0, ex):ex + ew] = False
     if not mask.any():
         return None
 

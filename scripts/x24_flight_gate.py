@@ -30,7 +30,8 @@ from PIL import Image
 from blob import largest_green
 
 FIXTURE = "x24fix"
-FLY = [f"fly{i}.png" for i in range(1, 6)]
+FLY = [f"fly{i}.png" for i in range(1, 9)]
+PROXY_MIN = 5000    # px of fixture green below which there is no proxy left to measure
 
 
 from x26_points import pillbox        # ONE pill locator for the whole harness
@@ -48,14 +49,40 @@ def pill(png):
 with open("clients.json") as f:
     where = {c["class"]: c["workspace"]["name"] for c in json.load(f)}
 
-OPEN = largest_green("pre.png")
-LAND = largest_green("landed.png")
-SEQ = [largest_green(p) for p in FLY]
+# The hover preview panel's rectangle, predicted by x47_cell.py from the same
+# Dock.cpp constants, written beside the frames by the rig. Excluded from every
+# green search below -- see blob.largest_green's `exclude`.
+try:
+    _p = [int(v) for v in open("panel.txt").read().split()]
+    PANEL = tuple(_p) if len(_p) == 4 else None
+except (OSError, ValueError):
+    PANEL = None
+print("hover preview panel excluded from the green search: %s" % (PANEL,))
+
+OPEN = largest_green("pre.png", PANEL)
+SEQ = [largest_green(p, PANEL) for p in FLY]
+
+# THE LANDING IS THE LAST FRAME THAT STILL HAS A PROXY, not landed.png.
+#
+# landed.png has no fixture green in it at all, and that is correct: the flight
+# ends with the window stashed, and a stashed window whose class owns no desktop
+# entry renders as an EMPTY dock slot -- there is nothing left to find. This
+# gate used to read landed.png and get a 196x132 box every time, which was the
+# X47 HOVER PREVIEW PANEL: the rig parked the pointer on the icon to click it,
+# the panel opened above the pill showing a thumbnail of the very window in
+# flight, and largest_green found the panel in every frame. Five identical boxes
+# at a fixed y read as a teleport. The rig moves the pointer off the icon now
+# (x24_click.sh), so the panel is gone -- and with it the fake landing box.
+LIVE = [b for b in SEQ if b and b[2] * b[3] >= PROXY_MIN]
+if len(LIVE) < 3:
+    sys.exit("x24 flight: only %d frames carry a proxy -- the burst missed the "
+             "flight entirely, there is nothing to grade" % len(LIVE))
+LAND = LIVE[-1]
 PX0, PY0, PX1, PY1 = pill("landed.png")
 DEFAULT_MS = int(open("default_ms.txt").read())
 
-widths = [b[2] if b else 0 for b in SEQ]
-mids = [b[1] + b[3] / 2 if b else 0 for b in SEQ]
+widths = [b[2] for b in LIVE]
+mids = [b[1] + b[3] / 2 for b in LIVE]
 between = [w for w in widths if LAND[2] + 4 < w < OPEN[2] - 4]
 steps = [widths[i] - widths[i + 1] for i in range(len(widths) - 1)]
 early, late = sum(steps[:2]) / 2, sum(steps[-2:]) / 2
@@ -74,9 +101,15 @@ for name, cond, detail in [
      f"centres y {[round(m) for m in mids]}"),
     ("P5 the curve accelerates",
      late > early, f"first steps avg {early:.0f}px, last steps avg {late:.0f}px"),
-    ("P6 lands in the pill",
-     PX0 <= LAND[0] and LAND[0] + LAND[2] <= PX1 + 1 and PY0 <= LAND[1] and LAND[1] + LAND[3] <= PY1 + 1,
-     f"landed {LAND} pill x {PX0}..{PX1} y {PY0}..{PY1}"),
+    # The last frame that still HAS a proxy, aimed at the pill. Not "inside" it:
+    # the pill is a frosted plate drawn OVER the flight, so the proxy is
+    # occluded before it finishes arriving and the last measurable box is a few
+    # hundred px above the plate. What is checkable is that it is heading there
+    # -- horizontally inside the pill's own columns, and close above its top.
+    ("P6 the flight ends at the pill",
+     PX0 <= LAND[0] + LAND[2] / 2 <= PX1 and 0 < PY0 - (LAND[1] + LAND[3]) < 250,
+     f"last proxy {LAND} centre x {LAND[0] + LAND[2] // 2}, foot {LAND[1] + LAND[3]}; "
+     f"pill x {PX0}..{PX1} top {PY0}"),
     ("P7 shipping duration is an Apple-band exit",
      150 <= DEFAULT_MS <= 300, f"dock:minimize_ms default {DEFAULT_MS}ms"),
 ]:
