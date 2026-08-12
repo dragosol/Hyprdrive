@@ -110,7 +110,7 @@ def getoption(key):
     # vec2/custom. `set` says whether anything ever assigned it. Take the first
     # typed field that is present -- False and 0 are values, so this cannot test
     # truthiness.
-    for k in ("bool", "int", "float", "str", "gradient", "vec2", "custom", "data"):
+    for k in ("bool", "int", "float", "str", "gradient", "vec2", "css", "custom", "data"):
         if k in d:
             return d[k]
     return None

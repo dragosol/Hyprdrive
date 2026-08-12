@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Hyprdrive Settings
+GenericName=Overview and Dock Settings
+Comment=Overview, dock, blur, monitors and shell -- one place, written through the config fragments
+Exec=hyprdrive-settings
+Icon=preferences-desktop
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=hyprdrive;overview;dock;blur;monitor;hyprland;
+StartupNotify=true
+StartupWMClass=hyprdrive-settings

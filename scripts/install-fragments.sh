@@ -34,13 +34,62 @@ done
 # whatever colours the last committer's wallpaper happened to have.
 python3 "$ROOT/scripts/theme-sync.py" --dest "$DEST" --no-apply
 
+# The settings app's own fragments, one per pane. They are seeded EMPTY rather
+# than created on first write, so that the pane's raw-snippet editor has a file
+# to point at before anybody has changed a value -- and so `ls` on this directory
+# tells you what the app owns. Each carries only its markers until a value lands.
+python3 - "$ROOT" "$DEST" <<'PY'
+import json, pathlib, subprocess, sys
+root, dest = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+schema = json.loads((root / "docs" / "schema.json").read_text())
+sys.path.insert(0, str(root / "scripts"))
+for p in schema["panes"] + [{"id": "monitors", "fragment": "45-monitors.lua"}]:
+    frag = p.get("fragment")
+    if not frag or (dest / frag).exists():
+        continue
+    body = ("-- hyprdrive fragment %s -- the %s pane of the settings app.\n"
+            "--\n-- Empty until the app writes a value here. Hand edits go BELOW the marker.\n"
+            % (frag[:-4], p.get("title", p["id"])))
+    subprocess.run([sys.executable, str(root / "scripts" / "fragment.py"), "write", str(dest / frag)],
+                   input=body, text=True, check=True, capture_output=True)
+    print("seeded %s" % (dest / frag))
+PY
+
 echo "fragments installed in $DEST"
 echo "sourced by ~/.config/hypr/hyprland.lua in filename order"
 
 if [ $# -gt 0 ]; then
-    echo "theme-sync units skipped (explicit DEST)"
+    echo "theme-sync units and the settings app skipped (explicit DEST)"
     exit 0
 fi
+
+# ------------------------------------------------------- the settings app --
+# Phase 11. The app is QML hosted by quickshell, installed ALONGSIDE
+# illogical-impulse's own settings window and importing its widgets -- which is
+# what "extends ii's settings shell" means in practice, and why the files land in
+# ii's config directory rather than a config root of their own. The names are
+# distinct (hyprdrive-settings.qml, modules/hyprdrive/) so an ii update cannot
+# collide with them and this install cannot clobber ii.
+QS_CONFIG=${HYPRDRIVE_QS_CONFIG:-$HOME/.config/quickshell/ii}
+BIN=$HOME/.local/bin
+APPS=$HOME/.local/share/applications
+
+if [ -d "$QS_CONFIG" ]; then
+    install -Dm644 "$ROOT/config/quickshell/hyprdrive-settings.qml" "$QS_CONFIG/hyprdrive-settings.qml"
+    mkdir -p "$QS_CONFIG/modules/hyprdrive"
+    install -m644 -t "$QS_CONFIG/modules/hyprdrive" "$ROOT"/config/quickshell/modules/hyprdrive/*.qml
+    echo "settings app installed in $QS_CONFIG"
+else
+    echo "settings app NOT installed: no quickshell config at $QS_CONFIG" >&2
+fi
+
+install -Dm755 "$ROOT/config/hyprdrive-settings" "$BIN/hyprdrive-settings"
+mkdir -p "$APPS"
+sed "s|^Exec=hyprdrive-settings|Exec=$BIN/hyprdrive-settings|" \
+    "$ROOT/config/hyprdrive-settings.desktop" > "$APPS/hyprdrive-settings.desktop.tmp"
+mv "$APPS/hyprdrive-settings.desktop.tmp" "$APPS/hyprdrive-settings.desktop"
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" 2>/dev/null || true
+echo "launcher: $BIN/hyprdrive-settings   desktop entry: $APPS/hyprdrive-settings.desktop"
 
 # ------------------------------------------------------------- theme-sync --
 # Phase 10. matugen writes the palette, the path unit notices, theme-sync
