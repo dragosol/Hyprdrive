@@ -173,7 +173,7 @@ static void prefilterOverviewWindowTextures(const PHLWINDOW& window, PHLMONITOR 
 
         auto&     fb = g_u2PrefilterFBs[SRC->m_texID];
         if (!fb)
-            fb = g_pHyprRenderer->createFB("scrolloverview_u2_prefilter");
+            fb = g_pHyprRenderer->createFB("hyprdrive_u2_prefilter");
         if (!fb)
             continue;
         if (!fb->isAllocated() || fb->m_size != SRC->m_size || fb->m_drmFormat != FBFORMAT) {

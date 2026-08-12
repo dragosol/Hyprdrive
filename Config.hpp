@@ -93,7 +93,7 @@ int           getGestureDistance();
 // a few units of the blurred wallpaper. X61 already had to draw the selection
 // ring OPAQUE and 4px thick just to make it visible against that.
 //
-// So the highlight reads its own key, `plugin:scrolloverview:col_highlight`,
+// So the highlight reads its own key, `plugin:hyprdrive:col_highlight`,
 // which the matugen template fills from `primary` -- the same bright colour the
 // pinned-window rule already uses. It regenerates with every theme change, so
 // the highlights follow the theme without the plugin having to read quickshell's

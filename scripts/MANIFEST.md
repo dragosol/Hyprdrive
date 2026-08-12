@@ -73,7 +73,7 @@ Run one gate: `scripts/gates/<name>/run.sh`. Its stdout+stderr land in
 - `blob.py` — Largest connected blob of fixture green on the host (bbox-of-all-pixels is a check that cannot fail); imported by zfligh
 - `pillbox.py` — FINDS the dock pill in a screenshot (widest bright run in the bottom eighth) — deliberately the opposite of the cell pre
 - `hyprwall-rotate.sh` — Wallpaper rotation driven by hyprwall.timer in the guest; deliberately not switchwall.sh so col.active_border never move
-- `x52_prof.sh` — Keystroke-to-paint profiling of the search path; needs a Prof::-instrumented build + SCROLLOVERVIEW_PROFILE=1 in the com
+- `x52_prof.sh` — Keystroke-to-paint profiling of the search path; needs a Prof::-instrumented build + HYPRDRIVE_PROFILE=1 in the com
 - `x51_open.sh` — Cold vs warm overview-open cost from the Prof log (first open after fresh compositor vs second).
 - `x51_opens.sh` — Cold text renders per open across N successive opens — cache convergence-to-zero instrument.
 - `x32_cell.py` — Predicts the Show Applications button's centre. Separate from x24_cell.py, which models the button as OFF (every gate using it sets show_apps_button=false) — the button is a slot of its own and teaching x24 about it would move predictions nobody asked to move.

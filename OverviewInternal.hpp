@@ -205,8 +205,8 @@ inline bool isTopLayerFocused(PHLMONITOR monitor) {
     return layerOwner && layerOwner->m_monitor == monitor && layerOwner->m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP;
 }
 
-inline constexpr const char* OVERVIEW_INSERT_FADE_BEZIER = "scrolloverviewWorkspaceInsertFade";
-inline constexpr const char* OVERVIEW_REMOVE_FADE_BEZIER = "scrolloverviewWorkspaceRemoveFade";
+inline constexpr const char* OVERVIEW_INSERT_FADE_BEZIER = "hyprdriveWorkspaceInsertFade";
+inline constexpr const char* OVERVIEW_REMOVE_FADE_BEZIER = "hyprdriveWorkspaceRemoveFade";
 
 // The overview's own entrance and exit curves. Both end flat rather than
 // overshooting -- an overview that bounces reads as a toy, and a bounce on the
