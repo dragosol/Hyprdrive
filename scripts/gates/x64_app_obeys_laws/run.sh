@@ -25,7 +25,11 @@ cd "$(dirname "$0")/../../.."
 source scripts/lib/rig.sh
 rig_env || exit 1
 
-OUT=/mnt/host/zrig/phase11/x64; mkdir -p "$OUT"
+# Evidence goes where the RUN says, not where the phase that wrote the gate
+# went: a gate that hardcodes zrig/phase11 files its frames under a finished
+# phase's directory forever, and a later round reading "the x64 films" gets the
+# ones from 2026-08-12 whatever it just ran.
+OUT=${X64_OUT:-${RIG_EVIDENCE:-/mnt/host/zrig}/x64}; mkdir -p "$OUT"
 FAIL=0
 bad() { echo "FAIL $*"; FAIL=1; }
 APP=$HOME/.local/bin/hyprdrive-settings

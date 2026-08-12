@@ -10,12 +10,19 @@
 # that a slow afternoon's rigs start photographing a wallpaper change and
 # reading it as an animation (measured: 2148867 changed pixels, which is the
 # whole screen).
+#
+# The hold is the GATE's now (scripts/gates/y8_bounce_once/run.sh calls
+# hyprwall_pause 90min through lib/rig.sh, which honours RIG_HYPRWALL_HELD).
+# This driver used to drive hyprwall.timer with raw systemctl over ssh, which
+# cannot honour a suite's hold and, because the timer carries
+# OnUnitActiveSec=3min, makes `start` itself a rotation. It is deleted rather
+# than ported: this script is the host-side driver the gate was ported AWAY
+# from, it does not run inside the suite, and nothing else in it touches the
+# wallpaper.
 set -u
 cd "$(dirname "$0")/.."
 G=./g
 SHARE=./share
-
-$G 'systemctl --user stop hyprwall.timer 2>/dev/null; systemd-run --user --on-active=90min systemctl --user start hyprwall.timer >/dev/null 2>&1; true'
 
 # A CLEAN FIXTURE, every time. z3_setup kills kitty, respawns MARK and parks it,
 # so the tile is back where the locator can find it whatever the last run did.

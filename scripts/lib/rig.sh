@@ -512,6 +512,26 @@ rig_wait_session() { # rig_wait_session [SECONDS=45]
     return 1
 }
 
+# The baseline every slate restores: one snapshot of every registered plugin key,
+# taken the first time a slate runs against this compositor instance -- which
+# under suite.sh is before the first gate, i.e. off a session no gate has
+# touched. Keyed by instance signature, so a compositor restart (x51 does one on
+# purpose) re-reads the config-as-loaded rather than inheriting a stale file.
+slate_keys() { _rig_need || return 1; python3 "$RIG_LIB_DIR/slate_keys.py" "$@"; }
+
+rig_slate_baseline() {
+    _rig_need || return 1
+    RIG_SLATE_KEYS=$XDG_RUNTIME_DIR/rig-slate-$HYPRLAND_INSTANCE_SIGNATURE.keys
+    if [ ! -s "$RIG_SLATE_KEYS" ]; then
+        slate_keys snapshot > "$RIG_SLATE_KEYS" 2>/dev/null \
+            || { rm -f "$RIG_SLATE_KEYS"
+                 echo "slate: could not snapshot the plugin's config keys" >&2; return 1; }
+        echo "slate: baseline captured, $(wc -l < "$RIG_SLATE_KEYS") keys -> $RIG_SLATE_KEYS" >&2
+    fi
+    export RIG_SLATE_KEYS
+    return 0
+}
+
 gate_slate() { # gate_slate [LABEL] -- returns 1 if the session cannot be made clean
     _rig_need || return 1
     local label=${1:-slate}
@@ -555,9 +575,32 @@ print('%s %d %d' % (ms[0]['name'], ms[0]['width'], ms[0]['height']) if len(ms)==
     [ "$got" = "$RIG_MON_NAME $want_w $want_h" ] \
         || { echo "slate($label): outputs are '$got', wanted '$RIG_MON_NAME $want_w $want_h'" >&2; return 1; }
 
-    # Plugin options back to their registered defaults (Config.cpp:304-530).
-    # Only the ones gates actually write; anything else a gate changes it must
-    # own, and it will show up here the first time it bites.
+    # EVERY registered plugin option, back to the value the suite started with.
+    #
+    # This used to be the seven dock keys and anim_scale that gates were known to
+    # write, with a comment saying the eighth would be found out the hard way.
+    # It was: x30 leaves pressure_threshold, x24 leaves minimize_ms, y8 leaves
+    # autohide_ms, and none of them was restored by anything but the gate's own
+    # trap -- which does not fire when a gate is killed.
+    #
+    # The baseline is a SNAPSHOT of the session's own values, not Config.cpp's
+    # defaults, and the difference matters here: the rice configures the plugin
+    # (matugen's col_highlight and dock:background_opacity, 10-theme's
+    # blur/render_power, 20-layout's workspace_gap, scale 0.82 against a
+    # registered 0.9). Forcing defaults would re-theme the session between gates
+    # and every pixel gate after that would measure a configuration nobody ships.
+    # See lib/slate_keys.py.
+    rig_slate_baseline || return 1
+    hyprctl eval "$(slate_keys lua < "$RIG_SLATE_KEYS")" >/dev/null 2>&1
+    sleep 0.5
+    # anim_scale AFTER the snapshot, not before: a baseline captured off a
+    # session that had already been slowed would otherwise re-slow every gate.
+    anim_restore
+
+    # The seven dock keys stay asserted explicitly on their REGISTERED defaults:
+    # nothing in this rice configures them, so this is both the restore check and
+    # a guard on the snapshot itself -- if the baseline was captured off a dirty
+    # session, this is where it says so instead of quietly propagating.
     cfg_dock "autohide=true, show_favorites=true, show_apps_button=true, show_trash=true, show_mounts=false, blur_size=-1, blur_passes=-1"
     sleep 0.5
     opt_want $RIG_KEY:dock:autohide true \
