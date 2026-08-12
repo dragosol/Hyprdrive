@@ -129,7 +129,14 @@ PY
 # -------------------------------------------------------------------- P2 APPLY --
 echo
 echo "--- P2 APPLY"
-SNAPS_BEFORE=$(python3 scripts/hdprof.py list -n 50 --json | python3 -c "import json,sys; print(len(json.load(sys.stdin)['snapshots']))")
+# The ref that this pair of imports has to move off. NOT a count of
+# `list -n 50`: that list is CAPPED at fifty, so once this guest's snapshot
+# history passed fifty entries the old check read "50 -> 50" and could never
+# pass again no matter what the importer did. Measured 2026-08-12: 62 snapshots
+# on disk, the fifty-first committed at 18:06 by x65, which is the minute x66
+# went red and stayed red. A ref that has to MOVE makes the same claim and does
+# not saturate.
+PRE_IMPORT_REF=$(python3 scripts/hdprof.py list -n 1 --json | python3 -c "import json,sys; print(json.load(sys.stdin)['head'])")
 python3 scripts/hdimport.py apply "$DOCKWARD" > "$OUT/dockward-apply.log" 2>&1
 sed 's/^/    /' "$OUT/dockward-apply.log"
 sleep 3
@@ -172,9 +179,9 @@ python3 scripts/hdimport.py apply "$AWKWARD" 2>&1 | sed 's/^/    /'
 sleep 3
 # The surface HAS moved this time -- dockward changed four files -- so the
 # snapshot is a real commit and the log has to name it.
-SNAPS_AFTER=$(python3 scripts/hdprof.py list -n 50 --json | python3 -c "import json,sys; print(len(json.load(sys.stdin)['snapshots']))")
+POST_IMPORT_REF=$(python3 scripts/hdprof.py list -n 1 --json | python3 -c "import json,sys; print(json.load(sys.stdin)['head'])")
 python3 scripts/hdprof.py list -n 3 | sed 's/^/    /'
-[ "$SNAPS_AFTER" -gt "$SNAPS_BEFORE" ] || bad "P3: no snapshot was committed across two imports ($SNAPS_BEFORE -> $SNAPS_AFTER)"
+[ "$POST_IMPORT_REF" != "$PRE_IMPORT_REF" ] || bad "P3: no snapshot was committed across two imports (HEAD is still $PRE_IMPORT_REF)"
 python3 scripts/hdprof.py list -n 3 --json | grep -q "theme import: awkward.conf" \
     || bad "P3: no snapshot names the import"
 [ -e "$STATE/apply-pending.json" ] && bad "P3: the import left its crash-safety record behind"
