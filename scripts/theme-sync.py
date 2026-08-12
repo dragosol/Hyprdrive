@@ -120,12 +120,21 @@ def luma(rgb):
 
 def hyprctl(*args):
     env = dict(os.environ)
-    if not env.get("HYPRLAND_INSTANCE_SIGNATURE"):
-        # Never trust the inherited environment: this runs from a systemd path
-        # unit, which has no session env at all [lib/rig.sh:81-88].
-        run = env.get("XDG_RUNTIME_DIR") or "/run/user/%d" % os.getuid()
+    run = env.get("XDG_RUNTIME_DIR") or "/run/user/%d" % os.getuid()
+    sig = env.get("HYPRLAND_INSTANCE_SIGNATURE")
+    # An inherited signature is a hint, never an answer. A path unit has no
+    # session environment at all, so most runs discover it -- but Hyprland's
+    # startup imports HYPRLAND_INSTANCE_SIGNATURE into the systemd user
+    # environment, and that copy goes stale the moment the compositor restarts,
+    # which gdm does after every crash. Trusting it then makes theme-sync write
+    # fragment after fragment that nothing ever applies, silently, forever:
+    # reproduced 2026-08-12, `apply=no compositor` while a live session sat
+    # right there. So the socket has to exist before the name is worth using
+    # [lib/rig.sh:70-78 makes the same rule for the gates].
+    if not sig or not (pathlib.Path(run) / "hypr" / sig / ".socket.sock").exists():
         d = pathlib.Path(run) / "hypr"
-        sigs = sorted(d.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []
+        sigs = sorted((p for p in d.glob("*") if (p / ".socket.sock").exists()),
+                      key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []
         if not sigs:
             return None
         env["HYPRLAND_INSTANCE_SIGNATURE"] = sigs[0].name
