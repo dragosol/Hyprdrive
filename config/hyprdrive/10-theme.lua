@@ -12,12 +12,15 @@ if hyprdrive_loaded() then
     hl.config({
         plugin = {
             hyprdrive = {
-                -- The selection ring, strip outline, dock hover and search
-                -- selection. NOT general:col.active_border -- on this rice
-                -- matugen fills that from `outline_variant`, a dark brown that
-                -- vanishes against the wallpaper. `primary` is the bright accent
-                -- the pinned-window rule already uses.
-                col_highlight = "rgba(ffb2b9ff)",
+                -- NO col_highlight here on purpose. The selection ring, strip
+                -- outline, dock hover and search selection all read that key,
+                -- and it is THEME-DERIVED: matugen regenerates it into
+                -- ~/.config/hypr/hyprland/colors.lua from the palette's
+                -- `primary` on every theme change. Copying it into a fragment
+                -- would pin it -- the fragments load after that file and would
+                -- win -- so the highlight would quietly stop following the
+                -- theme. To pin it deliberately, put col_highlight in the
+                -- raw-snippet block below; that is what the block is for.
 
                 wallpaper = 0,   -- one global wallpaper, as the rice has
                 -- USER 2026-08-01: the overview wallpaper stays SHARP (rounded
