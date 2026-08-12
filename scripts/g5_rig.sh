@@ -30,6 +30,13 @@ TAG=${1:?usage: g5_rig.sh <tag>}
 MON=$(cat $SRC/mon)
 shot() { grim -o "$MON" "$OUT/$TAG-$1.png"; }
 
+# The grader locates the SELECTION by the theme's accent and must not spell it
+# out: matugen re-derives the palette from the wallpaper, so the constant that
+# was right on one picture finds nothing on the next and the gate reports "no
+# selection on any frame". The x48 fixture reads it off the live compositor;
+# carry it over so g5_gate.py finds it beside its own frames.
+cp "$SRC/accent.json" "$SRC/highlight.json" "$OUT/"
+
 # Through the rig, not through systemctl: under a suite the wallpaper is held
 # for the WHOLE run and these two calls have to honour that. Raw systemctl here
 # was starting the rotation at the end of every g5 -- and because

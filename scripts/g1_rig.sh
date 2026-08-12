@@ -45,7 +45,23 @@ import json,sys
 hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
 print(hs[0] if len(hs)==1 else '')")
     [ -n "$MON" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
+    # SET THE MODE: `output create headless` defaults to 1920x1080 and every
+    # geometry this suite predicts is a function of the guest's 2560x1600.
+    # headless_on does this; this block hand-rolls the output because
+    # headless_on installs an EXIT trap that would tear it down when the
+    # fixture script exits -- so it must hand-roll the mode too.
+    #
+    # Virtual-1 goes DOWN FIRST: two enabled outputs at 0x0 overlap, and the
+    # "Monitor HEADLESS-N overlaps" notification Hyprland then raises sits in
+    # the frame for the next ~15 seconds and moves under every diff below.
     hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
+    hyprctl eval "return hl.monitor({output = [[$MON]], mode = [[$RIG_HEADLESS_MODE]], position = [[0x0]], scale = 1})" >/dev/null 2>&1; sleep 1.5
+    read -r GOT_W GOT_H <<< "$(hyprctl monitors -j | python3 -c "
+import json,sys
+m=json.load(sys.stdin)[0]; print(m['width'], m['height'])")"
+    WANT_W=${RIG_HEADLESS_MODE%%x*}; WANT_REST=${RIG_HEADLESS_MODE#*x}; WANT_H=${WANT_REST%%@*}
+    [ "$GOT_W" = "$WANT_W" ] && [ "$GOT_H" = "$WANT_H" ] \
+        || { echo "ABORT: headless came up ${GOT_W}x${GOT_H}, not ${WANT_W}x${WANT_H}"; exit 1; }
     printf '%s\n' "$MON" > $OUT/mon
 
     # kitty, never foot (standing rule): foot has no per-window opaque switch and
@@ -75,6 +91,13 @@ run)
 
     ov off; sleep 1.0
     ov on;  sleep 2.5
+
+    # The grader masks the chrome that ticks, and it finds the layer-shell half
+    # of it here rather than from memory: the quickshell bar's clock and CPU
+    # readouts are a layer surface on this output, so `layers` names and places
+    # them. Dumped WITH THE OVERVIEW UP, which is the state every frame below
+    # is taken in.
+    hyprctl layers -j > $OUT/layers.json
 
     # The drift control is taken BEFORE the space, not after: the space's effect
     # (if any) persists in the query, so a later "idle" frame would inherit it

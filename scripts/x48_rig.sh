@@ -57,10 +57,37 @@ import json,sys
 hs=[m['name'] for m in json.load(sys.stdin) if m['name'].startswith('HEADLESS')]
 print(hs[0] if len(hs)==1 else '')")
     [ -n "$MON" ] || { echo "ABORT: expected exactly one headless output"; exit 1; }
+    # SET THE MODE. `output create headless` comes up at the headless default
+    # 1920x1080, and this fixture is shared by x48, g5 and x50 -- all three of
+    # which predict cell/row/pill geometry with predictors that hardcode the
+    # guest's 2560x1600 (x24_cell.py, x32_cell.py, x47_cell.py). Until
+    # 2026-08-12 this block created the output and never set its mode, so the
+    # three gates measured a 1920x1080 screen against 2560x1600 predictions.
+    # headless_on does this; this block hand-rolls the output because
+    # headless_on installs an EXIT trap that would tear it down when the
+    # fixture script exits -- so it must hand-roll the mode too.
+    #
+    # Virtual-1 goes DOWN FIRST, and that order is not cosmetic: putting the
+    # headless output at 0x0 while Virtual-1 is still enabled there makes the
+    # two overlap, and Hyprland raises a "Monitor HEADLESS-N overlaps with other
+    # monitor(s)" notification that sits in the top right of the frame for the
+    # next ~15 seconds -- i.e. across a0 but not across b, which is a change in
+    # every frame diff this fixture feeds.
     hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = true})" >/dev/null 2>&1; sleep 1.5
+    hyprctl eval "return hl.monitor({output = [[$MON]], mode = [[$RIG_HEADLESS_MODE]], position = [[0x0]], scale = 1})" >/dev/null 2>&1; sleep 1.5
+    read -r GOT_W GOT_H <<< "$(hyprctl monitors -j | python3 -c "
+import json,sys
+m=json.load(sys.stdin)[0]; print(m['width'], m['height'])")"
+    WANT_W=${RIG_HEADLESS_MODE%%x*}; WANT_REST=${RIG_HEADLESS_MODE#*x}; WANT_H=${WANT_REST%%@*}
+    [ "$GOT_W" = "$WANT_W" ] && [ "$GOT_H" = "$WANT_H" ] \
+        || { echo "ABORT: headless came up ${GOT_W}x${GOT_H}, not ${WANT_W}x${WANT_H}"; exit 1; }
     printf '%s\n' "$MON" > $OUT/mon
     hyprctl monitors -j > $OUT/monitors.json
+    # BOTH colours the plugin's highlightColor() chooses between, so the graders
+    # can mirror that choice instead of hardcoding a hex that matugen re-derives
+    # every time the wallpaper changes (Config.hpp X56 block).
     hyprctl getoption general:col.active_border -j > $OUT/accent.json
+    hyprctl getoption $RIG_KEY:col_highlight -j    > $OUT/highlight.json
 
     # kitty, never foot: foot has no per-window opaque switch and a translucent
     # fixture makes every colour mask ambiguous.
