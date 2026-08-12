@@ -17,8 +17,8 @@ TMP=/tmp/animt
 mkdir -p $TMP
 
 dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-tog() { dsp "hl.plugin.scrolloverview.overview([[toggle]])"; }
-key() { hyprctl eval "return hl.config({ plugin = { scrolloverview = { $1 = $2 } } })" >/dev/null; }
+tog() { dsp "hl.plugin.hyprdrive.overview([[toggle]])"; }
+key() { hyprctl eval "return hl.config({ plugin = { hyprdrive = { $1 = $2 } } })" >/dev/null; }
 
 # Poll the keyhole until two consecutive grabs are identical, i.e. the motion
 # stopped. Reports milliseconds from the toggle to that point.
@@ -42,7 +42,7 @@ settle_ms() {
 
 run_pair() {
     local label="$1"
-    dsp "hl.plugin.scrolloverview.overview([[off]])"; sleep 2.0
+    dsp "hl.plugin.hyprdrive.overview([[off]])"; sleep 2.0
     local o=$(settle_ms tog); sleep 2.0
     local c=$(settle_ms tog); sleep 2.0
     echo "  $label: open ${o}ms  close ${c}ms"
@@ -58,4 +58,4 @@ key close_speed 6.0; sleep 0.5
 run_pair "close slowed  (open 3.0 / close 6.0)"
 
 key close_speed 2.2; sleep 0.5
-dsp "hl.plugin.scrolloverview.overview([[off]])"
+dsp "hl.plugin.hyprdrive.overview([[off]])"

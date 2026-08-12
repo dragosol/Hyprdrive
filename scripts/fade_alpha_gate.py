@@ -4,7 +4,7 @@
 # WHY THIS SHAPE AND NOT A FILM OF THE ANIMATION. The overview's open resolves
 # in ~3 frames of a 60fps capture in this guest, and the plugin's speed knobs
 # cannot be turned down for the camera (0.56's Lua parser rejects the plugin's
-# Hyprlang keys: "unknown config key 'plugin.scrolloverview.open_speed'"). A
+# Hyprlang keys: "unknown config key 'plugin.hyprdrive.open_speed'"). A
 # 3-frame transition cannot be phase-matched across two builds, so filming it
 # proves nothing either way. What CAN be pinned is the fade factor itself:
 # build once with FADE forced to 0.5, capture the SETTLED overview, and compare

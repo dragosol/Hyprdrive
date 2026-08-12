@@ -4,9 +4,9 @@
 set -u
 export XDG_RUNTIME_DIR=/run/user/1000
 export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
-LOG=/tmp/scrolloverview-prof.log
+LOG=/tmp/hyprdrive-prof.log
 dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()  { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
+ov()  { dsp "hl.plugin.hyprdrive.overview([[$1]])"; }
 
 systemctl --user stop hyprwall.timer 2>/dev/null
 : > $LOG

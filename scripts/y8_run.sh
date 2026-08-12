@@ -20,7 +20,7 @@ $G 'systemctl --user stop hyprwall.timer 2>/dev/null; systemd-run --user --on-ac
 # A CLEAN FIXTURE, every time. z3_setup kills kitty, respawns MARK and parks it,
 # so the tile is back where the locator can find it whatever the last run did.
 echo "=== setup ==="
-$G 'hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.minimize([[restore]]))" >/dev/null 2>&1; sleep 2; bash /mnt/host/z3_setup.sh 2>&1 | tail -1'
+$G 'hyprctl eval "return hl.dispatch(hl.plugin.hyprdrive.minimize([[restore]]))" >/dev/null 2>&1; sleep 2; bash /mnt/host/z3_setup.sh 2>&1 | tail -1'
 
 read -r _ TX TY _ _ _ <<< "$(python3 $SHARE/z3_blobs.py $SHARE/z3/view-ws1.png red)"
 read -r PX0 PX1 PY0 PY1 <<< "$(python3 $SHARE/pillbox.py $SHARE/z3/view-ws1.png)"

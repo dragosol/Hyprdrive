@@ -6,7 +6,7 @@
 # is painted -- which is neither steady-state frame cost nor open/close
 # time-to-settle, the two things this project has already instrumented.
 #
-# Requires a plugin built with the Prof:: counters and SCROLLOVERVIEW_PROFILE=1
+# Requires a plugin built with the Prof:: counters and HYPRDRIVE_PROFILE=1
 # in the COMPOSITOR's environment (custom/env.lua), because the plugin reads it.
 set -u
 export XDG_RUNTIME_DIR=/run/user/1000
@@ -14,10 +14,10 @@ export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null |
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
 export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
-LOG=/tmp/scrolloverview-prof.log
+LOG=/tmp/hyprdrive-prof.log
 
 dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
-ov()  { dsp "hl.plugin.scrolloverview.overview([[$1]])"; }
+ov()  { dsp "hl.plugin.hyprdrive.overview([[$1]])"; }
 key() { ydotool key "$1:1" "$1:0"; sleep 0.45; }
 
 N=${1:-12}

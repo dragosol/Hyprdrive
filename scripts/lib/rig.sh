@@ -38,7 +38,7 @@ RIG_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # the Phase-9 rename a rename of the harness as much as of the plugin, and a
 # harness edited in the same commit as the thing it measures proves nothing.
 # Override for a one-off run against a differently-named build: RIG_NS=... gate.
-RIG_NS=${RIG_NS:-scrolloverview}
+RIG_NS=${RIG_NS:-hyprdrive}
 RIG_KEY=plugin:$RIG_NS                                          # config-key prefix
 RIG_SO=$RIG_NS.so                                               # built artifact
 RIG_FAV=${XDG_STATE_HOME:-$HOME/.local/state}/$RIG_NS/favorites # dock favorites store

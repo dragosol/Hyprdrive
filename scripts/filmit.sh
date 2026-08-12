@@ -19,12 +19,12 @@ export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | hea
 WHAT=${1:-minimize}
 SCALE=${2:-10}
 OUT=/mnt/host/film; mkdir -p $OUT
-cfg(){ hyprctl eval "hl.config({plugin={scrolloverview={dock={$1}}}}) return 0" >/dev/null 2>&1; }
-ov(){ hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.overview([[$1]]))" >/dev/null 2>&1; }
+cfg(){ hyprctl eval "hl.config({plugin={hyprdrive={dock={$1}}}}) return 0" >/dev/null 2>&1; }
+ov(){ hyprctl eval "return hl.dispatch(hl.plugin.hyprdrive.overview([[$1]]))" >/dev/null 2>&1; }
 
-hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=$SCALE}}}) return 0" >/dev/null 2>&1
+hyprctl eval "hl.config({plugin={hyprdrive={anim_scale=$SCALE}}}) return 0" >/dev/null 2>&1
 sleep 0.5
-echo "anim_scale: $(hyprctl getoption plugin:scrolloverview:anim_scale|head -1)"
+echo "anim_scale: $(hyprctl getoption plugin:hyprdrive:anim_scale|head -1)"
 cfg "autohide=false"; sleep 0.5
 
 pkill -x kitty 2>/dev/null; sleep 1
@@ -40,9 +40,9 @@ sleep 2.5                      # let the recorder settle and prove it is pulling
 
 case "$WHAT" in
   minimize)
-    hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.minimize())" >/dev/null 2>&1
+    hyprctl eval "return hl.dispatch(hl.plugin.hyprdrive.minimize())" >/dev/null 2>&1
     sleep 7
-    hyprctl eval "return hl.dispatch(hl.plugin.scrolloverview.minimize([[restore]]))" >/dev/null 2>&1
+    hyprctl eval "return hl.dispatch(hl.plugin.hyprdrive.minimize([[restore]]))" >/dev/null 2>&1
     sleep 7
     ;;
   overview)
@@ -52,6 +52,6 @@ esac
 
 kill -INT $WFR 2>/dev/null; wait $WFR 2>/dev/null
 sleep 1
-hyprctl eval "hl.config({plugin={scrolloverview={anim_scale=1}}}) return 0" >/dev/null 2>&1
+hyprctl eval "hl.config({plugin={hyprdrive={anim_scale=1}}}) return 0" >/dev/null 2>&1
 cfg "autohide=true"
 ls -la $OUT/$WHAT.mp4 2>/dev/null | awk '{print "recorded:", $5, "bytes"}'
