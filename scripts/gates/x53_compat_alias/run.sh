@@ -16,9 +16,17 @@
 #      reason. (Found the hard way: the first cut probed `workspace_gap`, which
 #      this rice's own 20-layout.lua sets.)
 #   A' the precedence rule itself: a key set under BOTH names keeps the value
-#      the NEW name gives it. This is the only arm that covers the gradient
-#      pair, because both gradient keys are set by the rice and there is no
-#      unset one to copy into.
+#      the NEW name gives it. This is the arm for every type the rice already
+#      sets, where there is no unset key to copy INTO: the gradient pair from
+#      the start, and since Phase 10 the colour and one float as well --
+#      05-theme-derived.lua sets dock:indicator_color and
+#      dock:background_opacity from the wallpaper palette, and there is no
+#      unset colour key left in this config at all. That costs the colour arm
+#      of the COPY, and it is recorded here rather than papered over: to get it
+#      back, a run would have to move the derived fragment aside first. What it
+#      does NOT cost is coverage of the colour code path, which A' still walks.
+#      (Phase 9 hit the same wall from the other side -- the first cut probed
+#      workspace_gap, which 20-layout.lua sets.)
 #   B  a dispatch through the OLD Lua namespace reaches the same handler, proven
 #      by STATE (the window lands on special:minimized) rather than by pixels:
 #      "the old name still dispatches" is a fact about the handler, and a
@@ -82,10 +90,16 @@ say "=== preflight: $W0 warnings and $U0 uses already recorded this session"
 # themselves contain colons:   key | expected readback | which arm
 PROBES='mission_control_gap|77|int
 dock:icon_size|33|int
-dock:background_opacity|0.770000|float
+dock:pressure_threshold|77.000000|float
 terminal|probeterm|string
-mission_control|false|bool
-dock:indicator_color|4278255360|colour'
+mission_control|false|bool'
+
+# Set under BOTH names by the probe below, so the only thing observable about
+# them is which name wins. Every one of these is a key this rice's own config
+# already sets; see the A' note in the header.
+APRIME='col_highlight
+dock:indicator_color
+dock:background_opacity'
 
 say "=== A control: every probe key must be UNSET under both names first"
 while IFS='|' read -r K WANT KIND; do
@@ -104,16 +118,18 @@ if hyprdrive_loaded() then
         mission_control_gap = 77,
         mission_control     = false,
         terminal            = "probeterm",
-        col_highlight       = 0xff123456,   -- A': also set under the NEW name by the rice
+        col_highlight       = 0xff123456,   -- A': also set under the NEW name
         dock = {
             icon_size          = 33,
-            background_opacity = 0.77,
-            indicator_color    = 0xff00ff00,
+            pressure_threshold = 77,
+            background_opacity = 0.77,       -- A'
+            indicator_color    = 0xff00ff00, -- A'
         },
     } } })
 end
 LUA
-HL0=$(optg "$RIG_KEY:col_highlight")
+declare -A BEFORE
+while read -r K; do BEFORE[$K]=$(optg "$RIG_KEY:$K"); done <<< "$APRIME"
 hyprctl reload >/dev/null 2>&1; sleep 2.5
 
 say "=== A: what the new names read after the reload"
@@ -124,10 +140,12 @@ while IFS='|' read -r K WANT KIND; do
     [ "$GOT" = "$WANT" ] || bad "A: $K did not reach the new key ($KIND arm of the copy)"
 done <<< "$PROBES"
 
-HL1=$(optg "$RIG_KEY:col_highlight")
-say "=== A' precedence: col_highlight is set under BOTH names; new must win"
-say "A': col_highlight was $HL0, is $HL1 with the legacy probe live"
-[ "$HL1" = "$HL0" ] || bad "A': the deprecated name overrode the new one"
+say "=== A' precedence: these are set under BOTH names; the new one must win"
+while read -r K; do
+    NOW=$(optg "$RIG_KEY:$K")
+    say "A': $K was ${BEFORE[$K]}, is $NOW with the legacy probe live"
+    [ "$NOW" = "${BEFORE[$K]}" ] || bad "A': the deprecated name overrode the new one for $K"
+done <<< "$APRIME"
 
 rm -f "$FRAG"
 hyprctl reload >/dev/null 2>&1; sleep 2.5

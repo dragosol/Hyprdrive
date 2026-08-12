@@ -75,6 +75,12 @@ WALL0=$(jq -r '.background.wallpaperPath' "$IICFG")
 # chains behind it -- the rig header's rule, and the one an earlier probe in
 # this phase broke and left the session with a disabled Virtual-1.
 gate_slate z10_theme_adopt >/dev/null 2>&1 || { echo "FAIL could not slate the session"; exit 1; }
+# Standalone only. Under suite.sh the rotation is already held for the whole run
+# and calling hyprwall_pause again would REPLACE that 180min dead-man resume
+# with a 30min one -- re-arming the rotation in the middle of a longer suite,
+# under gates that are diffing frames. This is the one gate that moves the
+# wallpaper itself, so a timer firing underneath it is not survivable either.
+[ "${RIG_HYPRWALL_HELD:-0}" = 1 ] || hyprwall_pause 60min
 headless_on || exit 1
 z10_restore() {
     rm -f "$RIGFRAG" "$PINFRAG"
