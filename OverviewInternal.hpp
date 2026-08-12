@@ -114,7 +114,22 @@ float houseEase(bool decel, float t);
 namespace OvInternal {
 
 inline PHLWINDOW getOverviewFullscreenVisibilityWindow(const PHLWORKSPACE& workspace, const PHLWINDOW& fallback = {});
-inline constexpr const char* OVERVIEW_SUBMAP = "scrolloverview";
+inline constexpr const char* OVERVIEW_SUBMAP = "hyprdrive";
+// ONE RELEASE. The submap is defined by the USER's config, not by the plugin,
+// so a config written before the rename binds its clicks under the old name and
+// would simply stop working the day the plugin stopped answering to it.
+inline constexpr const char* OVERVIEW_SUBMAP_LEGACY = "scrolloverview";
+
+inline bool isOverviewSubmapName(const std::string& name) {
+    return name == OVERVIEW_SUBMAP || name == OVERVIEW_SUBMAP_LEGACY;
+}
+
+// The name this config actually binds, preferring the new one when both exist.
+inline const char* boundOverviewSubmap() {
+    if (g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) { return keybind && keybind->submap.name == OVERVIEW_SUBMAP; }))
+        return OVERVIEW_SUBMAP;
+    return OVERVIEW_SUBMAP_LEGACY;
+}
 inline CScrollOverview*      g_pointerGrabOverview = nullptr;
 
 inline void removeOverview(CScrollOverview* overview) {
@@ -144,7 +159,7 @@ inline xkb_keysym_t getOverviewKeysym(const IKeyboard::SKeyEvent& event) {
 }
 
 inline bool hasOverviewSubmap() {
-    return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) { return keybind && keybind->submap.name == OVERVIEW_SUBMAP; });
+    return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) { return keybind && isOverviewSubmapName(keybind->submap.name); });
 }
 
 // Whether the submap binds any KEY, as opposed to only mouse buttons.
@@ -154,12 +169,12 @@ inline bool hasOverviewSubmap() {
 // keyboard hook uninstalled -- measured 2026-08-01, arrows and Return dead.
 inline bool hasOverviewSubmapKeyBinds() {
     return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) {
-        return keybind && keybind->submap.name == OVERVIEW_SUBMAP && !keybind->mouse && !keybind->key.starts_with("mouse");
+        return keybind && isOverviewSubmapName(keybind->submap.name) && !keybind->mouse && !keybind->key.starts_with("mouse");
     });
 }
 
 inline bool isOverviewSubmapActive() {
-    return g_pKeybindManager && g_pKeybindManager->getCurrentSubmap().name == OVERVIEW_SUBMAP;
+    return g_pKeybindManager && isOverviewSubmapName(g_pKeybindManager->getCurrentSubmap().name);
 }
 
 inline bool isTopLayerFocused(PHLMONITOR monitor) {

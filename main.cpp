@@ -29,6 +29,8 @@
 using namespace Hyprutils::String;
 
 #include "globals.hpp"
+
+#include "Compat.hpp"
 #include "AppSearch.hpp"
 #include "Config.hpp"
 #include "Dock.hpp"
@@ -737,7 +739,7 @@ static SDispatchResult onWindowDispatcher(std::string arg) {
 }
 
 static void failNotif(const std::string& reason) {
-    HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE, "[scrolloverview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+    HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE, "[hyprdrive] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
 // Helper function to find a function by name and ensure it contains one of the requested substrings in its demangled name (to disambiguate overloads).
@@ -924,6 +926,9 @@ static SDispatchResult onHotkeyDispatcher(std::string arg) {
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     SCROLLOVERVIEW_HANDLE = handle;
 
+    // Before anything can record a use of a pre-rename name. ONE RELEASE.
+    ScrollOverview::Compat::openLog();
+
     const std::string HASH        = __hyprland_api_get_hash();
     const std::string CLIENT_HASH = __hyprland_api_get_client_hash();
 
@@ -1002,6 +1007,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // pointer still and no window repainting, there is no frame for the dock to
     // be drawn into and the change would not show until something else moved.
     static auto DOCKCONFIG = Event::bus()->m_events.config.reloaded.listen([] {
+        // FIRST, before anything in this plugin reads a config value this pass:
+        // a value the user set under the old plugin:scrolloverview: name is
+        // copied onto its plugin:hyprdrive: twin here and nowhere else, so the
+        // rest of the codebase only ever knows the new name. ONE RELEASE.
+        ScrollOverview::Compat::adoptLegacyValues();
+
         for (const auto& MONITOR : State::monitorState()->monitors())
             ScrollOverview::Dock::damageIfChanged(MONITOR);
     });
@@ -1119,6 +1130,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerConfig();
     registerTapSuper();
 
+    // ONE RELEASE. Pinned dock apps are user data; they do not get to disappear
+    // because the plugin changed its name. Both are one-shot and no-ops once
+    // the config and the store have been migrated.
+    ScrollOverview::Compat::adoptLegacyFavorites();
+    ScrollOverview::Compat::adoptLegacyValues();
+
     // X51/X52. Build the icon index at LOAD, where a one-off ~10ms pass is
     // invisible, rather than letting the first search pay for it inside a frame
     // that is already trying to paint results.
@@ -1127,7 +1144,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // wallpaper can even be asked for.
     AppSearch::warmIconIndexAsync();
 
-    return {"scrolloverview", "A plugin for an overview", "Vaxry, yayuuu", SCROLLOVERVIEW_VERSION};
+    return {ScrollOverview::Compat::NAME, "Mission-control overview + dock for Hyprland", "Vaxry, yayuuu, dragos", SCROLLOVERVIEW_VERSION};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

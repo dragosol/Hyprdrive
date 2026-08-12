@@ -17,7 +17,7 @@ make all
   that reaches it — once, that was a mid-close tile ease, minutes after login,
   with no crash report because `ld.so`'s error path is `_exit(127)`. Never ship
   a build whose symcheck failed.
-- **`rm -f scrolloverview.so` before `make` while the compositor has it mapped.**
+- **`rm -f hyprdrive.so` before `make` while the compositor has it mapped.**
   The link otherwise truncates the inode that is currently loaded.
 - After any unclean stop — power loss, a paused VM, a full disk — run
   `find .build -size 0 -delete` before trusting a build. Truncated objects keep
@@ -87,7 +87,12 @@ never asked about is not a refactor.
 
 ## Configuration keys
 
-`docs/CONFIG.md` is generated. Add the key to `Config.cpp`, then:
+`docs/CONFIG.md` is generated. Add the key to `Config.cpp` — one `addKey(...)`
+line with `KEY("tail")`, never a spelled-out `plugin:hyprdrive:` literal, because
+the registration body is run **twice**: once under `plugin:hyprdrive:` and once
+under the deprecated `plugin:scrolloverview:` prefix. Registering the alias from
+the same expression is the point; a hand-copied twin drifts, and a default that
+drifts between the two names is a compat layer that lies. Then:
 
 ```bash
 scripts/gen_keys_table.sh          # rewrite docs/CONFIG.md
@@ -96,6 +101,45 @@ scripts/gen_keys_table.sh --check  # fails if it is stale
 
 The hand-maintained table this fork inherited had two wrong defaults and covered
 six of seventy-nine keys. Do not reintroduce one.
+
+## Config fragments and the raw-snippet block
+
+`~/.config/hypr/hyprdrive/*.lua` is the surface the settings app writes through.
+Every fragment is split by two marker lines:
+
+```
+-- BEGIN raw-snippet (hand edits below survive regeneration)
+-- END raw-snippet
+```
+
+The contract, and it has exactly two clauses:
+
+- **Everything outside the block is machine-owned** and is regenerated wholesale.
+  Editing it is legal and pointless — the next write erases it.
+- **Everything inside the block is user-owned** and is carried across verbatim,
+  every regeneration, forever. Nothing generated ever lands inside it.
+
+The block is **last** in the file because Lua's last assignment wins: a hand
+edit that survives but is then overwritten by a generated line above it has not
+survived in any sense the user cares about.
+
+Keep the parse and the emit trivial: two line-anchored markers, no nesting, no
+escaping, no format of its own. `scripts/fragment.py` is the entire
+implementation and it should stay short enough to read in one sitting — a
+richer format is a format that can lose somebody's config.
+
+New fragments get a numeric prefix that puts them in dependency order, a header
+comment naming which half is which, and a raw block even when it is empty. A
+fragment without the markers is not a fragment; `fragment.py check` says so.
+
+## The compat aliases expire
+
+Phase 9 renamed every user-facing surface from `scrolloverview` to `hyprdrive`
+and kept the old names working **for one release**. `Compat.hpp` lists every one
+of them and is the only file that still knows the old name. When the release
+expires, delete `Compat.{hpp,cpp}`, the second registration pass in
+`Config.cpp`, the legacy Lua thunks, the second IPC event, the legacy submap
+name, and `scripts/gates/x53_compat_alias` — that gate is the checklist.
 
 ## Commits
 

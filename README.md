@@ -47,23 +47,45 @@ An undefined symbol in a plugin is not a link error: `-shared` never complains,
 `dlopen` binds lazily, and the compositor dies at the first call that reaches
 the missing symbol — minutes later, with no backtrace. Never ship a build whose
 symcheck failed. See [CONTRIBUTING.md](CONTRIBUTING.md) for the rest of the
-build rules, including the one about deleting `scrolloverview.so` before
+build rules, including the one about deleting `hyprdrive.so` before
 rebuilding while the compositor has it mapped.
 
 Load it:
 
 ```bash
-hyprctl plugin load /path/to/scrolloverview.so
+hyprctl plugin load /path/to/hyprdrive.so
 ```
 
-Or via `hyprpm` pointing at this repository. The binary keeps the upstream
-`scrolloverview` name, and so does the config namespace, until the rename lands
-with the settings work.
+Or via `hyprpm` pointing at this repository.
+
+### Coming from `scrolloverview`
+
+This fork shipped as `scrolloverview` and was renamed to **Hyprdrive**. An
+existing config keeps working for **one release** and needs no edits today:
+
+| old | new |
+| --- | --- |
+| `scrolloverview.so` | `hyprdrive.so` |
+| `plugin:scrolloverview:<key>` | `plugin:hyprdrive:<key>` |
+| `scrolloverview:<dispatcher>` | `hyprdrive:<dispatcher>` |
+| `hl.plugin.scrolloverview.*` | `hl.plugin.hyprdrive.*` |
+| `scrolloverview-gesture` | `hyprdrive-gesture` |
+| `submap = scrolloverview` | `submap = hyprdrive` |
+| IPC event `scrolloverview` | IPC event `hyprdrive` (both are emitted) |
+| `~/.local/state/scrolloverview/favorites` | `~/.local/state/hyprdrive/favorites` (adopted once, automatically) |
+| `$SCROLLOVERVIEW_PROFILE` | `$HYPRDRIVE_PROFILE` |
+
+Every old config key is still registered, and a value set on one is copied onto
+its new twin at config reload — the new name wins if both are set. The first old
+name a session uses prints one deprecation warning naming it, to stderr and to
+`/tmp/hyprdrive-compat.log`; once per session, not once per use. Everything in
+this table is removed one release after the rename, so migrate when convenient
+rather than when forced.
 
 ### Unload / fallback
 
 ```bash
-hyprctl plugin unload /path/to/scrolloverview.so
+hyprctl plugin unload /path/to/hyprdrive.so
 ```
 
 If a build misbehaves at login, comment out the `exec-once`/`hyprpm enable` line
@@ -74,8 +96,12 @@ compositor on disk.
 
 All 79 keys, with their types, defaults and ranges, are in
 **[docs/CONFIG.md](docs/CONFIG.md)** — generated from `Config.cpp` by
-`scripts/gen_keys_table.sh`, so it cannot drift from the code. Everything lives
-under `plugin:scrolloverview:`, with `input:`, `dock:` and `shadow:`
+`scripts/gen_keys_table.sh`, so it cannot drift from the code.
+
+For a config you intend to edit rather than read, prefer the **fragment layer**
+below: it is the surface the settings app writes through, and it is designed so
+that hand edits and generated ones can live in the same file. Everything lives
+under `plugin:hyprdrive:`, with `input:`, `dock:` and `shadow:`
 subsections.
 
 Two defaults differ from the table this fork inherited, and the code was right
@@ -86,7 +112,7 @@ both times: `scale` is **0.82** (not 0.5) and `workspace_gap` is **40** (not 0).
 ```ini
 # .config/hypr/hyprland.conf
 plugin {
-    scrolloverview {
+    hyprdrive {
         scale = 0.82
         workspace_gap = 40
         layout = vertical      # vertical or horizontal
@@ -110,7 +136,7 @@ plugin {
 -- .config/hypr/hyprland.lua
 hl.config({
     plugin = {
-        scrolloverview = {
+        hyprdrive = {
             scale = 0.82,
             workspace_gap = 40,
             layout = "vertical",
@@ -125,9 +151,46 @@ hl.config({
 In Lua, colour keys must be an integer colour value or a gradient (Hyprland's
 own format). The Hyprlang-only `rgba(...)` syntax is not accepted there.
 
+### Config fragments
+
+Everything above can also live in `~/.config/hypr/hyprdrive/*.lua`, sourced by
+`hyprland.lua` in **filename order** — the numeric prefix is the load order, so
+theme values land before the binds that reference them:
+
+```
+~/.config/hypr/hyprdrive/
+    00-plugin.lua      loads hyprdrive.so, defines hyprdrive_loaded()
+    10-theme.lua       colours, frost, shadow
+    20-layout.lua      scale, layout, workspace gap
+    30-keybinds.lua    the hyprdrive submap and the dock hotkeys
+```
+
+Each fragment has two regions, split by two marker lines:
+
+```lua
+hl.config({ plugin = { hyprdrive = { scale = 0.82 } } })   -- machine-owned
+
+-- BEGIN raw-snippet (hand edits below survive regeneration)
+hl.config({ plugin = { hyprdrive = { scale = 0.9 } } })    -- yours
+-- END raw-snippet
+```
+
+Everything **above** the BEGIN line is regenerated wholesale. Everything
+**between** the markers is yours and is carried across verbatim, every time.
+The raw block is last on purpose: Lua's last assignment wins, so a line you put
+there overrides the generated one above it — which is the only arrangement in
+which "your edits survive" also means "your edits take effect".
+
+Install or refresh the shipped set with `scripts/install-fragments.sh`; it
+preserves every raw block already on disk. `scripts/fragment.py` is the whole
+mechanism (`write`, `raw`, `check`) and it is what the settings app calls.
+
+`.conf` fragments are reserved for the legacy (hyprlang) parser and are skipped
+by the Lua loader, which cannot source them.
+
 ## Dispatchers
 
-Five, all under `scrolloverview:`. Each one validates its argument and reports
+Five, all under `hyprdrive:`. Each one validates its argument and reports
 the accepted set on a mistake.
 
 | dispatcher | argument | default | what it does |
@@ -146,20 +209,20 @@ keybinding store.
 
 ```bash
 # hyprland.conf
-bind = SUPER, g, scrolloverview:overview, toggle
-bind = SUPER, h, scrolloverview:minimize, window
-bind = SUPER, 1, scrolloverview:hotkey, 1
-bind = SUPER SHIFT, 1, scrolloverview:hotkey, shift 1
+bind = SUPER, g, hyprdrive:overview, toggle
+bind = SUPER, h, hyprdrive:minimize, window
+bind = SUPER, 1, hyprdrive:hotkey, 1
+bind = SUPER SHIFT, 1, hyprdrive:hotkey, shift 1
 ```
 
 ### Lua
 
 ```lua
 -- hyprland.lua
-hl.bind("SUPER + g", function() hl.plugin.scrolloverview.overview("toggle all") end)
-hl.bind("SUPER + h", function() hl.plugin.scrolloverview.minimize("window") end)
+hl.bind("SUPER + g", function() hl.plugin.hyprdrive.overview("toggle all") end)
+hl.bind("SUPER + h", function() hl.plugin.hyprdrive.minimize("window") end)
 for i = 1, 10 do
-    hl.bind("SUPER + " .. (i % 10), hl.plugin.scrolloverview.hotkey(tostring(i)))
+    hl.bind("SUPER + " .. (i % 10), hl.plugin.hyprdrive.hotkey(tostring(i)))
 end
 ```
 
@@ -174,40 +237,40 @@ second is correctly ignored.
 
 ### Submap
 
-Defining a `scrolloverview` submap replaces the built-in keyboard navigation.
+Defining a `hyprdrive` submap replaces the built-in keyboard navigation.
 While the submap is active, ordinary Hyprland binds outside it are not handled
 unless they carry `submap_universal`. This is how a click can be given a
 compound action.
 
 ```ini
 # hyprland.conf
-submap = scrolloverview
-    bind = , left,   scrolloverview:navigate, left
-    bind = , right,  scrolloverview:navigate, right
-    bind = , up,     scrolloverview:navigate, up
-    bind = , down,   scrolloverview:navigate, down
-    bind = , return, scrolloverview:overview, select
-    bind = , escape, scrolloverview:overview, off
-    bind = , mouse:272, scrolloverview:overview, select
-    bind = , mouse:274, scrolloverview:window, close
+submap = hyprdrive
+    bind = , left,   hyprdrive:navigate, left
+    bind = , right,  hyprdrive:navigate, right
+    bind = , up,     hyprdrive:navigate, up
+    bind = , down,   hyprdrive:navigate, down
+    bind = , return, hyprdrive:overview, select
+    bind = , escape, hyprdrive:overview, off
+    bind = , mouse:272, hyprdrive:overview, select
+    bind = , mouse:274, hyprdrive:window, close
 submap = reset
 ```
 
 ```lua
 -- hyprland.lua
-hl.define_submap("scrolloverview", function()
-    hl.bind("left",   hl.plugin.scrolloverview.navigate("left"))
-    hl.bind("right",  hl.plugin.scrolloverview.navigate("right"))
-    hl.bind("up",     hl.plugin.scrolloverview.navigate("up"))
-    hl.bind("down",   hl.plugin.scrolloverview.navigate("down"))
-    hl.bind("return", hl.plugin.scrolloverview.overview("select"))
-    hl.bind("escape", hl.plugin.scrolloverview.overview("off"))
+hl.define_submap("hyprdrive", function()
+    hl.bind("left",   hl.plugin.hyprdrive.navigate("left"))
+    hl.bind("right",  hl.plugin.hyprdrive.navigate("right"))
+    hl.bind("up",     hl.plugin.hyprdrive.navigate("up"))
+    hl.bind("down",   hl.plugin.hyprdrive.navigate("down"))
+    hl.bind("return", hl.plugin.hyprdrive.overview("select"))
+    hl.bind("escape", hl.plugin.hyprdrive.overview("off"))
     hl.bind("mouse:272", function()
-        hl.plugin.scrolloverview.overview("select")
-        hl.plugin.scrolloverview.window("select")
-        hl.plugin.scrolloverview.overview("off")
+        hl.plugin.hyprdrive.overview("select")
+        hl.plugin.hyprdrive.window("select")
+        hl.plugin.hyprdrive.overview("off")
     end, { mouse = true })
-    hl.bind("mouse:274", hl.plugin.scrolloverview.window("close"), { mouse = true })
+    hl.bind("mouse:274", hl.plugin.hyprdrive.window("close"), { mouse = true })
 end)
 ```
 
@@ -219,17 +282,17 @@ purely for the mouse does not kill the arrow keys.
 
 ```ini
 # hyprland.conf
-scrolloverview-gesture = 3, up, overview               # 3-finger up swipe
-scrolloverview-gesture = 4, up, overview, mod:SUPER, scale:1.5
-scrolloverview-gesture = 4, up, overview, disable_inhibit
-scrolloverview-gesture = 3, up, unset                  # remove one
+hyprdrive-gesture = 3, up, overview               # 3-finger up swipe
+hyprdrive-gesture = 4, up, overview, mod:SUPER, scale:1.5
+hyprdrive-gesture = 4, up, overview, disable_inhibit
+hyprdrive-gesture = 3, up, unset                  # remove one
 ```
 
 ```lua
 -- hyprland.lua
-hl.plugin.scrolloverview.gesture({ fingers = 3, direction = "vertical" })
-hl.plugin.scrolloverview.gesture({ fingers = 4, direction = "vertical", mod = "SUPER", scale = 1.5 })
-hl.plugin.scrolloverview.gesture({ fingers = 3, direction = "vertical", action = "unset" })
+hl.plugin.hyprdrive.gesture({ fingers = 3, direction = "vertical" })
+hl.plugin.hyprdrive.gesture({ fingers = 4, direction = "vertical", mod = "SUPER", scale = 1.5 })
+hl.plugin.hyprdrive.gesture({ fingers = 3, direction = "vertical", action = "unset" })
 ```
 
 `gesture_distance` is how far the swipe has to travel to count as a full one.

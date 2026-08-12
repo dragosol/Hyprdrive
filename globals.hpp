@@ -18,8 +18,8 @@ inline HANDLE SCROLLOVERVIEW_HANDLE = nullptr;
 // quickshell Appearance.qml. Registered once with Hyprland's animation manager
 // in CScrollOverview's constructor, so anything hand-rolled can evaluate the
 // SAME curve object instead of approximating it with a polynomial.
-inline constexpr const char* HOUSE_DECEL_BEZIER = "scrolloverviewOpen";
-inline constexpr const char* HOUSE_ACCEL_BEZIER = "scrolloverviewClose";
+inline constexpr const char* HOUSE_DECEL_BEZIER = "hyprdriveOpen";
+inline constexpr const char* HOUSE_ACCEL_BEZIER = "hyprdriveClose";
 
 // The house curve at t in [0,1]. Entrances decelerate, exits accelerate.
 // Falls back to a cubic of the right direction if called before the curves are
@@ -27,12 +27,12 @@ inline constexpr const char* HOUSE_ACCEL_BEZIER = "scrolloverviewClose";
 float houseEase(bool decel, float t);
 
 // OVERVIEW_CPP_SPEC §13.12 X52. Keystroke-to-paint profiler for the search
-// path. Gated on $SCROLLOVERVIEW_PROFILE so it is one predictable branch when
-// off; the standing rule is that a performance claim is closed by a measurement
+// path. Gated on $HYPRDRIVE_PROFILE so it is one predictable branch when
+// off ($SCROLLOVERVIEW_PROFILE also works, for one release); the standing rule is that a performance claim is closed by a measurement
 // of the moment complained about, and this is the instrument for that moment.
 namespace Prof {
     inline bool enabled() {
-        static const bool ON = std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr;
+        static const bool ON = std::getenv("HYPRDRIVE_PROFILE") != nullptr || std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr;
         return ON;
     }
 

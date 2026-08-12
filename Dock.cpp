@@ -22,6 +22,8 @@
 
 #include "Dock.hpp"
 
+#include "Compat.hpp"
+
 #include "AppSearch.hpp"
 #include "globals.hpp"
 #include "Config.hpp"
@@ -586,10 +588,10 @@ SMetrics metrics(size_t slots, float units, float iconMax, float maxWidth) {
 // back out and this is user data rather than a tunable.
 std::filesystem::path favoritesPath() {
     if (const char* STATE = std::getenv("XDG_STATE_HOME"); STATE && *STATE)
-        return std::filesystem::path{STATE} / "scrolloverview" / "favorites";
+        return std::filesystem::path{STATE} / ScrollOverview::Compat::NAME / "favorites";
 
     if (const char* HOME = std::getenv("HOME"); HOME && *HOME)
-        return std::filesystem::path{HOME} / ".local" / "state" / "scrolloverview" / "favorites";
+        return std::filesystem::path{HOME} / ".local" / "state" / ScrollOverview::Compat::NAME / "favorites";
 
     return {};
 }
@@ -597,7 +599,7 @@ std::filesystem::path favoritesPath() {
 // Seeds an EMPTY store only, and only with neutral entries every desktop is
 // likely to have -- an id that no desktop entry claims is dropped at layout
 // time, not here. Real dock contents are whatever the user pins; the store
-// under ~/.local/state/scrolloverview/favorites wins from the first write on.
+// under ~/.local/state/hyprdrive/favorites wins from the first write on.
 constexpr std::array<const char*, 3> DEFAULT_FAVORITES = {
     "org.gnome.Nautilus",
     "org.gnome.TextEditor",

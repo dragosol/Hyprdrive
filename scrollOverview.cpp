@@ -1,4 +1,6 @@
 #include "OverviewInternal.hpp"
+
+#include "Compat.hpp"
 using namespace OvInternal; // opted in here rather than leaked from the header
 
 // The definition behind the global declaration in OverviewInternal.hpp. One real
@@ -227,7 +229,7 @@ void CScrollOverview::updateCardWallpaperFB(PHLMONITOR monitor, const Time::stea
     const auto RENDERSIZE = monitor->m_transformedSize;
     const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
     if (!frost.cardWallpaperFB)
-        frost.cardWallpaperFB = g_pHyprRenderer->createFB("scrolloverview_card_wallpaper");
+        frost.cardWallpaperFB = g_pHyprRenderer->createFB("hyprdrive_card_wallpaper");
 
     if (!frost.cardWallpaperFB || !frost.cardWallpaperFB->isAllocated() || frost.cardWallpaperFB->m_size != FBSIZE || frost.cardWallpaperFB->m_drmFormat != FBFORMAT) {
         if (frost.cardWallpaperFB)
@@ -278,7 +280,7 @@ void CScrollOverview::updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperM
     const auto RENDERSIZE = monitor->m_transformedSize;
     const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
     if (!frost.backdropFB)
-        frost.backdropFB = g_pHyprRenderer->createFB("scrolloverview_backdrop_blur");
+        frost.backdropFB = g_pHyprRenderer->createFB("hyprdrive_backdrop_blur");
 
     if (!frost.backdropFB || !frost.backdropFB->isAllocated() || frost.backdropFB->m_size != FBSIZE || frost.backdropFB->m_drmFormat != FBFORMAT) {
         if (frost.backdropFB)
@@ -5591,7 +5593,7 @@ void CScrollOverview::render() {
     if (Prof::enabled() && Prof::pending) {
         ++Prof::frames;
         const auto SINCEKEY = std::chrono::duration<double, std::milli>(Prof::clock::now() - Prof::keyAt).count();
-        if (FILE* const F = std::fopen("/tmp/scrolloverview-prof.log", "a")) {
+        if (FILE* const F = std::fopen("/tmp/hyprdrive-prof.log", "a")) {
             std::fprintf(F, "q=%-6s f=%llu sinceKey=%7.2fms  FRAME=%6.2fms  bg=%6.2fms  live=%6.2fms  strip=%6.2fms  renderSearch=%6.2fms  match=%5.2fms/%llu  rows=%5.2fms  app=%5.2fms  scan=%5.2fms/%llu  TEXT[cold=%llu %6.2fms]  ICON[cold=%llu resolve=%6.2f decode=%6.2f upload=%6.2f]\n",
                          g_search.query.text.c_str(), (unsigned long long)Prof::frames, SINCEKEY,
                          Prof::frameNs / 1e6, Prof::bgNs / 1e6, Prof::liveNs / 1e6, Prof::stripNs / 1e6, Prof::srchNs / 1e6,
@@ -5742,7 +5744,11 @@ void CScrollOverview::activateSubmapIfConfigured() {
 
     previousSubmapName = g_pKeybindManager->getCurrentSubmap().name;
 
-    const auto RESULT = Config::Actions::setSubmap(OVERVIEW_SUBMAP);
+    const auto SUBMAP = boundOverviewSubmap();
+    if (SUBMAP != std::string_view{OVERVIEW_SUBMAP})
+        ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::KEY, std::string{"submap "} + SUBMAP);
+
+    const auto RESULT = Config::Actions::setSubmap(SUBMAP);
     if (!RESULT) {
         usesSubmapKeybinds = false;
         return;
@@ -5756,7 +5762,7 @@ void CScrollOverview::restoreSubmapIfActive() {
         return;
 
     const auto CURRENT = g_pKeybindManager->getCurrentSubmap().name;
-    if (CURRENT == OVERVIEW_SUBMAP) {
+    if (isOverviewSubmapName(CURRENT)) {
         (void)Config::Actions::setSubmap(previousSubmapName.empty() ? "reset" : previousSubmapName);
     }
 
@@ -5771,7 +5777,7 @@ bool CScrollOverview::dispatchSubmapMouseClick(uint32_t button) {
     const auto MODS    = g_pInputManager->getModsFromAllKBs();
 
     const auto KEYBIND = std::ranges::find_if(g_pKeybindManager->m_keybinds, [&](const auto& keybind) {
-        return keybind && keybind->enabled && !keybind->shadowed && keybind->key == KEYNAME && keybind->submap.name == OVERVIEW_SUBMAP &&
+        return keybind && keybind->enabled && !keybind->shadowed && keybind->key == KEYNAME && isOverviewSubmapName(keybind->submap.name) &&
             (keybind->modmask == MODS || keybind->ignoreMods);
     });
 

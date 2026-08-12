@@ -6,6 +6,8 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/EventManager.hpp>
+
+#include "Compat.hpp"
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 
@@ -29,7 +31,11 @@ static void emitOverviewState() {
     if (OPEN == lastOpen || !g_pEventManager)
         return;
     lastOpen = OPEN;
-    g_pEventManager->postEvent(SHyprIPCEvent{.event = "scrolloverview", .data = OPEN ? "1" : "0"});
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = ScrollOverview::Compat::NAME, .data = OPEN ? "1" : "0"});
+    // ONE RELEASE. A shell still listening for the pre-rename event name keeps
+    // revealing itself; the plugin does not get to decide when the user's
+    // quickshell config is updated.
+    g_pEventManager->postEvent(SHyprIPCEvent{.event = ScrollOverview::Compat::LEGACY_NAME, .data = OPEN ? "1" : "0"});
 }
 
 const std::vector<SP<IOverview>>& scrollOverviews() {

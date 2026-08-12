@@ -22,7 +22,7 @@
 #     and a global-scope symbol contains no namespace to grep for. Hence the
 #     rewrite: diff against what the hosts actually export, filter nothing.
 set -u
-SO=${1:-scrolloverview.so}
+SO=${1:-hyprdrive.so}
 HOST=${2:-$(command -v Hyprland || echo /usr/bin/Hyprland)}
 [ -f "$SO" ] || { echo "symcheck: no $SO"; exit 2; }
 [ -f "$HOST" ] || { echo "symcheck: no host binary $HOST"; exit 2; }

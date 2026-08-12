@@ -46,7 +46,7 @@ void captureFrameChromeBlur(PHLMONITOR monitor) {
     const auto FBFORMAT   = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
 
     if (!g_chromeBlurFB)
-        g_chromeBlurFB = g_pHyprRenderer->createFB("scrolloverview_chrome_blur");
+        g_chromeBlurFB = g_pHyprRenderer->createFB("hyprdrive_chrome_blur");
 
     if (!g_chromeBlurFB || !g_chromeBlurFB->isAllocated() || g_chromeBlurFB->m_size != FBSIZE || g_chromeBlurFB->m_drmFormat != FBFORMAT) {
         if (g_chromeBlurFB)

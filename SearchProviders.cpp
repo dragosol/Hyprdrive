@@ -50,7 +50,7 @@ namespace SearchProviders {
         using SPClock = std::chrono::steady_clock;
         SPClock::time_point w_genStart;
         bool spTrace() {
-            static const bool ON = std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr;
+            static const bool ON = std::getenv("HYPRDRIVE_PROFILE") != nullptr || std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr;
             return ON;
         }
         double sinceGen() {

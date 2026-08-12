@@ -33,9 +33,9 @@ VERSION_SCRIPT = scripts/generate-plugin-version.sh
 
 # An undefined symbol is a lazy-bind compositor kill (three same-day incidents
 # recorded in symcheck.sh's header), so the check IS part of the build.
-all: scrolloverview.so check
+all: hyprdrive.so check
 
-scrolloverview.so: $(OBJS)
+hyprdrive.so: $(OBJS)
 	$(CXX) -shared $(OBJS) -o $@ $(LDLIBS)
 
 .build/%.o: %.cpp | $(VERSION_HEADER)
@@ -49,10 +49,10 @@ $(VERSION_HEADER): FORCE $(VERSION_SCRIPT)
 
 FORCE:
 
-check: scrolloverview.so
+check: hyprdrive.so
 	bash scripts/symcheck.sh
 
 clean:
-	rm -rf .build scrolloverview.so
+	rm -rf .build hyprdrive.so
 
 -include $(DEPS)
