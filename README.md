@@ -438,6 +438,85 @@ that outlives the app, and `hdmon check`, which the launcher runs before the
 window is drawn. Kill the app, kill the watcher, pull the plug -- the next time
 anything opens the settings, an unconfirmed monitor change is undone.
 
+### Profiles
+
+Every file the settings app can write is under a git repository at
+`~/.local/state/hyprdrive/profiles`: the fragments, what the app owns
+(`settings.json`), and illogical-impulse's `config.json` -- which is in because
+the app writes it and because the **wallpaper** lives there, so a restored
+profile brings back the picture the accents were derived from. The matugen
+palette is deliberately out: it is derived from the wallpaper, and snapshotting a
+derivation next to its input is how the two get to disagree.
+
+```sh
+scripts/hdprof.py status          # what has changed since the last snapshot
+scripts/hdprof.py revert          # put it back, reload, restart the shell if ii moved
+scripts/hdprof.py save nord       # a profile is a git tag on a snapshot
+scripts/hdprof.py apply nord
+```
+
+Snapshots are taken **before**, never after -- automatically by a theme import,
+by `hdctl bulk`, and by a monitor change, all through one function. So `HEAD` is
+always the surface as it was before the last risky thing, the difference between
+`HEAD` and the files on disk is what you might want to undo, and `revert` needs
+no argument. There are no remotes and nothing to push.
+
+An apply that dies halfway leaves a pending record, and `hdprof check` -- which
+the launcher runs before the window is drawn, next to `hdmon check` -- puts it
+back. Same shape as the monitor countdown, for the same reason: the process that
+was supposed to clean up is the one that died.
+
+### Importing a theme
+
+```sh
+scripts/hdimport.py preview ~/themes/nord.conf     # every key, old -> new
+scripts/hdimport.py apply   ~/themes/nord.conf     # behind a snapshot, always
+```
+
+A hyprland.conf-style file is parsed with four rules (`name {`, `}`,
+`key = value`, `$var = value`) and every assignment is looked up in the schema,
+which knows all 445 legal keys -- including the plugin's, so a
+`plugin { hyprdrive { dock { ... } } }` block lands on the Dock pane. A `locked`
+row stays locked against a file: `decoration:blur:enabled = false` is refused
+with its reason printed, because the frost rule does not become negotiable by
+arriving in a theme.
+
+Everything else -- binds, `exec-once`, window rules, keys from another Hyprland
+version -- is kept **verbatim** in the Hyprland pane's raw snippet, inside a Lua
+long-bracket string whose bracket level is computed from the payload so a theme
+containing `]]` cannot close it early. Those lines are **inert**: this session's
+config is Lua, the fragments are Lua, and 0.56 has no `hl.keyword` and no
+`hl.source` to hand a hyprlang line to. Nothing is translated and nothing is
+dropped; turning one into `hl.bind(...)` is a person's decision.
+
+### Wallpapers
+
+A repository is a directory, and a remote one is a directory git put there.
+
+```sh
+scripts/hdwall.py repo-add nord https://github.com/somebody/wallpapers
+scripts/hdwall.py repo-pull nord          # clone and pull only -- never pushes
+scripts/hdwall.py set nord/aurora.jpg     # the palette follows
+```
+
+Mode, interval, the active repository and "the theme follows the wallpaper" are
+schema rows on the Wallpaper pane. The slideshow timer fires once a minute and
+reads them on every tick, so changing the interval restarts nothing. An `.mp4` is
+a wallpaper like any other: mpvpaper draws it, ii's config still records one
+wallpaper path, and the palette comes from a frame `ffmpeg` pulls a second in.
+
+It is all `scripts/hyprwall-rotate.sh` underneath -- extended, not replaced. Its
+default stays palette-neutral (an unattended rotation must not re-theme the
+desktop) and `THEME=1` is the opt-in; the pane's own swaps take the `THEME` path,
+because a swap somebody just asked for is exactly when the accents should follow.
+
+### Adding a setting
+
+**[docs/EXTENDING.md](docs/EXTENDING.md)** -- what a schema row's fields mean,
+what each pane does with one, what every apply-strategy does, and a worked
+example of a row added end to end (`wallpaper.interval`, commit `de174db`: one
+row, one `gen_schema.py`, no QML).
+
 ## Credit
 
 Hyprdrive started as a fork of
