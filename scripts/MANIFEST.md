@@ -281,6 +281,41 @@ would make a suite verdict worth more.
   clean, and when it runs the geometry is invariant). Rig-hardening follow-up
   (sweep + settle harder before the first click), not a product defect.
 
+## The wallpaper hold was not holding (2026-08-12, fixed)
+
+Two gates are graded on the wallpaper itself -- `x64`'s frost half compares
+detail through the app against the wallpaper's own detail (`pinwall.sh` pins
+wp17 because it measures ~9 there), and `z3` is a colour locator this file
+already records as flipping with the picture. Both went red in a back-to-back
+pair and neither was a build difference: the wallpaper moved **four times**
+during a run that had asked for 180 minutes of stillness (journal: 14:27 wp15,
+14:31 wp11, 14:46 wp21, 15:03 wp20), and x64 was handed a photograph measuring
+2.0 where wp17 measures 9.
+
+Two causes, both fixed:
+
+- `g5_rig.sh`, `x48_rig.sh`, `x50_rig.sh` and `x50_flight.sh` drove
+  `hyprwall.timer` with **raw systemctl** although all four source `lib/rig.sh`.
+  `hyprwall_pause`/`hyprwall_resume` have honoured `RIG_HYPRWALL_HELD` since the
+  suite learned to hold the wallpaper; systemctl cannot. And the start is not
+  "resume later": `hyprwall.timer` carries `OnUnitActiveSec=3min`, which has
+  usually already elapsed, so `systemctl start` **is a rotation**.
+- `hyprwall_pause` re-arms its dead-man **by unit name**, so the last caller
+  wins -- `x1_fixture.sh`'s bare 30-minute pause silently replaced the suite's
+  180-minute one. It now returns early under `RIG_HYPRWALL_HELD`, and `suite.sh`
+  arms its own dead-man *before* declaring the hold.
+
+Proof: the same build, same conditions, wallpaper pinned before each run --
+`suite-head-7a57070.log` (four rotations, 16 red, x64/z3/x60 red) vs
+`suite-head-20c69d9.log` (**zero** rotations, wallpaper still wp17 at the end,
+13 red, x64 and z3 green). Only x60 was a real defect; the other two were the
+photograph.
+
+`y8_run.sh` has the same shape and is deliberately left alone: it is the
+host-side driver the y8 gate was ported away from, it does not run inside the
+suite, and its `systemd-run` has no `--unit` so it cannot collide with the
+dead-man.
+
 ## Phase 11 -- the settings app (2026-08-12)
 
 Four gates, and between them they cover the app's whole claim. None of them
