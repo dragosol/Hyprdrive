@@ -280,3 +280,45 @@ would make a suite verdict worth more.
   the first click misses the predicted dock cell; ~1 in 3 standalone runs is
   clean, and when it runs the geometry is invariant). Rig-hardening follow-up
   (sweep + settle harder before the first click), not a product defect.
+
+## Phase 11 -- the settings app (2026-08-12)
+
+Four gates, and between them they cover the app's whole claim. None of them
+drives the QML: the app is a renderer over `scripts/hdctl.py`, so the round-trips
+drive that and the one gate that needs the window films it.
+
+| gate | clause | what it proves |
+| --- | --- | --- |
+| `x60_settings_schema` | 13.9 X36-X40 | docs/schema.json is current against Config.cpp and the Hyprland snapshot; every entry routes to a pane that exists; and the drift check has been SEEN to fail -- the gate adds a real `CBoolValue` to Config.cpp, requires both `--check`s to go red and name the key, and puts it back. |
+| `x61_blur_roundtrip` | 13.8 blur, user law | the app writes `decoration:blur:size` into 41-blur.lua, the compositor reports it, and the frost visibly changes through a translucent fixture over a hard black/white seam (285600 px blob, controls both sides at 0). `unset` restores the file and the option. |
+| `x62_raw_and_pin` | Phase 9 raw block, Phase 10 masking | a line typed into the Blur pane's raw editor survives the app rewriting the machine half AND theme-sync regenerating the derived fragment, and is still in effect; all six `dock:blur_*` are -1 so it fans out without naming the dock; and `hdctl set` on a derived key IS a pin -- theme-sync reports it masked, stands the derived value down, and leaves the unpinned accent following. |
+| `x63_monitor_countdown` | 13.9, monitors | the keep-these-settings leash, three ways: expired (scale back, fragment byte-identical), confirmed (held past the deadline), and CRASHED -- the watcher killed with the countdown open, nothing reverts it, and the next `hdmon check` (which the launcher runs before the window is drawn) does. |
+| `x64_app_obeys_laws` | user law: frost, Apple motion | the app's own surface: detail through it is cut to ~46% of the wallpaper's and is not flat (frosted, not painted over); its open and close are filmed and the open decelerates, the close accelerates, and the exit is measurably shorter. |
+
+### What x61 does NOT claim, and why
+
+The revert half of the blur round-trip is graded on the fragment and on
+`hyprctl getoption`, not on pixels. Measured 2026-08-12: raising the blur size
+repaints once, and after that nothing under that window repaints again -- not
+lowering it back, not a brightness change, not a window nudge, not
+`dispatch forcerendererreload` -- while `getoption` reports the new value every
+time. Hyprland caches the blurred backdrop (`decoration:blur:new_optimizations`)
+and a desktop where nothing moves never damages it; the reload that lands the
+first change is itself the damage that makes that one visible. Turning the
+optimization off does not help: the headless output then stops producing frames
+at all and every pair including the controls comes back byte-identical, which is
+a starved output rather than a result. The plugin already has a key about this
+cache (`live_layer_frost`, "the stale optimized blur FB"), so it is a known
+property of the system. Evidence: `zrig/phase11/x61/`.
+
+### x64's split verdict
+
+A film times an eased animation short, always -- the tail of an OutCubic opacity
+ramp moves too few pixels to clear any noise floor. Measured: 216 ms for a 300 ms
+animation and 166 ms for a 230 ms one, the same 0.72 factor twice, which is the
+instrument and not the app. So the film decides SHAPE (decelerate in, accelerate
+out -- the check that catches a linear fade) and direction, and
+`Motion.qml`'s constants decide DURATION and the 20-30% ratio, read out of the
+file the app actually runs on. The film keeps a veto: anything under 100 ms did
+not happen. The measured ratio is reported but not graded; two runs of the same
+build gave 23.1% and 33.4%, which is the under-read varying, not the app.
