@@ -67,8 +67,36 @@ def snapshot():
     return "\n".join(out)
 
 
+def _parse(lines):
+    out = {}
+    for line in lines:
+        if not line.strip():
+            continue
+        path, typ, value = line.rstrip("\n").split("\t", 2)
+        out[path] = (typ, value)
+    return out
+
+
+def restore(baseline_path):
+    """Lua that puts back ONLY the keys that have drifted from the baseline.
+
+    Writing all seventy-nine every time is wrong in a way that took a suite run
+    to find: `hyprctl getoption` reports `set: true` for anything the session has
+    ever assigned, and x53_compat_alias's A control requires its five probe keys
+    to be UNSET -- "already set by this config, the copy would be skipped by the
+    precedence rule and A would pass for free". A slate that assigns every key
+    turns that control red on a build with nothing wrong with it. A slate that
+    only puts back what moved leaves an untouched key untouched.
+    """
+    base = _parse(open(baseline_path).read().split("\n"))
+    now = _parse(snapshot().split("\n"))
+    drift = ["%s\t%s\t%s" % (k, base[k][0], base[k][1])
+             for k in base if k in now and now[k][1] != base[k][1]]
+    return lua(drift), [k.split("\t")[0] for k in drift]
+
+
 def lua(lines):
-    """One nested hl.config table for every writable key in the snapshot."""
+    """One nested hl.config table for every writable key in the list."""
     tree = {}
     for line in lines:
         if not line.strip():
@@ -86,6 +114,9 @@ def lua(lines):
         else:
             node[parts[-1]] = value
 
+    if not tree:
+        return ""
+
     def render(d):
         return "{" + ", ".join(
             "%s = %s" % (k, render(v) if isinstance(v, dict) else v)
@@ -100,8 +131,13 @@ def main(argv):
         print(snapshot())
     elif what == "lua":
         print(lua(sys.stdin.read().split("\n")))
+    elif what == "restore":
+        code, names = restore(argv[2])
+        if names:
+            print("# drifted since the baseline: %s" % " ".join(names), file=sys.stderr)
+        print(code)
     else:
-        sys.exit("usage: slate_keys.py snapshot|lua")
+        sys.exit("usage: slate_keys.py snapshot|lua|restore BASELINE")
     return 0
 
 

@@ -590,9 +590,13 @@ print('%s %d %d' % (ms[0]['name'], ms[0]['width'], ms[0]['height']) if len(ms)==
     # registered 0.9). Forcing defaults would re-theme the session between gates
     # and every pixel gate after that would measure a configuration nobody ships.
     # See lib/slate_keys.py.
+    # ONLY THE KEYS THAT DRIFTED. Assigning all seventy-nine every time makes
+    # `getoption` report set=true for every one of them, and x53_compat_alias's
+    # A control requires its five probe keys to be UNSET -- it went red on a
+    # clean build the first suite this ran (2026-08-12).
     rig_slate_baseline || return 1
-    hyprctl eval "$(slate_keys lua < "$RIG_SLATE_KEYS")" >/dev/null 2>&1
-    sleep 0.5
+    local _fix; _fix=$(slate_keys restore "$RIG_SLATE_KEYS" 2>/dev/null)
+    [ -n "$_fix" ] && { hyprctl eval "$_fix" >/dev/null 2>&1; sleep 0.5; }
     # anim_scale AFTER the snapshot, not before: a baseline captured off a
     # session that had already been slowed would otherwise re-slow every gate.
     anim_restore

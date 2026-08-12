@@ -91,7 +91,17 @@ ratio = OVER[2] / HOME[2]
 # so the pill is wider there than in the control frame and a fixed box would
 # reject a preview that is sitting exactly where it should.
 QX0, QY0, QX1, QY1 = pill("post_dock.png")
-inside = POST and QX0 <= POST[0] and POST[0] + POST[2] <= QX1 + 1 and QY0 <= POST[1] and POST[1] + POST[3] <= QY1 + 1
+# "GONE, or inside the pill". POST is None on a correct build and that is the
+# expected reading, not a failure: the flight ends with the window stashed, and
+# a stashed window whose class owns no desktop entry renders as an EMPTY dock
+# slot -- there is nothing green left to find. This check used to require a box
+# INSIDE the pill and it passed on the TRASH icon, which is green and sits in
+# the pill; with the dock pinned to the composition the cell predictors model
+# (no trash) the sliver is gone and the honest reading appears. What the phase
+# can still catch, and what it is for, is a window that did NOT go: fixture
+# green anywhere OUTSIDE the pill after the drop means the tile is still up.
+inside = (POST is None) or (QX0 <= POST[0] and POST[0] + POST[2] <= QX1 + 1
+                            and QY0 <= POST[1] and POST[1] + POST[3] <= QY1 + 1)
 # The tooltip sits ABOVE the pill, the highlight inside it, so the band starts
 # well above the pill's top edge.
 hover_px = band_diff("hover_off.png", "hover_on.png", PY0 - 140)
@@ -105,8 +115,9 @@ for name, cond, detail in [
      clients("miss").get(FIXTURE) == "1", f"{FIXTURE} -> {clients('miss').get(FIXTURE)}"),
     ("P3a proxy shrinks over the pill",
      0.20 < ratio < 0.60, f"{HOME[2]}px -> {OVER[2]}px ({ratio:.2f}x)"),
-    ("P3b released window lands in the pill",
-     bool(inside),  f"post {POST} pill x {QX0}..{QX1}"),
+    ("P3b the released window is gone from the overview",
+     bool(inside),
+     f"post {POST if POST else 'no fixture green anywhere (stashed)'} pill x {QX0}..{QX1}"),
     ("P4 hover lights and labels the icon",
      hover_px > 2000 and idle_px == 0, f"{hover_px}px changed, idle control {idle_px}px"),
     ("P5 pill is padded evenly around the icon",
