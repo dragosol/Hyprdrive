@@ -66,14 +66,13 @@ for f in "$A" "$B" "$C"; do
     [ -s "$f" ] || { echo "FAIL: $f missing or empty -- capture did not land" >&2; exit 1; }
 done
 
-if cmp -s "$B" "$C"; then
-    echo "VOID: B and C are byte-identical -- the typed-query control did not move," >&2
-    echo "the output was starved, and A==B would prove nothing" >&2
-    exit 1
-fi
-if ! cmp -s "$A" "$B"; then
-    echo "FAIL: cold text (A) != cached text (B) -- the glyph-cache-served render is not pixel-identical" >&2
-    exit 1
-fi
-echo "X51 PASS: cached text is byte-identical to fresh text (A==B), and the typed-query control differs (B!=C)"
-exit 0
+# `cmp -s "$A" "$B"` was the whole comparison until 2026-08-12, and these are
+# WHOLE-OUTPUT grabs: the quickshell bar is in them, and its clock ticks in the
+# twenty seconds of open/close laps between A and B. Measured on that run's own
+# frames, A and B differed by 106 pixels and every one of them was inside
+# x 800..916, y 10..25 -- the clock. Not one differing pixel where the plugin
+# draws. x51_ident.py masks the layer-shell chrome (from x51_layers.json, which
+# the capture run dumps) and grades what is left EXACTLY, zero tolerance,
+# keeping the B != C starved-output control.
+python3 "$REPO/scripts/x51_ident.py" "$A" "$B" "$C" /mnt/host/x51_layers.json
+exit $?

@@ -75,7 +75,18 @@ bash scripts/z3_setup.sh 2>&1 | tail -2
 alive_or_die "after z3 setup"
 
 # G1 -----------------------------------------------------------------------
-eval "$(blobs $SHARE/z3/view-ws1.png full | awk '{print $1"_x="$2"; "$1"_y="$3}')"
+# The TILE comes from the whole frame (it is in the main card, below the band);
+# the two STRIP MINIS come from the band, exactly as G2 and G3 already take
+# them. G1 used to take all three from the whole frame, and its yellow mask is
+# broad: on wp03 (dry golden hillsides, 5.3% of its pixels inside that mask)
+# the largest yellow blob was the WALLPAPER -- 2871 px at (1925,1217) -- while
+# the mini it wanted was third-largest at 570 px. G1 then dragged the window
+# into the main card and the gate reported "position lost". Deterministic, and
+# not a build difference: identical numbers on HEAD and on a4189e2
+# (zrig/phase8/Z3_FINDING.md). Eleven of the twenty-two wallpapers score 0.0%
+# on that mask, which is the only reason this has been green.
+eval "$(blobs $SHARE/z3/view-ws1.png full | awk '$1 == "red" {print "red_x="$2"; red_y="$3}')"
+eval "$(blobs $SHARE/z3/view-ws1.png band | awk '$1 != "red" {print $1"_x="$2"; "$1"_y="$3}')"
 # No strip means no overview, and the usual cause is that the PLUGIN IS NOT
 # LOADED -- which reads as "the fixture is wrong" for a good ten minutes if the
 # rig does not say so. `hyprctl plugin list` and the config error overlay both
