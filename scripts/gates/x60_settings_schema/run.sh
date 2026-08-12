@@ -89,14 +89,25 @@ bad = [e["key"] for e in d["entries"] if e["pane"] not in panes]
 if bad:
     print("FAIL P3: %d entries route to a pane that does not exist: %s" % (len(bad), bad[:5]))
     sys.exit(1)
-# Every pane the app draws must be reachable from the schema's own pane list.
-missing = [p["id"] for p in d["panes"]
-           if p["id"] != "monitors" and not any(e["pane"] == p["id"] for e in d["entries"])]
-if missing:
-    print("FAIL P3: panes with no rows at all: %s" % missing)
+# A pane says whether rows are how it is built (`rows: false` for Monitors,
+# which comes from hyprctl, and Profiles, which is a log). Grade the DECLARATION,
+# both ways: a pane that claims rows and has none is drawn empty, and a pane that
+# disclaims them and has some is a row nobody will ever see. Spelling the
+# exceptions out here instead would put the app's shape in the gate, where the
+# next pane to be added would find it out the hard way.
+counts = {p["id"]: sum(1 for e in d["entries"] if e["pane"] == p["id"]) for p in d["panes"]}
+rowsy = {p["id"]: p.get("rows", True) for p in d["panes"]}
+empty = [i for i, n in counts.items() if rowsy[i] and n == 0]
+stray = [i for i, n in counts.items() if not rowsy[i] and n > 0]
+if empty:
+    print("FAIL P3: panes that are built from rows and have none: %s" % empty)
     sys.exit(1)
-print("    %d entries, all routed, %d panes all populated (monitors is built from hyprctl)"
-      % (len(d["entries"]), len(panes)))
+if stray:
+    print("FAIL P3: panes that say they are not row-driven but carry rows: %s" % stray)
+    sys.exit(1)
+notrows = [i for i, r in rowsy.items() if not r]
+print("    %d entries, all routed, %d panes -- %d row-driven and populated, %s built another way"
+      % (len(d["entries"]), len(panes), len(panes) - len(notrows), ", ".join(sorted(notrows))))
 PY
 
 echo

@@ -20,6 +20,14 @@
     "  wallpaper the rice's own rotation script, which regenerates the palette and fans out."
   ],
 
+  "_panes_note": [
+    "`rows: false` means this pane is NOT built from schema entries -- Monitors is built from",
+    "`hyprctl monitors`, Profiles is a snapshot log. Every other pane IS its rows, which is why",
+    "adding an option to them is a row here and nothing else. x60 grades the declaration both ways:",
+    "a pane that claims rows and has none is a pane the app draws empty, and a pane that disclaims",
+    "them and has some is a row nobody will ever see."
+  ],
+
   "panes": [
     {
       "id": "hyprland",
@@ -54,6 +62,7 @@
       "title": "Monitors",
       "icon": "monitor",
       "fragment": "45-monitors.lua",
+      "rows": false,
       "blurb": "Mode, refresh and scale per output. Every change is on a fifteen-second leash."
     },
     {
@@ -75,6 +84,7 @@
       "title": "Profiles",
       "icon": "history",
       "fragment": null,
+      "rows": false,
       "blurb": "Snapshots of every file this app can write, the themes you imported into them, and one button that puts it all back."
     }
   ],

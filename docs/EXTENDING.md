@@ -83,8 +83,14 @@ per-pane code.
 
 So: put a row on `hyprland`, `blur`, `dock`, `overview` or `quickshell` and it
 appears with **no other change anywhere**. Put one on `wallpaper` and it appears
-in the Slideshow section. `monitors` and `profiles` are not row-driven; a row on
-either is a mistake `gen_schema.py` will not catch.
+in the Slideshow section.
+
+`monitors` and `profiles` are not row-driven, and they say so: their pane entry
+carries `"rows": false`. That is a declaration rather than a comment — `x60`
+grades it both ways, so a pane that claims rows and has none (the app would draw
+it empty) and a pane that disclaims them and carries some (a row nobody would
+ever see) are both red. A new pane that is a form leaves the flag out; a new pane
+that is a log sets it.
 
 ---
 

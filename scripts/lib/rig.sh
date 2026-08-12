@@ -328,6 +328,15 @@ dock_click() { # dock_click CLASS [shift] -- sweep, predict, held click
 hyprwall_pause() { # hyprwall_pause [DURATION=30min]
     _rig_need || return 1
     systemctl --user stop hyprwall.timer 2>/dev/null
+    # Under a suite the hold belongs to the suite, and a gate's own pause must
+    # not re-arm the dead-man: the unit is named, so the LAST caller wins, and
+    # x1_fixture.sh's bare 30-minute pause was silently replacing the suite's
+    # 180-minute one. Measured 2026-08-12 -- the short dead-man fired 34 minutes
+    # into a 45-minute run, started an OnUnitActiveSec=3min rotation, and moved
+    # the wallpaper four times under gates that measure it (x64's frost half and
+    # z3's colour locator both went red on the photograph rather than the build).
+    # Same guard hyprwall_resume has, for the same reason.
+    [ "${RIG_HYPRWALL_HELD:-0}" = 1 ] && return 0
     systemctl --user stop hyprwall-resume.timer 2>/dev/null
     systemd-run --user --on-active="${1:-30min}" --unit=hyprwall-resume \
         systemctl --user start hyprwall.timer >/dev/null 2>&1

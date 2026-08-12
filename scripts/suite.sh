@@ -32,8 +32,11 @@ fail=0
 # hyprwall is held down for the WHOLE run, once. The per-gate pause/resume pairs
 # the gates ship were re-arming the rotation between gates -- and `systemctl
 # start` on an OnActiveSec=3min timer is itself a rotation trigger.
-export RIG_HYPRWALL_HELD=1
+# ORDER MATTERS: arm the long dead-man FIRST, then declare the hold. The flag is
+# what stops every gate's own pause from re-arming a shorter one, and it would
+# stop this one too.
 hyprwall_pause 180min
+export RIG_HYPRWALL_HELD=1
 trap 'RIG_HYPRWALL_HELD=0; hyprwall_resume' EXIT
 
 for dir in scripts/gates/*/; do
