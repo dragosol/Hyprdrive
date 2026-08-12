@@ -363,7 +363,10 @@ def main(argv):
             palette = {}
             print("theme-sync: %s unreadable (%s) -- falling back to live values" % (colors, e), file=sys.stderr)
 
-    live = {"border_accent": border_accent(), "bg_luma": bg_luma()}
+    live = {"border_accent": border_accent(), "bg_luma": bg_luma(),
+            "blur": getoption("decoration:blur:enabled"),
+            "blur_size": getoption("decoration:blur:size"),
+            "blur_passes": getoption("decoration:blur:passes")}
     vals, notes = derive(palette, live)
     if vals is None:
         print("theme-sync: " + "; ".join(notes), file=sys.stderr)
@@ -397,10 +400,21 @@ def main(argv):
 
     log = pathlib.Path(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))) / "hyprdrive"
     log.mkdir(parents=True, exist_ok=True)
-    line = "%s %s accent=#%02x%02x%02x pill=#%02x%02x%02x alpha=%.2f masked=%s apply=%s" % (
+    # The second source, recorded every run. The dock's frost is not a number
+    # this script derives -- dock:blur_* are -1 = follow decoration:blur:* -- so
+    # the honest way to show the frost is still on is to write down what it is
+    # inheriting. A `blur=off` line here is the user-law alarm: nothing in this
+    # pipeline can turn compositor blur off, and nothing in it will turn it back
+    # on either, so the log is where that has to become visible.
+    live_note = "blur=%s/%s/%s" % (live.get("blur") or "?", live.get("blur_size") or "?",
+                                  live.get("blur_passes") or "?")
+    line = "%s %s accent=#%02x%02x%02x pill=#%02x%02x%02x alpha=%.2f masked=%s %s apply=%s" % (
         time.strftime("%Y-%m-%dT%H:%M:%S"), vals["mode"],
         *vals["col_highlight"], *vals["background_color"],
-        vals["background_opacity"], ",".join(sorted(pins)) or "-", applied)
+        vals["background_opacity"], ",".join(sorted(pins)) or "-", live_note, applied)
+    if live.get("blur") == "false":
+        notes.append("decoration:blur:enabled is FALSE -- the dock's frost follows it and is therefore off. "
+                     "Frost is supposed to be on everywhere; this pipeline will not override it.")
     with (log / "theme-sync.log").open("a") as fh:
         fh.write(line + "\n")
     print("theme-sync: " + line)
