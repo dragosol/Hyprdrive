@@ -17,7 +17,7 @@ TAG=${1:?usage: x50_flight.sh <tag>}
 # raw `ydotool key` below stays raw ON PURPOSE: rig.sh key() sleeps 0.30 after
 # the press, and the grim burst must start on the very next line.
 
-systemctl --user stop hyprwall.timer 2>/dev/null
+hyprwall_pause         # a stop under a suite, a dead-man on its own
 ov off; sleep 1.0
 ov on;  sleep 2.5
 grim -o "$MON" "$OUT/$TAG-f00-rest.png"
@@ -29,6 +29,6 @@ grim -o "$MON" "$OUT/$TAG-f99-settled.png"
 
 ydotool key 1:1 1:0; sleep 1.0
 ov off
-systemctl --user start hyprwall.timer 2>/dev/null
+hyprwall_resume        # the suite's hold applies here too
 ls -la $OUT/$TAG-f*.png
 echo X50_FLIGHT_OK

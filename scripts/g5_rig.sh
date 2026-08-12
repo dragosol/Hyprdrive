@@ -30,7 +30,12 @@ TAG=${1:?usage: g5_rig.sh <tag>}
 MON=$(cat $SRC/mon)
 shot() { grim -o "$MON" "$OUT/$TAG-$1.png"; }
 
-systemctl --user stop hyprwall.timer 2>/dev/null
+# Through the rig, not through systemctl: under a suite the wallpaper is held
+# for the WHOLE run and these two calls have to honour that. Raw systemctl here
+# was starting the rotation at the end of every g5 -- and because
+# hyprwall.timer's OnUnitActiveSec has usually already elapsed by then, that
+# start IS a rotation. Measured 2026-08-12 (zrig/phase12/).
+hyprwall_pause
 
 ov off; sleep 1.0
 ov on;  sleep 2.5
@@ -49,7 +54,7 @@ done
 
 key $K_ESC; sleep 1.5
 ov off
-systemctl --user start hyprwall.timer 2>/dev/null
+hyprwall_resume
 
 ls -la $OUT/$TAG-*.png
 md5sum $OUT/$TAG-*.png | awk '{print $1}' | sort -u | wc -l | xargs echo "distinct frames:"

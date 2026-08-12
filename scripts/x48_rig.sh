@@ -31,7 +31,7 @@ OUT=/mnt/host/x48; mkdir -p $OUT
 
 restore() {
     hyprctl eval "return hl.monitor({output = [[Virtual-1]], disabled = false})" >/dev/null 2>&1
-    systemctl --user start hyprwall.timer 2>/dev/null
+    hyprwall_resume        # the suite's hold applies here too
 }
 
 case "${1:?usage: x48_rig.sh fixture|run <tag>}" in
@@ -40,7 +40,7 @@ fixture)
     trap restore EXIT
     # A rotating wallpaper repaints the backdrop mid-run, and every check here
     # is a frame diff.
-    systemctl --user stop hyprwall.timer 2>/dev/null
+    hyprwall_pause         # a stop under a suite, a dead-man on its own
     ov off; sleep 1
     pkill -x kitty 2>/dev/null; sleep 1.5
 
@@ -78,7 +78,7 @@ print(hs[0] if len(hs)==1 else '')")
 
     hyprctl clients -j > $OUT/fixture-clients.json
     trap - EXIT              # the fixture must SURVIVE for the run phase
-    systemctl --user stop hyprwall.timer 2>/dev/null
+    hyprwall_pause         # a stop under a suite, a dead-man on its own
     echo "output: $MON"
     echo X48_FIXTURE_OK
     ;;

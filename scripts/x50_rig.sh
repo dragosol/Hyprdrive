@@ -29,7 +29,7 @@ TAG=${1:?usage: x50_rig.sh <tag>}
 MON=$(cat $SRC/mon)
 shot() { grim -o "$MON" "$OUT/$TAG-$1.png"; }
 
-systemctl --user stop hyprwall.timer 2>/dev/null
+hyprwall_pause         # a stop under a suite, a dead-man on its own
 
 hyprctl monitors -j > $OUT/monitors.json
 hyprctl layers -j   > $OUT/layers.json
@@ -57,7 +57,7 @@ shot 30-nomatch
 
 key $K_ESC; sleep 1.5
 ov off
-systemctl --user start hyprwall.timer 2>/dev/null
+hyprwall_resume        # the suite's hold applies here too
 
 ls -la $OUT/$TAG-*.png
 md5sum $OUT/$TAG-*.png | awk '{print $1}' | sort -u | wc -l | xargs echo "distinct frames:"
