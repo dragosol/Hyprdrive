@@ -275,7 +275,9 @@ def cmd_set(a):
         # what it displays without every caller building paths.
         d = load()
         r = repo_named(d, a.repo) if a.repo else active_repo(d)
-        cand = [f for f in wallpapers(r or {"path": "/"})
+        if not r:
+            raise SystemExit("hdwall: '%s' is not a file and there is no repository to look it up in" % p)
+        cand = [f for f in wallpapers(r)
                 if pathlib.Path(f).name == p or pathlib.Path(f).stem == p]
         if not cand:
             raise SystemExit("hdwall: no wallpaper called '%s'" % p)
@@ -324,8 +326,10 @@ def cmd_slideshow(a):
                       capture_output=True).returncode != 0:
         print("hdwall: %s is not installed (scripts/install-fragments.sh installs it)" % unit)
         return 0
-    subprocess.run(["systemctl", "--user", "enable" if want else "disable",
-                    "--now" if want else "--now", unit], capture_output=True)
+    # --now either way: enabling should start it, disabling should stop it, and
+    # a timer that is disabled but still running is the state nobody expects.
+    subprocess.run(["systemctl", "--user", "enable" if want else "disable", "--now", unit],
+                   capture_output=True)
     state = subprocess.run(["systemctl", "--user", "is-active", unit],
                            capture_output=True, text=True).stdout.strip()
     print("hdwall: slideshow %s, every %s minutes -- %s is %s"

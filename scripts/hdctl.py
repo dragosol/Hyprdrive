@@ -400,6 +400,20 @@ def cmd_preview(a):
     return 0
 
 
+def theme_follows(sch):
+    """Does a wallpaper change re-derive the palette?
+
+    The wallpaper.theme ROW answers it -- the store if anybody set it, the row's
+    own default otherwise. The first cut read the default off whichever row was
+    being written, which for wallpaper.path is the empty string; it came out True
+    by accident rather than by asking."""
+    e = entry_for(sch, "wallpaper.theme")
+    if e is None:
+        return True
+    v = load_store()["panes"].get(e["pane"], {}).get("wallpaper.theme", e.get("default", True))
+    return str(v).strip().lower() not in ("false", "0", "no", "off")
+
+
 def set_one(sch, key, value, force=False):
     """Write one row, by whatever mechanism its apply-strategy names.
 
@@ -421,9 +435,7 @@ def set_one(sch, key, value, force=False):
         # schema row says which config it lands in.
         ii_write(key[3:] if key.startswith("ii:") else key, value)
     elif how == "wallpaper":
-        rotate(value, theme=str(load_store()["panes"].get(e["pane"], {})
-                                .get("wallpaper.theme", e.get("default", True))).lower()
-               not in ("false", "0", "no", "off"))
+        rotate(value, theme=theme_follows(sch))
     elif how == "none":
         pass          # the store IS where this one lives (slideshow interval, ...)
     else:
