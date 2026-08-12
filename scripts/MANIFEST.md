@@ -200,6 +200,30 @@ Known follow-ups (tracked, not worked around):
   before treating the frost A/B as a trusted gate. Not a plugin frost defect --
   the plugin frost code is untouched and the behavior gate is green.
 
+## Harness follow-ups (2026-08-11, after the gate fire)
+
+Ranked. None of these is worked around anywhere; they are the next things that
+would make a suite verdict worth more.
+
+1. `g1_gate.py` diffs whole frames with an absolute 400 px floor, no mask and no
+   blob — and this desktop is not still. The bar clock, the CPU readouts and the
+   big desktop clock widget tick under the overview, and g1's own "no drift
+   between two idle frames" control has been measured at 2849 px on frames it
+   then graded. It reads green when g1 runs first after a compositor restart
+   (quickshell's widgets are not up yet) and red mid-suite, on the same build.
+   Mask the bar and the clock widget, dilate, take the largest connected blob.
+   Until then g1's red says nothing about the build, and a build A/B that moves
+   g1's position in the run is measuring the position.
+2. `g1_rig.sh` and `x48_rig.sh` hand-roll their headless output and never set
+   its mode, so g1/g5/x48/x50 run at the headless default 1920x1080 while every
+   cell predictor (x24_cell, x45dock_cell, x47_cell, x32_cell) hardcodes
+   2560x1600. They hand-roll it because `headless_on` installs an EXIT trap that
+   would tear the output down when the fixture script exits — so the fix is to
+   set the mode explicitly there, not to call headless_on.
+3. `gate_slate` restores the seven dock options and anim_scale that gates
+   actually write. A gate that changes anything else still owns restoring it,
+   and will find out the hard way.
+
 ## Guest gate dependencies + known flakes (2026-08-09)
 
 - The film gates (z4/z4t/z5) need `ffmpeg` in the guest; the pixel graders need
