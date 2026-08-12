@@ -66,6 +66,50 @@ import json,sys
 print(next((c['address'] for c in json.load(sys.stdin) if c['class']=='Y9MAG'), ''))")
 [ -n "$MAG" ] || { echo "ABORT: Y9MAG did not appear"; exit 1; }
 
+# PLACE THEM. Every window in this session floats, so two windows spawned back
+# to back are put wherever the compositor's float placement decides, and that is
+# not a constant: on 2026-08-12 the pair landed EXACTLY stacked -- magenta over
+# green, same 180 rows, green 0 px on the desktop frame -- and the gate reported
+# "fixture was visible on the desktop: NO -- rig fault". Correctly, but only in
+# one of two back-to-back suite runs, which is a straddler.
+#
+# Side by side with a gutter, on the only output there is (headless at 0x0,
+# Virtual-1 disabled, so monitor coordinates are global ones), and read back:
+# a placement that did not land is the same class of silent failure as a warp
+# that did not land.
+place() { # place CLASS X Y W H
+    hyprctl eval "$(cat <<LUA
+for _, w in ipairs(hl.get_windows()) do
+    if w.class == "$1" then
+        hl.dispatch(hl.dsp.focus({window = w}))
+        hl.dispatch(hl.dsp.window.resize({x = $4, y = $5, relative = false}))
+        hl.dispatch(hl.dsp.window.move({x = $2, y = $3, relative = false}))
+    end
+end
+return 1
+LUA
+)" >/dev/null 2>&1
+    sleep 0.8
+}
+place Y9GRN 200 350 1000 700
+place Y9MAG 1360 350 1000 700
+
+hyprctl clients -j | python3 -c "
+import json,sys
+want = {'Y9GRN': (200, 350, 1000, 700), 'Y9MAG': (1360, 350, 1000, 700)}
+got = {c['class']: (c['at'][0], c['at'][1], c['size'][0], c['size'][1])
+       for c in json.load(sys.stdin) if c.get('class') in want}
+bad = 0
+for k, w in want.items():
+    g = got.get(k)
+    print('    %-6s at %s size %s' % (k, g[:2] if g else '?', g[2:] if g else '?'))
+    if g is None or max(abs(a - b) for a, b in zip(g, w)) > 8:
+        print('ABORT: %s is at %s, the rig placed it at %s' % (k, g, w)); bad = 1
+a, b = got.get('Y9GRN'), got.get('Y9MAG')
+if a and b and not (a[0] + a[2] <= b[0] or b[0] + b[2] <= a[0]):
+    print('ABORT: the two fixtures overlap -- the desktop baseline cannot see both'); bad = 1
+sys.exit(bad)" || exit 1
+
 # Both on screen first: the baseline that says the magenta CAN be seen at all.
 grim -o $MON $OUT/$TAG-desktop.png
 
