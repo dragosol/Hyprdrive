@@ -380,7 +380,7 @@ enum class EFlightKind { MinimizeProxy, RestoreProxy, RestoreDriven };
 // with neither proxy nor real window on screen; the proxy holds its landing box
 // while the real window works its way back through moveWindowToWorkspace +
 // retile + damage, and one held frame still dipped to 7% of the window's area at
-// the z4 gate's frame 232). Erased from g_flights = gone.
+// the z4 gate's frame 232). Erased from g_flight.flights = gone.
 enum class EFlightPhase { Flying, Landing };
 inline constexpr int LAND_HOLD_FRAMES = 2;
 
@@ -409,32 +409,66 @@ struct SFlight {
     bool isLanding() const { return phase == EFlightPhase::Landing; }
 };
 
-// Z13. The tile a window occupied when it was minimized WITH THE OVERVIEW
-// OPEN. Grid slots are recomputed when the window rejoins the workspace, so
-// aiming a restore at the scaled desktop box lands wrong and the tile then
-// snaps into the grid ("teleports among the distribution"). The slot it HAD
-// is the best predictor: same window set, same slot. Used once, then dropped.
-std::vector<std::pair<PHLWINDOWREF, CBox>> g_minimizeTiles;
 
+// Y6. GNOME's launch feedback, from iconGrid.js `zoomOutActorAtPos`: a CLONE of
+// the icon scales to 3x about its own centre while easing opacity to nothing.
+// The real icon underneath is untouched, which is why this is a separate list
+// and not a transform on the item.
+struct SLaunchZoom {
+    std::string     icon;
+    CBox            from;
+    Time::steady_tp startedAt;
+};
+
+// Y8. macOS hops the icon a thing LANDS in -- once, not a decaying train, and
+// on arrival rather than on release.
+struct SBounce {
+    std::string     wmClass;
+    Time::steady_tp startedAt;
+};
+
+// EVERYTHING THE DOCK IS ANIMATING, and the one piece of state that decides
+// whether it should be: five loose g_ globals scattered over 100 lines, each
+// with its own helpers between them, so "what is the dock in the middle of"
+// had no single answer to read. Same lists, same names minus the prefix.
+//
+// Z13's minimizeTiles is in here rather than beside the minimize path because
+// it is the memory of an animation that has not happened yet: the tile a
+// restore will aim at.
+struct SDockFlight {
+    // Y4/Y5. ONE FLIGHT PER WINDOW, replacing the single optional. Y4 makes
+    // "minimize the whole app" the DEFAULT click, so the old one-at-a-time rule
+    // -- a documented ponytail shortcut while only shift could reach it --
+    // would now teleport two of a three-window app on an ordinary gesture.
+    std::vector<SFlight>     flights;
+    // Z13. The tile a window occupied when it was minimized WITH THE OVERVIEW
+    // OPEN. Grid slots are recomputed when the window rejoins the workspace, so
+    // aiming a restore at the scaled desktop box lands wrong and the tile then
+    // snaps into the grid ("teleports among the distribution"). The slot it HAD
+    // is the best predictor: same window set, same slot. Used once, then dropped.
+    std::vector<std::pair<PHLWINDOWREF, CBox>> minimizeTiles;
+    std::vector<SLaunchZoom> launchZooms;
+    std::vector<SBounce>     bounces;
+    // Y7. Set by the overview while a window drag is in the air, so the pill can
+    // draw the drop glow. Not a flight, but the same question: is the dock in
+    // the middle of something.
+    bool                     windowDragActive = false;
+};
+
+SDockFlight g_flight;
 void rememberMinimizeTile(const PHLWINDOW& window, const CBox& tile) {
-    std::erase_if(g_minimizeTiles, [&](const auto& e) { return !e.first.lock() || e.first.lock() == window; });
-    g_minimizeTiles.emplace_back(window, tile);
+    std::erase_if(g_flight.minimizeTiles, [&](const auto& e) { return !e.first.lock() || e.first.lock() == window; });
+    g_flight.minimizeTiles.emplace_back(window, tile);
 }
 
 CBox takeMinimizeTile(const PHLWINDOW& window) {
-    const auto IT = std::ranges::find_if(g_minimizeTiles, [&](const auto& e) { return e.first.lock() == window; });
-    if (IT == g_minimizeTiles.end())
+    const auto IT = std::ranges::find_if(g_flight.minimizeTiles, [&](const auto& e) { return e.first.lock() == window; });
+    if (IT == g_flight.minimizeTiles.end())
         return {};
     const CBox TILE = IT->second;
-    g_minimizeTiles.erase(IT);
+    g_flight.minimizeTiles.erase(IT);
     return TILE;
 }
-
-// Y4/Y5. ONE FLIGHT PER WINDOW, replacing the single optional. Y4 makes
-// "minimize the whole app" the DEFAULT click, so the old one-at-a-time rule --
-// which was a documented ponytail shortcut while only shift could reach it --
-// would now teleport two of a three-window app on the user's ordinary gesture.
-std::vector<SFlight> g_flights;
 
 // Z4. Everything the compositor wants to ANIMATE about a just-restored window
 // -- geometry easing from its stash box, the MOVE_TO_WORKSPACE fade -- must be
@@ -476,13 +510,6 @@ float easeOutExpo(float t) {
 constexpr float LAUNCH_ZOOM_SCALE = 3.F;   // APPICON_ANIMATION_OUT_SCALE
 constexpr float LAUNCH_ZOOM_MS    = 250.F; // APPICON_ANIMATION_OUT_TIME
 
-struct SLaunchZoom {
-    std::string     icon;
-    CBox            from;
-    Time::steady_tp startedAt;
-};
-
-std::vector<SLaunchZoom> g_launchZooms;
 
 // `Clutter.AnimationMode.EASE_OUT_QUAD`.
 float easeOutQuad(float t) {
@@ -497,8 +524,6 @@ constexpr float DRAG_GLOW_BAND  = 0.30F;
 constexpr float DRAG_GLOW_PX    = 18.F; // how far the halo reaches past the pill
 constexpr float DRAG_GLOW_ALPHA = 0.55F;
 
-bool g_windowDragActive = false;
-
 // Y8. macOS hops the icon a thing LANDS in -- once, not a decaying train, and
 // on arrival rather than on release. Up decelerates and down accelerates, which
 // is both the house rule and what falling actually does.
@@ -506,12 +531,6 @@ constexpr float BOUNCE_MS       = 420.F;
 constexpr float BOUNCE_HEIGHT   = 0.34F; // of one icon height
 constexpr float BOUNCE_UP_SHARE = 0.42F; // the hop is quicker up than down
 
-struct SBounce {
-    std::string     wmClass;
-    Time::steady_tp startedAt;
-};
-
-std::vector<SBounce> g_bounces;
 
 float bounceCurve(float t) {
     if (t <= 0.F || t >= 1.F)
@@ -1008,7 +1027,7 @@ bool autohideAnimating(PHLMONITOR monitor) {
     const auto& R = g_reveal[monitor->m_id];
     // X54. A flight counts as animating: the window is mid-air toward the icon
     // and nothing else on an idle desktop would ask for the frames it needs.
-    return R.pending || !g_flights.empty() || elapsedMs(R.changedAt) < sc<float>(std::max(1, Config::getValue<int>(KEY_AUTOHIDE_MS)));
+    return R.pending || !g_flight.flights.empty() || elapsedMs(R.changedAt) < sc<float>(std::max(1, Config::getValue<int>(KEY_AUTOHIDE_MS)));
 }
 
 SLayout baseLayout(PHLMONITOR monitor) {
@@ -1221,7 +1240,7 @@ void updateAutohide(PHLMONITOR monitor) {
     // no icon to fly to -- the target lookup failed and the flight was dropped
     // on its first frame, which is why it teleported. The dock now comes out for
     // the flight and slides away after it.
-    want = want || URGENT || overlayHoldsDock() || !g_flights.empty();
+    want = want || URGENT || overlayHoldsDock() || !g_flight.flights.empty();
 
     if (want == R.shown) {
         R.pending = false;
@@ -1757,14 +1776,14 @@ static void zdbg(const char* fmt, ...) {
     }
 }
 
-// Z15 (user): defined after g_panel below; a flight click kills the hover
+// Z15 (user): defined after g_hover.panel below; a flight click kills the hover
 // panel INSTANTLY. Leaving it alive re-eased it from a stale parked box, which
 // read as "a panel dragged from the bottom of the screen" under the restore.
 void dismissHoverPanelNow();
 
 bool reverseFlight(const PHLWINDOW& window, bool restoring) {
-    const auto IT = std::ranges::find_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
-    zdbg("reverse(%d) found=%d landing=%d lastA=%f\n", (int)restoring, IT != g_flights.end(), IT == g_flights.end() ? -9 : (int)IT->isLanding(), IT == g_flights.end() ? -9.F : IT->lastAlpha);
+    const auto IT = std::ranges::find_if(g_flight.flights, [&window](const auto& f) { return f.window.lock() == window; });
+    zdbg("reverse(%d) found=%d landing=%d lastA=%f\n", (int)restoring, IT != g_flight.flights.end(), IT == g_flight.flights.end() ? -9 : (int)IT->isLanding(), IT == g_flight.flights.end() ? -9.F : IT->lastAlpha);
     // Reverse UNLESS the flight is already landing (past the point where the
     // motion means anything). It used to also bail when lastAlpha < 0 -- a
     // flight that had not drawn a frame yet -- but that was a strand: the caller
@@ -1774,11 +1793,11 @@ bool reverseFlight(const PHLWINDOW& window, bool restoring) {
     // and a never-drawn flight has no visible proxy to be discontinuous with, so
     // the empty lastDrawn / negative lastAlpha below simply fall through to the
     // render loop's fresh-flight defaults (START = icon/from, default alpha).
-    if (IT == g_flights.end() || IT->isLanding())
+    if (IT == g_flight.flights.end() || IT->isLanding())
         return false;
 
     const SFlight OLD = *IT;
-    g_flights.erase(IT);
+    g_flight.flights.erase(IT);
 
     // Z9r5: state flips WITH the direction. A restoring flight's window is
     // already real -- sending it back means stash (plus unhide on the overview
@@ -1801,7 +1820,7 @@ bool reverseFlight(const PHLWINDOW& window, bool restoring) {
 
     // A reversed flight is always a proxy (never driven): the desktop-driven
     // restore only starts from restoreWithFlightImpl, not from a reversal.
-    g_flights.emplace_back(SFlight{.window    = window,
+    g_flight.flights.emplace_back(SFlight{.window    = window,
                                    .from      = OLD.from,
                                    .kind      = restoring ? EFlightKind::RestoreProxy : EFlightKind::MinimizeProxy,
                                    .startedAt = Time::steadyNow(),
@@ -1847,9 +1866,9 @@ void minimizeWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnL
         // the ACKNOWLEDGEMENT of the drop, so it fires now, while the window
         // is still flying in -- not at the landing.
         if (bounceOnLand)
-            g_bounces.emplace_back(SBounce{.wmClass = window->m_class, .startedAt = Time::steadyNow()});
-        std::erase_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
-        g_flights.emplace_back(SFlight{.window = window, .from = from, .kind = EFlightKind::MinimizeProxy, .startedAt = Time::steadyNow()});
+            g_flight.bounces.emplace_back(SBounce{.wmClass = window->m_class, .startedAt = Time::steadyNow()});
+        std::erase_if(g_flight.flights, [&window](const auto& f) { return f.window.lock() == window; });
+        g_flight.flights.emplace_back(SFlight{.window = window, .from = from, .kind = EFlightKind::MinimizeProxy, .startedAt = Time::steadyNow()});
     }
 }
 
@@ -1863,8 +1882,8 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
     if (window && reverseFlight(window, true)) {
         if (monitor && Minimize::isMinimized(window)) {
             const CBox TARGET = restoreForFlight(monitor, window, CBox{});
-            const auto IT     = std::ranges::find_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
-            if (IT != g_flights.end()) {
+            const auto IT     = std::ranges::find_if(g_flight.flights, [&window](const auto& f) { return f.window.lock() == window; });
+            if (IT != g_flight.flights.end()) {
                 // restoreForFlight may have un-hidden the real window (desktop
                 // path): upgrade the reversed proxy to a driven flight to match.
                 IT->kind = window->isHidden() ? EFlightKind::RestoreProxy : EFlightKind::RestoreDriven;
@@ -1937,8 +1956,8 @@ void restoreWithFlightImpl(PHLMONITOR monitor, PHLWINDOW window) {
     // Desktop path (window not hidden) drives the real window natively (Z17);
     // overview path (hidden) draws a proxy. The kind is frozen here for the
     // whole flight -- Z18: re-deriving it per frame flipped it mid-flight.
-    std::erase_if(g_flights, [&window](const auto& f) { return f.window.lock() == window; });
-    g_flights.emplace_back(SFlight{.window    = window,
+    std::erase_if(g_flight.flights, [&window](const auto& f) { return f.window.lock() == window; });
+    g_flight.flights.emplace_back(SFlight{.window    = window,
                                    .from      = TO,
                                    .kind      = window->isHidden() ? EFlightKind::RestoreProxy : EFlightKind::RestoreDriven,
                                    .startedAt = Time::steadyNow()});
@@ -2070,7 +2089,7 @@ void launchApp(PHLMONITOR monitor, const SItem& item) {
     // and `middle-click-action=launch` alike. GNOME calls animateLaunch() from
     // the same place, on activation rather than on the branch that chose it.
     if (!item.icon.empty() && item.iconBox.width >= 1 && item.iconBox.height >= 1)
-        g_launchZooms.emplace_back(SLaunchZoom{.icon = item.icon, .from = item.iconBox, .startedAt = Time::steadyNow()});
+        g_flight.launchZooms.emplace_back(SLaunchZoom{.icon = item.icon, .from = item.iconBox, .startedAt = Time::steadyNow()});
 
     const bool  FIRSTINSTANCE = item.uri.empty() ? classWindows(item.wmClass).empty() : true;
     const auto  PENDKEY       = !item.uri.empty() ? item.uri : (item.desktopId.empty() ? item.wmClass : item.desktopId);
@@ -2150,8 +2169,8 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl =
     // then reverses its flight in place.
     bool anyFlight = false;
     for (const auto& WINDOW : windows) {
-        const auto IT = std::ranges::find_if(g_flights, [&WINDOW](const auto& f) { return f.window.lock() == WINDOW; });
-        if (IT == g_flights.end())
+        const auto IT = std::ranges::find_if(g_flight.flights, [&WINDOW](const auto& f) { return f.window.lock() == WINDOW; });
+        if (IT == g_flight.flights.end())
             continue;
         anyFlight = true;
         if (IT->isRestore() && Minimize::isMinimized(WINDOW))
@@ -2506,12 +2525,16 @@ struct SDockDrag {
     int         insert = -1;
 };
 
-std::optional<SDockDrag> g_drag;
+// The two things that can be moving an icon: the dock's own drag, and G12's
+// caret -- a foreign drag keeps its state in the search panel and only ever
+// hands the dock an index to draw, so the two sources cannot both think they
+// own the gesture. One struct, so a reader can see there are exactly two.
+struct SDockDragState {
+    std::optional<SDockDrag> drag;
+    int                      foreignInsert = -1;
+};
 
-// G12's caret. A foreign drag keeps its own state in the search panel and only
-// ever hands the dock the index to draw, so the two sources cannot both think
-// they own the gesture.
-int g_foreignInsert = -1;
+SDockDragState g_dockDrag;
 
 // Deliberately the overview's own threshold: two drags on one screen that start
 // at different distances would read as one of them being sticky.
@@ -2532,7 +2555,7 @@ std::vector<size_t> favoriteSlots(const SLayout& layout) {
 }
 
 int caretIndex() {
-    return g_drag && g_drag->live ? g_drag->insert : g_foreignInsert;
+    return g_dockDrag.drag && g_dockDrag.drag->live ? g_dockDrag.drag->insert : g_dockDrag.foreignInsert;
 }
 
 // Where the caret sits for an insertion index: hard against the left edge of
@@ -2820,7 +2843,7 @@ void unpin(const std::string& desktopId) {
 }
 
 bool dragBegin(PHLMONITOR monitor, const Vector2D& point) {
-    g_drag.reset();
+    g_dockDrag.drag.reset();
 
     if (!monitor)
         return false;
@@ -2830,32 +2853,32 @@ bool dragBegin(PHLMONITOR monitor, const Vector2D& point) {
     if (ITEM == LAYOUT.items.end() || ITEM->desktopId.empty())
         return false;
 
-    g_drag = SDockDrag{.id = ITEM->desktopId, .start = point};
+    g_dockDrag.drag = SDockDrag{.id = ITEM->desktopId, .start = point};
     return true;
 }
 
 bool dragMove(PHLMONITOR monitor, const Vector2D& point) {
-    if (!g_drag || !monitor)
+    if (!g_dockDrag.drag || !monitor)
         return false;
 
-    if (!g_drag->live) {
+    if (!g_dockDrag.drag->live) {
         const float T = dragThresholdPx(monitor);
-        if (g_drag->start.distanceSq(point) <= T * T)
+        if (g_dockDrag.drag->start.distanceSq(point) <= T * T)
             return false;
 
-        g_drag->live = true;
+        g_dockDrag.drag->live = true;
     }
 
-    g_drag->insert = dropIndexAt(monitor, point);
+    g_dockDrag.drag->insert = dropIndexAt(monitor, point);
     return true;
 }
 
 bool dragEnd(PHLMONITOR monitor, const Vector2D& point) {
-    if (!g_drag)
+    if (!g_dockDrag.drag)
         return false;
 
-    const auto DRAG = *g_drag;
-    g_drag.reset();
+    const auto DRAG = *g_dockDrag.drag;
+    g_dockDrag.drag.reset();
 
     if (!DRAG.live)
         return false;
@@ -2889,19 +2912,19 @@ bool dragEnd(PHLMONITOR monitor, const Vector2D& point) {
 }
 
 void dragCancel() {
-    g_drag.reset();
+    g_dockDrag.drag.reset();
 }
 
 bool dragPending() {
-    return g_drag.has_value();
+    return g_dockDrag.drag.has_value();
 }
 
 bool dragging() {
-    return g_drag && g_drag->live;
+    return g_dockDrag.drag && g_dockDrag.drag->live;
 }
 
 void setForeignInsert(int index) {
-    g_foreignInsert = index;
+    g_dockDrag.foreignInsert = index;
 }
 
 bool openMenu(PHLMONITOR monitor, const Vector2D& point) {
@@ -3078,7 +3101,7 @@ bool damageIfChanged(PHLMONITOR monitor) {
 // pointed at the dispatcher measured "no animation", and why the diagnostic log
 // came back EMPTY rather than wrong.
 void setWindowDragActive(bool active) {
-    g_windowDragActive = active;
+    g_flight.windowDragActive = active;
 }
 
 void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand) {
@@ -3222,41 +3245,47 @@ struct SPanel {
     Time::steady_tp leftAt    = Time::steadyNow();
 };
 
-std::optional<SPanel> g_panel;
+// The hover panel: the state it is in, and -- Y1/Y2 -- the geometry it was
+// actually DRAWN at last frame, plus the cell each window landed in.
+// Hit-testing has to use the drawn boxes rather than the settled target:
+// during the entrance and the slide the plate on screen is somewhere else
+// entirely, and a pointer resting on what it can see must not fall through a
+// box that has not arrived yet. Same reasoning the X28 menu already documents
+// for its rows.
+struct SDockHoverPanel {
+    std::optional<SPanel>                      panel;
+    CBox                                       drawn;
+    std::vector<std::pair<CBox, PHLWINDOWREF>> cells;
+};
+
+SDockHoverPanel g_hover;
 
 void dismissHoverPanelNow() {
-    g_panel.reset();
+    g_hover.panel.reset();
     // The tooltip is a separate element and lingered into the flight ("sh"
     // bubble, frame 279 of the verification film). Clearing the name kills it
     // this frame -- the fade-out path only runs while a name is remembered.
     g_tip = {};
 }
 
-// Y1/Y2. The panel AS DRAWN last frame, plus the cell each window landed in.
-// Hit-testing has to use these rather than the settled target: during the
-// entrance and the slide the plate on screen is somewhere else entirely, and a
-// pointer resting on what it can see must not fall through a box that has not
-// arrived yet. Same reasoning the X28 menu already documents for its rows.
-CBox                                       g_panelDrawn;
-std::vector<std::pair<CBox, PHLWINDOWREF>> g_panelCells;
 
 void forgetPanelGeometry() {
-    g_panelDrawn = CBox{};
-    g_panelCells.clear();
+    g_hover.drawn = CBox{};
+    g_hover.cells.clear();
 }
 
 // Y1. Inside the plate that is actually on screen -- and not while it is
 // leaving, or a dismissal already under way would be resurrected by a pointer
 // that merely happens to be where the shrinking plate still is.
 bool panelContains(const Vector2D& point) {
-    return g_panel && !g_panel->out && g_panelDrawn.width >= 1 && g_panelDrawn.height >= 1 && g_panelDrawn.containsPoint(point);
+    return g_hover.panel && !g_hover.panel->out && g_hover.drawn.width >= 1 && g_hover.drawn.height >= 1 && g_hover.drawn.containsPoint(point);
 }
 
 // Y2. The preview cell under the pointer and the window in it. The BOX comes
 // back with the window because the title plate is centred on the cell, not on
 // the icon the panel belongs to.
 std::optional<std::pair<CBox, PHLWINDOW>> panelCellAt(const Vector2D& point) {
-    for (const auto& [BOX, REF] : g_panelCells) {
+    for (const auto& [BOX, REF] : g_hover.cells) {
         if (!BOX.containsPoint(point))
             continue;
 
@@ -3317,52 +3346,52 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
     if (WANT) {
         const CBox TARGET = panelTarget(monitor, layout, windows, anchor);
 
-        if (!g_panel) {
+        if (!g_hover.panel) {
             // Rises out of the icon, decelerating into place.
-            g_panel = SPanel{.wmClass = wmClass, .anchor = anchor, .target = TARGET, .from = anchor, .moveSince = now, .moveMs = PANEL_IN_MS, .decel = true};
+            g_hover.panel = SPanel{.wmClass = wmClass, .anchor = anchor, .target = TARGET, .from = anchor, .moveSince = now, .moveMs = PANEL_IN_MS, .decel = true};
         } else {
-            g_panel->leaving = false;
-            g_panel->wmClass = wmClass;
-            g_panel->anchor  = anchor;
+            g_hover.panel->leaving = false;
+            g_hover.panel->wmClass = wmClass;
+            g_hover.panel->anchor  = anchor;
 
             // Caught mid-dismissal, or moved to another icon: in both cases the
             // move restarts from WHERE IT IS, which is what makes it read as one
             // panel following the pointer rather than two panels swapping.
-            if (g_panel->out || !sameBox(g_panel->target, TARGET)) {
-                const float T = std::clamp(elapsedMs(g_panel->moveSince) / std::max(1.F, g_panel->moveMs), 0.F, 1.F);
+            if (g_hover.panel->out || !sameBox(g_hover.panel->target, TARGET)) {
+                const float T = std::clamp(elapsedMs(g_hover.panel->moveSince) / std::max(1.F, g_hover.panel->moveMs), 0.F, 1.F);
 
-                g_panel->from      = lerpBox(g_panel->from, g_panel->target, houseEase(g_panel->decel, T));
-                g_panel->target    = TARGET;
-                g_panel->moveSince = now;
-                g_panel->moveMs    = g_panel->out ? PANEL_IN_MS : PANEL_SLIDE_MS;
-                g_panel->decel     = true;
-                g_panel->out       = false;
+                g_hover.panel->from      = lerpBox(g_hover.panel->from, g_hover.panel->target, houseEase(g_hover.panel->decel, T));
+                g_hover.panel->target    = TARGET;
+                g_hover.panel->moveSince = now;
+                g_hover.panel->moveMs    = g_hover.panel->out ? PANEL_IN_MS : PANEL_SLIDE_MS;
+                g_hover.panel->decel     = true;
+                g_hover.panel->out       = false;
             }
         }
-    } else if (g_panel) {
-        if (!g_panel->out && !g_panel->leaving) {
-            g_panel->leaving = true;
-            g_panel->leftAt  = now;
+    } else if (g_hover.panel) {
+        if (!g_hover.panel->out && !g_hover.panel->leaving) {
+            g_hover.panel->leaving = true;
+            g_hover.panel->leftAt  = now;
         }
 
         // The grace expires: shrink back into the icon, accelerating.
-        if (g_panel->leaving && elapsedMs(g_panel->leftAt) >= PANEL_GRACE_MS) {
-            const float T = std::clamp(elapsedMs(g_panel->moveSince) / std::max(1.F, g_panel->moveMs), 0.F, 1.F);
+        if (g_hover.panel->leaving && elapsedMs(g_hover.panel->leftAt) >= PANEL_GRACE_MS) {
+            const float T = std::clamp(elapsedMs(g_hover.panel->moveSince) / std::max(1.F, g_hover.panel->moveMs), 0.F, 1.F);
 
-            g_panel->from      = lerpBox(g_panel->from, g_panel->target, houseEase(g_panel->decel, T));
-            g_panel->target    = g_panel->anchor;
-            g_panel->moveSince = now;
-            g_panel->moveMs    = PANEL_OUT_MS;
-            g_panel->decel     = false;
-            g_panel->out       = true;
-            g_panel->leaving   = false;
+            g_hover.panel->from      = lerpBox(g_hover.panel->from, g_hover.panel->target, houseEase(g_hover.panel->decel, T));
+            g_hover.panel->target    = g_hover.panel->anchor;
+            g_hover.panel->moveSince = now;
+            g_hover.panel->moveMs    = PANEL_OUT_MS;
+            g_hover.panel->decel     = false;
+            g_hover.panel->out       = true;
+            g_hover.panel->leaving   = false;
         }
 
         // The panel keeps drawing the LAST app's windows while it dismisses --
         // the pointer has already left, so nothing else names them.
-        windows = panelWindows(g_panel->wmClass);
+        windows = panelWindows(g_hover.panel->wmClass);
         if (windows.empty()) {
-            g_panel.reset();
+            g_hover.panel.reset();
             forgetPanelGeometry();
             return;
         }
@@ -3371,14 +3400,14 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
         return;
     }
 
-    const float T = std::clamp(elapsedMs(g_panel->moveSince) / std::max(1.F, g_panel->moveMs), 0.F, 1.F);
-    if (g_panel->out && T >= 1.F) {
-        g_panel.reset();
+    const float T = std::clamp(elapsedMs(g_hover.panel->moveSince) / std::max(1.F, g_hover.panel->moveMs), 0.F, 1.F);
+    if (g_hover.panel->out && T >= 1.F) {
+        g_hover.panel.reset();
         forgetPanelGeometry();
         return;
     }
 
-    const CBox  DRAWN = lerpBox(g_panel->from, g_panel->target, houseEase(g_panel->decel, T));
+    const CBox  DRAWN = lerpBox(g_hover.panel->from, g_hover.panel->target, houseEase(g_hover.panel->decel, T));
     const float SCALE = std::max(monitor->m_scale, 0.01F);
 
     if (DRAWN.width < 2.0 || DRAWN.height < 2.0) {
@@ -3388,7 +3417,7 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
 
     // The plate fades with the growth so the frost does not slam on at full
     // strength over the icon it is still the size of.
-    const float ALPHA   = g_panel->out ? 1.F - houseEase(false, T) : houseEase(true, T);
+    const float ALPHA   = g_hover.panel->out ? 1.F - houseEase(false, T) : houseEase(true, T);
     const int   ROUNDED = sc<int>(std::round(PANEL_RADIUS * SCALE));
 
     // X13/X29/X86: panel frost shares overview chrome blur when Super is open.
@@ -3420,9 +3449,9 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
 
     // Y1/Y2. Published for the pointer, which is why it is the DRAWN plate and
     // the DRAWN cells rather than the settled ones.
-    g_panelDrawn = DRAWN;
-    g_panelCells.clear();
-    g_panelCells.reserve(windows.size());
+    g_hover.drawn = DRAWN;
+    g_hover.cells.clear();
+    g_hover.cells.reserve(windows.size());
 
     float x = sc<float>(DRAWN.x) + PAD;
     for (const auto& WINDOW : windows) {
@@ -3430,7 +3459,7 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
 
         CBox cell{std::round(x), std::round(sc<float>(DRAWN.y) + PAD), std::round(WIDTH), std::round(CELLH)};
         renderLivePreview(monitor, WINDOW, cell, now);
-        g_panelCells.emplace_back(cell, PHLWINDOWREF{WINDOW});
+        g_hover.cells.emplace_back(cell, PHLWINDOWREF{WINDOW});
 
         x += WIDTH + PANEL_CELL_GAP * SCALE;
     }
@@ -3440,7 +3469,7 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
 // far above, beside updateAutohide, which runs long before any of this is in
 // scope.
 bool panelHoldsDock(PHLMONITOR monitor) {
-    if (!monitor || !g_panel)
+    if (!monitor || !g_hover.panel)
         return false;
 
     return panelContains((g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale);
@@ -3450,7 +3479,7 @@ bool panelHoldsDock(PHLMONITOR monitor) {
 // pointer resting on an icon emits no motion, so without a frame of its own the
 // entrance would freeze on its first step and the previews would be stills.
 bool panelUp() {
-    return g_panel.has_value();
+    return g_hover.panel.has_value();
 }
 
 }
@@ -3518,7 +3547,7 @@ bool panelClick(PHLMONITOR monitor, const Vector2D& point, bool release) {
 // landing together is one bounce and not a double-height launch.
 float bounceLift(const std::string& wmClass, float iconHeight) {
     float lift = 0.F;
-    for (const auto& BOUNCE : g_bounces) {
+    for (const auto& BOUNCE : g_flight.bounces) {
         if (BOUNCE.wmClass != wmClass)
             continue;
 
@@ -3532,7 +3561,7 @@ float bounceLift(const std::string& wmClass, float iconHeight) {
 // between. Uses the pill as laid out THIS frame, so a dock still sliding out
 // glows against where it actually is rather than where it will settle.
 float dragGlow(PHLMONITOR monitor, const SLayout& layout, const Vector2D& mouse) {
-    if (!g_windowDragActive || layout.pill.empty())
+    if (!g_flight.windowDragActive || layout.pill.empty())
         return 0.F;
 
     const float H       = sc<float>(monitor->m_size.y) * monitor->m_scale;
@@ -3559,12 +3588,12 @@ float dragGlow(PHLMONITOR monitor, const SLayout& layout, const Vector2D& mouse)
 // surviving output costs one skipped animation during a hotplug, which is the
 // cheaper of the two wrong answers.
 void settleFlights() {
-    if (g_flights.empty())
+    if (g_flight.flights.empty())
         return;
 
     bool unhid = false;
 
-    for (auto& flight : g_flights) {
+    for (auto& flight : g_flight.flights) {
         const auto WINDOW = flight.window.lock();
         if (!WINDOW)
             continue;
@@ -3583,7 +3612,7 @@ void settleFlights() {
         WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
     }
 
-    g_flights.clear();
+    g_flight.flights.clear();
 
     // Z20: setHidden fires no compositor event, so an overview's draw list is
     // never told and the window becomes a clickable, invisible tile.
@@ -3598,8 +3627,8 @@ void settleFlights() {
 void render(PHLMONITOR monitor) {
     // Y6/Y8. Retire what has run its course before anything asks whether the
     // dock still needs frames.
-    std::erase_if(g_bounces, [](const SBounce& b) { return elapsedMs(b.startedAt) >= BOUNCE_MS; });
-    std::erase_if(g_launchZooms, [](const SLaunchZoom& z) { return elapsedMs(z.startedAt) >= LAUNCH_ZOOM_MS; });
+    std::erase_if(g_flight.bounces, [](const SBounce& b) { return elapsedMs(b.startedAt) >= BOUNCE_MS; });
+    std::erase_if(g_flight.launchZooms, [](const SLaunchZoom& z) { return elapsedMs(z.startedAt) >= LAUNCH_ZOOM_MS; });
 
     const auto LAYOUT = layout(monitor);
     if (LAYOUT.pill.empty())
@@ -3741,7 +3770,7 @@ void render(PHLMONITOR monitor) {
 
     // Y6. GNOME's launch blow-up, drawn over the icon row so the growing clone
     // is not clipped by the neighbours it passes over.
-    for (const auto& ZOOM : g_launchZooms) {
+    for (const auto& ZOOM : g_flight.launchZooms) {
         const auto TEX = OverviewRender::appIcon(ZOOM.icon);
         if (!TEX)
             continue;
@@ -3831,8 +3860,8 @@ void render(PHLMONITOR monitor) {
         // Over the plate but not over an icon: keep the app it is already
         // showing, so crossing from icon to preview is one continuous panel.
         const bool FROMICON = HASHOVER;
-        panelAnchor         = FROMICON ? HOVEREDITEM->iconBox : g_panel->anchor;
-        panelClass          = FROMICON ? HOVEREDITEM->wmClass : g_panel->wmClass;
+        panelAnchor         = FROMICON ? HOVEREDITEM->iconBox : g_hover.panel->anchor;
+        panelClass          = FROMICON ? HOVEREDITEM->wmClass : g_hover.panel->wmClass;
     }
 
     renderHoverPreview(monitor, LAYOUT, panelAnchor, panelClass, NOW);
@@ -3860,7 +3889,7 @@ void render(PHLMONITOR monitor) {
     if (g_menu)
         renderTooltip(monitor, LAYOUT, CBox{}, "");
     else if (CELL && !CELL->second->m_title.empty())
-        renderTooltip(monitor, LAYOUT, CELL->first, CELL->second->m_title, sc<float>(g_panelDrawn.y));
+        renderTooltip(monitor, LAYOUT, CELL->first, CELL->second->m_title, sc<float>(g_hover.drawn.y));
     else if (!panelUp()) {
         if (HASHOVER)
             renderTooltip(monitor, LAYOUT, HOVEREDITEM->iconBox, itemName(*HOVEREDITEM));
@@ -3883,7 +3912,7 @@ void render(PHLMONITOR monitor) {
     // Y4 made "minimize the whole app" the default gesture, so this is a LIST:
     // a three-window app is three flights, and the old single-slot version
     // would have teleported two of them on an ordinary click.
-    for (auto it = g_flights.begin(); it != g_flights.end();) {
+    for (auto it = g_flight.flights.begin(); it != g_flight.flights.end();) {
         const auto  WINDOW = it->window.lock();
         const float T      = flightProgress(*it);
         const auto  ITEM   = WINDOW ? std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return item.wmClass == WINDOW->m_class; }) : LAYOUT.items.end();
@@ -3957,7 +3986,7 @@ void render(PHLMONITOR monitor) {
                 }
             }
 
-            it = g_flights.erase(it);
+            it = g_flight.flights.erase(it);
             continue;
         }
 
@@ -4034,7 +4063,7 @@ void render(PHLMONITOR monitor) {
     // previews all need frames nothing else on an idle desktop would ask for.
     // Y6/Y8 join it: a bounce and a launch zoom both run on a dock nothing else
     // is touching, and neither is in damageIfChanged's signature.
-    if (LAYOUT.previews.empty() && g_flights.empty() && !panelUp() && g_bounces.empty() && g_launchZooms.empty())
+    if (LAYOUT.previews.empty() && g_flight.flights.empty() && !panelUp() && g_flight.bounces.empty() && g_flight.launchZooms.empty())
         return;
 
     // X25. A minimized window sits on a hidden workspace, so its commits damage
