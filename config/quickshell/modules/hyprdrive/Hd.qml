@@ -28,8 +28,17 @@ Singleton {
     property var monitors: []
     property real pendingSeconds: -1
 
+    // Profiles. `profDirty` is the list of files that differ from the last
+    // snapshot -- it is what the Revert button is enabled by, so it is a
+    // property and not a computed guess.
+    property var snapshots: []
+    property var profiles: []
+    property var profDirty: []
+    property string profHead: ""
+
     readonly property string hdctl: `${root.repo}/scripts/hdctl.py`
     readonly property string hdmon: `${root.repo}/scripts/hdmon.py`
+    readonly property string hdprof: `${root.repo}/scripts/hdprof.py`
 
     function entriesFor(pane) {
         if (!root.schema) return [];
@@ -73,6 +82,60 @@ Singleton {
             `printf %s '${Qt.btoa(text)}' | base64 -d | python3 ${root.hdctl} raw-write ${pane}`];
         setProc.running = true;
     }
+
+    // -------------------------------------------------------------- profiles --
+    // Every one of these is `hdprof`, and hdprof is what the importer and the
+    // monitor pane call too -- so "snapshot" means the same thing whether a
+    // person clicked it or an import took it on their behalf.
+    function refreshProfiles() {
+        if (!root.repo) return;
+        profStatusProc.running = true;
+        profListProc.running = true;
+        profTagProc.running = true;
+    }
+
+    function profSnapshot(reason) {
+        root.status = "taking a snapshot";
+        profProc.command = ["python3", root.hdprof, "snapshot", "--reason", reason];
+        profProc.running = true;
+    }
+
+    function profSave(name) {
+        root.status = `saving profile ${name}`;
+        profProc.command = ["python3", root.hdprof, "save", name];
+        profProc.running = true;
+    }
+
+    function profApply(name) {
+        root.status = `applying profile ${name}`;
+        profProc.command = ["python3", root.hdprof, "apply", name];
+        profProc.running = true;
+    }
+
+    // No ref = the last snapshot, which is the one taken before whatever just
+    // happened. That is the whole point of taking them before rather than after.
+    function profRevert(ref) {
+        root.status = ref ? `restoring ${ref}` : "reverting to the last snapshot";
+        profProc.command = ref
+            ? ["python3", root.hdprof, "revert", ref]
+            : ["python3", root.hdprof, "revert"];
+        profProc.running = true;
+    }
+
+    function profImportPreview(path) {
+        root.importReport = null;
+        root.status = `reading ${path}`;
+        importProc.command = ["python3", `${root.repo}/scripts/hdimport.py`, "preview", path, "--json"];
+        importProc.running = true;
+    }
+
+    function profImportApply(path) {
+        root.status = `importing ${path}`;
+        profProc.command = ["python3", `${root.repo}/scripts/hdimport.py`, "apply", path];
+        profProc.running = true;
+    }
+
+    property var importReport: null
 
     // ---------------------------------------------------------------- reads --
     function refresh() {
@@ -132,6 +195,7 @@ Singleton {
                 root.repo = text.trim();
                 root.refresh();
                 root.refreshMonitors();
+                root.refreshProfiles();
             }
         }
     }
@@ -191,7 +255,68 @@ Singleton {
     Timer {
         id: refreshTimer
         interval: 350          // the reload has to land first
-        onTriggered: { root.refresh(); root.refreshMonitors(); }
+        onTriggered: { root.refresh(); root.refreshMonitors(); root.refreshProfiles(); }
+    }
+
+    Process {
+        id: profStatusProc
+        command: ["python3", root.hdprof, "status", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const d = JSON.parse(text);
+                    root.profDirty = d.dirty ?? [];
+                    root.profHead = d.head ?? "";
+                } catch (e) { root.profDirty = []; }
+            }
+        }
+    }
+
+    Process {
+        id: profListProc
+        command: ["python3", root.hdprof, "list", "--json", "-n", "25"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { root.snapshots = JSON.parse(text).snapshots ?? []; }
+                catch (e) { root.snapshots = []; }
+            }
+        }
+    }
+
+    Process {
+        id: profTagProc
+        command: ["python3", root.hdprof, "profiles", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { root.profiles = JSON.parse(text); } catch (e) { root.profiles = []; }
+            }
+        }
+    }
+
+    Process {
+        id: importProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { root.importReport = JSON.parse(text); }
+                catch (e) { root.status = "that file did not parse: " + e; }
+            }
+        }
+        stderr: StdioCollector {
+            onStreamFinished: { if (text.trim()) root.status = text.trim(); }
+        }
+    }
+
+    Process {
+        id: profProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.status = text.trim().split("\n").pop();
+                refreshTimer.restart();
+            }
+        }
+        stderr: StdioCollector {
+            onStreamFinished: { if (text.trim()) root.status = text.trim(); }
+        }
     }
 
     Process {

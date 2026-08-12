@@ -49,6 +49,7 @@ ApplicationWindow {
     // reason the overview never shows a double image.)
     property int activePage: 0
     property bool closing: false
+    property bool startPaneApplied: false
 
     // The panes come from the schema, so a pane added in curated.json appears
     // here without this file changing.
@@ -70,6 +71,26 @@ ApplicationWindow {
     Component.onCompleted: {
         MaterialThemeLoader.reapplyTheme();
         openAnim.start();
+    }
+
+    // HYPRDRIVE_PANE=wallpaper opens on the Wallpaper pane. It is applied once,
+    // when the schema arrives (the pane list does not exist before that), and it
+    // sets activePage too so the first pane is not animated in from the pane
+    // nobody asked for. A name that is not a pane is ignored rather than
+    // corrected: guessing is how you land on the wrong screen silently.
+    Connections {
+        target: Hd
+        function onReadyChanged() {
+            if (!Hd.ready || root.startPaneApplied) return;
+            root.startPaneApplied = true;
+            const want = Quickshell.env("HYPRDRIVE_PANE");
+            if (!want) return;
+            const i = root.pages.findIndex(p => p.id === want);
+            if (i >= 0) {
+                root.currentPage = i;
+                root.activePage = i;
+            }
+        }
     }
 
     // The close is an animation with a quit on the end of it, not a quit. An exit
@@ -223,10 +244,16 @@ ApplicationWindow {
                         anchors.margins: 14
                         active: Hd.ready
 
+                        // Three panes need more than rows: monitors has the
+                        // countdown, profiles is a log and not a form, and
+                        // wallpaper is a picture grid. Everything else IS rows,
+                        // which is why there is one component for all of them.
                         sourceComponent: {
                             const p = root.pages[root.activePage];
                             if (!p) return null;
-                            return p.id === "monitors" ? monitorsC : schemaC;
+                            if (p.id === "monitors") return monitorsC;
+                            if (p.id === "profiles") return profilesC;
+                            return schemaC;
                         }
 
                         // Pane switching obeys the same two curves as the window:
@@ -274,6 +301,7 @@ ApplicationWindow {
                         SchemaPane { pane: root.pages[root.activePage]?.id ?? "hyprland" }
                     }
                     Component { id: monitorsC; MonitorsPane {} }
+                    Component { id: profilesC; ProfilesPane {} }
 
                     StyledText {
                         anchors.centerIn: parent

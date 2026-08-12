@@ -62,6 +62,13 @@
       "icon": "widgets",
       "fragment": null,
       "blurb": "illogical-impulse's own knobs, written to its config.json."
+    },
+    {
+      "id": "profiles",
+      "title": "Profiles",
+      "icon": "history",
+      "fragment": null,
+      "blurb": "Snapshots of every file this app can write, the themes you imported into them, and one button that puts it all back."
     }
   ],
 
