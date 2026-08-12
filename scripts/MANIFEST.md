@@ -56,6 +56,7 @@ Row colours: green PASS/SKIP, red FAIL/SLATE, yellow DIED.
 | `z1_preview_survives_swaps` | dock-hover | Z1 (user report 2026-08-07): move window to another desktop, hover its dock preview, swap desktops back and forth — preview must still draw (h0 before swaps ==  | ~1.5 min |
 | `z2_preview_click_goto` | dock-click | Z2 (user report 2026-08-07): clicking the dock preview goes to that window — view lands on its desktop AND it is focused; control click at the same height but o | ~1 min |
 | `z3_position_memory` | drag-strip | Z3 (user report 2026-08-07): strip moves after the first must still remember coordinates — G1 main tile -> off-screen desktop mini (always worked, keep), G2 str | ~3 min |
+| `z10_theme_adopt` | config | Phase 10 theme adoption, end to end: a wallpaper swap through the rice's own rotation script (`THEME=1`) must repaint the dock pill AND the overview strip ring with no compositor restart and nobody typing anything — asserted by requiring the systemd path unit to have fired (service InvocationID changes, theme-sync's log grows) rather than by the gate not calling it. Two-sided in one run: P1 inherits (dock delta 14.54 over a backdrop control of 0.00, cos 1.000 against the move the palette predicts; ring 1311 -> 0 old, 0 -> 1310 new), P2 pins the dock's accent keys in a later-sorting fragment (dock delta 0.00 while the overview still repaints). Red two ways on the old world and they fail differently: with nothing installed the overview arms pass on Hyprland's own config-file auto-reload and the dock arms sit at 0.00 (`zrig/phase10/z10-on-parent.log`); with the derived fragment present and the sync off, BOTH accents freeze (`z10-stale-pin.log`) | ~4 min |
 | `zflight_z4_z7` | minimize-restore | z4: no hole at restore landing (green area never dips below 25% of steady after first exceeding 50%); z4t: tiled window's restore flies to its tile, not the sta | ~3-4 min for all six arms |
 
 Run one gate: `scripts/gates/<name>/run.sh`. Its stdout+stderr land in
@@ -198,6 +199,26 @@ Known follow-ups (tracked, not worked around):
   itself — it had been invoking share/hyprrestart.sh, a HOST script whose every
   step goes through ssh and which therefore did nothing at all from inside the
   guest.)*
+
+## Phase 10 notes (2026-08-12)
+
+- **Every "opaque" kitty fixture in this guest is 8% wallpaper.**
+  `custom/rules.lua:40` applies `opacity 0.92 0.86` to class `.*`, and kitty's
+  own `-o background_opacity=1.0` does not override a compositor window rule.
+  Any gate whose claim rests on a solid-colour backdrop is measuring the
+  photograph behind it as well; `z10_theme_adopt` pins its own fixture with a
+  later `hl.window_rule` and then CHECKS the frame (`off < 3`) before measuring.
+  Worth auditing the other pixel gates for the same assumption.
+- **`hyprctl reload` re-applies the monitor config.** It re-enables Virtual-1
+  and drops a rig's headless output to 1920x1080 at x=2560, and it discards live
+  `hl.config` writes. A gate that reloads mid-run must put its own session
+  settings in a config fragment, where the reload re-applies them instead of
+  undoing them, rather than setting them live.
+- **Hyprland 0.56 auto-reloads on a change to a file it has already sourced**
+  (a NEW file is not watched until some reload has sourced it). That is how
+  matugen's `hyprland/colors.lua` reached the running session before this phase,
+  and it is why `05-theme-derived.lua` has to be regenerated rather than merely
+  written.
 
 ## Gate baseline notes (2026-08-08)
 
