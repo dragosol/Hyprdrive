@@ -146,14 +146,16 @@ def build_mask(out, shape):
     return m, notes, (x1 - x0) * (y1 - y0)
 
 
-def main(argv):
-    tag = argv[1] if len(argv) > 1 else "post"
-    out = pathlib.Path(argv[2]) if len(argv) > 2 else pathlib.Path("/home/dragos/hyprvm/share/g1")
+def grade(out, fr, rows, label):
+    """Mask, dilate, blob, one table. True iff every row passed.
 
-    names = ["00-ctrlA", "01-ctrlB", "10-space", "20-typed", "30-kx", "40-k_x", "50-nostart"]
-    fr = {n: load(out, tag, n) for n in names}
-    h, w = fr["00-ctrlA"].shape[:2]
-
+    `rows` are (claim, frame-label, a, b, "quiet"|"loud"). This is shared with
+    gates/g1/g1c_grade.py rather than transcribed into it: the compose arm was
+    still diffing whole unmasked frames against a 400 px floor on 2026-08-12,
+    which is the same defect this file was rewritten to remove, and a doctrine
+    that exists in two copies drifts back apart. One implementation, two arms.
+    """
+    h, w = fr[rows[0][2]].shape[:2]
     mask, notes, pinned = build_mask(out, (h, w))
     pct = 100.0 * mask.sum() / (h * w)
     ppct = 100.0 * pinned / (h * w)
@@ -167,13 +169,13 @@ def main(argv):
     if ppct > 1.5:
         print(f"MASK     the pinned clock box is {ppct:.2f}% of the frame -- a hand-written "
               "mask that big can hide the very change this gate exists to catch")
-        print("G1 GATE: FAIL (MASK)")
-        return 1
+        print(f"{label}: FAIL (MASK)")
+        return False
     if pct > 8.0:
         print(f"MASK     {pct:.2f}% of the frame is masked -- too much of the output is "
               "somebody else's chrome for this measurement to mean anything")
-        print("G1 GATE: FAIL (MASK)")
-        return 1
+        print(f"{label}: FAIL (MASK)")
+        return False
 
     keep = ~mask
 
@@ -186,18 +188,12 @@ def main(argv):
         return {"identical": ident, "raw": int(raw.sum()), "changed": int(m.sum()),
                 "blob": cells * S * S, "box": box}
 
-    rows = [
-        ("SPACE on an empty query is a no-op", "ctrlA vs 10-space", "00-ctrlA", "10-space", "quiet"),
-        ("no drift between two idle frames", "ctrlA vs 01-ctrlB", "00-ctrlA", "01-ctrlB", "quiet"),
-        ("LIVENESS: 'k' does start a search", "ctrlA vs 20-typed", "00-ctrlA", "20-typed", "loud"),
-        ("SPACE types once a search is active", "30-kx vs 40-k_x", "30-kx", "40-k_x", "loud"),
-        ("TAB/BACKSPACE/F5 start no search", "ctrlA vs 50-nostart", "00-ctrlA", "50-nostart", "quiet"),
-    ]
-
+    cw = max(len(r[0]) for r in rows)
+    fw = max(len(r[1]) for r in rows)
     print()
-    print(f"{'claim':38} {'frames':21} {'raw':>8} {'masked':>8} {'blob':>9}  verdict")
+    print(f"{'claim':{cw}} {'frames':{fw}} {'raw':>8} {'masked':>8} {'blob':>9}  verdict")
     ok_all = True
-    for claim, label, a, b, kind in rows:
+    for claim, flabel, a, b, kind in rows:
         r = measure(a, b)
         if kind == "quiet":
             ok = r["blob"] <= QUIET
@@ -209,12 +205,29 @@ def main(argv):
             why = "" if ok else ("  <- IDENTICAL FRAMES" if r["identical"]
                                  else f"  <- blob {r['blob']} under LOUD={LOUD}")
         ok_all &= ok
-        print(f"{claim:38} {label:21} {r['raw']:>8} {r['changed']:>8} {r['blob']:>9}  "
+        print(f"{claim:{cw}} {flabel:{fw}} {r['raw']:>8} {r['changed']:>8} {r['blob']:>9}  "
               f"{'PASS' if ok else 'FAIL'}{why}")
 
     print()
-    print("G1 GATE: PASS" if ok_all else "G1 GATE: FAIL")
-    return 0 if ok_all else 1
+    print(f"{label}: PASS" if ok_all else f"{label}: FAIL")
+    return ok_all
+
+
+def main(argv):
+    tag = argv[1] if len(argv) > 1 else "post"
+    out = pathlib.Path(argv[2]) if len(argv) > 2 else pathlib.Path("/home/dragos/hyprvm/share/g1")
+
+    names = ["00-ctrlA", "01-ctrlB", "10-space", "20-typed", "30-kx", "40-k_x", "50-nostart"]
+    fr = {n: load(out, tag, n) for n in names}
+
+    rows = [
+        ("SPACE on an empty query is a no-op", "ctrlA vs 10-space", "00-ctrlA", "10-space", "quiet"),
+        ("no drift between two idle frames", "ctrlA vs 01-ctrlB", "00-ctrlA", "01-ctrlB", "quiet"),
+        ("LIVENESS: 'k' does start a search", "ctrlA vs 20-typed", "00-ctrlA", "20-typed", "loud"),
+        ("SPACE types once a search is active", "30-kx vs 40-k_x", "30-kx", "40-k_x", "loud"),
+        ("TAB/BACKSPACE/F5 start no search", "ctrlA vs 50-nostart", "00-ctrlA", "50-nostart", "quiet"),
+    ]
+    return 0 if grade(out, fr, rows, "G1 GATE") else 1
 
 
 if __name__ == "__main__":
