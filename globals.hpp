@@ -77,3 +77,17 @@ namespace Prof {
 
 bool ensureScrollOverviewHooks();
 void disableScrollOverviewHooks();
+
+// THE overview membership gate, reachable from a TU that cannot include the
+// internals header. Defined in scrollOverview.cpp as a one-line forwarder to
+// `shouldShowOverviewWindow` in OverviewInternal.hpp, which is the single
+// authority ~40 call sites already consult.
+//
+// It exists because Window.cpp had a COPY of that gate -- the ancestor version,
+// missing the Z9r5 hidden-for-a-flight check, the Y9 minimized-only-under-a-
+// query rule and the search filter -- and the copy decided whether a window's
+// blur takes the precomputed path. Two functions of the same name answering
+// differently about the same window is the exact shape of the Z20/Y9 bug class,
+// and it was one `#include` away from being unfixable: OverviewInternal.hpp
+// pulls in scrollOverview.hpp AND Dock.hpp, so Window.cpp cannot have it.
+bool overviewShowsWindow(const PHLWINDOW& window);

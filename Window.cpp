@@ -100,18 +100,6 @@ static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     return window;
 }
 
-static bool shouldShowOverviewWindow(const PHLWINDOW& window) {
-    const auto WINDOW = getOverviewWindowToShow(window);
-
-    if (!validMapped(WINDOW))
-        return false;
-
-    if (WINDOW->m_pinned && WINDOW->m_isFloating)
-        return false;
-
-    return true;
-}
-
 static float getOverviewWindowTargetOpacity(const PHLWINDOW& window) {
     if (!window)
         return 1.F;
@@ -873,13 +861,13 @@ static bool overviewWorkspaceBoxReadyForPrecomputedBlur(PHLMONITOR monitor, cons
 }
 
 bool shouldUsePrecomputedBlur(const PHLWINDOW& window, PHLMONITOR monitor, const CBox* workspaceBox, const CBox* windowBox, bool dragged) {
-    return !dragged && ScrollOverview::Config::getValue<bool>("decoration:blur:new_optimizations") && shouldShowOverviewWindow(window) && !window->m_isFloating && shouldBlurBackground(window) &&
+    return !dragged && ScrollOverview::Config::getValue<bool>("decoration:blur:new_optimizations") && overviewShowsWindow(window) && !window->m_isFloating && shouldBlurBackground(window) &&
         overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox);
 }
 
 bool shouldUseBlurFramebuffer(const PHLWINDOW& window, PHLMONITOR monitor, const CBox* workspaceBox, const CBox* windowBox) {
     return shouldUsePrecomputedBlur(window, monitor, workspaceBox, windowBox) ||
-        (shouldShowOverviewWindow(window) && shouldBlurBackground(window) && window->m_ruleApplicator->xray().valueOr(false) &&
+        (overviewShowsWindow(window) && shouldBlurBackground(window) && window->m_ruleApplicator->xray().valueOr(false) &&
          overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox));
 }
 

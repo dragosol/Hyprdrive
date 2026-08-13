@@ -4880,6 +4880,12 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     }
 }
 
+// The one line that lets a TU without the internals header ask THE gate; see
+// the declaration in globals.hpp for why Window.cpp needs it.
+bool overviewShowsWindow(const PHLWINDOW& window) {
+    return shouldShowOverviewWindow(window);
+}
+
 namespace {
 struct SSurfaceOwner {
     PHLLS     layer;
