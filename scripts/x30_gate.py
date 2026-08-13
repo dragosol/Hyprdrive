@@ -27,11 +27,20 @@ def load(name):
     return np.asarray(Image.open(f"{D}/{name}.png").convert("RGB")).astype(int)
 
 
-def largest_blob(mask):
+def largest_blob(mask, anchored=False):
     """Biggest connected region, as (top, left, height, width, pixels).
 
     The bbox of every surviving pixel is not a shape: two unrelated specks give
     a box the size of the screen. The dock is one solid rectangle.
+
+    `anchored` keeps only components that REACH THE BOTTOM of the band. The pill
+    emerges from the bottom edge, so its blob always touches it; X47's hover
+    preview panel floats a gap ABOVE the pill and never does. The pointer P6
+    holds against the barrier is also sitting on the icon, so the panel rises
+    mid-burst -- 310x152 at top=1412, 47007px, LARGER than the 502x64 pill it
+    was covering -- and the two frames in the middle of the travel came back
+    shape-mismatched, i.e. the one phase that measures the slide could not see
+    it (measured 2026-08-13, zrig/danglingC/x30-slide-blobs.log).
     """
     seen = np.zeros_like(mask)
     best = []
@@ -47,6 +56,8 @@ def largest_blob(mask):
                 if 0 <= ny < mask.shape[0] and 0 <= nx < mask.shape[1] and mask[ny, nx] and not seen[ny, nx]:
                     seen[ny, nx] = True
                     stack.append((ny, nx))
+        if anchored and max(p[0] for p in px) < mask.shape[0] - 8:
+            continue
         if len(px) > len(best):
             best = px
 
@@ -58,14 +69,14 @@ def largest_blob(mask):
     return (min(ys), min(xs), max(ys) - min(ys) + 1, max(xs) - min(xs) + 1, len(best))
 
 
-def blob(frame, control, noise=None):
+def blob(frame, control, noise=None, anchored=False):
     """The largest changed region in the bottom band, in FULL-frame coords."""
     a = load(frame)[-BAND:]
     b = load(control)[-BAND:]
     mask = np.abs(a - b).sum(axis=2) > THRESH
     if noise is not None:
         mask &= ~noise
-    top, left, h, w, n = largest_blob(mask)
+    top, left, h, w, n = largest_blob(mask, anchored)
     return (top + load(frame).shape[0] - BAND, left, h, w, n)
 
 
@@ -159,7 +170,7 @@ check("P5", ok, "pressure reveals the dock OVER a fullscreen window")
 # animation so the transient can be photographed at all.
 fracs = []
 for i in range(1, 13):
-    top, left, h, w, n = blob(f"slide{i}", "off2", NOISE)
+    top, left, h, w, n = blob(f"slide{i}", "off2", NOISE, anchored=True)
     shaped = h == 0 or (w >= FW * 0.9 and abs((left + w / 2) - FCX) <= 12)
     fracs.append(h / FH if shaped else -1.0)
 print("  slide fractions: " + " ".join(f"{f:.2f}" for f in fracs))

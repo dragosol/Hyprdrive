@@ -3,14 +3,14 @@
  "generator": "scripts/gen_schema.py",
  "hyprland_version": "0.56.1",
  "counts": {
-  "plugin": 79,
+  "plugin": 80,
   "hyprland": 353,
   "curated": 13,
-  "total": 445,
+  "total": 446,
   "per_pane": {
    "overview": 32,
    "blur": 24,
-   "dock": 39,
+   "dock": 40,
    "hyprland": 337,
    "wallpaper": 5,
    "quickshell": 8
@@ -414,6 +414,16 @@
    "min": 0.0,
    "max": 2000.0,
    "widget": "slider"
+  },
+  {
+   "key": "plugin:hyprdrive:dock:require_pressure",
+   "source": "plugin",
+   "pane": "dock",
+   "apply": "reload",
+   "type": "bool",
+   "default": "false",
+   "description": "hyprgnomedock: the bottom edge must be PUSHED past pressure_threshold, not merely touched (D2D require-pressure-to-show)",
+   "widget": "switch"
   },
   {
    "key": "plugin:hyprdrive:dock:show_delay_ms",

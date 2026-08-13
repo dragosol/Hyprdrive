@@ -455,6 +455,13 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CFloatValue>(KEY("dock:pressure_threshold"),
                                    "hyprgnomedock: px of motion pushed into the bottom edge before the dock reveals (D2D pressure-threshold)", 100.F,
                                    SFloatValueOptions{.min = 0.F, .max = 2000.F}));
+    // FALSE where the reference is true, and the divergence is deliberate: the
+    // pressure feed is the RELATIVE motion path, and an absolute pointer never
+    // emits one, so `true` is a dock that never comes out on that hardware. See
+    // the note at the reveal test in Dock.cpp.
+    addKey(makeShared<CBoolValue>(KEY("dock:require_pressure"),
+                                  "hyprgnomedock: the bottom edge must be PUSHED past pressure_threshold, not merely touched (D2D require-pressure-to-show)",
+                                  false));
     addKey(makeShared<CIntValue>(KEY("dock:show_delay_ms"), "hyprgnomedock: delay from the barrier trigger to the reveal (D2D show-delay)", 250,
                                  SIntValueOptions{.min = 0, .max = 5000}));
     addKey(makeShared<CIntValue>(KEY("dock:hide_delay_ms"), "hyprgnomedock: delay from the pointer leaving to the hide (D2D hide-delay)", 200,

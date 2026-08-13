@@ -269,6 +269,7 @@ constexpr const char* KEY_BLUR_VIBR   = "plugin:hyprdrive:dock:blur_vibrancy";
 // 0.25, `hide-delay` 0.20, `animation-time` 0.20.
 constexpr const char* KEY_AUTOHIDE     = "plugin:hyprdrive:dock:autohide";
 constexpr const char* KEY_PRESSURE     = "plugin:hyprdrive:dock:pressure_threshold";
+constexpr const char* KEY_REQ_PRESSURE = "plugin:hyprdrive:dock:require_pressure";
 constexpr const char* KEY_SHOW_DELAY   = "plugin:hyprdrive:dock:show_delay_ms";
 constexpr const char* KEY_HIDE_DELAY   = "plugin:hyprdrive:dock:hide_delay_ms";
 constexpr const char* KEY_AUTOHIDE_MS  = "plugin:hyprdrive:dock:autohide_ms";
@@ -1176,7 +1177,28 @@ void updateAutohide(PHLMONITOR monitor) {
         const auto POINT = g_pInputManager->getMouseCoordsInternal();
         const bool ATEDGE = BOX.containsPoint(POINT) && POINT.y >= BOX.y + BOX.h - REVEAL_BAND;
 
-        want = ATEDGE || R.pressure >= Config::getValue<float>(KEY_PRESSURE);
+        // `require-pressure-to-show`. The reference's switch between the two
+        // reveals, and the one key of X30's four that was never implemented --
+        // which is why `pressure_threshold` could be set to 20, 100 or 5000 and
+        // the same push revealed the dock every time (danglingA ticket x30).
+        //
+        // It was not that the threshold went unread: it was ORed with ATEDGE,
+        // and the band pressure ACCUMULATES in (the bottom EDGE_BAND = 2px) is a
+        // strict subset of the band ATEDGE tests (the bottom REVEAL_BAND = 4px).
+        // `R.pressure >= threshold` could therefore never be true while ATEDGE
+        // was false: the term was unreachable on every device, and the key it
+        // read gated nothing.
+        //
+        // The reference defaults this TRUE. It ships FALSE here, deliberately:
+        // e2aabe8 added the position test because the user reported the reveal
+        // DEAD, and the mechanism it found -- the pressure feed hooks the
+        // RELATIVE motion path while an absolute pointer (a tablet, a VM, most
+        // touch hardware) never emits one -- has not gone away. Defaulting to
+        // the reference's value would hand those users a dock that cannot be
+        // revealed at all. So the shipping default is the behaviour that was
+        // measured to work, and the reference's is one key away.
+        const bool PRESSED = R.pressure >= Config::getValue<float>(KEY_PRESSURE);
+        want               = Config::getValue<bool>(KEY_REQ_PRESSURE) ? (ATEDGE && PRESSED) : ATEDGE;
 
         // X77 (user, 2026-08-06): "if I move my cursor off it, it starts hiding
         // and I can't unhide until it's done hiding".

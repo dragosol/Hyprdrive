@@ -105,8 +105,18 @@ fixed)
 # two would not be enough to tell "the threshold is enforced" from "some fixed
 # amount of shoving reveals it": the SAME push is run against the stock 100 and
 # against a lowered threshold, and only the number changes between them.
+# `require_pressure` is what makes these two phases a measurement rather than a
+# tautology. It ships FALSE (see the note in Dock.cpp), and with it false the
+# bottom edge reveals on POSITION alone -- so a push cannot fail to reveal and
+# "the threshold is enforced" is untestable, which is exactly what the danglingA
+# x30 ticket measured at 20, 100 and 5000. Turned on, the threshold is the whole
+# decision, and P2a/P2b run the SAME push against it from both sides.
+#
+# The push is worth ~72px: `edge` arrives with ~8 (only the steps that land in
+# the 2px band count) and `push 8 8` adds 64 against the clamp.
 weak)
     park; sleep 0.8
+    key require_pressure true; sleep 0.5
     edge
     push 8 8
     sleep 1.2; shot weak
@@ -122,6 +132,7 @@ lowthresh)
     push 8 8
     sleep 1.2; shot lowthresh
     key pressure_threshold 100.0
+    key require_pressure false
     park; sleep 1.5
     echo LOWTHRESH_OK
     ;;
@@ -173,18 +184,27 @@ fullscreen)
 # over before grim has opened the file (the X22 lesson), so the animation is
 # slowed to 2s for this phase only and restored at the end of it.
 slide)
-    # 6000, not 2000. A whole-output grim costs ~0.36s on this guest and there
-    # is roughly 0.8s of dead time between the push and the first frame landing,
-    # so at 2000ms the burst opened at fraction 0.77 and only ONE frame of
-    # twelve fell inside the 0.15..0.85 window the gate asks for -- measured
-    # 2026-08-12: 0.77 0.89 0.98 1.02 1.00 1.00 ... At 6000ms the same dead time
-    # is fraction 0.13 and the twelve frames cover the whole travel.
-    key autohide_ms 6000
+    # The dead time, not the duration, is what decides whether this phase sees
+    # the travel -- and the dead time was mostly THIS PHASE'S OWN 800-step push.
+    # Twelve whole-output grims at ~0.36s each cover ~4.3s, so the burst has to
+    # OPEN near fraction 0. It did not:
+    #
+    #   2000ms + push 40 20   0.77 0.89 0.98 1.02 1.00 ...   1 frame in window
+    #   6000ms + push 40 20   -1 -1 -1 0.83 0.88 0.93 ...    1 frame in window
+    #
+    # Raising the duration 3x moved the opening fraction 0.77 -> 0.83, i.e. not
+    # at all, because `push 40 20` is forty ydotool spawns -- about 5s of wall
+    # clock -- and every one of them is spent watching the slide it triggered on
+    # its FIRST step. So the push goes, and `edge` alone is the trigger: with
+    # `require_pressure` at its shipping FALSE the pointer reaching the bottom
+    # band is what flips the dock, which is exactly the reveal P1..P3 measure.
+    # The hide is completed at the stock 200ms BEFORE the slow duration is armed,
+    # or the burst opens on a pill that is still half-way down from the last one.
     park; sleep 1.5
+    key autohide_ms 3000; sleep 0.3
     edge
-    push 40 20
     for i in $(seq 1 12); do shot slide$i; done
-    sleep 3.0
+    sleep 4.0
     key autohide_ms 200
     park; sleep 1.5
     echo SLIDE_OK
