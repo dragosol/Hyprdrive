@@ -393,6 +393,11 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                     return;
                 }
 
+                // The other half of the one-gesture-at-a-time rule; see the
+                // note at the resize press.
+                if (resize.activeWindow || resize.pointerDown)
+                    return;
+
                 // Before the submap check: that branch returns, and the press
                 // shrink has to show whether or not a submap is active.
                 TileChrome::setPressed(windowAtOverviewPoint(lastMousePosLocal), true);
@@ -455,6 +460,22 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                // ONE POINTER GESTURE AT A TIME. Drag and resize ride DIFFERENT
+                // buttons and had no exclusion between them, so both could own
+                // the same window at once: onMouseMove advances each of them
+                // independently, and a resize begun mid-drag retargets a window
+                // whose position the drag is still writing every frame. Nobody
+                // asked for that gesture -- it is what two independent
+                // pointer-down flags do when neither knows about the other --
+                // and it is the finding that blocked P8's gesture variant.
+                //
+                // The refusal goes on the PRESS, both ways, so the two states
+                // can never coexist and the move handler needs no guard of its
+                // own. Panning counts: it is the third thing the main button
+                // can be doing.
+                if (drag.activeWindow || drag.pendingPrimary || pan.pointerDown)
+                    return;
+
                 beginSubmapMouseClickPending(event.button);
 
                 size_t resizeWorkspace = 0;
@@ -500,6 +521,10 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
         lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
         if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+            // One gesture at a time; see the note at the resize press.
+            if (resize.activeWindow || resize.pointerDown)
+                return;
+
             if (beginSubmapMouseClickPending(event.button))
                 return;
 
