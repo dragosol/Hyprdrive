@@ -165,8 +165,21 @@ def main(argv):
     faster = 1 - c["span"] / o["span"]
     print("    measured: the exit is %.1f%% shorter than the entrance (direction check only)"
           % (100 * faster))
-    if faster <= 0.02:
-        print("    FAIL the exit is not measurably faster than the entrance")
+    # THE FLOOR IS BELOW THE MEASURED NOISE, and it has to be, because the
+    # instrument's under-read is not the same run to run. Seven runs of ONE build
+    # on one wallpaper (zrig/danglingB2/wear/wear.log): open span 216-299 ms for
+    # the same 300 ms animation, close span 149-216 ms for the same 230 ms one,
+    # so this ratio measured 0.001, 0.310, 0.353, 0.357, 0.402, 0.413, 0.500 --
+    # a 0.5-wide band on an unchanging app. The old floor of 0.02 sat INSIDE it
+    # and turned the first x64 of a session red about one run in seven, which is
+    # exactly the position a suite runs it in.
+    # So the film is asked the only thing it can answer at this spread -- that
+    # the exit is not measurably LONGER -- with the floor a further 0.15 below
+    # the worst reading ever measured. The 20-30% claim is graded above, on the
+    # constants the app actually runs.
+    FASTER_FLOOR = -0.15
+    if faster <= FASTER_FLOOR:
+        print("    FAIL the exit is LONGER than the entrance (%.3f, floor %.2f)" % (faster, FASTER_FLOOR))
         bad = 1
     return bad
 
