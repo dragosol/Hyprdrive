@@ -51,7 +51,7 @@ Row colours: green PASS/SKIP, red FAIL/SLATE, yellow DIED.
 | `y11_crossdesk_preview` | dock-hover | 13.14 Y11 (the regression gate on X99): a non-active-desktop dock preview is NON-BLANK (fixture magenta count in the panel band) and LIVE (changed pixels betwee | ~2 min |
 | `y4_click_semantics` | dock-click | 13.14 Y4: plain dock click minimizes ALL of an app's windows, second click restores all, CTRL+click cycles (never stashes) — STATE via special:minimized, not pi | ~2 min |
 | `y7_drag_glow` | drag-strip | 13.14 Y7: dock glow intensity correlated to drag distance within the bottom-30% band — OFF above the band, CONTINUOUS (rungs rise in steps, none is the whole ri | ~1.5 min |
-| `y8_bounce_once` | drag-strip | 13.14 Y8: on drop-to-minimize the landing icon hops ONCE, macOS-like, 'not a decaying bounce train' — IT HAPPENS / ONE PEAK (no second hump above a third of the | ~2-3 min |
+| `y8_bounce_once` | drag-strip | 13.14 Y8: on drop-to-minimize the landing icon hops ONCE, macOS-like, 'not a decaying bounce train' — IT HAPPENS / ONE PEAK (no second hump above a third of the first) / IT SETTLES. The fixture is spawned as `kitty` because the hop moves the ICON and a class with no desktop entry has no icon to move; the gate asserts that before it drags. | ~2-3 min |
 | `y9_filter_reveal` | search | Y9 as revised 2026-08-06: minimized windows show in the overview ONLY when a query matches — q0 no-query magenta ABSENT, q1 'MAGWIN' magenta PRESENT, q2 cleared | ~1.5 min |
 | `z1_preview_survives_swaps` | dock-hover | Z1 (user report 2026-08-07): move window to another desktop, hover its dock preview, swap desktops back and forth — preview must still draw (h0 before swaps ==  | ~1.5 min |
 | `z2_preview_click_goto` | dock-click | Z2 (user report 2026-08-07): clicking the dock preview goes to that window — view lands on its desktop AND it is focused; control click at the same height but o | ~1 min |
@@ -336,6 +336,45 @@ like these, and the shape is the lesson.
   the first click misses the predicted dock cell; ~1 in 3 standalone runs is
   clean, and when it runs the geometry is invariant). Rig-hardening follow-up
   (sweep + settle harder before the first click), not a product defect.
+
+## y8 was photographing an empty square (2026-08-12, fixed)
+
+Three rounds of "the pill never moved" -- peaks 43, 20 and finally 0 px against
+a 300 px floor -- and none of them was about the bounce. The hop moves the
+ICON's draw box and only that (Dock.cpp:3284; the running dot and the badge stay
+put on purpose, which is what macOS does), and the dock draws an icon only for a
+class AppSearch can resolve to a desktop entry. The fixture was
+`kitty --class MARK`; nothing on this guest claims MARK, so its dock cell was an
+empty square with a running dot under it. There was no moving part in frame.
+
+Two fixes, both in the rig:
+
+- the fixture is spawned as `kitty` (`Z3_MARK_CLASS`, default still MARK for
+  z3's own callers), which resolves through kitty.desktop -- and the gate now
+  asserts that its class owns an icon before it drags, naming the fixture rather
+  than the plugin when it does not (`y8_icon_check.py`, mirroring
+  AppSearch::entryIndexForClass);
+- the camera starts AT the release. Z10 arms the hop at the drop, not at the
+  landing, so the drop-committed check that used to run first -- 1.2 s plus an
+  hyprctl round trip, against a 3.4 s hop at anim_scale 8 -- opened the shutter
+  just after the peak. It is asserted after the burst instead.
+
+CALIBRATION, and the floor turns out to have been right all along. Two arms, one
+camera, one band, three runs each (`zrig/danglingB2/y8/arms.log`):
+
+    DROP (flight + hop)          peak 1903, 1903, 1903   one hump, settles to 0
+    dispatcher minimize (no hop) peak   47,   55,   51
+
+The dispatcher arm takes `minimizeWithFlight`'s default `bounceOnLand=false`, so
+it is the same window, the same flight and the same landing with the hop
+removed: whatever the two arms share is not the bounce, and they share almost
+nothing. The 300 px floor sits 5.5x above the no-bounce readings and 6.3x below
+the hop's, in a 38x gap, so it stays. The magnitude corroborates the constants
+independently: BOUNCE_HEIGHT 0.34 of a 54 px icon is an 18 px lift, and an 18 px
+lift of a 54 px icon is ~1944 changed px.
+
+The ONE PEAK half is proven on a mutant film -- the same hop replayed at half
+height 14 frames later -- which the gate reports as "2 humps" and fails.
 
 ## Two gates were graded on the wallpaper, and one of them still is (2026-08-12)
 

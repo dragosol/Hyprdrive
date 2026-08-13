@@ -23,7 +23,25 @@ RIG_HEADLESS=1
 trap 'headless_off; hyprwall_resume' EXIT
 hyprwall_pause 90min
 
+# THE FIXTURE HAS TO HAVE AN ICON, and MARK does not. The hop moves the icon's
+# draw box and only that -- the running dot and the badge stay put on purpose
+# (Dock.cpp:3284) -- and the dock draws an icon only for a class AppSearch can
+# resolve to a desktop entry. `kitty --class MARK` resolves to nothing, so
+# MARK's dock cell is an empty square with a dot under it, and every "the pill
+# never moved" this gate has ever printed (peak 43, 20, and 0 px over three
+# rounds) was a photograph of a cell with nothing in it to move. The fixture is
+# therefore spawned as `kitty`, which resolves through kitty.desktop, and the
+# precondition is asserted here rather than assumed.
+export Z3_MARK_CLASS=${Z3_MARK_CLASS:-kitty}
+export Y8_CLASS=$Z3_MARK_CLASS
+
 echo "=== setup ==="
+if ! python3 scripts/y8_icon_check.py "$Y8_CLASS"; then
+    echo "Y8 RIG FAULT: the fixture class owns no dock icon, so the hop has no moving"
+    echo "part and the band would read zero whatever the bounce does. This is a"
+    echo "statement about the fixture, not about the plugin."
+    exit 1
+fi
 dsp "hl.plugin.$RIG_NS.minimize([[restore]])"; sleep 2
 bash scripts/z3_setup.sh || { echo "Y8 ABORT -- z3_setup failed"; exit 1; }
 

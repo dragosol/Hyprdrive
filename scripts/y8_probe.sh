@@ -17,6 +17,12 @@
 set -u
 source "$(dirname "$0")/lib/rig.sh"
 rig_env || exit 1
+# The fixture's window class. It must be one AppSearch can resolve to a desktop
+# entry: the hop moves the ICON's draw box and nothing else (Dock.cpp:3284, and
+# the running dot and badge are deliberately left where they are), so a class
+# with no icon has no moving part and the band reads zero however the bounce
+# behaves. See gates/y8_bounce_once/run.sh, which asserts this before it drags.
+CLS=${Y8_CLASS:-${Z3_MARK_CLASS:-MARK}}
 OUT=/mnt/host/y8; mkdir -p $OUT; rm -f $OUT/f*.png
 
 GX=$1; GY=$2; PX=$3; PY=$4; PTOP=$5
@@ -55,33 +61,54 @@ walk() { local n=12 i; for i in $(seq 1 $n); do
 warp $((W - 60)) 60; sleep 1.2
 grim -o $MON $OUT/base.png 2>/dev/null
 
-warp $GX $GY; sleep 0.6
-ydotool click 0x40; sleep 0.15
-walk $GX $GY $PX $PY; sleep 0.5
-ydotool click 0x80                     # release ON the pill: flight + bounce
-
-# THE GESTURE HAS TO HAVE LANDED. Without this the gate reads "the pill never
-# moved" for a drop that never committed -- a rig fault wearing a product
-# defect's clothes -- and that is exactly the shape of the red on record
-# (peak 20-46 px against a 300 px floor, three runs, 2026-08-12). MARK on
-# special:minimized is the same ruler x24's minimize rig uses.
-sleep 1.2
-MARKWS=$(hyprctl clients -j | python3 -c "
+# THE CONTROL ARM, and it is the one that makes the number mean "bounce". The
+# flight and the hop overlap almost exactly (minimize_ms 400 and BOUNCE_MS 420,
+# both scaled), and the flight ends INSIDE the band, so "the pill region changed"
+# on its own does not distinguish a hop from a proxy arriving. Y8_NOBOUNCE=1
+# minimizes the same window over the same path with the same camera through the
+# dispatcher, which takes minimizeWithFlight's default bounceOnLand=false
+# (Dock.hpp:207): same flight, same landing, no hop. Whatever the two arms have
+# in common is not the bounce.
+if [ "${Y8_NOBOUNCE:-0}" = 1 ]; then
+    A=$(hyprctl clients -j | python3 -c "
 import json,sys
-print(next((c['workspace']['name'] for c in json.load(sys.stdin) if c['class']=='MARK'), 'GONE'))")
-if [ "$MARKWS" != "special:minimized" ]; then
-    echo "Y8 RIG FAULT: the drop did not minimize MARK (workspace=$MARKWS) -- there is no"
-    echo "landing to photograph, and a 'no bounce' verdict from here would be about the drag."
-    exit 1
+print(next((c['address'] for c in json.load(sys.stdin) if c['class']=='$CLS'), ''))")
+    [ -n "$A" ] || { echo "Y8 CONTROL: no $CLS window to minimize"; exit 1; }
+    dsp "hl.dsp.focus({window = [[address:$A]]})"; sleep 0.4
+    dsp "hl.plugin.$RIG_NS.minimize([[window]])"
+else
+    warp $GX $GY; sleep 0.6
+    ydotool click 0x40; sleep 0.15
+    walk $GX $GY $PX $PY; sleep 0.5
+    ydotool click 0x80                 # release ON the pill: flight + bounce
 fi
 
-# The bounce starts when the flight LANDS, i.e. minimize_ms * anim_scale after
-# the release -- not at the release. A burst that stopped at the flight's end
-# would photograph everything except the thing under test.
+# THE CAMERA STARTS AT THE RELEASE, and nothing goes in front of it. Z10 arms
+# the hop at the DROP ("the hop is the ACKNOWLEDGEMENT of the drop, so it fires
+# now, while the window is still flying in", FlightController.cpp:651), and
+# BOUNCE_UP_SHARE puts the top of it at 0.42 * BOUNCE_MS. The drop-committed
+# check that used to sit here cost 1.2 s plus an hyprctl round trip, which at
+# anim_scale 8 is the whole rise -- the burst opened just after the peak. It is
+# asserted AFTER the burst instead: a drop that did not commit voids the frames
+# either way, and asking first is what made them worthless.
 for i in $(seq 0 $((FRAMES - 1))); do
     grim -o $MON "$(printf "$OUT/f%02d.png" $i)" 2>/dev/null
     sleep $GAP
 done
+
+# THE GESTURE HAS TO HAVE LANDED. Without this the gate reads "the pill never
+# moved" for a drop that never committed -- a rig fault wearing a product
+# defect's clothes -- and that is exactly the shape of the red on record
+# (peak 20-46 px against a 300 px floor, three runs, 2026-08-12). The fixture on
+# special:minimized is the same ruler x24's minimize rig uses.
+MARKWS=$(hyprctl clients -j | python3 -c "
+import json,sys
+print(next((c['workspace']['name'] for c in json.load(sys.stdin) if c['class']=='$CLS'), 'GONE'))")
+if [ "$MARKWS" != "special:minimized" ]; then
+    echo "Y8 RIG FAULT: the drop did not minimize $CLS (workspace=$MARKWS) -- there was no"
+    echo "landing to photograph, and a 'no bounce' verdict from here would be about the drag."
+    exit 1
+fi
 
 # Put the window back so the next rig starts from a normal desktop.
 hyprctl eval "return hl.dispatch(hl.plugin.$RIG_NS.minimize([[restore]]))" >/dev/null 2>&1

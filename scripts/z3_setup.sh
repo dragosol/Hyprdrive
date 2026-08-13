@@ -20,6 +20,17 @@ OUT=/mnt/host/z3; mkdir -p $OUT
 
 MARKX=200; MARKY=150
 
+# The marker's WINDOW CLASS is a parameter because one caller needs it to own a
+# desktop entry. The dock draws an item's icon only when AppSearch can resolve
+# the class to one (Dock.cpp:3276 `if (const auto TEX = appIcon(ITEM.icon))`),
+# and MARK matches nothing on this guest -- so MARK's dock cell is an empty
+# square with a running dot under it, and anything that measures that cell's
+# CONTENTS measures nothing. y8 (the landing hop moves the icon and only the
+# icon) therefore asks for `kitty`, which resolves through kitty.desktop.
+# Everything else keeps MARK: it is a distinct class, which is what the
+# workspace assertions want.
+MARKCLASS=${Z3_MARK_CLASS:-MARK}
+
 # ov/dsp come from rig.sh (identical expansions)
 
 hyprwall_pause
@@ -64,7 +75,7 @@ print(next((c['address'] for c in json.load(sys.stdin) if c['class']=='$1'), '')
     dsp "hl.dsp.window.resize({exact=true,x=$4,y=$5})"; sleep 0.6
 }
 
-spawn MARK '#ff0000' 1 1100 700
+spawn "$MARKCLASS" '#ff0000' 1 1100 700
 spawn Z3Y  '#ffff00' 2 700 450
 spawn Z3C  '#00ffff' 3 700 450
 
@@ -72,15 +83,15 @@ spawn Z3C  '#00ffff' 3 700 450
 dsp "hl.dsp.focus({workspace = 1})"; sleep 1.0
 A=$(hyprctl clients -j | python3 -c "
 import json,sys
-print(next((c['address'] for c in json.load(sys.stdin) if c['class']=='MARK'), ''))")
+print(next((c['address'] for c in json.load(sys.stdin) if c['class']=='$MARKCLASS'), ''))")
 dsp "hl.dsp.focus({window = [[address:$A]]})"; sleep 0.4
 dsp "hl.dsp.window.move({x=$MARKX,y=$MARKY,exact=true})"; sleep 0.8
 
 AT=$(hyprctl clients -j | python3 -c "
 import json,sys
-print(next((str(c['at']) for c in json.load(sys.stdin) if c['class']=='MARK'), '?'))")
-echo "MARK parked at $AT (wanted [$MARKX, $MARKY])"
-case "$AT" in "[$MARKX, $MARKY]") ;; *) echo "ABORT: MARK is at $AT"; exit 1 ;; esac
+print(next((str(c['at']) for c in json.load(sys.stdin) if c['class']=='$MARKCLASS'), '?'))")
+echo "$MARKCLASS parked at $AT (wanted [$MARKX, $MARKY])"
+case "$AT" in "[$MARKX, $MARKY]") ;; *) echo "ABORT: $MARKCLASS is at $AT"; exit 1 ;; esac
 
 hyprctl clients -j > $OUT/clients-0.json
 ov off; sleep 1.2
