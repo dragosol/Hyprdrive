@@ -39,15 +39,18 @@ hyprwall_pause 180min
 export RIG_HYPRWALL_HELD=1
 trap 'RIG_HYPRWALL_HELD=0; hyprwall_resume' EXIT
 
-# ...AND IT IS HELD ON A KNOWN PICTURE, not on whatever was up. Holding alone is
-# not enough for a back-to-back pair, because the suite does not end where it
-# started: z10_theme_adopt swaps the wallpaper and re-derives the palette as its
-# whole claim, so run 2 begins on run 1's leftovers. Two gates are graded on the
-# picture -- x64's frost half, and any colour locator, because the overview shows
-# the wallpaper unblurred by design -- and on 2026-08-12 a pair that did not pin
-# came back 5 red and 7 red on ONE build, the two extra being x26 and x64 reading
-# the photograph (zrig/danglingB2/wear/). pinwall.sh lives on the share because
-# the wallpaper set does; a suite without it still runs, but it says so.
+# ...AND IT IS HELD ON A KNOWN PICTURE, not on whatever was up. A hold freezes
+# the rotation; it does not choose what it freezes, and the rotation had already
+# put a photograph up. Two things are graded on the picture -- x64's frost half,
+# and any colour locator, because the overview draws the wallpaper UNBLURRED by
+# design -- and on 2026-08-12 a pair that held but did not pin came back 5 red
+# and 7 red on ONE build, the two extra being x26 and x64 reading the photograph
+# (zrig/danglingB2/wear/). pinwall.sh lives on the share because the wallpaper
+# set does; a suite without it still runs, but it says so.
+#
+# Reported at both ends because z10_theme_adopt moves the wallpaper mid-run on
+# purpose and puts it back in its EXIT trap: a run that ends somewhere else is a
+# restore that did not happen, and every pixel verdict after it is suspect.
 if [ -f /mnt/host/pinwall.sh ]; then
     bash /mnt/host/pinwall.sh
 else

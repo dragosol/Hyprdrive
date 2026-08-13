@@ -378,10 +378,11 @@ height 14 frames later -- which the gate reports as "2 humps" and fails.
 
 ## Two gates were graded on the wallpaper, and one of them still is (2026-08-12)
 
-The hold was fixed below; PINNING was not, and a hold is not enough for a
-back-to-back pair because **the suite does not end where it started** --
-`z10_theme_adopt` swaps the wallpaper and re-derives the palette as its whole
-claim. A pair run on 2026-08-12 came back **5 red and 7 red on one build**
+The hold was fixed below; PINNING was not. A hold freezes the rotation, it does
+not choose what it freezes -- and the rotation had already put a photograph up:
+the pair of 2026-08-12 ran on wp06 because the timer's last firing before it
+(19:35:53, suites 19:41-20:55, zero rotations between) had left wp06 there, and
+nothing ran `pinwall.sh`. The pair came back **5 red and 7 red on one build**
 (`zrig/danglingB/suites/`), and neither extra red was a build difference:
 
 - `x64`'s frost half compared the patch's high-frequency energy against the
@@ -408,6 +409,12 @@ run of the sequence, not the last.
 
 `suite.sh` now runs `pinwall.sh` itself and prints the wallpaper it started and
 ended on, so a pair that ran on two pictures says so in its own table.
+
+Two commits in this round (`812d2e9`, and a line in `0cfe09d`) blamed the drift
+on `z10_theme_adopt` leaving its wallpaper behind. That is wrong and is corrected
+here: z10 moves the wallpaper on purpose and puts it back, palette included, in
+its EXIT trap (`z10_restore`, `THEME=1 WALL="$WALL0"`), and both converged suites
+end on the picture they started on. The pair was simply never pinned.
 
 ## The wallpaper hold was not holding (2026-08-12, fixed)
 
