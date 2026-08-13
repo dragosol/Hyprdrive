@@ -337,6 +337,39 @@ like these, and the shape is the lesson.
   clean, and when it runs the geometry is invariant). Rig-hardening follow-up
   (sweep + settle harder before the first click), not a product defect.
 
+## Two gates were graded on the wallpaper, and one of them still is (2026-08-12)
+
+The hold was fixed below; PINNING was not, and a hold is not enough for a
+back-to-back pair because **the suite does not end where it started** --
+`z10_theme_adopt` swaps the wallpaper and re-derives the palette as its whole
+claim. A pair run on 2026-08-12 came back **5 red and 7 red on one build**
+(`zrig/danglingB/suites/`), and neither extra red was a build difference:
+
+- `x64`'s frost half compared the patch's high-frequency energy against the
+  wallpaper's own and required it under 60%. That ratio is a measurement of how
+  much APP TEXT is in the patch relative to how detailed the picture is. Measured
+  minutes apart on one build: wp17 (detail 9.3) 28% PASS, wp06 (detail 2.7-3.6)
+  72-95% FAIL -- and a synthetic 45%-alpha UNBLURRED overlay reads 0.45 and would
+  have PASSED. It now correlates the wallpaper's own structure with what shows
+  through: fine detail must be gone (< 0.25, measured 0.002-0.006) and the
+  backdrop's shape must still be there (> 0.20, measured 0.37-0.52). Wallpaper
+  contrast cancels, so the gate no longer cares which picture is up: measured
+  green on wp17, wp02 and wp06.
+- `x26`'s P3b hunts fixture green with `G>150 and R,B<110`, which is also a
+  description of foliage. On wp02 the wallpaper -- drawn UNBLURRED behind the
+  overview by design -- puts 7072 pixels into that mask, and P3b called the
+  largest 16x20 of them "the released window is still up", three runs out of
+  three. The mask now also requires the green to stand 120 above the larger of
+  its own red and blue: fixture 141-142, wallpaper 42-90, accent 53.
+
+Neither was session wear, which was the first hypothesis: six consecutive runs
+of both gates in a session already 5.5 hours old and two suites deep drift
+nowhere (`zrig/danglingB2/wear/wear.log`), and x64's one red there was the FIRST
+run of the sequence, not the last.
+
+`suite.sh` now runs `pinwall.sh` itself and prints the wallpaper it started and
+ended on, so a pair that ran on two pictures says so in its own table.
+
 ## The wallpaper hold was not holding (2026-08-12, fixed)
 
 Two gates are graded on the wallpaper itself -- `x64`'s frost half compares
@@ -384,7 +417,7 @@ drive that and the one gate that needs the window films it.
 | `x61_blur_roundtrip` | 13.8 blur, user law | the app writes `decoration:blur:size` into 41-blur.lua, the compositor reports it, and the frost visibly changes through a translucent fixture over a hard black/white seam (285600 px blob, controls both sides at 0). `unset` restores the file and the option. |
 | `x62_raw_and_pin` | Phase 9 raw block, Phase 10 masking | a line typed into the Blur pane's raw editor survives the app rewriting the machine half AND theme-sync regenerating the derived fragment, and is still in effect; all six `dock:blur_*` are -1 so it fans out without naming the dock; and `hdctl set` on a derived key IS a pin -- theme-sync reports it masked, stands the derived value down, and leaves the unpinned accent following. |
 | `x63_monitor_countdown` | 13.9, monitors | the keep-these-settings leash, three ways: expired (scale back, fragment byte-identical), confirmed (held past the deadline), and CRASHED -- the watcher killed with the countdown open, nothing reverts it, and the next `hdmon check` (which the launcher runs before the window is drawn) does. |
-| `x64_app_obeys_laws` | user law: frost, Apple motion | the app's own surface: detail through it is cut to ~46% of the wallpaper's and is not flat (frosted, not painted over); its open and close are filmed and the open decelerates, the close accelerates, and the exit is measurably shorter. |
+| `x64_app_obeys_laws` | user law: frost, Apple motion | the app's own surface: the wallpaper's FINE detail is gone behind it and its SHAPE is not (high-frequency correlation < 0.25, low-frequency > 0.20 -- frosted, rather than either translucent or painted over); its open and close are filmed and the open decelerates, the close accelerates, and the exit is not longer. |
 
 ### What x61 does NOT claim, and why
 
@@ -411,8 +444,14 @@ instrument and not the app. So the film decides SHAPE (decelerate in, accelerate
 out -- the check that catches a linear fade) and direction, and
 `Motion.qml`'s constants decide DURATION and the 20-30% ratio, read out of the
 file the app actually runs on. The film keeps a veto: anything under 100 ms did
-not happen. The measured ratio is reported but not graded; two runs of the same
-build gave 23.1% and 33.4%, which is the under-read varying, not the app.
+not happen. The measured ratio is reported, and graded only against a floor BELOW the
+measured noise. Seven runs of one build on one wallpaper gave 0.001, 0.310,
+0.353, 0.357, 0.402, 0.413 and 0.500 -- a 0.5-wide band on an unchanging app,
+because the open film also carries Hyprland's own window animation. The old
+floor of 0.02 sat inside that band and reddened the first x64 of a session about
+one run in seven, which is the position a suite runs it in. It is -0.15 now,
+which still catches an exit LONGER than the entrance and leaves the 20-30% claim
+where it can be measured: on the constants the app runs.
 
 ## Phase 12 -- profiles, theme import, wallpaper repos (2026-08-12)
 

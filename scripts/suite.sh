@@ -39,6 +39,24 @@ hyprwall_pause 180min
 export RIG_HYPRWALL_HELD=1
 trap 'RIG_HYPRWALL_HELD=0; hyprwall_resume' EXIT
 
+# ...AND IT IS HELD ON A KNOWN PICTURE, not on whatever was up. Holding alone is
+# not enough for a back-to-back pair, because the suite does not end where it
+# started: z10_theme_adopt swaps the wallpaper and re-derives the palette as its
+# whole claim, so run 2 begins on run 1's leftovers. Two gates are graded on the
+# picture -- x64's frost half, and any colour locator, because the overview shows
+# the wallpaper unblurred by design -- and on 2026-08-12 a pair that did not pin
+# came back 5 red and 7 red on ONE build, the two extra being x26 and x64 reading
+# the photograph (zrig/danglingB2/wear/). pinwall.sh lives on the share because
+# the wallpaper set does; a suite without it still runs, but it says so.
+if [ -f /mnt/host/pinwall.sh ]; then
+    bash /mnt/host/pinwall.sh
+else
+    echo "SUITE: no /mnt/host/pinwall.sh -- the wallpaper is HELD but not PINNED, so a" >&2
+    echo "SUITE: comparison with another run is only valid if it started on this picture." >&2
+fi
+WALL_AT_START=$(jq -r '.background.wallpaperPath' "$HOME/.config/illogical-impulse/config.json" 2>/dev/null)
+echo "wallpaper: $WALL_AT_START"
+
 for dir in scripts/gates/*/; do
     name=$(basename "$dir")
     if [ $# -gt 0 ]; then
@@ -81,7 +99,11 @@ for dir in scripts/gates/*/; do
     printf '%s%-24s %-5s %4ss%s\n' "$c" "$name" "${RES[$name]}" "${SECS[$name]}" "$NC"
 done
 
+WALL_AT_END=$(jq -r '.background.wallpaperPath' "$HOME/.config/illogical-impulse/config.json" 2>/dev/null)
 echo
+echo "wallpaper: started on $WALL_AT_START, ended on $WALL_AT_END"
+[ "$WALL_AT_START" = "$WALL_AT_END" ] \
+    || echo "SUITE: the wallpaper MOVED during the run -- every pixel verdict above is suspect"
 printf '== %d gates, %d red\n' "${#NAMES[@]}" \
     "$(for n in "${NAMES[@]}"; do echo "${RES[$n]}"; done | grep -cE 'FAIL|DIED|SLATE')"
 [ $fail = 0 ]
