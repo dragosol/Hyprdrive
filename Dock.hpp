@@ -40,22 +40,15 @@ struct SItem {
     bool        trashEmpty = true;  // no `Empty Trash` row while it is
 };
 
-// X25. One minimized window, drawn in the pill as the REAL window, live.
-struct SPreview {
-    PHLWINDOW window;
-    CBox      box; // monitor-local, RENDER px
-};
-
 struct SLayout {
-    CBox                  pill; // monitor-local, RENDER px; empty when there is nothing to draw
-    int                   rounding = 0;
-    std::vector<SItem>    items;
-    std::vector<SPreview> previews;
+    CBox               pill; // monitor-local, RENDER px; empty when there is nothing to draw
+    int                rounding = 0;
+    std::vector<SItem> items;
 
     // X32 Show Applications. `show-apps-at-top` false and
     // `show-apps-always-in-the-edge` true, so on a bottom dock it is the LAST
-    // slot -- past the previews, hard against the right-hand edge. Empty when
-    // `show-apps-button` is off.
+    // slot, hard against the right-hand edge. Empty when `show-apps-button` is
+    // off.
     CBox showApps;
 };
 

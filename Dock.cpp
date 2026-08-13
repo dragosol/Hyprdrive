@@ -1010,13 +1010,17 @@ SLayout baseLayout(PHLMONITOR monitor) {
 
     auto items = dockItems();
 
-    // X46. A minimized window used to be appended to the pill as a preview
-    // slot of its own. It is not any more: the pill's cells, centres and width
-    // must not move when something is minimized, because the user asked for the
+    // X46. A minimized window used to be appended to the pill as a preview slot
+    // of its own. It is not any more: the pill's cells, centres and width must
+    // not move when something is minimized, because the user asked for the
     // window to go INTO its icon rather than to sprout a second entry. Live
-    // previews still exist -- X47 raises them on HOVER instead, which is also
-    // where the SPreview machinery below now gets its contents.
-    const std::vector<PHLWINDOW> MINIMIZED;
+    // previews still exist -- X47 raises them on HOVER, out of its own layout.
+    //
+    // The slot's machinery outlived the decision by an empty vector: baseLayout
+    // built `previews` from a list that was `const std::vector<PHLWINDOW>` and
+    // never assigned, so every reader of SLayout::previews -- the slide offset,
+    // the click hit-test, the render, the frame-pump predicate -- was walking a
+    // container that could not have an element in it. Deleted, with the struct.
 
     // X32. The button is a slot of its own, so it widens the pill and competes
     // for icon size with everything else -- and it is the ONE thing that can put
@@ -1024,21 +1028,14 @@ SLayout baseLayout(PHLMONITOR monitor) {
     // pinned. That is the reference's behaviour: `show-show-apps-button` does
     // not go away when the dash is empty.
     const bool SHOWAPPS = Config::getValue<bool>(KEY_SHOW_APPS);
-    if (items.empty() && MINIMIZED.empty() && !SHOWAPPS)
+    if (items.empty() && !SHOWAPPS)
         return out;
 
-    std::vector<float> aspects;
-    aspects.reserve(MINIMIZED.size());
-    float units = sc<float>(items.size()) + (SHOWAPPS ? 1.F : 0.F);
-    for (const auto& WINDOW : MINIMIZED) {
-        aspects.emplace_back(previewAspect(WINDOW));
-        units += aspects.back();
-    }
-
+    const float SLOTS    = sc<float>(items.size()) + (SHOWAPPS ? 1.F : 0.F);
     const float SCALE    = std::max(monitor->m_scale, 0.01F);
     const float ICONMAX  = sc<float>(std::clamp(Config::getValue<int>(KEY_ICON_SIZE), 8, 512));
     const float FRACTION = std::clamp(Config::getValue<float>(KEY_FRACTION), 0.05F, 1.F);
-    const auto  M        = metrics(items.size() + MINIMIZED.size() + (SHOWAPPS ? 1 : 0), units, ICONMAX, FRACTION * sc<float>(monitor->m_size.x));
+    const auto  M        = metrics(items.size() + (SHOWAPPS ? 1 : 0), SLOTS, ICONMAX, FRACTION * sc<float>(monitor->m_size.x));
 
     // `extend-height` false and `always-center-icons` false: a floating pill
     // sized to its contents, centred on the monitor, clear of the bottom edge.
@@ -1056,21 +1053,6 @@ SLayout baseLayout(PHLMONITOR monitor) {
         item.iconBox.round();
 
         cursor += M.icon + 2.F * ITEM_MARGIN_X;
-    }
-
-    // X25 previews sit to the RIGHT of the running icons, the end of the dock a
-    // minimized window goes to on the reference desktop the user works on.
-    out.previews.reserve(MINIMIZED.size());
-    for (size_t i = 0; i < MINIMIZED.size(); ++i) {
-        const float WIDTH = M.icon * aspects[i];
-
-        SPreview preview;
-        preview.window = MINIMIZED[i];
-        preview.box    = CBox{cursor * SCALE, (YL + ITEM_PAD_TOP) * SCALE, WIDTH * SCALE, M.icon * SCALE};
-        preview.box.round();
-        out.previews.emplace_back(std::move(preview));
-
-        cursor += WIDTH + 2.F * ITEM_MARGIN_X;
     }
 
     // X32 Show Applications. `show-apps-at-top` FALSE puts it at the far end of
@@ -1093,8 +1075,6 @@ SLayout baseLayout(PHLMONITOR monitor) {
             const double SHIFT = (M.icon + 2.F * ITEM_MARGIN_X) * SCALE;
             for (auto& item : out.items)
                 item.iconBox.x += SHIFT;
-            for (auto& preview : out.previews)
-                preview.box.x += SHIFT;
         }
     }
 
@@ -1276,8 +1256,6 @@ SLayout layout(PHLMONITOR monitor) {
     out.pill.y += DY;
     for (auto& item : out.items)
         item.iconBox.y += DY;
-    for (auto& preview : out.previews)
-        preview.box.y += DY;
     if (!out.showApps.empty())
         out.showApps.y += DY;
 
@@ -2354,16 +2332,6 @@ bool click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle, b
 
         applyClickAction(monitor, *ITEM, Config::getValue<std::string>(shift ? KEY_SHIFT_MIDDLE : KEY_MIDDLE_CLICK), shift);
         return true;
-    }
-
-    // A preview is one specific window, so it restores that window rather than
-    // going through the class -- two minimized windows of one app are two
-    // previews, and the class path could not tell them apart.
-    for (const auto& PREVIEW : LAYOUT.previews) {
-        if (PREVIEW.box.containsPoint(point)) {
-            Minimize::restore(PREVIEW.window);
-            return true;
-        }
     }
 
     // X32 Show Applications. Ahead of the icons because its cell is laid out
@@ -3448,11 +3416,6 @@ void render(PHLMONITOR monitor) {
 
     const auto NOW = Time::steadyNow();
 
-    // X25. The REAL window, through the same path the overview tiles use --
-    // which is the point of rebuilding the dock in C++ at all. An icon or a
-    // cached screenshot here would be the defect the spec names.
-    const auto drawWindowAt = [&](const PHLWINDOW& window, const CBox& box) { renderLivePreview(monitor, window, box, NOW); };
-
     // Y5. The flight is a real window at real SIZE, not a thumbnail, so where it
     // is legal it draws the way the overview draws a tile -- live blur, frost
     // scaled to the render scale, real decorations.
@@ -3539,14 +3502,11 @@ void render(PHLMONITOR monitor) {
     // the state machine; the loop is a loop.
     Flight::renderFlights(monitor, LAYOUT, NOW, OWNSPASS);
 
-    for (const auto& PREVIEW : LAYOUT.previews)
-        drawWindowAt(PREVIEW.window, PREVIEW.box);
-
     // X47. The panel needs the same loop: its entrance, its travel and its live
     // previews all need frames nothing else on an idle desktop would ask for.
     // Y6/Y8 join it: a bounce and a launch zoom both run on a dock nothing else
     // is touching, and neither is in damageIfChanged's signature.
-    if (LAYOUT.previews.empty() && !Flight::any() && !panelUp() && g_flight.bounces.empty() && g_flight.launchZooms.empty())
+    if (!Flight::any() && !panelUp() && g_flight.bounces.empty() && g_flight.launchZooms.empty())
         return;
 
     // X25. A minimized window sits on a hidden workspace, so its commits damage
