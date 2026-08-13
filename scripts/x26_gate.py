@@ -40,7 +40,31 @@ def green(png):
     Labelled on a 4x downsample; there is no scipy on this host.
     """
     im = np.asarray(Image.open(png).convert("RGB")).astype(int)
-    mask = (im[:, :, 1] > 150) & (im[:, :, 0] < 110) & (im[:, :, 2] < 110)
+    # SATURATION, not "greenish". "G>150 and R,B both under 110" is a description
+    # of half the photographs in the wallpaper set, and this gate's verdict has
+    # been a function of which one was up. Measured 2026-08-12
+    # (zrig/danglingB2/wear/): on wp02 the WALLPAPER, shown unblurred behind the
+    # overview by design, puts 7072 pixels into that mask and P3b called the
+    # largest of them the fixture -- 16x20 px of foliage, three runs out of
+    # three, on a build where the window was properly stashed. The same mask
+    # finds an 84x8 blob of theme accent in a frame from the failing suite that
+    # contains no fixture at all.
+    #
+    # The fixture is a #00ff00 kitty and photographs of leaves are not, so the
+    # discriminator is how far the green stands above the larger of its own red
+    # and blue:
+    #     fixture     141-142 typical; 141 at the 1st percentile of the home
+    #                 tile, 102 at the 1st percentile of the shrunken proxy
+    #     wallpaper   42-90 (median 55), over 7072 pixels
+    #     accent      53
+    # The floor is 120: 30 above every false reading ever measured here and 22
+    # below the fixture's own bulk. It is not delicate -- every floor from 90 to
+    # 130 leaves both measured fixture blobs byte-identical (736x492 at home,
+    # 332x156 over the pill) and every false positive absent -- and it is a floor
+    # on the COLOUR, so unlike a floor on the blob's size it cannot hide a small
+    # genuine leftover.
+    G = im[:, :, 1]
+    mask = (G > 150) & (G - np.maximum(im[:, :, 0], im[:, :, 2]) > 120)
     if not mask.any():
         return None
 
