@@ -11,13 +11,28 @@ Every check is bracketed so it can fail:
   LIVE     b must differ from a0            -- a STALLED output hands back the
            same frame forever, and every other check here would then compare a
            frame with itself and pass on zeros.
-  PANEL    the selected result row (opaque accent) exists at all, and its TOP is
-           below the half-way line OF THE OVERVIEW. This is DoD clause 23.
-  STRIP    the region above the tiles -- the search row and the desktop strip --
-           is quiet between a0 and b: the band does not push the strip down
-           (DoD 18).
-  TILES    the tile block gives its space back DOWNWARD: its top does not
-           descend and its foot rises.
+  ORDER    the selected result row (opaque accent) exists at all, and it sits
+           ABOVE the tile block -- results between the search bar and the
+           desktop strip, which is X60's placement.
+  YIELDS   the band's space comes FROM THE TILE GRID: the tile block is shorter
+           under a query than at rest.
+  ONSCREEN nothing is shoved off: the tile block's foot stays clear of the dock,
+           which is X48's actual constraint and the one X60 kept.
+
+THIS GATE USED TO ASSERT THE OPPOSITE, AND THE SPEC MOVED UNDER IT. X48 and
+DoD 23 put the results in the BOTTOM half and this file graded exactly that:
+PANEL wanted the selected row below the overview's midline, STRIP wanted the
+chrome above the tiles to be quiet, TILES wanted the block's foot to RISE.
+Then the user reported (2026-08-05, spec 13.12 X60) "the search results are all
+the way at the bottom and they should be between the search bar and the desktop
+bar", and X60 says in terms: "This SUPERSEDES X48's placement". The band became
+top chrome in 2bc0633, measured there as the selected cell moving y=753 -> y=164
+-- which is the same number this gate has been reporting as a defect ever since
+(y=160 at 2560x1600). Three failures, one superseded clause.
+
+X48's real complaint survives and is what ORDER/YIELDS/ONSCREEN now grade: the
+results must not shove the overview down and off the screen -- the band takes
+its space from the tile grid, never from the strip going off the top.
 
 Two traps this gate walked into first, both recorded because each one made a
 working build read as broken:
@@ -141,7 +156,19 @@ def main(tag):
     if changed.sum() < H * a0.shape[1] * 0.01:
         fails.append("LIVE")
 
-    # PANEL. Accent-coloured AND changed: the wallpaper holds plenty of dark
+    # The tile block: the biggest blob of fixture red. Needed by ORDER as well
+    # as by the two below, so it is measured first.
+    ra, rb = blobs(red(a0), limit=1), blobs(red(b), limit=1)
+    if not ra or not rb:
+        print("TILES    no fixture tile found -- nothing below can be believed")
+        print("X48 GATE: FAIL (TILES)")
+        return 1
+    ta, tb = ra[0], rb[0]
+    A_TOP, A_FOOT = ta[1], ta[1] + ta[3]
+    B_TOP, B_FOOT = tb[1], tb[1] + tb[3]
+    print(f"TILES    top {A_TOP} -> {B_TOP}   foot {A_FOOT} -> {B_FOOT}   height {ta[3]} -> {tb[3]}")
+
+    # ORDER. Accent-coloured AND changed: the wallpaper holds plenty of dark
     # warm brown and it is static, so intersecting with the change mask is what
     # separates the row from the backdrop it was tuned to sit against.
     near = np.ones(b.shape[:2], bool)
@@ -149,43 +176,40 @@ def main(tag):
         near &= np.abs(b[:, :, c] - ACCENT[c]) < 16
     rows = blobs(near & changed, limit=3)
     if not rows:
-        print("PANEL    no accent row found")
-        fails.append("PANEL")
+        print("ORDER    no accent row found")
+        fails.append("ORDER")
     else:
         x, y, w, h, n = rows[0]
-        print(f"PANEL    selected row at y={y} (x={x} {w}x{h}, {n}px)  -> {'BOTTOM' if y > MID else 'TOP'} half")
+        print(f"ORDER    selected row at y={y}..{y+h} (x={x} {w}x{h}, {n}px), tile block top {B_TOP}")
         if n < 3000:
-            print("PANEL    blob too small to be a result row")
-            fails.append("PANEL")
-        elif y <= MID:
-            fails.append("PANEL")
+            print("ORDER    blob too small to be a result row")
+            fails.append("ORDER")
+        elif y + h > B_TOP:
+            print("ORDER    the results are NOT above the tile block")
+            fails.append("ORDER")
 
-    # The biggest blob of fixture red is the main tile. The strip's own minis are
-    # red too, and they legitimately re-lay-out under a query (F3-b), so the strip
-    # is graded by how QUIET its region is, not by tracking a mini.
-    ra, rb = blobs(red(a0), limit=1), blobs(red(b), limit=1)
-    if not ra or not rb:
-        print("TILES    no fixture tile found")
-        fails.append("TILES")
-        ra = rb = [(0, H, 0, 0, 0)]
+    # YIELDS. X60: "the band takes its space from the tile grid". The block is
+    # shorter under a query than at rest, and by more than the locator's own
+    # jitter -- NODRIFT above bounds that at tens of pixels over the whole frame.
+    if tb[3] >= ta[3] - 8:
+        print(f"YIELDS   the tile block did not give the band any height ({ta[3]} -> {tb[3]})")
+        fails.append("YIELDS")
+
+    # ONSCREEN. X48's surviving constraint, and the reason X60 quotes it: the
+    # results must not shove the overview down and off the screen. The dock is
+    # the thing the tiles would be shoved under, and it is located the way the
+    # standing doctrine locates a dock -- the biggest lit blob ANCHORED to the
+    # bottom edge of the frame, not a hardcoded y.
+    docks = [d for d in blobs(a0.mean(axis=2) > 22, limit=6) if d[1] > H * 0.85]
+    if not docks:
+        print("ONSCREEN no dock found at the bottom edge -- cannot bound the tiles")
+        fails.append("ONSCREEN")
     else:
-        ta, tb = ra[0], rb[0]
-        band = changed[OVY:min(ta[1], tb[1]), OVX:OVX + OVW]
-        pct = 100.0 * band.sum() / max(1, band.size)
-        print(f"STRIP    rows {OVY}..{min(ta[1], tb[1])} changed {band.sum()} of {band.size} = {pct:.2f}%")
-        if pct > 5.0:
-            print("STRIP    the chrome above the tiles MOVED -- the band is pushing it down")
-            fails.append("STRIP")
-
-    if ra[0][4]:
-        ta, tb = ra[0], rb[0]
-        print(f"TILES    top {ta[1]} -> {tb[1]}   foot {ta[1]+ta[3]} -> {tb[1]+tb[3]}")
-        if tb[1] > ta[1] + 3:
-            print("TILES    the tile block DESCENDED -- the band is pushing from the top")
-            fails.append("TILES")
-        if tb[1] + tb[3] > ta[1] + ta[3] - 8:
-            print("TILES    the foot did not rise -- no space was given back downward")
-            fails.append("TILES")
+        DOCKTOP = docks[0][1]
+        print(f"ONSCREEN tile foot {B_FOOT} vs dock top {DOCKTOP}")
+        if B_FOOT > DOCKTOP:
+            print("ONSCREEN the tile block was pushed UNDER the dock")
+            fails.append("ONSCREEN")
 
     print(("X48 GATE: FAIL (" + ", ".join(fails) + ")") if fails else "X48 GATE: PASS")
     return 1 if fails else 0
