@@ -134,15 +134,35 @@ def row_profile(img):
     return out
 
 
+def col_profile(img):
+    """The same signature down the OTHER axis. This is the one BACKDROP grades;
+    see the note there for why the row profile cannot be."""
+    g = img.mean(axis=2)
+    out = np.full(PW, np.nan)
+    for k in range(PW):
+        v = g[:, k][BG[:, k]]
+        if v.size > 4:
+            out[k] = v.mean()
+    return out
+
+
 hf_back, hf_sharp, hf_frost = hf_y(sharp_c), hf_y(sharp_h), hf_y(frost_h)
 
 # --- TEXTURE. Graded first. A blur over a FLAT backdrop is a no-op, so on the
 # --- rig's original blank fixture every check below is true of nothing: the
 # --- band's two control frames were byte-identical, measured. X47_STRIPES=1
 # --- exists to put structure here and this asserts it arrived.
-check("TEXTURE", hf_back > 2.0 and sharp_c.mean(axis=2)[BG].std() > 20.0,
-      "backdrop behind the plate: HF-y %.2f, luminance sd %.1f (needs >2.0, >20)"
-      % (hf_back, sharp_c.mean(axis=2)[BG].std()))
+# BOTH axes, because both claims below are made on a different one: BLURS needs
+# vertical detail to destroy, BACKDROP needs a horizontal shape to preserve.
+# The column-profile floor is expressed against the instrument's own noise --
+# SAMEBACK measures the two arms' identical controls at <= 2/255 and their
+# profile difference is ~0.1 -- so 2.0 is more than an order of magnitude clear
+# of it without being a number tuned to one picture.
+cp_back = col_profile(sharp_c)
+cp_sd = float(np.nanstd(cp_back))
+check("TEXTURE", hf_back > 2.0 and sharp_c.mean(axis=2)[BG].std() > 20.0 and cp_sd > 2.0,
+      "backdrop behind the plate: HF-y %.2f, luminance sd %.1f, column-profile sd %.2f (needs >2.0, >20, >2.0)"
+      % (hf_back, sharp_c.mean(axis=2)[BG].std(), cp_sd))
 
 # --- SAMEBACK. The whole A/B rests on the two arms seeing the same thing. ----
 delta_c = np.abs(sharp_c - frost_c).max()
@@ -155,12 +175,25 @@ check("BLURS", hf_sharp > 1.0 and hf_frost < 0.6 * hf_sharp,
       % (hf_sharp, hf_frost, hf_sharp / max(hf_frost, 0.01)))
 
 # --- BACKDROP: the plate SHOWS what is behind it, so it is not an opaque fill.
-pc, ps, pf = row_profile(sharp_c), row_profile(sharp_h), row_profile(frost_h)
+#
+# ON THE COLUMN PROFILE, and the axis is the whole point -- this is the same
+# regrade x64's frost check took in round B, said the other way round. A frost
+# is a claim about TWO scales: the fine detail must be GONE (BLURS, measured
+# along y, the short axis) and the coarse shape must REMAIN (here, measured
+# along x, the long one). Graded along y this check is unsatisfiable by any
+# honest blur: at blur_size 20 / passes 4 the kernel's reach is larger than the
+# plate is TALL (152px), so every row of the frosted plate averages content from
+# outside the plate entirely and its row profile flattens -- 0.963 sharp ->
+# 0.102 frosted, which reads exactly like "the plate went opaque" and is not.
+# The plate is 662px WIDE, so along x the same kernel still resolves the
+# backdrop: 0.995 sharp -> 0.682 frosted, while a synthetic opaque fill scores
+# 0.018 (measured 2026-08-13, zrig/danglingC/x47-frost-mutants.log).
+pc, ps, pf = col_profile(sharp_c), col_profile(sharp_h), col_profile(frost_h)
 ok = ~np.isnan(pc) & ~np.isnan(ps) & ~np.isnan(pf)
 r_sharp = np.corrcoef(ps[ok], pc[ok])[0, 1]
 r_frost = np.corrcoef(pf[ok], pc[ok])[0, 1]
-check("BACKDROP", r_sharp > 0.7 and r_frost > 0.25,
-      "row-profile correlation with the backdrop: %.3f sharp, %.3f frosted (%d rows)"
+check("BACKDROP", r_sharp > 0.9 and r_frost > 0.40,
+      "column-profile correlation with the backdrop: %.3f sharp, %.3f frosted (%d columns)"
       % (r_sharp, r_frost, ok.sum()))
 
 # --- RADIUS: the blur KEYS reach the render. Without this the two arms could

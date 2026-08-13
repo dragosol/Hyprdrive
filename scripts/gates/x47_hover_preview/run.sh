@@ -24,6 +24,28 @@ if [ ! -e /home/dragos/hyprvm/share ]; then
     ln -sfn /mnt/host /home/dragos/hyprvm/share || exit 1
 fi
 
+# THE PLATE'S BACKDROP IS NOT WHAT THE GATE THOUGHT IT WAS, TWICE.
+#
+# x47_rig.sh's own comment said the backdrop "in this band is the desktop-strip
+# minis of these very windows", which is why every attempt at the TEXTURE
+# precondition went to the fixture's stripes. It is not. Measured 2026-08-13
+# (zrig/danglingC/x47-band.log): the plate sits at y 1354..1506 and every
+# X47A/X47B window is at [730,450] 1100x700 -- 200px above it and not under it
+# at all. That is why one-row stripes scored HF-y 1.02 and five-row bands scored
+# 0.50: neither was ever in frame.
+#
+# Nor is it the wallpaper. A generated two-scale image was pinned for both arms
+# and the plate's backdrop did not move a pixel (identical TEXTURE numbers on
+# two different generated images, one of which was not even applied) -- quickshell
+# paints its wallpaper on Virtual-1, and these arms run on a HEADLESS output.
+# What IS behind the plate is the compositor's own background: flat at luminance
+# ~22 with one hard edge across the top rows (144 -> 4).
+#
+# So the frost is graded on the structure that is REALLY there, per the pattern
+# x64's frost check was regraded to in round B -- fine detail GONE, coarse shape
+# REMAINS -- with the two claims taken on the axes that can carry them. See the
+# BACKDROP note in x47_frost.py.
+
 # ONE run: the main gate grades RISES/LIVE/FOLLOWS/GRACE on the frosted frames,
 # and X47_FROST_PAIR captures the sharp+frosted plate pair against the SAME
 # frozen hover (frost-fa / frost-fb) so the frost A/B compares a bit-identical
