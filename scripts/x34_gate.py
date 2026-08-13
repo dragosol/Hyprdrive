@@ -100,9 +100,24 @@ def solid_region(m, frac=0.35):
     return x0, y0, x1, y1
 
 
+# The dock hangs off the BOTTOM edge (Dock.cpp's baseLayout puts its top at
+# monitor height - EDGE_MARGIN - pill height), so nothing above this line can be
+# the pill. That is structure, not a guess about the picture -- and it is the
+# only thing that keeps the locator off the desktop's top bar, which repaints
+# WHOLE (2560x62, 54675px) when the dock is toggled and out-blobs the pill
+# (366x86, 30884px) every time. Measured 2026-08-13, zrig/danglingC/x34-pill-*.
+PILL_BAND_TOP = 0.55
+
+
 def cmd_pill(prefix):
-    box = solid_region(mask(load(f"{prefix}_on"), load(f"{prefix}_e1"),
-                            noise=(load(f"{prefix}_e0"), load(f"{prefix}_e1"))))
+    m = mask(load(f"{prefix}_on"), load(f"{prefix}_e1"),
+             noise=(load(f"{prefix}_e0"), load(f"{prefix}_e1")))
+    m[:int(m.shape[0] * PILL_BAND_TOP)] = False
+
+    # Largest connected BLOB, per the standing pixel doctrine -- a row profile
+    # sums unrelated things that merely share a row.
+    found = sorted(blobs(dilate(m, 2), minpx=200), key=lambda b: -b[4])
+    box = found[0][:4] if found else None
     if box is None:
         print("FAIL pill: no difference between dock on and dock off")
         return 1
@@ -162,19 +177,39 @@ def cmd_ink(prefix, x0, y0, x1, y1):
     if len(found) < 10:
         print(f"FAIL ink: only {len(found)} circles to measure")
         return 1
+    lum = up.mean(axis=2)
     widths = []
     for bx0, by0, bx1, by1, _, own in found:
-        # White pixels that TOUCH another white pixel. The circle's rim is
-        # antialiased against whatever icon is behind it, so over a light icon it
-        # leaves scattered single bright pixels that read as glyph; a stroke,
-        # however thin, is always joined to itself. Eroding the circle instead
-        # was the first cut and it ate the parts of `3`, `4` and `9` that reach
-        # for the rim.
-        cell = up[by0:by1 + 1, bx0:bx1 + 1]
-        white = (cell.min(axis=2) > 150) & own[by0:by1 + 1, bx0:bx1 + 1]
-        white &= (np.roll(white, 1, 0) | np.roll(white, -1, 0)
-                  | np.roll(white, 1, 1) | np.roll(white, -1, 1))
-        cols = np.nonzero(white.any(axis=0))[0]
+        # The glyph is measured in the badge's CORE, and against the badge's own
+        # darkness -- not against an absolute white.
+        #
+        # Both halves are paid for. An absolute `>150` floor found nothing at
+        # all: the digit is drawn white, but at this font size its stem is a
+        # sub-pixel stroke, so it composites to ~82/255 over an 80%-black disc
+        # while its densest point reaches ~165 (measured 2026-08-13,
+        # zrig/danglingC/x34-ink-*). And the disc's RIM antialiases against
+        # whatever icon is behind it, so over a light icon the rim arc is
+        # brighter than the glyph and -- being an arc, joined to itself -- it
+        # survived the touch filter and read as a 14px-wide glyph in a 19px
+        # badge. The digit is centred by construction (`text-align: center`,
+        # vertically too), so an inset that drops the rim cannot drop the digit.
+        INSET = 0.18
+        d = int(round(INSET * max(by1 - by0 + 1, bx1 - bx0 + 1)))
+        cell = lum[by0 + d:by1 + 1 - d, bx0 + d:bx1 + 1 - d]
+        core = own[by0 + d:by1 + 1 - d, bx0 + d:bx1 + 1 - d]
+        vals = cell[core]
+        if not len(vals):
+            widths.append(0)
+            continue
+        base = float(np.median(vals))          # the disc is most of the core
+        thresh = base + 0.45 * (float(vals.max()) - base)
+
+        # Ink that TOUCHES ink. A stroke, however thin, is always joined to
+        # itself; a lone bright pixel is noise.
+        ink = (cell > thresh) & core
+        ink &= (np.roll(ink, 1, 0) | np.roll(ink, -1, 0)
+                | np.roll(ink, 1, 1) | np.roll(ink, -1, 1))
+        cols = np.nonzero(ink.any(axis=0))[0]
         widths.append(int(cols.max() - cols.min() + 1) if len(cols) else 0)
     print(f"  glyph widths L->R: {widths}")
     one, ten = widths[0], widths[9]

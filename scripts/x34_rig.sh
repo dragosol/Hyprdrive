@@ -121,8 +121,16 @@ slot1)
     ;;
 
 # P2. Shift takes the whole app down, exactly as a shift-click does.
+#
+# P1 left the app DOWN, and Y4's toggle is a toggle: run against that state
+# `shift 1` correctly brings it back up and the phase would read the restore as
+# a failure to minimize. So the pre-state is established first, exactly as P4
+# does -- and asserted, because a phase that silently starts from the wrong side
+# measures the toggle's other half.
 slot1shift)
+    hot 1; sleep 1.4
     B=$(nvis kitty)
+    [ "$B" = 0 ] && { echo "FAIL slot1shift: nothing visible to minimize (pre-state $B)"; exit 0; }
     hot "shift 1"; sleep 1.4
     A=$(nvis kitty)
     echo "SLOT1SHIFT visible $B -> $A (total kitty $(nclass kitty))"
