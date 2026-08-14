@@ -153,6 +153,7 @@ class CHiddenLease {
         if (!window || window->isHidden())
             return;
         window->setHidden(true);
+        Membership::bump("flight hide");
         m_held = true;
     }
     CHiddenLease(const CHiddenLease&)            = delete;
@@ -186,8 +187,10 @@ class CHiddenLease {
         const auto WINDOW = m_window.lock();
         if (!WINDOW)
             return;
-        if (WINDOW->isHidden())
+        if (WINDOW->isHidden()) {
             WINDOW->setHidden(false);
+            Membership::bump("flight unhide");
+        }
 
         if (const auto MONITOR = m_monitor.lock()) {
             if (const auto OVERVIEW = scrollOverviewForMonitor(MONITOR))

@@ -102,6 +102,7 @@ std::vector<PHLWINDOW> minimized() {
 
 bool minimize(PHLWINDOW window, bool handoffFocus) {
     dropDeadEntries();
+    Membership::bump("minimize");
 
     if (!window || isMinimized(window))
         return false;
@@ -194,6 +195,7 @@ bool showOriginalWorkspace(PHLWINDOW window) {
 
 bool restore(PHLWINDOW window) {
     dropDeadEntries();
+    Membership::bump("restore");
 
     if (!window)
         return false;

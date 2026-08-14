@@ -487,7 +487,7 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
 // cannot disagree about which windows exist. Dropping a window from the gate
 // removes it from the grid too, and the survivors re-lay-out through the U4
 // reflow animation at no extra cost.
-inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
+inline bool shouldShowOverviewWindowLive(const PHLWINDOW& window) {
     // Z9r5: a window hidden for a dock flight is the proxy's alone -- drawing
     // its tile too would be the double image the spec forbids.
     if (window && window->isHidden())
@@ -519,6 +519,18 @@ inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
         return false;
 
     return true;
+}
+
+// P6i1 SHADOW. The live answer is what is returned, always. Beside it, a
+// generation-keyed cache is asked what it WOULD have said, and a disagreement
+// is written down with the window that caused it. Nothing here reads the cache
+// to decide anything -- see Membership.cpp for why the bump set, not the cache,
+// is the thing that has to be proved before a reader is switched over.
+inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
+    const bool LIVE = shouldShowOverviewWindowLive(window);
+    if (window && !Membership::observe(window.get(), LIVE))
+        Membership::divergence(window->m_class, window->m_title, LIVE);
+    return LIVE;
 }
 
 inline bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {

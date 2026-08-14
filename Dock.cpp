@@ -3656,11 +3656,15 @@ void drawFlightSurface(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& 
     // compositor's own window pass ran before the dock's chrome pass this frame,
     // so it never observes the flip.
     const bool REHIDE = window->isHidden();
-    if (REHIDE)
+    if (REHIDE) {
         window->setHidden(false);
+        Membership::bump("flight draw unhide");
+    }
     renderLivePreview(monitor, window, box, now, alpha, true, ownsPass);
-    if (REHIDE)
+    if (REHIDE) {
         window->setHidden(true);
+        Membership::bump("flight draw rehide");
+    }
 }
 
 }

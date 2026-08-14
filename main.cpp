@@ -306,6 +306,7 @@ static void resetCompose();
 // not into either caller.
 void resetSearchSession() {
     g_search.reset();
+    Membership::bump("search session reset");
     resetCompose(); // a sequence abandoned last time must not eat the first key
     SearchProviders::query("");
 }
@@ -559,6 +560,9 @@ static SSearchKey searchKeyFor(uint32_t keycode) {
 
 // The trailing work every edit to the query owes, whatever made the edit.
 static void afterQueryEdit() {
+    // The gate reads the query twice -- "is it empty" for the Y9 minimized rule
+    // and the text itself for the match -- so every edit changes its answer.
+    Membership::bump("query edit");
 
     // X52. The moment being complained about starts HERE, not at the frame.
     if (Prof::enabled()) {
@@ -1007,6 +1011,23 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // X30. Flipping dock-fixed at runtime damages nothing by itself: with the
     // pointer still and no window repainting, there is no frame for the dock to
     // be drawn into and the change would not show until something else moved.
+    // P6i1 SHADOW. Everything the compositor tells us that can change the
+    // membership gate's answer: what windows exist, and the four properties the
+    // gate reads off one. The plugin's own mutators -- setHidden for a flight,
+    // minimize/restore, the search query -- bump at their own call sites, since
+    // no event announces them.
+    static auto MEMBOPEN  = Event::bus()->m_events.window.open.listen([](PHLWINDOW) { Membership::bump("window.open"); });
+    static auto MEMBLATE  = Event::bus()->m_events.window.openLate.listen([](PHLWINDOW) { Membership::bump("window.openLate"); });
+    static auto MEMBCLOSE = Event::bus()->m_events.window.close.listen([](PHLWINDOW) { Membership::bump("window.close"); });
+    static auto MEMBKILL  = Event::bus()->m_events.window.kill.listen([](PHLWINDOW) { Membership::bump("window.kill"); });
+    static auto MEMBGONE  = Event::bus()->m_events.window.destroy.listen([](PHLWINDOWREF) { Membership::bump("window.destroy"); });
+    static auto MEMBPIN   = Event::bus()->m_events.window.pin.listen([](PHLWINDOW) { Membership::bump("window.pin"); });
+    static auto MEMBFLOAT = Event::bus()->m_events.window.floating.listen([](PHLWINDOW) { Membership::bump("window.floating"); });
+    static auto MEMBTITLE = Event::bus()->m_events.window.title.listen([](PHLWINDOW) { Membership::bump("window.title"); });
+    static auto MEMBCLASS = Event::bus()->m_events.window.class_.listen([](PHLWINDOW) { Membership::bump("window.class"); });
+    static auto MEMBWS    = Event::bus()->m_events.window.moveToWorkspace.listen([](PHLWINDOW, PHLWORKSPACE) { Membership::bump("window.moveToWorkspace"); });
+    static auto MEMBFULL  = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { Membership::bump("window.fullscreen"); });
+
     static auto DOCKCONFIG = Event::bus()->m_events.config.reloaded.listen([] {
         // FIRST, before anything in this plugin reads a config value this pass:
         // a value the user set under the old plugin:scrolloverview: name is

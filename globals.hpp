@@ -75,6 +75,18 @@ namespace Prof {
     };
 }
 
+// P6i1 STEP ONE: the generation counter behind the planned membership
+// snapshot, and a SHADOW of the cache it would key, running beside the live
+// gate. Nothing reads the cache -- every call still computes the real answer --
+// so this cannot change behaviour; what it produces is the evidence a cutover
+// needs, namely whether the bump set below is complete. See Membership.cpp.
+namespace Membership {
+    void bump(const char* why);
+    bool observe(const void* key, bool live);
+    void divergence(const std::string& cls, const std::string& title, bool live);
+    void report(const char* when);
+}
+
 bool ensureScrollOverviewHooks();
 void disableScrollOverviewHooks();
 
