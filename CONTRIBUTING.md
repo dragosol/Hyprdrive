@@ -10,8 +10,11 @@ preferences — every one of them is a bug that already happened.
 make all
 ```
 
-- `all` is the build **and** `scripts/symcheck.sh`. It must end with
-  `symcheck: OK -- every undefined symbol has a provider (~558 checked)`.
+- `all` is the build **and** `make check`: `scripts/symcheck.sh`,
+  `scripts/keycheck.sh`, `gen_keys_table.sh --check`, `gen_schema.py --check`
+  and `scripts/host_tests.sh`, in that order. The symcheck line must read
+  `symcheck: OK -- every undefined symbol has a provider (~563 checked)`, and
+  the run ends on the host tests rather than on it.
   A `-shared` link never complains about an undefined symbol and `dlopen` binds
   lazily, so a missing symbol is a time bomb that goes off at the first call
   that reaches it — once, that was a mid-close tile ease, minutes after login,
@@ -85,6 +88,23 @@ The same applies to reads that sit inside short-circuited conditions — a
 refactor that quietly starts calling `layoutTarget()` on windows the old code
 never asked about is not a refactor.
 
+### Instruments are off by default, and the switch goes at the call site
+
+Two of these exist, both read from the environment exactly once:
+
+| variable | what it turns on |
+| --- | --- |
+| `HYPRDRIVE_PROFILE` | `Prof::` — keystroke-to-paint timing for the search path |
+| `HYPRDRIVE_MEMBERSHIP_SHADOW` | `Membership::` — recomputes the cached half of the overview membership gate on every call and logs any disagreement to `~/.local/state/hyprdrive/membership-shadow.log`. This is how you re-prove the bump set after adding a mutator. |
+
+Both are consulted from **inside the render pass**, so "off" has to mean a
+predictable branch and not a cheaper function: the flag is checked at the CALL
+SITE, in a header, so the out-of-line instrument is never entered. Measured, the
+membership shadow costs a full recomputation plus a synchronous `fopen`/
+`fprintf`/`fclose` per divergence — enough, when it was still unconditional, to
+move three pixel gates from green to red purely by perturbing frame timing.
+Anything new that instruments a hot path follows the same shape.
+
 ## Configuration keys
 
 `docs/CONFIG.md` is generated. Add the key to `Config.cpp` — one `addKey(...)`
@@ -97,10 +117,17 @@ drifts between the two names is a compat layer that lies. Then:
 ```bash
 scripts/gen_keys_table.sh          # rewrite docs/CONFIG.md
 scripts/gen_keys_table.sh --check  # fails if it is stale
+python3 scripts/gen_schema.py      # rewrite docs/schema.json -- the key count
+python3 scripts/gen_schema.py --check
 ```
 
+**Both** generators, not just the first: a new key changes `docs/schema.json`
+too, `make all` runs `gen_schema.py --check`, and stopping after the CONFIG.md
+line leaves the build red. `docs/EXTENDING.md` covers what else a schema row
+can carry.
+
 The hand-maintained table this fork inherited had two wrong defaults and covered
-six of seventy-nine keys. Do not reintroduce one.
+six of them. Do not reintroduce one.
 
 ## Config fragments and the raw-snippet block
 
@@ -135,11 +162,15 @@ fragment without the markers is not a fragment; `fragment.py check` says so.
 ## The compat aliases expire
 
 Phase 9 renamed every user-facing surface from `scrolloverview` to `hyprdrive`
-and kept the old names working **for one release**. `Compat.hpp` lists every one
-of them and is the only file that still knows the old name. When the release
-expires, delete `Compat.{hpp,cpp}`, the second registration pass in
-`Config.cpp`, the legacy Lua thunks, the second IPC event, the legacy submap
-name, and `scripts/gates/x53_compat_alias` — that gate is the checklist.
+and kept the old names working **for one release**. `Compat.hpp` carries the list; read it rather than
+this paragraph, because the old name is deliberately spelled in several places
+outside it — `OVERVIEW_SUBMAP_LEGACY` in `OverviewInternal.hpp`, the
+`$SCROLLOVERVIEW_PROFILE` env var in `globals.hpp` and `SearchProviders.cpp`,
+and the legacy thunks, the `scrolloverview-gesture` keyword and the second
+registration pass in `Config.cpp`. When the release expires, delete
+`Compat.{hpp,cpp}` and every one of those, plus the second IPC event,
+`adoptLegacyFavorites()`, and `scripts/gates/x53_compat_alias` — that gate is
+the checklist that proves you got them all.
 
 ## Commits
 

@@ -1,7 +1,8 @@
 # Adding a setting is adding a row
 
 This is the contract the settings app is built on, and it is the reason the app
-is four QML files rather than one per pane: **a new option is one row of data.**
+built from one generic pane and one row component rather than one pane per
+subject: **a new option is one row of data.**
 No new component, no new dialog, no new write path, no new revert story. This
 document says exactly what a row is, what each pane does with one, what the
 apply-strategies mean, and then walks through a row that was actually added this
@@ -19,7 +20,7 @@ reads. It joins three sources, and **only one of them is hand-written**:
 
 | source | where | how many | who maintains it |
 | --- | --- | --- | --- |
-| `plugin` | `Config.cpp`, parsed by `scripts/lib/configkeys.py` | 79 | the plugin. Add a key there and the row appears. |
+| `plugin` | `Config.cpp`, parsed by `scripts/lib/configkeys.py` | 80 | the plugin. Add a key there and the row appears. |
 | `hyprland` | `config/schema/hyprland-descriptions.json`, a snapshot of `hyprctl descriptions -j` | 353 | refresh with `gen_schema.py --refresh-hyprland` |
 | `curated` | `config/schema/curated.json` | 13 | **you**, by hand |
 
@@ -106,7 +107,6 @@ importer, and neither does a profile restore.
 | `reload` | writes the value into the pane's fragment through `fragment.py` (machine half only, raw block preserved), then `hyprctl reload` | anything the compositor reads: every plugin key and every Hyprland option |
 | `qs-restart` | writes ii's `config.json`, coercing to the type already there | `ii:` keys. Quickshell watches its own file for most of them; the ones read at construction need the restart, which `hdprof` fires when it sees ii's file move |
 | `wallpaper` | runs `scripts/hyprwall-rotate.sh` with `WALL=` and `THEME=` from the `wallpaper.theme` row | wallpaper paths, still or video |
-| `monitor` | goes through `hdmon apply` and its fifteen-second countdown | anything that can take away the screen you would undo it with |
 | `none` | stores the value and stops | settings that are read by something else on its own schedule — the slideshow's mode and interval, read by `hdwall tick` on every tick |
 
 Two things that are deliberately *not* apply-strategies:
@@ -170,7 +170,7 @@ Added in commit `de174db`. In full, this is what it took.
 
 ```
 $ python3 scripts/gen_schema.py
-wrote docs/schema.json -- 445 entries (79 plugin, 353 hyprland, 13 curated) over 7 panes
+wrote docs/schema.json -- 446 entries (80 plugin, 353 hyprland, 13 curated) over 6 panes
 ```
 
 That is the whole change to the settings surface. What it bought, with nothing
@@ -205,6 +205,6 @@ component and a line in `SchemaRow`'s selector). Everything else is one row.
 1. Row in `config/schema/curated.json` — or a key in `Config.cpp`, or a refreshed
    Hyprland snapshot.
 2. `python3 scripts/gen_schema.py`.
-3. `make all` — `gen_schema.py --check` is one of its four checks, so a schema you
+3. `make all` — `gen_schema.py --check` is one of its five checks, so a schema you
    forgot to regenerate is a red build.
 4. Nothing else, unless §6's last paragraph applies.

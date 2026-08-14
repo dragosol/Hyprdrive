@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every config key the plugin READS must be spelled with the current prefix.
 #
-# WHY THIS EXISTS. The Phase-9 rename moved 79 keys to plugin:hyprdrive: and
+# WHY THIS EXISTS. The Phase-9 rename moved every key to plugin:hyprdrive: and
 # kept plugin:scrolloverview: registered as an alias so old configs keep
 # working. That combination has a failure mode with no symptom at build time and
 # no error at runtime: a getter left spelled with the OLD prefix still RESOLVES
