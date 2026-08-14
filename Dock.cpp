@@ -1605,15 +1605,9 @@ void renderTooltip(PHLMONITOR monitor, const SLayout& layout, const CBox& anchor
     // Entrances decelerate, exits accelerate: the house rule, both directions.
     const float ALPHA = g_tip.out ? 1.F - houseEase(false, T) : houseEase(true, T);
 
-    // A pointer resting on an icon emits no motion, so nothing else would ask
-    // for the frames this fade needs. Same doLater the live previews use: a
-    // damage requested inside the pass is cleared with that pass.
-    if (T < 1.F) {
-        g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
-            if (MONITOR)
-                g_pHyprRenderer->damageMonitor(MONITOR.lock());
-        });
-    }
+    // The frames this fade needs are asked for by needsFrames(), which reads the
+    // same g_tip clock this line does. A pointer resting on an icon emits no
+    // motion, so nothing else on the desktop would ask for them.
 
     const float SCALE = std::max(monitor->m_scale, 0.01F);
     const float CX    = sc<float>(g_tip.anchor.x) + sc<float>(g_tip.anchor.width) / 2.F;
@@ -2643,6 +2637,96 @@ bool menuClick(PHLMONITOR monitor, const Vector2D& point) {
     return true;
 }
 
+// Defined in the unnamed namespace further down, with the rest of the hover
+// panel. Declared INSIDE one here so it is the same entity: at namespace scope
+// this would be a second, external-linkage panelUp() and every call below would
+// be ambiguous.
+namespace {
+bool panelUp();
+}
+
+// One outstanding frame request per monitor. See pumpFrame.
+std::unordered_map<MONITORID, bool> g_pumpPending;
+
+// ASK FOR ANOTHER FRAME. Every animation the dock owns runs on a desktop where
+// nothing else is moving, so nothing else damages the monitor -- and a damage
+// requested from INSIDE the render pass is cleared with that pass, so it has to
+// be posted for after it. doLater is that, and it both starts and sustains the
+// loop.
+//
+// ONE REQUEST PER FRAME, and that is not tidiness either. damageIfChanged runs
+// on every pointer MOTION event, and motion events arrive far faster than
+// frames do -- so a predicate that is true while the pointer merely rests on a
+// dock icon (the hover panel is up, a bounce is running) posts a doLater per
+// motion, each of which damages the monitor, each of which causes a frame,
+// whose render.pre calls damageIfChanged again. Measured 2026-08-14: without
+// this guard zflight goes from 8/8 green to z4/z4c/z5/z6 red with the dock
+// missing clicks outright (zrig/danglingC2/zflight-pump-flood.log). The
+// collapse is exact rather than approximate: two damageMonitor calls in one
+// event-loop iteration are the same region twice, so dropping the second
+// changes nothing but the flood.
+void pumpFrame(PHLMONITOR monitor) {
+    if (!monitor)
+        return;
+
+    auto& PENDING = g_pumpPending[monitor->m_id];
+    if (PENDING)
+        return;
+
+    PENDING = true;
+    g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}, ID = monitor->m_id] {
+        g_pumpPending[ID] = false;
+        if (MONITOR)
+            g_pHyprRenderer->damageMonitor(MONITOR.lock());
+    });
+}
+
+// IS ANYTHING ON THE DOCK STILL MOVING? The one list, in one place.
+//
+// It was three: an inline `autohideAnimating || WIGGLING || overlayUp` in
+// damageIfChanged, a `T < 1` inside renderTooltip, and a four-term early return
+// at the bottom of render(). Each had its own copy of the same doLater, and a
+// new animation had to find and join all three -- which is how the tooltip fade
+// ended up with a pump of its own that nothing else knew about.
+//
+// It is still called from TWO places, and that is deliberate rather than a job
+// half done. damageIfChanged runs on render.pre AND on pointer motion, so it is
+// the only one reached while the dock is fully away (render() returns on an
+// empty pill) -- that is what lets a reveal start at all. The render tail runs
+// after the flight loop has advanced, which is where the flight animations must
+// be asked from: moving that request to before the tick is the exact reordering
+// that made three reversals in a row fire against flights that had never drawn
+// a frame (see the note above Flight::renderFlights).
+bool needsFrames(PHLMONITOR monitor, const SLayout& layout) {
+    // X30. A flip waiting out its delay looks EXACTLY like the frame before it,
+    // so the visual-state check in damageIfChanged would stop the chain of
+    // frames dead and the dock would freeze half-way -- or never start.
+    if (autohideAnimating(monitor))
+        return true;
+
+    // X31. The wiggle's rotation changes every frame while it runs.
+    // ponytail: this pumps frames for the 2500ms of every 3000ms the urgent icon
+    // is deliberately STILL, as well as the 500 it moves. Waking on a timer for
+    // the next burst instead would save them; measure it before building it.
+    if (Config::getValue<bool>(KEY_DANCE_URGENT) && anyUrgent(layout.items))
+        return true;
+
+    // X34. The hotkey overlay fades.
+    if (overlayUp())
+        return true;
+
+    // Y2. A pointer resting on an icon emits no motion, so nothing else would
+    // ask for the frames the tooltip fade needs. renderTooltip clears the name
+    // when its exit finishes, so a settled tooltip answers false here.
+    if (!g_tip.name.empty() && elapsedMs(g_tip.since) < (g_tip.out ? TOOLTIP_FADE_OUT_MS : TOOLTIP_FADE_MS))
+        return true;
+
+    // X25/X47/Y6/Y8. A minimized window's commits damage no monitor, the hover
+    // panel's entrance and live previews need frames of their own, and a bounce
+    // or a launch zoom runs on a dock nothing else is touching.
+    return Flight::any() || panelUp() || !g_flight.bounces.empty() || !g_flight.launchZooms.empty();
+}
+
 bool damageIfChanged(PHLMONITOR monitor) {
     if (!monitor)
         return false;
@@ -2674,13 +2758,8 @@ bool damageIfChanged(PHLMONITOR monitor) {
     // event, which arrive far faster than frames do. It was being built twice.
     const auto LAYOUT = layout(monitor);
 
-    const bool WIGGLING = Config::getValue<bool>(KEY_DANCE_URGENT) && anyUrgent(LAYOUT.items);
-
-    if (autohideAnimating(monitor) || WIGGLING || overlayUp())
-        g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
-            if (MONITOR)
-                g_pHyprRenderer->damageMonitor(MONITOR.lock());
-        });
+    if (needsFrames(monitor, LAYOUT))
+        pumpFrame(monitor);
 
     SDockVisualState state;
     if (!LAYOUT.pill.empty()) {
@@ -3541,27 +3620,14 @@ void render(PHLMONITOR monitor) {
     // the state machine; the loop is a loop.
     Flight::renderFlights(monitor, LAYOUT, NOW, OWNSPASS);
 
-    // X47. The panel needs the same loop: its entrance, its travel and its live
-    // previews all need frames nothing else on an idle desktop would ask for.
-    // Y6/Y8 join it: a bounce and a launch zoom both run on a dock nothing else
-    // is touching, and neither is in damageIfChanged's signature.
-    if (!Flight::any() && !panelUp() && g_flight.bounces.empty() && g_flight.launchZooms.empty())
-        return;
-
-    // X25. A minimized window sits on a hidden workspace, so its commits damage
-    // no monitor and nothing else on an idle desktop asks for a frame. The
-    // damage that keeps the preview live cannot be asked for here -- it is
-    // cleared with this frame's ring -- and render.pre only runs when a frame is
-    // ALREADY happening, so from there the loop can never start itself. doLater
-    // lands it after the frame, which both starts and sustains the loop.
+    // ASKED FOR HERE, after the flight loop has advanced -- see the note on
+    // needsFrames for why this site cannot be folded into the other one.
     // ponytail: whole-monitor damage at the refresh rate while anything is
     // minimized. The pill's rectangle would do, but damageBox wants global
     // logical coords and the layout is monitor-local render px; convert it if
     // this ever shows up in a profile.
-    g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}] {
-        if (MONITOR)
-            g_pHyprRenderer->damageMonitor(MONITOR.lock());
-    });
+    if (needsFrames(monitor, LAYOUT))
+        pumpFrame(monitor);
 }
 
 // Y5. The flight is a real window at real SIZE, not a thumbnail, so where it is
