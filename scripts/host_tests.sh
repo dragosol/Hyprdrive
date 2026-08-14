@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# The tests that need NO compositor: pure functions, compiled and run on the
+# spot. `make check` runs this, which is the whole point -- a host test nobody
+# runs is a comment with a build cost.
+#
+# Two of them today:
+#   drop_table_test   ScrollOverview::Drop::resolve(), all 65536 fact
+#                     combinations against the pre-split branch ladder.
+#   geometry_test     ScrollOverview::Geometry -- the overview's transform,
+#                     clamps and box predicates.
+#
+# Anything that needs a running Hyprland is a GATE (scripts/gates/), not a host
+# test, and lives in scripts/suite.sh instead.
+set -u
+cd "$(dirname "$0")/.."
+
+CXX=${CXX:-g++}
+OUT=$(mktemp -d)
+trap 'rm -rf "$OUT"' EXIT
+fail=0
+
+run() {
+    local name=$1; shift
+    if ! "$CXX" -std=c++2b -O2 -Wall -o "$OUT/$name" "$@" 2>"$OUT/$name.build"; then
+        echo "host_tests: $name FAILED TO BUILD" >&2
+        cat "$OUT/$name.build" >&2
+        fail=1
+        return
+    fi
+    if ! "$OUT/$name" > "$OUT/$name.out" 2>&1; then
+        echo "host_tests: $name FAILED" >&2
+        cat "$OUT/$name.out" >&2
+        fail=1
+        return
+    fi
+    echo "host_tests: $name OK -- $(tail -1 "$OUT/$name.out")"
+}
+
+run drop_table_test scripts/drop_table_test.cpp
+# shellcheck disable=SC2046
+run geometry_test scripts/geometry_test.cpp OverviewGeometry.cpp $(pkg-config --cflags --libs hyprutils)
+
+exit $fail

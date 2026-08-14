@@ -30,7 +30,7 @@ CScrollOverview::~CScrollOverview() {
     // what lets the second open hit. Bounded by TEXT_CACHE_MAX, and the icon
     // texture cache beside it already lives for the life of the plugin.
     
-    g_dragReflowExcluded = nullptr;
+    grid().dragExcluded = nullptr;
     if (g_pointerGrabOverview == this)
         g_pointerGrabOverview = nullptr;
     transferSharedStateOwnership();
@@ -1317,7 +1317,7 @@ float CScrollOverview::dragMiniProgress() const {
     const float ELAPSED = ScrollOverview::Config::animElapsedMs(drag.miniChangedAt);
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
     if (T < 1.F)
-        g_gridReflowActive = true; // rides the overview's existing next-frame request
+        grid().reflowActive = true; // rides the overview's existing next-frame request
 
     return drag.miniFrom + (TARGET - drag.miniFrom) * T;
 }
@@ -1344,7 +1344,7 @@ float CScrollOverview::dragRecentreProgress() const {
     const float ELAPSED = ScrollOverview::Config::animElapsedMs(drag.recentreChangedAt);
     const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
     if (T < 1.F)
-        g_gridReflowActive = true; // rides the overview's existing next-frame request
+        grid().reflowActive = true; // rides the overview's existing next-frame request
 
     return drag.recentreFrom + (TARGET - drag.recentreFrom) * T;
 }
@@ -1526,7 +1526,7 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
 
     // Last, after refreshDragOriginalOverviewBoxes() above has read the boxes it
     // needs out of the full grid.
-    g_dragReflowExcluded = WINDOW.get();
+    grid().dragExcluded = WINDOW.get();
     TileChrome::setHovered(PHLWINDOW{});
 
     updateWindowDrag();
@@ -1634,7 +1634,7 @@ void CScrollOverview::updateWindowResize() {
 }
 
 void CScrollOverview::clearDragPending() {
-    g_dragReflowExcluded        = nullptr;
+    grid().dragExcluded        = nullptr;
     drag.pendingPrimary          = false;
     drag.activeWindow.reset();
     drag.originalWorkspace.reset();
@@ -2096,9 +2096,9 @@ void CScrollOverview::commitDropCancel(const SOverviewDropSite& site) {
             const auto  FLOATBOX = draggedWindowBox(WSIDX);
             const float SCALEDIV = std::max(scale->value(), 0.01F) * std::max(MON->m_scale, 0.01F);
 
-            g_gridReflows[site.window.get()] = SGridReflow{site.window, CBox{overviewPointToGlobal(WSIDX, FLOATBOX.pos()), FLOATBOX.size() * (1.F / SCALEDIV)}, slot,
+            grid().reflows[site.window.get()] = SGridReflow{site.window, CBox{overviewPointToGlobal(WSIDX, FLOATBOX.pos()), FLOATBOX.size() * (1.F / SCALEDIV)}, slot,
                                                           Time::steadyNow(), g_overviewFrame, false};
-            g_gridReflowActive               = true;
+            grid().reflowActive               = true;
         }
     }
 
@@ -2276,7 +2276,7 @@ void CScrollOverview::commitDrop(const SOverviewDropSite& site, const ScrollOver
 void CScrollOverview::endWindowDrag() {
     // Before anything below reads a slot: the D5 return seed wants this window's
     // slot in the FULL grid, not the gap it has been leaving open.
-    g_dragReflowExcluded = nullptr;
+    grid().dragExcluded = nullptr;
 
     SOverviewDropSite site;
 
@@ -5300,10 +5300,10 @@ void CScrollOverview::onPreRender() {
     // it holds still through the eased tail and reading THAT as frame timing
     // invents a 196ms stall which the painted-frame signal shows is not there.
     if (TileChrome::animating())
-        g_gridReflowActive = true;
+        grid().reflowActive = true;
 
-    if (g_gridReflowActive) {
-        g_gridReflowActive = false;
+    if (grid().reflowActive) {
+        grid().reflowActive = false;
         reflowPacer->setValueAndWarp(0.F);
         *reflowPacer = 1.F;
         damage();

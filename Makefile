@@ -36,7 +36,10 @@ VERSION_SCRIPT = scripts/generate-plugin-version.sh
 # keycheck: a config key read through the deprecated alias resolves, returns the
 # default forever and reports nothing -- see that script's header. And so is the
 # schema: it MIRRORS Config.cpp for the settings app, and an unrefreshed mirror
-# is an option the app cannot reach and nobody is told about.
+# is an option the app cannot reach and nobody is told about. And so are the
+# host tests: they cost a second, they need no compositor, and a pure function
+# that is only ever checked by photographing a tile is checked three minutes and
+# one fixture at a time.
 all: hyprdrive.so check
 
 hyprdrive.so: $(OBJS)
@@ -58,6 +61,7 @@ check: hyprdrive.so
 	bash scripts/keycheck.sh
 	bash scripts/gen_keys_table.sh --check
 	python3 scripts/gen_schema.py --check
+	bash scripts/host_tests.sh
 
 clean:
 	rm -rf .build hyprdrive.so
