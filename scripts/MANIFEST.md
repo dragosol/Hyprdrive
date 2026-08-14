@@ -126,6 +126,18 @@ delete freely — git remembers.
 - `y12b_gate2.py` — the working FFT four-zone attenuation-curve version; keep as the starting point if frost parity ever needs re-
 - `y13_poll.sh` — GDM-restart-to-wallpaper timing instrument (survives the restart via setsid); perf question answered
 - `y13_qs.sh` — quickshell-alone wallpaper-up timing proxy; answered with y13_poll
+- `x1_probe.sh` — 'does a query actually reach the overview's filter', X1's three-frame falsifiability control; that liveness check lives inside the gates now
+- `x1_dragprobe.sh` — hunts a grab point and strip target that actually move a window, so X1's drag phase could not silently no-op; superseded by x1_fixture.sh + the rig's warp
+- `x1_dropsweep.sh` — empirical sweep of candidate X positions for a committing strip-cell drop; same X1 coordinate-discovery fire
+- `x1_tilebox.sh` — captures the overview at rest so the HOST could measure a tile box; host/guest split-brain era
+- `x1_tilebox.py` — the host-side measurement for it (connected component, not bbox); its lessons were re-implemented in x43_tilebox.py, which cites it
+- `p7_ab.sh` — Phase-7 search A/B across five settled states; needs an instrumentation patch its own header says was deliberately never committed
+- `p7_func.sh` — Phase-7 behavioural check (session reset + keyboard/pointer hit lists end to end); x28 and y4 own that coverage now
+- `p8_smoke.sh` — Phase-8 filmed drag smoke, the three drags a human would try after endWindowDrag changed; drop_table_test.cpp now covers the logic exhaustively on every `make check`
+- `x24_flight_run.sh` — X24 flight driven from the HOST over ~/hyprvm/g; `gates/x24/run.sh` says in as many words that it ports this driver's orchestration
+- `x26_run.sh` — X26 end to end from the HOST; `gates/x26/run.sh` is the port, and this hardcodes host paths
+- `z3_run.sh` — Z3 driver that ran on the HOST, three gestures in one overview session; `gates/z3_position_memory/run.sh` is the port
+- `z3_view.sh` — puts the overview's main card on a workspace and photographs it so the host could locate the next drag target; orphaned with z3_run.sh
 
 ## Suite integrity (2026-08-11) — why 25 of 27 gates were red
 
@@ -545,3 +557,122 @@ editor, and that they cannot break the config; it does not prove a `bind =` line
 does anything, because it does not. Translating them would mean a
 hyprlang-to-dispatcher table, which is the parser this phase was asked not to
 write.
+
+## Campaign close-out (2026-08-14) — what is CLOSED and what is OPEN by design
+
+This is the end of the refactor/feature campaign. Everything below is either
+finished or deliberately not finished; there is no third category and nothing is
+waiting on somebody to remember it.
+
+### A word on what "converged" means
+
+Two consecutive suites are compared on their **VERDICT TABLE, stripped of
+timings** — gate name and PASS/FAIL/SKIP/DIED, nothing else. They are never
+byte-identical and it would be a bad sign if they were: every gate prints its
+own duration, and the same gate legitimately varies by seconds between runs on
+the same build. A claim of "byte-identical runs" in any report is either wrong
+or was made about the stripped table; say **verdict-identical** and there is
+nothing to misread.
+
+### CLOSED
+
+1. **P6i1, the membership snapshot — CUT OVER.** The gate is split by cost.
+   `isHidden`, `validMapped` and the pinned+floating pair are re-read on every
+   call, forever: they are four bool reads, and they are the properties that
+   change with no event to announce it. The expensive half — the search match
+   and the minimize-stash scan — is cached against a generation that every
+   mutator bumps. Round one shadowed the WHOLE gate and found 15 divergences,
+   all of them `validMapped` flipping between `window.close` and
+   `window.destroy`; splitting by cost removed exactly those and nothing else.
+   Evidence: `zrig/final/`, and the finding it closes is
+   `zrig/danglingC2/p6i1-shadow-finding.md`.
+2. **The shadow does not ship hot.** It was running unconditionally inside the
+   render path — ~192k calls per suite, with a synchronous `fopen`/`fprintf`/
+   `fclose` on the compositor thread for every divergence. It is now behind
+   `HYPRDRIVE_MEMBERSHIP_SHADOW`, read once, branched on at the CALL SITE, so
+   with it off `Membership::observe` is not called at all. Same shape as
+   `Prof::enabled()`. Turn it on to re-run the verification; it costs nothing
+   when off.
+3. **The dock's frame pump could latch off.** `g_pumpPending` was set false by
+   the `doLater` it queued, and a `doLater` queued against an output that is
+   then removed never runs — leaving that monitor's mark true forever and its
+   dock silently unable to request another frame. The mark is erased by the
+   callback now, and `Dock::forgetMonitor()` drops all three per-monitor maps
+   from the `monitor.removed` handler, beside `Flight::abortAll`.
+4. **Dead code and stale instruments** — see the Attic list above for the twelve
+   one-off probes that moved there, and the commit for the ~120 lines of
+   unreachable plugin code that went with them.
+
+### OPEN, on purpose, with the reason
+
+1. **P6i2 — `FramePacing.cpp`, and the `refreshWindows` deletion behind it.**
+   Not a refactor that can be taken in isolation. `refreshWindows()` is
+   `redrawAll()`, which rebuilds `workspaceImage->windows` — and the render
+   walks THAT list, not the membership gate — so deleting its one caller
+   (`CHiddenLease::release()`) before the render walks the snapshot puts Z20
+   back. Order: cut over (done) → the render walks the snapshot → the call is
+   the no-op the ticket assumes → delete. The two ~25-line verbatim twins in
+   `scrollOverview.cpp` (`shouldAllowSurfaceFrame` /
+   `shouldHandleSurfaceDamage`, and the `renderWorkspaceBackground` /
+   `renderWorkspaceLive` heads) are the body of that module and are deliberately
+   left duplicated until it exists: deduplicating them in place would make the
+   extraction harder, not easier. Reasoning in
+   `zrig/danglingC2/deferred-refactors-roundC.md`.
+2. **P6i4 — the liveliness registry.** Already exists in substance (`g_previewed`
+   with its 250ms TTL, consumed at one place through `Dock::isPreviewing`). The
+   only unpaid clause is killing the core→dock query, and that cannot be bought
+   by adding a registry — it dies when frame pacing moves out of the god object,
+   i.e. with P6i2, which takes the registry with it. Same document.
+3. **P8 — `SGesture` as a `std::variant`.** Worth doing; struck on verification
+   cost, not on merit. The illegal state it would make unrepresentable (a drag
+   and a resize owning one window) was already made unreachable at runtime by
+   `bdef20c`. Its named method (`scripts/p8_ab.sh` + `p8_diff.py`) needs
+   instrumentation the script's own header says is deliberately not committed,
+   and grades four drags parent-vs-child against a same-build noise floor —
+   about an hour of wall clock before the first line is written. **Next round:
+   build it against `scripts/drop_table_test.cpp` first — 65536 combinations,
+   free, and it runs on every `make check` — then `p8_ab.sh` for the pixels.**
+4. **x47's fixture does not own what it photographs.** The frost A/B needs
+   structure behind the hover plate, and what is behind it is whatever the
+   PREVIOUS gate left on screen: measured 216.5/255 of backdrop step inside a
+   suite and 13.0 standalone, same build, twenty minutes apart. Under suite
+   conditions it is reproducible (PASS in every convergence run on record), so
+   this is "the gate depends on its predecessor", not "the gate is a
+   straddler" — an undeclared dependency, still worth removing, not urgent.
+   Two candidate fixes and the acceptance test are written up in
+   `zrig/danglingC2/x47-frost-fixture.md`.
+5. **The lock-screen zoom asymmetry is unmeasured, and needs a password.**
+   `modules/ii/lock/PasswordChars.qml` carries literal durations (50 / 200 /
+   1000) that the motion audit never reached, because grading the lock screen
+   means locking the session and unlocking it, and an automated run cannot type
+   the user's password. Not routed to tokens with the rest for the same reason:
+   an unverifiable edit to the one surface that can lock you out is a bad trade.
+6. **The waffle panel family's 30 literal durations.** `Config.options.panelFamily`
+   selects `ii` or `waffle`; this rice runs `ii`, so `modules/waffle/**` is not
+   loaded and its thirty literals were left alone. If waffle is ever made the
+   live family, audit them first — the numbers are 80/120/150/160/170/200/250/
+   300/350/400/1000 and only some have equal-valued Appearance tokens.
+7. **`AppSearch.cpp` and `SearchProviders.cpp` carry `#ifdef`-gated self-check
+   `main()`s** (`APPSEARCH_TEST`, `SEARCHPROVIDERS_TEST`, ~320 lines together)
+   that nothing defines, so they never compile and can rot unnoticed. They each
+   carry a hand-build recipe and are deliberate dev tools; the fix if they are
+   worth keeping is to wire them into `scripts/host_tests.sh` beside
+   `drop_table_test` and `geometry_test`, not to delete them. Left as found.
+8. **`OvGeom::expandHitbox` and `OvGeom::spanOverlap` now have no production
+   caller** — their three wrappers in `OverviewInternal.hpp` were dead and were
+   deleted. Both are kept: they are pure primitives of the geometry module with
+   host-test coverage (`scripts/geometry_test.cpp`), which is exactly what the
+   module is for, and P6i2's extraction is the caller most likely to want them.
+
+### One trap this pass paid for, so the next one does not
+
+**The duplicated `#include` lines in this tree are load-bearing.** Several files
+include the same std headers twice, and an automated tidy will find them. They
+are the `#define private public` idiom: the std headers are included CLEAN
+first, so that claiming a private member only reaches the one Hyprland header
+whose include guard is being claimed, and every later inclusion is a no-op. The
+Z19 comment at the top of `Dock.cpp` says so. Deleting the first block appears
+to work — it compiles — and quietly widens `private`-to-`public` over every
+std header in the translation unit. Only `OverviewRender.cpp` and
+`SearchProviders.cpp` have no such block, and those are the only files where an
+unused include was actually removed.
