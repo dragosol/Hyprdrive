@@ -193,7 +193,7 @@ snapfull > $OUT/$TAG-snap-mid.txt
 #   Screen centre is a GAP -- pressing there closes the overview instead.
 echo "PHASE P7 drag-storm $(date +%s.%N)"
 # Defaults are measured for the 8-tiles-on-ws1 layout. A different tile count
-# reflows the grid and moves them, so they are env-overridable and x1_tilebox.sh
+# reflows the grid and moves them, so they are env-overridable and attic/x1_tilebox.sh
 # re-measures them from a capture.
 GX=${GX:-384}; GY=${GY:-528}; TX=${TX:-1150}; TY=${TY:-190}
 # A drag that MISSES a tile releases on the backdrop, which switches desktop and

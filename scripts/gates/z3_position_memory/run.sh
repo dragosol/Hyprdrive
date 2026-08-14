@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # z3_position_memory -- guest-side orchestrator, ported from the host driver
-# scripts/z3_run.sh (which drove the guest through ~/hyprvm/g). We ARE the
+# scripts/attic/z3_run.sh (which drove the guest through ~/hyprvm/g). We ARE the
 # guest here, so every `$G '...'` became the command itself; the locator, the
 # gesture order and the verdict are the driver's, byte-for-byte.
 #

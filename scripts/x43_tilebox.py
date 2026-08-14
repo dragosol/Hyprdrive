@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Locate a flat-coloured tile in an overview capture (host side).
 
-Same traps as x1_tilebox.py: the overview DIMS tiles so exact-RGB finds
+Same traps as attic/x1_tilebox.py: the overview DIMS tiles so exact-RGB finds
 nothing (match on channel dominance), and the wallpaper is red-dominant in
 places (take the largest CONNECTED COMPONENT and fill-test it, never a global
 bbox). The strip band is excluded by row -- its cards carry the same colours at

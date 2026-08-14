@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # X26 drag overview->dock + dock polish, end to end IN THE GUEST.
 #
-# Ported from the host-driven scripts/x26_run.sh: the ~/hyprvm/g ssh hops
+# Ported from the host-driven scripts/attic/x26_run.sh: the ~/hyprvm/g ssh hops
 # became direct local invocations (we ARE the guest), the measurement flow is
 # unchanged -- every coordinate is measured off a frame from THIS run via
 # x26_points.py, because the overview tile moves with the window count and the

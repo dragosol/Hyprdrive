@@ -9,7 +9,7 @@
 #   * the drop dump, if the build under test carries the temporary
 #     instrumentation.
 #
-# THE DUMP NEEDS A TEMPORARY PATCH, exactly as scripts/p7_ab.sh does.
+# THE DUMP NEEDS A TEMPORARY PATCH, exactly as scripts/attic/p7_ab.sh does.
 # /tmp/p8drop.log is written by throwaway logging in renderDraggedWindow and in
 # endWindowDrag's three gather stages -- the proxy box and both eased progresses
 # once per drawn frame, then the 16 drop facts and the branch actually taken.

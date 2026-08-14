@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # usage: z3_shot.sh <tag>
 # Photograph the overview WITHOUT touching it. The point of this script is what
-# it does not do: z3_view.sh closes and reopens, which destroys CScrollOverview
+# it does not do: attic/z3_view.sh closes and reopens, which destroys CScrollOverview
 # and every piece of drag state it holds -- so a second drag taken after it is a
 # first drag wearing a different name.
 set -u

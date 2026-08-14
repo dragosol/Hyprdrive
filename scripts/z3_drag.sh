@@ -8,7 +8,7 @@
 # the rig scores a pass on code it never ran.
 #
 # The overview is assumed OPEN and showing the card MARK is on -- z3_setup.sh
-# and z3_view.sh both leave it that way, and a drag that started with it closed
+# and attic/z3_view.sh both leave it that way, and a drag that started with it closed
 # would be measuring nothing.
 set -u
 source "$(dirname "$0")/lib/rig.sh"

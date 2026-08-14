@@ -9,7 +9,7 @@
 #                    (two-control pixel gate)  [x24_ov_click.sh + x24_ov_gate.py]
 #   D  flight:       the minimize is ANIMATED into the pill, P1..P7
 #                    [x24_click.sh + x26_points.py + x24_flight_gate.py]
-# Half D ports the orchestration of the old host driver x24_flight_run.sh
+# Half D ports the orchestration of the old host driver attic/x24_flight_run.sh
 # (ssh/g calls replaced with direct local commands; grading runs guest-side).
 #
 # Click expectations follow Dock.cpp's Y4 semantics (activateItem): a plain
