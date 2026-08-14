@@ -602,6 +602,17 @@ nothing to misread.
 4. **Dead code and stale instruments** — see the Attic list above for the twelve
    one-off probes that moved there, and the commit for the ~120 lines of
    unreachable plugin code that went with them.
+5. **`y8`'s wallpaper guard was grading energy, not structure.** It aborted the
+   gate when frame 0 and frame -1 differed by more than 500,000 px — and y8's
+   own subject is a 1100x700 window flying out of the frame, which is ~500k px
+   by itself. Measured on the run that tripped it: **502,366 against a 500,000
+   floor**, a straddler at 100.5% of its own threshold, red because the build
+   got faster and the flight finished inside the capture window. It counts
+   COLUMNS now: the real minimize touches 856 of 2560 (33%), a different
+   wallpaper touches 2560 of 2560 (100%), and so does that rotation blended
+   50%. Floor at 80%, nowhere near either. Proved both ways — the old guard
+   aborts on the real frames, the new one passes them and still returns 2 on a
+   frame pair whose last frame is a different wallpaper.
 
 ### OPEN, on purpose, with the reason
 
