@@ -300,16 +300,28 @@ CBox scaledBox(const PHLWINDOW& window, const CBox& base) {
 // un-hovering -- which fades the button out and, with the old gate, emptied its
 // hit box at exactly the moment the cursor arrived. A hit area that blinks in
 // time with the thing you are reaching for cannot be hit.
+// WHERE THE BUTTON IS, in one copy. Both entry points below need the same disc
+// and differ only in the question they ask ABOUT it -- can it be seen, can it be
+// reached -- so the geometry was written out twice, four identical lines each.
+// X55 has already moved this corner once; a second copy is a second place to
+// forget.
+static CBox closeButtonDisc(const CBox& tileBox, float scale) {
+    const float D  = std::clamp(shortSide(tileBox) * CLOSE_FRACTION, CLOSE_MIN * scale, CLOSE_MAX * scale);
+    // With CLOSE_INSET 0 those are exactly the tile's top-right corner, and the
+    // box is centred on it -- so it overhangs by D/2 on both axes.
+    const float CX = sc<float>(tileBox.x + tileBox.w) - D * CLOSE_INSET;
+    const float CY = sc<float>(tileBox.y) + D * CLOSE_INSET;
+
+    return CBox{CX - D / 2.F, CY - D / 2.F, D, D};
+}
+
 CBox closeButtonHitBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale) {
     if (!window || tileBox.w < 1 || tileBox.h < 1)
         return {};
 
     const float SCALE = std::max(monitorScale, 0.01F);
-    const float D     = std::clamp(shortSide(tileBox) * CLOSE_FRACTION, CLOSE_MIN * SCALE, CLOSE_MAX * SCALE);
-    const float CX    = sc<float>(tileBox.x + tileBox.w) - D * CLOSE_INSET;
-    const float CY    = sc<float>(tileBox.y) + D * CLOSE_INSET;
 
-    return CBox{CX - D / 2.F, CY - D / 2.F, D, D}.expand(CLOSE_SLOP * SCALE);
+    return closeButtonDisc(tileBox, SCALE).expand(CLOSE_SLOP * SCALE);
 }
 
 CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale) {
@@ -320,14 +332,7 @@ CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorS
     if (std::clamp(easedHover(STATE->hover), 0.F, 1.F) < CLOSE_VISIBLE_AT)
         return {};
 
-    const float SCALE = std::max(monitorScale, 0.01F);
-    const float D     = std::clamp(shortSide(tileBox) * CLOSE_FRACTION, CLOSE_MIN * SCALE, CLOSE_MAX * SCALE);
-    const float CX    = sc<float>(tileBox.x + tileBox.w) - D * CLOSE_INSET;
-    const float CY    = sc<float>(tileBox.y) + D * CLOSE_INSET;
-    // With CLOSE_INSET 0 those are exactly the tile's top-right corner, and the
-    // box below is centred on it -- so it overhangs by D/2 on both axes.
-
-    return CBox{CX - D / 2.F, CY - D / 2.F, D, D};
+    return closeButtonDisc(tileBox, std::max(monitorScale, 0.01F));
 }
 
 void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float monitorScale, float alpha) {

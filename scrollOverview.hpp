@@ -246,7 +246,6 @@ class CScrollOverview : public IOverview {
     void      endScrollingPan();
     void      focusMostVisibleScrollingWindow(const PHLWORKSPACE& workspace);
     bool      moveScrollingColumnSelection(bool next);
-    bool      moveScrollingStackSelection(bool next);
     void   applyWorkspaceAnimationOverrides();
     void   restoreWorkspaceAnimationOverrides();
     void   forceWorkspaceAlphaVisible();

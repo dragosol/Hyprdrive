@@ -1,10 +1,8 @@
-#include <cstdio>
 #include "OverviewRender.hpp"
 #include "OverviewPassElement.hpp"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
-#include <sstream>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/helpers/math/Math.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
@@ -13,7 +11,6 @@
 #include <hyprgraphics/image/Image.hpp>
 #include "AppSearch.hpp"
 #include "Config.hpp"
-#include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/render/pass/ClearPassElement.hpp>
 #include "globals.hpp"

@@ -140,10 +140,6 @@ void pairKey(const char* modern, const char* legacy, const std::type_info* under
     pairs().emplace_back(SPair{.modern = modern, .legacy = legacy, .underlying = underlying});
 }
 
-size_t pairedKeys() {
-    return pairs().size();
-}
-
 void adoptLegacyValues() {
     for (const auto& PAIR : pairs()) {
         if (!::Config::mgr()->getConfigValue(PAIR.legacy).setByUser)

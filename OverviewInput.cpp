@@ -165,7 +165,6 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
         if (pan.pointerDown)
             updateScrollingPan();
 
-        //  highlightHoverDebug();
 }
 
 void CScrollOverview::onTouchMove(ITouch::SMotionEvent, Event::SCallbackInfo& info) {

@@ -77,7 +77,6 @@ void   noteLegacyUse(ELegacy kind, const std::string& name);
 // IValue::underlying(), which is how the copy below knows what it is copying
 // without a second table of types to keep in step.
 void   pairKey(const char* modern, const char* legacy, const std::type_info* underlying);
-size_t pairedKeys();
 
 // Copies every legacy key the user set onto its modern twin. Called on every
 // config reload, BEFORE anything in the plugin reads a value.

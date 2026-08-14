@@ -72,7 +72,6 @@ struct SOverviewWindowMetrics {
     float hyprbarLogicalHeight    = 0.F;
     int   hyprbarHeightPx         = 0;
     float hyprbarHeightPxScaled   = 0.F;
-    float hyprbarTopOffsetLogical = 0.F;
     bool  shadowIncludesHyprbar   = false;
     bool  borderIncludesHyprbar   = false;
 };
@@ -366,7 +365,6 @@ static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const
     metrics.shadowIncludesHyprbar   = shouldOverviewShadowIncludeHyprbar(window, metrics.borderIncludesHyprbar);
     metrics.hyprbarHeightPx         = sc<int>(std::round(metrics.hyprbarLogicalHeight * metrics.pxScale));
     metrics.hyprbarHeightPxScaled   = metrics.hyprbarLogicalHeight * metrics.pxScale;
-    metrics.hyprbarTopOffsetLogical = metrics.hyprbarLogicalHeight > 0.F ? metrics.hyprbarLogicalHeight + metrics.borderSize : 0.F;
 
     return metrics;
 }
@@ -442,6 +440,28 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
     const bool     previousBorderCacheDirty = window->m_borderSizeCacheDirty;
     const int      previousCachedBorderSize = window->m_cachedBorderSize;
 
+    // ONE RESTORE, TWO EXITS. Every line below has to be put back whether the
+    // positioning reply fails here and now or the frame ends normally later, and
+    // it was written out twice -- eight lines each -- in a block where a line
+    // missed from one copy leaks a hyprbars config value into the user's live
+    // session and leaves the plugin's buttons permanently rescaled. Same class
+    // as the three copies of the dock's still-moving test; one lambda, two
+    // callers. It re-reads the global state rather than closing over the pointer
+    // above because the deferred caller runs a frame later.
+    const auto RESTOREBARS = [window, previousBarTextSize, previousButtonPadding, previousButtonSizes, previousRounding, previousBorderSize, previousBorderCacheDirty,
+                              previousCachedBorderSize] {
+        ScrollOverview::Config::setValue("plugin:hyprbars:bar_text_size", previousBarTextSize);
+        ScrollOverview::Config::setValue("plugin:hyprbars:bar_button_padding", previousButtonPadding);
+        window->m_ruleApplicator->roundingOverride(previousRounding);
+        window->m_ruleApplicator->borderSizeOverride(previousBorderSize);
+        window->m_borderSizeCacheDirty = previousBorderCacheDirty;
+        window->m_cachedBorderSize     = previousCachedBorderSize;
+        if (auto* const BARSTATE = getOverviewHyprbarGlobalState()) {
+            for (size_t i = 0; i < previousButtonSizes.size() && i < BARSTATE->buttons.size(); ++i)
+                BARSTATE->buttons[i].size = previousButtonSizes[i];
+        }
+    };
+
     const auto scaledRounding   = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->m_ruleApplicator->rounding().valueOrDefault() * metrics.renderScale)));
     const auto scaledBorderSize = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->getRealBorderSize() * metrics.renderScale)));
     window->m_ruleApplicator->rounding().set(scaledRounding, Desktop::Types::PRIORITY_SET_PROP);
@@ -455,16 +475,7 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
     if (!REPLY) {
         window->positionAnimation()->value() = previousWindowPos;
         window->sizeAnimation()->value()     = previousWindowSize;
-        ScrollOverview::Config::setValue("plugin:hyprbars:bar_text_size", previousBarTextSize);
-        ScrollOverview::Config::setValue("plugin:hyprbars:bar_button_padding", previousButtonPadding);
-        window->m_ruleApplicator->roundingOverride(previousRounding);
-        window->m_ruleApplicator->borderSizeOverride(previousBorderSize);
-        window->m_borderSizeCacheDirty = previousBorderCacheDirty;
-        window->m_cachedBorderSize     = previousCachedBorderSize;
-        if (HYPRBARGLOBALSTATE) {
-            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i)
-                HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
-        }
+        RESTOREBARS();
         return;
     }
 
@@ -479,8 +490,7 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
 
     state.queuedAny = true;
     state.restoreFns.emplace_back([window, decoration, WORKSPACE, OVERRIDEWORKSPACEOFFSET, previousWindowPos, previousWindowSize, previousWorkspaceOffset, previousReply,
-                                   previousReplyData, previousBarTextSize, previousButtonPadding, previousButtonSizes, previousRounding, previousBorderSize,
-                                   previousBorderCacheDirty, previousCachedBorderSize] {
+                                   previousReplyData, RESTOREBARS] {
         if (!window || !decoration)
             return;
 
@@ -493,16 +503,7 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
             previousReplyData->lastReply = previousReply;
         decoration->onPositioningReply(previousReply);
 
-        ScrollOverview::Config::setValue("plugin:hyprbars:bar_text_size", previousBarTextSize);
-        ScrollOverview::Config::setValue("plugin:hyprbars:bar_button_padding", previousButtonPadding);
-        window->m_ruleApplicator->roundingOverride(previousRounding);
-        window->m_ruleApplicator->borderSizeOverride(previousBorderSize);
-        window->m_borderSizeCacheDirty = previousBorderCacheDirty;
-        window->m_cachedBorderSize     = previousCachedBorderSize;
-        if (auto* const HYPRBARGLOBALSTATE = getOverviewHyprbarGlobalState()) {
-            for (size_t i = 0; i < previousButtonSizes.size() && i < HYPRBARGLOBALSTATE->buttons.size(); ++i)
-                HYPRBARGLOBALSTATE->buttons[i].size = previousButtonSizes[i];
-        }
+        RESTOREBARS();
     });
 }
 

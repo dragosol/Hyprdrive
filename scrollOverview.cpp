@@ -1867,53 +1867,6 @@ bool CScrollOverview::moveScrollingColumnSelection(bool next) {
     return true;
 }
 
-bool CScrollOverview::moveScrollingStackSelection(bool next) {
-    if (images.empty() || viewportCurrentWorkspace >= images.size())
-        return false;
-
-    const auto& WORKSPACEIMAGE = images[viewportCurrentWorkspace];
-    if (!WORKSPACEIMAGE || !WORKSPACEIMAGE->pWorkspace)
-        return false;
-
-    const auto ALGO = overviewScrollingAlgorithmForWorkspace(WORKSPACEIMAGE->pWorkspace);
-    if (!ALGO || !ALGO->m_scrollingData || ALGO->m_scrollingData->columns.empty())
-        return false;
-
-    if (!closeOnWindow || closeOnWindow->m_workspace != WORKSPACEIMAGE->pWorkspace || !shouldShowOverviewWindow(closeOnWindow.lock()) || closeOnWindow->m_isFloating)
-        syncSelectionToViewport();
-
-    const auto CURRENT = getOverviewWindowToShow(closeOnWindow.lock());
-    if (!CURRENT || !CURRENT->layoutTarget())
-        return false;
-
-    const auto CURRENTDATA = ALGO->dataFor(CURRENT->layoutTarget());
-    const auto CURRENTCOL  = CURRENTDATA ? CURRENTDATA->column.lock() : nullptr;
-    if (!CURRENTCOL)
-        return false;
-
-    const auto CURRENTIDX = CURRENTCOL->idx(CURRENT->layoutTarget());
-    const auto TARGETIDX  = CURRENTIDX + (next ? 1 : -1);
-    if (TARGETIDX < 0 || TARGETIDX >= sc<int>(CURRENTCOL->targetDatas.size()))
-        return false;
-
-    const auto TARGETDATA = CURRENTCOL->targetDatas[TARGETIDX];
-    if (!TARGETDATA || !TARGETDATA->target)
-        return false;
-
-    for (const auto& windowRef : WORKSPACEIMAGE->windows) {
-        const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
-        if (shouldShowOverviewWindow(WINDOW) && !WINDOW->m_isFloating && WINDOW->layoutTarget() == TARGETDATA->target && WINDOW->m_workspace == WORKSPACEIMAGE->pWorkspace) {
-            closeOnWindow = WINDOW;
-            rememberSelection(WINDOW);
-            syncFocusedSelection();
-            damage();
-            return true;
-        }
-    }
-
-    return false;
-}
-
 // The live handles a drop needs, filled in by the three gather steps below in
 // the order endWindowDrag() runs them. The pure half -- what to DO with them --
 // is ScrollOverview::Drop::resolve(facts) in DropDecision.hpp.
