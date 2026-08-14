@@ -183,6 +183,13 @@ void showOverlay();
 // -- it has to answer with requestInputFrame() instead, and this is how it knows.
 bool damageIfChanged(PHLMONITOR monitor);
 
+// Drop every per-monitor row the dock holds for an output that has gone away.
+// Called from the monitor.removed handler beside Flight::abortAll. The frame-
+// pump mark is the one that matters: it is cleared by a doLater, and a doLater
+// queued against a removed output never runs, which would leave that monitor's
+// dock latched out of ever requesting another frame.
+void forgetMonitor(MONITORID id);
+
 // X30. Feed the autohide pressure barrier with RELATIVE pointer motion. The
 // bus's mouse.move carries the absolute position, and at the bottom edge the
 // cursor is clamped -- so its position stops changing while the user is still

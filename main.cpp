@@ -1148,6 +1148,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto MONITORGONE = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
         ScrollOverview::Flight::abortAll("monitor-removed");
         dropScrollOverviewsForMonitor(monitor);
+        if (monitor)
+            ScrollOverview::Dock::forgetMonitor(monitor->m_id);
     });
 
     ScrollOverview::Config::registerDispatcher("overview", ::onOverviewDispatcher);

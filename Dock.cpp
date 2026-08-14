@@ -152,21 +152,16 @@ static_assert(CONTAINER_PAD_X + ITEM_MARGIN_X - HOVER_PAD == HL_PAD, "X53: the h
 constexpr float PREVIEW_MIN_ASPECT = 0.60F;
 constexpr float PREVIEW_MAX_ASPECT = 2.20F;
 
-// (user, 2026-08-03) hover highlight and tooltip, read off the GNOME shell the
-// user showed: a rounded cell slightly larger than the icon, and a dark plate
-// above the dock carrying the app's name.
-// X57. The host draws its dash label and its overview window caption with ONE
-// style, so this is both of them:
-//     .dash-label, .window-caption {
-//         background-color rgba(0,0,0,0.9); border 1px rgba(255,255,255,0.1);
-//         border-radius 999px; padding 6px 12px; color #ffffff }
-// The PILL shape and the 12x6 padding ratio are the host's. The size is the
-// user's ("make the tooltips bigger"), and the border comes from Hyprland
-// rather than from that stylesheet -- see X56.
-constexpr float TOOLTIP_FONT   = 16.F;
-constexpr float TOOLTIP_PAD_X  = 16.F;
-constexpr float TOOLTIP_PAD_Y  = 9.F;
-constexpr float TOOLTIP_BG_A   = 0.90F;
+// (user, 2026-08-03) the tooltip: a dark plate above the dock carrying the
+// app's name. How it LOOKS is not decided here any more -- X57 established that
+// the host styles its dash label and its overview window caption with one css
+// rule, so the plate is drawn by the shared OverviewRender::labelPill and the
+// font, padding and background alpha live there, in one copy. This file had a
+// second set of all four with the same values; they were dead once the pill
+// landed and are gone.
+//
+// What stays is the one number that is the DOCK'S own: how far above the pill
+// the plate floats.
 constexpr float TOOLTIP_GAP    = 8.F;
 
 // X28. The app-icon menu. Same font as the tooltip -- it is the same chrome,
@@ -415,13 +410,6 @@ struct SDockFlight {
 SDockFlight g_flight;
 // [FLIGHT] rememberMinimizeTile / takeMinimizeTile / warpRestoredWindowAnims
 // moved to FlightController.cpp -- every caller was flight code.
-
-// A minimize is an exit, so it accelerates. This used to be a cubic mirror --
-// the right SHAPE but not the house curve; houseEase evaluates the registered
-// bezier itself, so the dock and the overview are exactly the same motion.
-float exitEase(float t) {
-    return houseEase(false, t);
-}
 
 // [FLIGHT] easeOutExpo moved to FlightController.cpp (only the flight used it).
 
@@ -770,12 +758,6 @@ std::vector<SItem> dockItems() {
         });
     }
 
-    return out;
-}
-
-std::vector<PHLWINDOW> previewWindows() {
-    auto out = Minimize::minimized();
-    std::erase_if(out, [](const auto& window) { return !window || !window->m_isMapped || !window->wlSurface() || !window->wlSurface()->resource(); });
     return out;
 }
 
@@ -2665,20 +2647,44 @@ std::unordered_map<MONITORID, bool> g_pumpPending;
 // collapse is exact rather than approximate: two damageMonitor calls in one
 // event-loop iteration are the same region twice, so dropping the second
 // changes nothing but the flood.
+//
+// THE MARK IS ERASED, NOT SET FALSE, and the difference is a latch. `PENDING`
+// is the only thing standing between a motion event and another doLater, so a
+// mark that survives its callback is a dock that never asks for a frame again:
+// the entry reads true, every pumpFrame returns early, and the reveal, the
+// bounce and the flights all stop mid-animation on that output with nothing in
+// any log. The callback erases, and forgetMonitor() erases on the way out --
+// because a doLater queued against a monitor that is then removed is dropped
+// with the loop, and its callback is exactly what would have cleared the mark.
 void pumpFrame(PHLMONITOR monitor) {
     if (!monitor)
         return;
 
-    auto& PENDING = g_pumpPending[monitor->m_id];
-    if (PENDING)
+    if (g_pumpPending[monitor->m_id])
         return;
 
-    PENDING = true;
+    g_pumpPending[monitor->m_id] = true;
     g_pEventLoopManager->doLater([MONITOR = PHLMONITORREF{monitor}, ID = monitor->m_id] {
-        g_pumpPending[ID] = false;
+        g_pumpPending.erase(ID);
         if (MONITOR)
             g_pHyprRenderer->damageMonitor(MONITOR.lock());
     });
+}
+
+// AN OUTPUT THAT IS GONE OWNS NO STATE. The dock keeps three maps keyed by
+// monitor id -- the visual state damageIfChanged diffs against, the autohide
+// reveal, and the frame-pump mark -- and none of them had anything that removed
+// a row. Two of the three merely leak a handful of bytes per hotplug; the third
+// is the latch described above. A stale row is not only waste either: nothing
+// here promises a MONITORID is never handed out twice, and a row that outlives
+// its output is the state a later one would be judged against.
+//
+// Called from the monitor.removed handler beside Flight::abortAll -- the same
+// place, and for the same reason, as P0's overview teardown.
+void forgetMonitor(MONITORID id) {
+    g_visualStates.erase(id);
+    g_reveal.erase(id);
+    g_pumpPending.erase(id);
 }
 
 // IS ANYTHING ON THE DOCK STILL MOVING? The one list, in one place.
