@@ -842,7 +842,62 @@ void presentPreview(const PHLWINDOW& window, PHLMONITOR monitor, const Time::ste
         &data);
 }
 
-std::unordered_map<MONITORID, std::string> g_signatures;
+// WHAT THE DOCK LOOKS LIKE THIS FRAME, as a value.
+//
+// damageIfChanged only asks for a repaint when this changes, so anything that
+// can alter a pixel WITHOUT moving a box -- a badge arriving, an app going
+// urgent, `user-trash` becoming `user-trash-full`, the hovered row of a context
+// menu -- has to be a field in here or the frame that would draw it is never
+// asked for. Every one of those is a bug this tree has actually shipped, which
+// is what the numbered comments on the fields are.
+//
+// It used to be a hand-built string, and the two reasons it is not any more are
+// bugs waiting rather than tidiness. Concatenation ALIASES: the old
+// `desktopId + "/" + wmClass + uri + icon` spells the same thing for
+// ("a", "b") as for ("ab", "") -- rare, silent, and indistinguishable from a
+// dropped frame. And a new visual feature had to REMEMBER to append itself. A
+// struct with a defaulted operator== cannot alias, and the compiler carries the
+// reminder instead of a comment: add a field, and the comparison picks it up.
+struct SDockItemState {
+    std::string desktopId, wmClass, uri, icon;
+    bool        running = false;
+    int         badge   = 0;
+    bool        urgent  = false;
+
+    bool operator==(const SDockItemState&) const = default;
+};
+
+struct SDockVisualState {
+    // No pill -- dock off, or fully hidden. Everything else is then moot, and
+    // the default-constructed state is exactly "nothing to draw", which is what
+    // the first call on a monitor has to compare equal to.
+    bool pillUp = false;
+    // pillY is in here because during the autohide slide it is the ONLY thing
+    // that changes.
+    int                         pillX = 0, pillY = 0, pillW = 0;
+    std::vector<SDockItemState> items;
+    // The hovered cell is part of what the pill LOOKS like, so a bare pointer
+    // move over an otherwise idle dock has to repaint it -- nothing else on the
+    // desktop damages the monitor for a motion event.
+    int  hovered       = -1;
+    bool hoverShowApps = false;
+    // X32/G12. The insertion caret moves on a bare pointer move exactly as the
+    // hover highlight does, and nothing else asks for a frame during a drag.
+    int caret = -1;
+    // X34. The hotkey overlay's numbers arrive and leave without a single box
+    // moving, so the frame that draws them -- and the one that clears them --
+    // has to be asked for from here.
+    bool overlay = false;
+    // X28. The menu is part of what the dock looks like, and its hovered row
+    // moves with a bare pointer move exactly as the icon highlight does.
+    bool        menuUp = false;
+    std::string menuClass, menuUri;
+    int         menuRow = -1;
+
+    bool operator==(const SDockVisualState&) const = default;
+};
+
+std::unordered_map<MONITORID, SDockVisualState> g_visualStates;
 
 // X30. AUTOHIDE. The pill is away by default (`autohide` true, `dock-fixed`
 // false) and is revealed by pushing the pointer into the bottom edge until the
@@ -2627,21 +2682,23 @@ bool damageIfChanged(PHLMONITOR monitor) {
                 g_pHyprRenderer->damageMonitor(MONITOR.lock());
         });
 
-    std::string signature;
+    SDockVisualState state;
     if (!LAYOUT.pill.empty()) {
-        // pill.y is in the signature because during the slide it is the ONLY
-        // thing that changes.
-        signature = std::to_string(sc<int>(LAYOUT.pill.x)) + "," + std::to_string(sc<int>(LAYOUT.pill.y)) + "," + std::to_string(sc<int>(LAYOUT.pill.width));
+        state.pillUp = true;
+        state.pillX  = sc<int>(LAYOUT.pill.x);
+        state.pillY  = sc<int>(LAYOUT.pill.y);
+        state.pillW  = sc<int>(LAYOUT.pill.width);
+
         for (const auto& ITEM : LAYOUT.items) {
-            // X32. The desktop id is in here as well as the class because a
+            // X32. The desktop id is carried as well as the class because a
             // pinned favourite HAS no class: without it, launching a pinned app
             // -- or pinning one while another is already pinned -- leaves the
-            // signature identical and the dot never appears.
+            // state identical and the running dot never appears.
             // X35. The icon NAME, because the trash swaps `user-trash` for
             // `user-trash-full` without moving a box. Ceiling: the swap is seen
             // when the poll next runs AND something asks for a frame, so on a
             // wholly idle desktop the new icon can lag the deletion by a beat.
-            signature += "|" + ITEM.desktopId + "/" + ITEM.wmClass + ITEM.uri + ITEM.icon + (ITEM.running ? "+" : "-");
+            auto& ITEMSTATE = state.items.emplace_back(SDockItemState{ITEM.desktopId, ITEM.wmClass, ITEM.uri, ITEM.icon, ITEM.running});
 
             // A location has no class, so every badge lookup below would key on
             // the empty string -- and a location has no notifications anyway.
@@ -2649,59 +2706,41 @@ bool damageIfChanged(PHLMONITOR monitor) {
                 continue;
 
             // X31. A badge arriving, or an app going urgent, changes what the
-            // pill LOOKS like without moving a single box -- so the signature
-            // has to carry them or the first frame that would show either one
-            // never gets asked for.
-            if (const auto COUNT = badgeCount(ITEM.wmClass); COUNT > 0)
-                signature += "!" + std::to_string(COUNT);
-            if (classUrgent(ITEM.wmClass))
-                signature += "*";
+            // pill LOOKS like without moving a single box.
+            ITEMSTATE.badge  = badgeCount(ITEM.wmClass);
+            ITEMSTATE.urgent = classUrgent(ITEM.wmClass);
         }
 
-        // The hovered cell is part of what the pill LOOKS like, so a bare pointer
-        // move over an otherwise idle dock has to repaint it -- nothing else on
-        // the desktop damages the monitor for a motion event.
         const auto MOUSE = (g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale;
         for (size_t i = 0; i < LAYOUT.items.size(); ++i) {
             if (hoverBox(LAYOUT.items[i].iconBox, monitor->m_scale).containsPoint(MOUSE)) {
-                signature += "#" + std::to_string(i);
+                state.hovered = sc<int>(i);
                 break;
             }
         }
 
-        if (!LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(MOUSE))
-            signature += "#apps";
+        state.hoverShowApps = !LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(MOUSE);
+        state.caret         = caretIndex();
+        state.overlay       = overlayUp();
 
-        // X32/G12. The insertion caret moves on a bare pointer move exactly as
-        // the hover highlight does, and nothing else on the desktop asks for a
-        // frame during a drag.
-        if (const int CARET = caretIndex(); CARET >= 0)
-            signature += "^" + std::to_string(CARET);
-
-        // X34. Same reasoning as the badge: the numbers arrive and leave
-        // without a single box moving, so they have to be in here or the frame
-        // that draws them -- and the one that clears them -- is never asked for.
-        if (overlayUp())
-            signature += "~overlay";
-
-        // X28. The menu is part of what the dock looks like, and its hovered row
-        // moves with a bare pointer move exactly as the icon highlight does.
         if (g_menu && g_menu->monitor == monitor->m_id) {
-            signature += "@" + g_menu->item.wmClass + g_menu->item.uri;
+            state.menuUp    = true;
+            state.menuClass = g_menu->item.wmClass;
+            state.menuUri   = g_menu->item.uri;
             for (size_t i = 0; i < g_menu->rows.size(); ++i) {
                 if (!g_menu->rows[i].box.empty() && g_menu->rows[i].box.containsPoint(MOUSE)) {
-                    signature += "/" + std::to_string(i);
+                    state.menuRow = sc<int>(i);
                     break;
                 }
             }
         }
     }
 
-    auto& LAST = g_signatures[monitor->m_id];
-    if (LAST == signature)
+    auto& LAST = g_visualStates[monitor->m_id];
+    if (LAST == state)
         return false;
 
-    LAST = signature;
+    LAST = std::move(state);
     g_pHyprRenderer->damageMonitor(monitor);
     return true;
 }
