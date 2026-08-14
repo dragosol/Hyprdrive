@@ -482,12 +482,71 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
     return MATCHED;
 }
 
+// P6i1, ROUND TWO: THE GATE IS SPLIT BY COST, and only the expensive half is
+// shadowed -- and, at cutover, cached.
+//
+// Round one shadowed the whole gate and found 15 divergences over a full suite,
+// every one of them `validMapped` flipping inside a single generation:
+// `window.close` fires when the close is REQUESTED, the unmap happens after it,
+// and `window.destroy` fires later still. Nothing announces the unmap, so no
+// bump set can ever cover it. But the properties with that shape -- isHidden,
+// validMapped, the pinned+floating pair -- are also the CHEAPEST part of the
+// gate, four bool reads off the window, so they are simply re-read on every
+// call, forever. Only what actually costs gets a generation key.
+//
+// This half is that cost: a string match over workspace+title+class+appname,
+// and a linear scan of the minimize stash. Both change only through mutators
+// that already bump (query edit, session reset, minimize, restore, title,
+// class, moveToWorkspace), which is exactly the property a generation key needs.
+inline bool overviewMembershipMatchesLive(const PHLWINDOW& WINDOW) {
+    // Y9 REVISED (user, 2026-08-06): a minimized window belongs in the overview
+    // ONLY while a query is active. With an empty query it stays put away --
+    // which is what minimizing it meant -- and this is X58(a)'s original wording
+    // restored: "filtering needs to work even on minimized windows".
+    //
+    // The gate goes HERE and nowhere else on purpose. shouldShowOverviewWindow
+    // is the one thing every overview path consults (see the note on it), so
+    // putting the rule under it keeps render, hit-test, drag and grid from ever
+    // disagreeing about whether a stashed window exists. The workspace-home
+    // plumbing in overviewGridWindows and addOverviewWindow stays: it is what
+    // puts the window on the RIGHT desktop once a query does bring it back.
+    if (g_search.query.text.empty() && ScrollOverview::Minimize::isMinimized(WINDOW))
+        return false;
+
+    return overviewSearchMatches(WINDOW);
+}
+
+// THE CACHE READ, and the only one. Keyed on WINDOW -- the group's current --
+// rather than on the window handed in: every member of a group asks this
+// question about the same representative and has to get the same answer.
+//
+// With the shadow off (the shipping path) a hit returns immediately and nothing
+// else in this function runs. With it on, the live answer is computed anyway and
+// compared, which is how the bump set gets re-proved after someone adds a
+// mutator -- and is why the comparison lives here rather than in a test that
+// would have to reconstruct sixty callers to mean anything.
+inline bool overviewMembershipMatches(const PHLWINDOW& WINDOW) {
+    bool       cached = false;
+    const bool HIT    = Membership::lookup(WINDOW.get(), cached);
+
+    if (HIT && !Membership::shadowEnabled())
+        return cached;
+
+    const bool LIVE = overviewMembershipMatchesLive(WINDOW);
+
+    if (HIT && cached != LIVE)
+        Membership::divergence(WINDOW->m_class, WINDOW->m_title, LIVE);
+
+    Membership::store(WINDOW.get(), LIVE);
+    return LIVE;
+}
+
 // The search filter hangs off this gate rather than off the grid builder: every
 // overview path (render, hit-test, drag, grid) already consults it, so they
 // cannot disagree about which windows exist. Dropping a window from the gate
 // removes it from the grid too, and the survivors re-lay-out through the U4
 // reflow animation at no extra cost.
-inline bool shouldShowOverviewWindowLive(const PHLWINDOW& window) {
+inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     // Z9r5: a window hidden for a dock flight is the proxy's alone -- drawing
     // its tile too would be the double image the spec forbids.
     if (window && window->isHidden())
@@ -501,36 +560,7 @@ inline bool shouldShowOverviewWindowLive(const PHLWINDOW& window) {
     if (WINDOW->m_pinned && WINDOW->m_isFloating)
         return false;
 
-    // Y9 REVISED (user, 2026-08-06): a minimized window belongs in the overview
-    // ONLY while a query is active. With an empty query it stays put away --
-    // which is what minimizing it meant -- and this is X58(a)'s original wording
-    // restored: "filtering needs to work even on minimized windows".
-    //
-    // The gate goes HERE and nowhere else on purpose. This function is the one
-    // thing every overview path consults (see the note above it), so putting the
-    // rule in it keeps render, hit-test, drag and grid from ever disagreeing
-    // about whether a stashed window exists. The workspace-home plumbing in
-    // overviewGridWindows and addOverviewWindow stays: it is what puts the
-    // window on the RIGHT desktop once a query does bring it back.
-    if (g_search.query.text.empty() && ScrollOverview::Minimize::isMinimized(WINDOW))
-        return false;
-
-    if (!overviewSearchMatches(WINDOW))
-        return false;
-
-    return true;
-}
-
-// P6i1 SHADOW. The live answer is what is returned, always. Beside it, a
-// generation-keyed cache is asked what it WOULD have said, and a disagreement
-// is written down with the window that caused it. Nothing here reads the cache
-// to decide anything -- see Membership.cpp for why the bump set, not the cache,
-// is the thing that has to be proved before a reader is switched over.
-inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
-    const bool LIVE = shouldShowOverviewWindowLive(window);
-    if (window && !Membership::observe(window.get(), LIVE))
-        Membership::divergence(window->m_class, window->m_title, LIVE);
-    return LIVE;
+    return overviewMembershipMatches(WINDOW);
 }
 
 inline bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
@@ -896,11 +926,6 @@ inline CBox getOverviewDragWindowBox(const PHLWINDOW& window, PHLMONITOR monitor
     return getOverviewWindowBox(window, monitor, scale, viewOffset, offset, layout, round);
 }
 
-inline CBox expandOverviewWindowHitbox(CBox box, float scale, float monitorScale) {
-    const auto GAPS = ScrollOverview::Config::getCssGapData("general:gaps_in");
-    return OvGeom::expandHitbox(box, scale, monitorScale, OvGeom::SGaps{GAPS.m_left, GAPS.m_top, GAPS.m_right, GAPS.m_bottom});
-}
-
 inline float overviewPointDistanceSqToBox(const Vector2D& point, const CBox& box) {
     return OvGeom::pointDistanceSqToBox(point, box);
 }
@@ -1056,30 +1081,6 @@ inline float getWorkspaceRenderedPitch(PHLMONITOR monitor, float scale, ScrollOv
 
 inline float getWorkspaceLogicalPitch(PHLMONITOR monitor, float scale, ScrollOverview::Config::ELayout layout) {
     return OvGeom::workspaceLogicalPitch(viewportOf(monitor), scale, axisOf(layout), sc<float>(ScrollOverview::Config::getWorkspaceGap()));
-}
-
-inline float getWindowVerticalOverlap(const PHLWINDOW& a, const PHLWINDOW& b) {
-    if (!a || !b)
-        return 0.F;
-
-    const auto APOS  = a->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto ASIZE = a->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto BPOS  = b->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto BSIZE = b->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-
-    return OvGeom::spanOverlap(APOS.y, ASIZE.y, BPOS.y, BSIZE.y);
-}
-
-inline float getWindowHorizontalOverlap(const PHLWINDOW& a, const PHLWINDOW& b) {
-    if (!a || !b)
-        return 0.F;
-
-    const auto APOS  = a->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto ASIZE = a->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto BPOS  = b->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    const auto BSIZE = b->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-
-    return OvGeom::spanOverlap(APOS.x, ASIZE.x, BPOS.x, BSIZE.x);
 }
 
 inline bool overviewBoxesEqual(const CBox& a, const CBox& b) {

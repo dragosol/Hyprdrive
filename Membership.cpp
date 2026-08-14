@@ -7,29 +7,40 @@
 #include <string>
 #include <unordered_map>
 
-// P6i1, STEP ONE: the generation counter and a SHADOW of the cache it is meant
-// to key, running beside the live gate and agreeing with it or saying so.
+// P6i1: THE MEMBERSHIP SNAPSHOT. Readers are cut over; this file owns the cache.
 //
-// The plan is a membership snapshot: `shouldShowOverviewWindow` is consulted
-// from about sixty places -- render, hit-test, drag, the grid, the strip, the
-// frame pacer -- and every one of them recomputes it. One snapshot, invalidated
-// by a generation that every mutator bumps, is both cheaper and the only way
-// those callers cannot disagree inside a frame.
+// `shouldShowOverviewWindow` is consulted from about sixty places -- render,
+// hit-test, drag, the grid, the strip, the frame pacer -- and every one of them
+// used to recompute the whole answer. One snapshot, invalidated by a generation
+// that every mutator bumps, is both cheaper and the only way those callers
+// cannot disagree inside a frame.
 //
-// The danger is entirely in the bump set. A mutator nobody thought of means a
-// stale answer: a window that renders when it should not, or worse, one that
-// stops rendering and cannot be got back -- which is the exact shape of Z20 and
-// of the Y9 minimized-window bug, both of which cost rounds. So no reader is
-// switched over here. Instead every call computes the live answer AND what a
-// generation-keyed cache would have returned, and any disagreement is written
-// down with the window that caused it and the generation it happened in.
+// The danger was always the bump set. A mutator nobody thought of means a stale
+// answer: a window that renders when it should not, or worse, one that stops
+// rendering and cannot be got back -- the exact shape of Z20 and of the Y9
+// minimized-window bug, both of which cost rounds. So the cutover was not taken
+// on reasoning. A SHADOW ran first: every call computed the live answer AND what
+// a generation-keyed cache would have returned, and wrote down any disagreement.
 //
-// A run with divergence 0 and a non-trivial HIT count is the evidence the
-// cutover needs. A run with divergence 0 and hits 0 proves nothing at all --
-// that is a generation churning faster than it is read -- which is why the
-// report prints both and why the hit rate is the first number to look at.
+// What the two rounds of that shadow found, and why the cache looks like this:
 //
-// Remove this file at cutover; it has no other purpose.
+//   ROUND ONE shadowed the WHOLE gate: 15 divergences over a full suite, every
+//   one of them `validMapped` going false between `window.close` and
+//   `window.destroy` -- a gap no event announces. Not a missing bump. A property
+//   that cannot be cached at all.
+//   ROUND TWO split the gate BY COST (see OverviewInternal.hpp). The three
+//   uncacheable properties are also the cheapest -- four bool reads -- so they
+//   are re-read on every call and never come here. What arrives is the expensive
+//   half: the search match and the minimize-stash scan, both of which have
+//   mutators that already bump. Divergence 0 over ~14M checks across two full
+//   suites, hit rate 99.8%. That is the evidence the cutover was waiting for;
+//   the log is in zrig/final/.
+//
+// THE SHADOW IS STILL HERE, and still the way to re-prove this. It is off unless
+// HYPRDRIVE_MEMBERSHIP_SHADOW is set (globals.hpp) -- with it on, every call
+// recomputes the live answer and compares it against what the cache holds, which
+// is a verification mode and not a shipping one: it also writes a line to a file
+// from inside the render pass. With it off, none of this code runs.
 
 namespace Membership {
     namespace {
@@ -76,57 +87,73 @@ namespace Membership {
             va_end(ap);
             std::fclose(f);
         }
+
+        void report(const char* when) {
+            say("REPORT %-18s generation %llu  checks %llu  hits %llu (%.1f%%)  fills %llu  bumps %llu  DIVERGED %llu  cache %zu  last bump %s\n", when,
+                (unsigned long long)g_generation, (unsigned long long)g_checks, (unsigned long long)g_hits,
+                g_checks ? 100.0 * (double)g_hits / (double)g_checks : 0.0, (unsigned long long)g_fills, (unsigned long long)g_bumps,
+                (unsigned long long)g_diverged, g_cache.size(), g_lastBump.c_str());
+        }
     }
 
+    // The generation ALWAYS moves -- the cache is keyed on it, so gating this
+    // would be gating correctness. Only the bookkeeping that exists to explain a
+    // divergence is behind the shadow: `why` is a literal, but assigning it to a
+    // std::string is an allocation on a path a mutator can reach.
     void bump(const char* why) {
         ++g_generation;
+
+        if (!shadowEnabled())
+            return;
+
         ++g_bumps;
         g_lastBump = why ? why : "?";
     }
 
-    void report(const char* when) {
-        say("REPORT %-18s generation %llu  checks %llu  hits %llu (%.1f%%)  fills %llu  bumps %llu  DIVERGED %llu  cache %zu  last bump %s\n", when,
-            (unsigned long long)g_generation, (unsigned long long)g_checks, (unsigned long long)g_hits,
-            g_checks ? 100.0 * (double)g_hits / (double)g_checks : 0.0, (unsigned long long)g_fills, (unsigned long long)g_bumps,
-            (unsigned long long)g_diverged, g_cache.size(), g_lastBump.c_str());
-    }
-
-    // True when a generation-keyed cache would have agreed with the live gate
-    // (or had nothing to say and was filled). False is a divergence, and the
-    // caller has the window to name it with.
-    bool observe(const void* key, bool live) {
+    // THE CACHE READ. True when this generation already has an answer for
+    // `key`, written to `out`; false means the caller must compute it and
+    // store() the result.
+    //
+    // Keyed on the raw window pointer, and an address CAN be reused by a later
+    // window. That is safe here and not by luck: every open, close, kill and
+    // destroy bumps the generation, so a reused address is always consulted in
+    // a generation the old entry does not carry, and misses.
+    bool lookup(const void* key, bool& out) {
         ++g_checks;
 
-        // Keep it bounded the same way the grid maps are: this is a shadow, not
-        // a leak. Address reuse after an erase is exactly one of the things the
-        // divergence count is here to catch, so nothing clever is done about it.
+        if (shadowEnabled()) {
+            if (g_checks == 1)
+                report("first check");
+            else if (g_checks % 20000 == 0)
+                report("periodic");
+        }
+
+        // Bounded the same way the grid maps are. Dropping the table costs a
+        // generation of refills and nothing else -- every entry is derivable.
         if (g_cache.size() > 512)
             g_cache.clear();
 
-        auto& ENTRY = g_cache[key];
-        if (ENTRY.generation == g_generation) {
-            ++g_hits;
-            if (ENTRY.member == live)
-                return true;
-            ++g_diverged;
-            ENTRY.member = live; // report each divergence once, not once per call
+        const auto IT = g_cache.find(key);
+        if (IT == g_cache.end() || IT->second.generation != g_generation) {
+            ++g_fills;
             return false;
         }
 
-        ++g_fills;
-        ENTRY = SEntry{g_generation, live};
-
-        // Liveness. A shadow that stopped running would otherwise read as a
-        // clean run.
-        if (g_checks == 1)
-            report("first check");
-        else if (g_checks % 20000 == 0)
-            report("periodic");
-
+        ++g_hits;
+        out = IT->second.member;
         return true;
     }
 
+    void store(const void* key, bool member) {
+        g_cache[key] = SEntry{g_generation, member};
+    }
+
+    // SHADOW ONLY. The cache said one thing and the freshly computed answer said
+    // another, which means the bump set has a hole. Records it once per entry
+    // per generation -- see the file header for the two rounds of this that
+    // shaped the split.
     void divergence(const std::string& cls, const std::string& title, bool live) {
+        ++g_diverged;
         say("DIVERGE generation %llu  live=%s  cached=%s  class=%s  title=%s  last bump=%s\n", (unsigned long long)g_generation, live ? "in" : "out",
             live ? "out" : "in", cls.c_str(), title.c_str(), g_lastBump.c_str());
         if (g_diverged <= 3 || g_diverged % 100 == 0)

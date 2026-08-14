@@ -75,16 +75,30 @@ namespace Prof {
     };
 }
 
-// P6i1 STEP ONE: the generation counter behind the planned membership
-// snapshot, and a SHADOW of the cache it would key, running beside the live
-// gate. Nothing reads the cache -- every call still computes the real answer --
-// so this cannot change behaviour; what it produces is the evidence a cutover
-// needs, namely whether the bump set below is complete. See Membership.cpp.
+// P6i1: the membership snapshot -- a generation counter, a cache keyed on it,
+// and the SHADOW that proved the bump set complete before any reader was
+// switched over. Membership.cpp owns the cache and carries the evidence;
+// OverviewInternal.hpp has the cost split and the one call site.
 namespace Membership {
+    // THE SHADOW IS A DEBUG INSTRUMENT AND DOES NOT SHIP HOT.
+    //
+    // The gate it verifies is consulted ~192k times per suite from inside the
+    // render pass, the verification recomputes the answer it was meant to save,
+    // and a divergence writes a line to a file SYNCHRONOUSLY -- an fopen /
+    // fprintf / fclose on the compositor's own thread. That is a fine price for
+    // an evidence run and an indefensible one for every frame the user ever
+    // sees. So it is off unless asked for, exactly like Prof:: above: the
+    // environment is read once and the CALL SITE branches on it, which is what
+    // makes "off" mean a predictable branch rather than a cheaper function.
+    inline bool shadowEnabled() {
+        static const bool ON = std::getenv("HYPRDRIVE_MEMBERSHIP_SHADOW") != nullptr;
+        return ON;
+    }
+
     void bump(const char* why);
-    bool observe(const void* key, bool live);
+    bool lookup(const void* key, bool& out);
+    void store(const void* key, bool member);
     void divergence(const std::string& cls, const std::string& title, bool live);
-    void report(const char* when);
 }
 
 bool ensureScrollOverviewHooks();
