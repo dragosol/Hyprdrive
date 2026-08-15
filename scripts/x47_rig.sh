@@ -205,29 +205,6 @@ shot h0
 sleep 0.5            # the counter ticks every 80ms, so this must differ
 shot h1
 
-# --- FROST A/B, both configs against THIS ONE frozen hover ------------------
-# X47_FROST_PAIR=1: the frost gate needs a sharp plate and a frosted plate over
-# a BIT-IDENTICAL backdrop, differing only in the blur pass. Two separate rig
-# runs cannot give that -- the striped fixtures float to slightly different
-# spots each run, so the plate's backdrop moves and SAMEBACK (its control) fails
-# with the plate rect half off the fixture. So capture BOTH here, still hovering
-# X47A, changing nothing but dock:blur_size/passes (renderHoverPreview reads
-# them per frame, Dock.cpp). The control frame carries no panel, so it is
-# blur-independent -- fa-c0 and fb-c0 are the same desktop and are shared.
-if [ "${X47_FROST_PAIR:-0}" = 1 ]; then
-    echo "$PX $PY $PW $PH" | tee $OUT/frost-fa-panel.txt > $OUT/frost-fb-panel.txt
-    cp $OUT/$TAG-c0.png $OUT/frost-fa-c0.png
-    cp $OUT/$TAG-c0.png $OUT/frost-fb-c0.png
-    cfg_dock "blur_size=20, blur_passes=4"; sleep 0.6
-    for kv in blur_size=20 blur_passes=4; do want "${kv%%=*}" "${kv##*=}"; done
-    grim -g "$BAND" $OUT/frost-fb-h0.png 2>/dev/null
-    cfg_dock "blur_size=1, blur_passes=1"; sleep 0.6
-    for kv in blur_size=1 blur_passes=1; do want "${kv%%=*}" "${kv##*=}"; done
-    grim -g "$BAND" $OUT/frost-fa-h0.png 2>/dev/null
-    cfg_dock "blur_size=20, blur_passes=4"; sleep 0.4   # main run stays frosted
-    echo "frost pair: frost-fa (sharp) + frost-fb (frosted) over one hover"
-fi
-
 # --- FOLLOWS ---------------------------------------------------------------
 warp $BX $BY
 sleep 0.9
@@ -242,6 +219,105 @@ shot g0
 # --- control after ---------------------------------------------------------
 sleep 1.6            # grace + PANEL_OUT_MS, with room
 shot c2
+
+# --- FROST A/B: A FIXTURE THAT OWNS THE PLATE'S BACKDROP --------------------
+# X47_FROST_PAIR=1. This phase used to run inline above, with the overview open,
+# and it measured whatever happened to be behind the plate. That was the bug:
+# the SAME BUILD gave a backdrop step of 216.5/255 inside a suite and 13.0 in a
+# standalone re-run twenty minutes later, because what the plate was frosting
+# was the scene the PREVIOUS GATE left on screen. A fixture must own what the
+# gate photographs; this one did not own it at all.
+#
+# Two things are different here, and the probe that settled both is
+# zrig/final/x47-fixture/.
+#
+# THE OVERVIEW IS CLOSED. The rig's old comment said "the dock is drawn by the
+# overview pass, so there is no dock to hover with the overview closed". That
+# stopped being true when X27 moved the dock to RENDER_POST_WINDOWS, and the
+# probe measured it: hovering with the overview CLOSED raises the plate
+# perfectly well (120095 px change over the plate rect). It also has to be
+# closed -- with the overview OPEN the plate sits over the workspace-card
+# background, which is flat: profile sd 0.9 and a step of 4.0, i.e. nothing to
+# blur. Closed, the desktop is behind the plate and we can put something there.
+#
+# X47Z IS THAT SOMETHING. One extra kitty, solid white, positioned so its BOTTOM
+# EDGE falls STEPROW rows into the plate: white above, the compositor's dark
+# background below, one hard horizontal step across the whole plate width. That
+# is the shape x47_frost.py grades (EDGE = argmax|diff| finds it, TEXTURE wants
+# it >40/255 and 6..len-8 rows in) and now the rig placed it instead of hoping
+# for it.
+#   * A NEW CLASS SHIFTS EVERY ICON, so the predictions are re-read after it is
+#     up -- x47_cell.py reads the live client list, so it accounts for the
+#     fourth icon on its own. The plate's x is icon_x - width/2 (the grader's
+#     own note), which is what centres the backdrop on it.
+#   * It is spawned AFTER every behaviour capture, so RISES/LIVE/FOLLOWS/GRACE
+#     see exactly the scene they always saw.
+#   * It is WIDER than the plate by BACKPAD on each side, so the window's own
+#     rounded corners and border are outside every column the grader samples.
+#   * It is STATIC. SAMEBACK asserts the two arms share a bit-identical control
+#     frame, and the ticking counter stays where it was, far above this band.
+if [ "${X47_FROST_PAIR:-0}" = 1 ]; then
+    STEPROW=30      # rows into the plate; grader needs the step 6..PH-8 in
+    BACKPAD=200     # how far past the plate the backdrop reaches on each side
+    BACKH=160       # tall enough to matter, short enough to clear the X47A row
+
+    ov off; sleep 1.5
+    warp $PARKX $PARKY; sleep 1.0
+
+    # Spawned first at a provisional rect, because the prediction it has to obey
+    # cannot be read until it exists: it is the fourth icon that moves X47A.
+    fixture_kitty X47Z 400 1200 600 "$BACKH" '#ffffff' 'clear; sleep infinity' \
+        || { echo "ABORT: X47Z backdrop never mapped"; exit 1; }
+
+    read -r AX AY <<< "$(hyprctl clients -j | python3 "$CELL" X47A)"
+    read -r PX PY PW PH <<< "$(hyprctl clients -j | python3 "$CELL" panel)"
+    PLATEX=$((AX - PW / 2))
+    BX0=$((PLATEX - BACKPAD)); BW=$((PW + 2 * BACKPAD))
+    BY0=$((PY + STEPROW - BACKH))
+    echo "frost: icon X47A=$AX  plate x=$PLATEX ${PW}x${PH} at y=$PY"
+    echo "frost: backdrop X47Z ${BW}x${BACKH} at $BX0,$BY0 -- step at plate row $STEPROW"
+
+    hyprctl eval "$(cat <<LUA
+for _, w in ipairs(hl.get_windows()) do
+    if w.class == "X47Z" then
+        hl.dispatch(hl.dsp.focus({window = w}))
+        hl.dispatch(hl.dsp.window.resize({x = $BW, y = $BACKH, relative = false}))
+        hl.dispatch(hl.dsp.window.move({x = $BX0, y = $BY0, relative = false}))
+    end
+end
+return 1
+LUA
+)" >/dev/null 2>&1
+    sleep 0.9
+    # It has to BE where it was put, or the step is not where the grader looks.
+    read -r GX GY GW GH <<< "$(hyprctl clients -j | python3 -c "
+import json,sys
+for c in json.load(sys.stdin):
+    if c['class'] == 'X47Z':
+        print(c['at'][0], c['at'][1], c['size'][0], c['size'][1]); break")"
+    echo "frost: X47Z landed at $GX,$GY ${GW}x${GH}"
+    [ "$((GY + GH))" -ge "$((PY + STEPROW - 6))" ] && [ "$((GY + GH))" -le "$((PY + STEPROW + 6))" ] \
+        || { echo "ABORT: X47Z bottom edge at $((GY + GH)), wanted $((PY + STEPROW)) +-6"; exit 1; }
+
+    echo "$PX $PY $PW $PH" | tee $OUT/frost-fa-panel.txt > $OUT/frost-fb-panel.txt
+
+    # Control FIRST and unhovered: it is the backdrop profile the whole gate is
+    # graded against. One capture, shared by both arms, so SAMEBACK is exact.
+    sleep 0.8
+    grim -g "$BAND" $OUT/frost-fa-c0.png 2>/dev/null
+    cp $OUT/frost-fa-c0.png $OUT/frost-fb-c0.png
+
+    warp_or_die $AX $AY
+    sleep 0.6
+    cfg_dock "blur_size=20, blur_passes=4"; sleep 0.6
+    for kv in blur_size=20 blur_passes=4; do want "${kv%%=*}" "${kv##*=}"; done
+    grim -g "$BAND" $OUT/frost-fb-h0.png 2>/dev/null
+    cfg_dock "blur_size=1, blur_passes=1"; sleep 0.6
+    for kv in blur_size=1 blur_passes=1; do want "${kv%%=*}" "${kv##*=}"; done
+    grim -g "$BAND" $OUT/frost-fa-h0.png 2>/dev/null
+    warp $PARKX $PARKY
+    echo "frost pair: frost-fa (sharp) + frost-fb (frosted) over one frozen hover, own backdrop"
+fi
 
 # The overview, the dock config and the DISPLAY all go back in restore(), on the
 # EXIT trap, so an abort restores as thoroughly as a clean finish does.

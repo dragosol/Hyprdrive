@@ -602,7 +602,33 @@ nothing to misread.
 4. **Dead code and stale instruments** — see the Attic list above for the twelve
    one-off probes that moved there, and the commit for the ~120 lines of
    unreachable plugin code that went with them.
-5. **`y8`'s wallpaper guard was grading energy, not structure.** It aborted the
+5. **x47's frost fixture owns its backdrop.** It was the campaign's last
+   blocker. The gate measured whatever was behind the hover plate, and that was
+   the scene the PREVIOUS gate left: the same build gave a backdrop step of
+   216.5/255 inside a suite and 13.0 in a standalone re-run twenty minutes
+   later. Both changes are FIXTURE, the grader is untouched.
+   * The frost pair is captured with the **overview CLOSED**. `x47_rig.sh` said
+     "the dock is drawn by the overview pass, so there is no dock to hover with
+     the overview closed"; X27 moved the dock to `RENDER_POST_WINDOWS` and that
+     comment went stale. Probed: hovering with the overview closed raises the
+     plate perfectly well, 120095 px over the plate rect. It also HAS to be
+     closed — with the overview open the plate sits on the flat workspace-card
+     background, profile sd 0.9 and a step of 4.0, i.e. nothing to blur.
+   * **`X47Z`**, one extra kitty, solid white, placed with its bottom edge 30
+     rows into the plate: white above, the compositor's dark background below,
+     one hard step across the whole plate width — the shape the grader already
+     looks for. It is wider than the plate by 200px each side so its rounded
+     corners and border miss every sampled column, it is static so SAMEBACK
+     stays exact, and it goes up AFTER every behaviour capture so
+     RISES/LIVE/FOLLOWS/GRACE see the scene they always saw. The predictions are
+     re-read once it is mapped, because a fourth class shifts every icon centre.
+   Acceptance, three consecutive runs from a COLD session (fresh compositor
+   each): step **166.3**/255 at row 26, profile sd **78.0**, EDGEFRAC 0.705 →
+   0.050, correlation 0.996 / 0.817, RADIUS 17276 of 17290 — identical to the
+   decimal in all three, with SELFTEST rejecting all five synthetic arms every
+   time. The ticket asked for "the same TEXTURE numbers to within noise when run
+   STANDALONE twice"; these are the same to the decimal, three times.
+6. **`y8`'s wallpaper guard was grading energy, not structure.** It aborted the
    gate when frame 0 and frame -1 differed by more than 500,000 px — and y8's
    own subject is a 1100x700 window flying out of the frame, which is ~500k px
    by itself. Measured on the run that tripped it: **502,366 against a 500,000
@@ -643,33 +669,24 @@ nothing to misread.
    about an hour of wall clock before the first line is written. **Next round:
    build it against `scripts/drop_table_test.cpp` first — 65536 combinations,
    free, and it runs on every `make check` — then `p8_ab.sh` for the pixels.**
-4. **x47's fixture does not own what it photographs.** The frost A/B needs
-   structure behind the hover plate, and what is behind it is whatever the
-   PREVIOUS gate left on screen: measured 216.5/255 of backdrop step inside a
-   suite and 13.0 standalone, same build, twenty minutes apart. Under suite
-   conditions it is reproducible (PASS in every convergence run on record), so
-   this is "the gate depends on its predecessor", not "the gate is a
-   straddler" — an undeclared dependency, still worth removing, not urgent.
-   Two candidate fixes and the acceptance test are written up in
-   `zrig/danglingC2/x47-frost-fixture.md`.
-5. **The lock-screen zoom asymmetry is unmeasured, and needs a password.**
+4. **The lock-screen zoom asymmetry is unmeasured, and needs a password.**
    `modules/ii/lock/PasswordChars.qml` carries literal durations (50 / 200 /
    1000) that the motion audit never reached, because grading the lock screen
    means locking the session and unlocking it, and an automated run cannot type
    the user's password. Not routed to tokens with the rest for the same reason:
    an unverifiable edit to the one surface that can lock you out is a bad trade.
-6. **The waffle panel family's 30 literal durations.** `Config.options.panelFamily`
+5. **The waffle panel family's 30 literal durations.** `Config.options.panelFamily`
    selects `ii` or `waffle`; this rice runs `ii`, so `modules/waffle/**` is not
    loaded and its thirty literals were left alone. If waffle is ever made the
    live family, audit them first — the numbers are 80/120/150/160/170/200/250/
    300/350/400/1000 and only some have equal-valued Appearance tokens.
-7. **`AppSearch.cpp` and `SearchProviders.cpp` carry `#ifdef`-gated self-check
+6. **`AppSearch.cpp` and `SearchProviders.cpp` carry `#ifdef`-gated self-check
    `main()`s** (`APPSEARCH_TEST`, `SEARCHPROVIDERS_TEST`, ~320 lines together)
    that nothing defines, so they never compile and can rot unnoticed. They each
    carry a hand-build recipe and are deliberate dev tools; the fix if they are
    worth keeping is to wire them into `scripts/host_tests.sh` beside
    `drop_table_test` and `geometry_test`, not to delete them. Left as found.
-8. **`OvGeom::expandHitbox` and `OvGeom::spanOverlap` now have no production
+7. **`OvGeom::expandHitbox` and `OvGeom::spanOverlap` now have no production
    caller** — their three wrappers in `OverviewInternal.hpp` were dead and were
    deleted. Both are kept: they are pure primitives of the geometry module with
    host-test coverage (`scripts/geometry_test.cpp`), which is exactly what the
