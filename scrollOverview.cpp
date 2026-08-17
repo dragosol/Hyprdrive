@@ -5182,6 +5182,30 @@ void CScrollOverview::close() {
 
     closeOnWindow = getOverviewWindowToShow(closeOnWindow.lock());
 
+    // Y9 + the section 5 checklist: "Click / activate tile: focus + raise that
+    // window, close overview." Y9 put minimized windows in the grid on the
+    // desktop they were minimized FROM, so a query can legitimately select one
+    // -- and then every workspace decision below reads m_workspace, which for a
+    // stashed window is `special:minimized`. changeWorkspace onto a special
+    // workspace does nothing, so the overview closed, the workspace did not
+    // move and the window stayed stashed: the click was dead. Measured before
+    // this: workspace unchanged, still minimized.
+    //
+    // Un-stash FIRST and the rest of this function needs no special case at
+    // all: m_workspace is a real desktop again, the branches below commit an
+    // ordinary selection onto it, and the close animation carries the tile to
+    // the window's restored rect -- which is exactly the restore the eye
+    // expects, without a second flight fighting the close for the same 300ms.
+    //
+    // Minimize::restore is the house's ONE answer to "something named a
+    // minimized window and asked to go to it" -- Dock::activateWindow, the X28
+    // menu's window rows and the hover panel's click all call it, with the same
+    // note that a stashed window is restored rather than selected because the
+    // stash owns no card to land a selection on. This is the fourth caller, not
+    // a fourth answer.
+    if (closeOnWindow && ScrollOverview::Minimize::isMinimized(closeOnWindow.lock()))
+        ScrollOverview::Minimize::restore(closeOnWindow.lock());
+
     // X43: focus and stacking are two different things. fullWindowFocus() only
     // makes a window active -- it never restacks -- so a selected floating
     // window stayed underneath whatever was covering it. Raise here, at the one
