@@ -563,6 +563,38 @@ inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     return overviewMembershipMatches(WINDOW);
 }
 
+// THE TILE PREDICATE. A tile is on screen if the membership gate admits it OR
+// the grid has promoted it, and BOTH the render and the hit-test ask exactly
+// this question -- which is the whole point of the function existing.
+//
+// They used to ask different ones. The render drew a window when
+// `PROMOTED || shouldShowOverviewWindow(window)`; windowAtOverviewPoint asked
+// the gate alone. So for as long as a promoted or releasing tile was drawn it
+// took no press: the click fell THROUGH it to the workspace CARD underneath and
+// switched desktops, which is the user's "the click took me to an empty
+// desktop". Measured with the render-list shadow -- 48 RENDER-UNCLICK lines in
+// one soak, a drawn tile's own centre hit-testing to another window or to
+// nothing at all. B1 says render, hit-test and drag all place a tile through one
+// getOverviewWindowBox; this is the same rule applied one step earlier, to
+// whether the tile is there at all.
+//
+// `promoted` hands back WHICH half admitted it, because the render needs that
+// anyway (it decides the clip box and suppresses the per-card offset) and asking
+// twice is how the two answers drift apart again.
+//
+// On side effects: overviewGridPromoted arms and clocks the release, and the
+// hit-test reaches it now. That is not a new class of call -- the very next line
+// of every one of these loops calls getOverviewWindowBox, which has always
+// called overviewGridReleasing unconditionally -- and the release clock is
+// idempotent within a frame by construction (GridLayout.hpp).
+inline bool overviewTileShown(const PHLWINDOW& window, PHLMONITOR monitor, bool* promoted = nullptr) {
+    const bool PROMOTED = overviewGridPromoted(window, monitor);
+    if (promoted)
+        *promoted = PROMOTED;
+
+    return PROMOTED || shouldShowOverviewWindow(window);
+}
+
 inline bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
     const auto WINDOW = getOverviewWindowToShow(window);
 

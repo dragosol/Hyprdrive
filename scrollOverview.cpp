@@ -679,7 +679,7 @@ PHLWINDOW CScrollOverview::windowAtOverviewPoint(const Vector2D& point, size_t* 
         if (!isWorkspaceScrolling(wimg->pWorkspace) && shouldShowOverviewWindow(fullscreenWindow)) {
             for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
                 const auto window = getOverviewWindowToShow(it->lock());
-                if (!shouldShowOverviewWindow(window) || !window->m_isFloating)
+                if (!overviewTileShown(window, MONITOR) || !window->m_isFloating)
                     continue;
 
                 const auto texbox = getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), offset, layout);
@@ -699,7 +699,7 @@ PHLWINDOW CScrollOverview::windowAtOverviewPoint(const Vector2D& point, size_t* 
         for (const bool floating : {true, false}) {
             for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
                 const auto window = getOverviewWindowToShow(it->lock());
-                if (!shouldShowOverviewWindow(window) || window->m_isFloating != floating)
+                if (!overviewTileShown(window, MONITOR) || window->m_isFloating != floating)
                     continue;
 
                 const auto texbox = getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), offset, layout);
@@ -3193,8 +3193,11 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         // of shouldShowOverviewWindow would delete it on its first outbound
         // frame. overviewGridReleasing only admits a window that was legally
         // shown a moment ago and is still validMapped.
-        const bool PROMOTED = overviewGridPromoted(window, monitor);
-        if (!PROMOTED && !shouldShowOverviewWindow(window))
+        //
+        // ONE predicate, and windowAtOverviewPoint asks the same one -- a tile
+        // this function paints is a tile that function can hand back.
+        bool PROMOTED = false;
+        if (!overviewTileShown(window, monitor, &PROMOTED))
             return;
         if (drag.activeWindow && window == getOverviewWindowToShow(drag.activeWindow.lock()))
             return;
