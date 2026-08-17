@@ -479,6 +479,31 @@ void CScrollOverview::ensureTrailingWorkspace() {
 // placeholder-card path through the renderer: the strong refs below are the only
 // thing keeping them alive, exactly as E2's trailing workspace works, so closing
 // the overview reaps them for free.
+//
+// v1.1 item 0. That purchase had NO CEILING, and the F3B report caught the bill:
+// a long session wedged the compositor with its main thread at 86% inside this
+// function. The highest live id only ever RATCHETS UP -- an output cycle leaves
+// the session parked one desktop higher (measured: five headless_on/off cycles
+// took maxID 1 -> 4), a window parked on a high desktop pins it there, and the
+// user can jump to any id at all -- and this fill then re-creates every missing
+// id below it on EVERY open and hands the renderer a card and a blurred strip
+// cell for each one.
+//
+// Measured on b78cd50, one window parked on desktop 300, session on desktop 1
+// (zrig/v6/item0): the open itself stays cheap (7 ms) -- the cost is what the
+// open LEAVES BEHIND. Compositor main-thread CPU while the overview is up:
+// 0.03 s/s at maxID 2, 0.06 s/s at 50, 0.68 s/s at 300, with the hyprctl round
+// trip going 6 ms -> 28 ms. (It falls again past ~500 only because the cells
+// have shrunk below a pixel and the renderer drops them -- the peak is where a
+// cell is small enough to be free of nothing and large enough to be drawn.)
+//
+// So: BOUND it. Parity is a claim about the first few desktops -- GNOME's own
+// dynamic count is "highest used + 1" and nobody's is thirty-two -- and a strip
+// with more cells than this is a smear, not a row of desktops. Past the cap the
+// strip shows what actually EXISTS, sparsely: a real desktop 300 still gets its
+// own card, so nothing the user made disappears; only the phantoms stop.
+constexpr WORKSPACEID GAP_POPULATION_MAX = 32;
+
 void CScrollOverview::ensureNoWorkspaceGaps() {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || closing) {
@@ -501,7 +526,8 @@ void CScrollOverview::ensureNoWorkspaceGaps() {
     }
 
     std::vector<PHLWORKSPACE> kept;
-    for (WORKSPACEID id = 1; id < maxID; ++id) {
+    const WORKSPACEID         FILLTO = std::min(maxID, GAP_POPULATION_MAX + 1);
+    for (WORKSPACEID id = 1; id < FILLTO; ++id) {
         if (existing.contains(id)) {
             // Keep paying for the ones we already materialised; anything else is
             // the user's and must not be adopted.
