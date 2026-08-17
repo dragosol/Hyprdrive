@@ -91,6 +91,11 @@ namespace OvInternal {
     inline constexpr float GRID_RELEASE_GRACE_MS = 50.F;
 
     // --- membership -----------------------------------------------------------
+    // The desktop a window LIVES ON, as the overview models it: for a stashed
+    // window that is the desktop it was minimized FROM, because its own
+    // m_workspace is `special:minimized` and answers no useful question. Every
+    // "which card owns this window" decision has to go through here.
+    WORKSPACEID            overviewGridHomeWorkspace(const PHLWINDOW& window);
     // Windows of one workspace that belong in a grid, minimized ones included at
     // the desktop they were minimized FROM.
     std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace);

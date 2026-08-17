@@ -18,6 +18,28 @@ namespace OvInternal {
         return ANIMATOR;
     }
 
+    // Y9 taught overviewGridWindows and addOverviewWindow that a stashed window
+    // belongs to the desktop it was minimized FROM. Two decisions kept reading
+    // the raw m_workspace instead, and a stashed window's m_workspace is the
+    // stash -- so it could never equal the active workspace, and a window
+    // minimized FROM the active desktop answered "I live somewhere else". It
+    // then took a grid slot twice: once as a home member, once as an
+    // off-desktop match joining the active grid under B2. Measured with the
+    // render-list shadow: 4145 RENDER-GRIDDUP lines in one soak, every one of
+    // them a stashed window against its own home card. The visible cost is the
+    // layout solving for N+1 -- two windows laid out as three, so the tiles sit
+    // in row 0 of a two-row grid with an empty row underneath, which is the
+    // user's "not centered or organized properly".
+    WORKSPACEID overviewGridHomeWorkspace(const PHLWINDOW& window) {
+        if (!window)
+            return WORKSPACE_INVALID;
+
+        if (const auto HOME = ScrollOverview::Minimize::originalWorkspace(window); HOME != WORKSPACE_INVALID)
+            return HOME;
+
+        return window->m_workspace ? window->m_workspace->m_id : WORKSPACE_INVALID;
+    }
+
     std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace) {
         std::vector<PHLWINDOW> windows;
         if (!workspace)
@@ -64,8 +86,9 @@ namespace OvInternal {
         if (window->m_monitor != monitor)
             return false;
 
-        const auto WORKSPACE = window->m_workspace;
-        return WORKSPACE && WORKSPACE != monitor->m_activeWorkspace && shouldShowOverviewWindow(window);
+        const auto ACTIVE = monitor->m_activeWorkspace;
+        const auto HOME   = overviewGridHomeWorkspace(window);
+        return ACTIVE && HOME != WORKSPACE_INVALID && HOME != ACTIVE->m_id && shouldShowOverviewWindow(window);
     }
 
     // OVERVIEW_CPP_SPEC 13.2 F3-b, the symmetric half: "released back OUT to its
@@ -268,15 +291,18 @@ namespace OvInternal {
         if (!ScrollOverview::Config::getMissionControl() || !monitor)
             return false;
 
-        const auto WORKSPACE = window->m_workspace;
-        if (!WORKSPACE)
+        const auto ACTIVE = monitor->m_activeWorkspace;
+        if (!ACTIVE)
             return false;
 
         // A promoted window is laid out in the ACTIVE workspace's grid, not its own.
-        if (WORKSPACE != monitor->m_activeWorkspace && !overviewGridPromoted(window, monitor))
+        // HOME, not m_workspace: a window stashed FROM the active desktop owns a slot
+        // in the active grid outright, and asking its m_workspace sent it down the
+        // promoted branch instead -- the other half of the duplicate above.
+        if (overviewGridHomeWorkspace(window) != ACTIVE->m_id && !overviewGridPromoted(window, monitor))
             return false;
 
-        return overviewGridLayout(monitor->m_activeWorkspace, monitor, window, out);
+        return overviewGridLayout(ACTIVE, monitor, window, out);
     }
 
     float overviewGridProgress(float scale) {
