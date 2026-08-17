@@ -50,6 +50,19 @@ def largest_green(png, exclude=None, min_excess=None):
         for ex, ey, ew, eh in rects:
             ex, ey, ew, eh = int(ex), int(ey), int(ew), int(eh)
             mask[max(0, ey):ey + eh, max(0, ex):ex + ew] = False
+    found = largest_of(mask)
+    return found[:4] if found else None
+
+
+def largest_of(mask):
+    """(x, y, w, h, area) of the biggest 4-connected blob in a boolean mask.
+
+    Split out of largest_green so a rig locating a DIFFERENT colour gets the
+    same labelling instead of a fourth private copy of it -- f3b_release is
+    magenta, and its whole verdict is a blob area over a run of film frames.
+    `area` is in full-resolution pixels, counted off the downsample, so it is a
+    multiple of S*S and an estimate rather than a census.
+    """
     if not mask.any():
         return None
 
@@ -84,4 +97,5 @@ def largest_green(png, exclude=None, min_excess=None):
 
     ys, xs = np.array(best).T
     return (xs.min() * S, ys.min() * S,
-            (xs.max() - xs.min() + 1) * S, (ys.max() - ys.min() + 1) * S)
+            (xs.max() - xs.min() + 1) * S, (ys.max() - ys.min() + 1) * S,
+            best_n * S * S)

@@ -874,17 +874,22 @@ inline CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
 
     // F3-b outbound. It has just stopped matching, so it owns no slot and
     // overviewGridSlot says no, but it is still drawn on the active card for one
-    // reflow. `geometry` already IS its real rect on its own desktop, so easing
+    // release. `geometry` already IS its real rect on its own desktop, so easing
     // to it means the frame the release expires draws the identical box down the
     // ordinary path below and the handover is invisible. The offset carries the
     // direction that desktop lies in, in RENDERED px against logical geometry,
     // hence the divide -- same conversion as the inbound seed.
+    //
+    // `exiting` is the whole difference between this and the branch below: the
+    // destination is OFF THE MONITOR, so the entrance curve would spend the
+    // animation getting there and leave one or two visible frames behind it.
+    // See gridReflowEase for the measurement.
     if (overviewGridReleasing(window, monitor)) {
         CBox home = geometry;
         if (const float UNIT = scale * std::max(monitor->m_scale, 0.01F); UNIT > 0.01F && std::abs(offset) > 0.01F)
             home.translate(axisOffsetVector(offset / UNIT, layout));
 
-        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, home, nullptr, false), overviewGridProgress(scale));
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, home, nullptr, false, true), overviewGridProgress(scale));
         offset   = 0.F;
     } else if (CBox slot; overviewGridSlot(window, monitor, slot)) {
         const bool PROMOTED = overviewGridPromoted(window, monitor);

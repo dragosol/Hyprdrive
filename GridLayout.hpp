@@ -90,6 +90,16 @@ namespace OvInternal {
     // cut just short of home.
     inline constexpr float GRID_RELEASE_GRACE_MS = 50.F;
 
+    // Apple motion law, on record as user law: an exit ACCELERATES and runs
+    // 20-30% faster than the matching entrance. The release is the only exit the
+    // grid owns, so it is the only place this applies.
+    inline constexpr float GRID_RELEASE_SPEEDUP = 0.75F;
+
+    // How long the outbound half of F3-b runs. Both the ease and the clock that
+    // decides when the release is over read THIS, never the reflow duration --
+    // they disagreed once and the tile was cut a quarter of the way home.
+    int gridReleaseMs();
+
     // --- membership -----------------------------------------------------------
     // The desktop a window LIVES ON, as the overview models it: for a stashed
     // window that is the desktop it was minimized FROM, because its own
@@ -118,11 +128,12 @@ namespace OvInternal {
     float overviewGridProgress(float scale);
     CBox  overviewGridLerpBox(const CBox& from, const CBox& to, float t);
     // A reflow is windows arriving at new slots, i.e. an entrance: house decel.
-    float gridReflowEase(float t);
+    // A RELEASE is the one exit, and takes the house accel curve instead.
+    float gridReflowEase(float t, bool exiting = false);
     bool  gridBoxesDiffer(const CBox& a, const CBox& b);
     // Called from getOverviewWindowBox, i.e. many times per window per frame from
     // render, hit-test and drag alike. Restarting only when the *target* moves
     // keeps it idempotent within a frame, so those call sites cannot disagree.
-    CBox  gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom = nullptr, bool promoted = false);
+    CBox  gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom = nullptr, bool promoted = false, bool exiting = false);
 
 } // namespace OvInternal

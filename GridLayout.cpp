@@ -91,13 +91,17 @@ namespace OvInternal {
         return ACTIVE && HOME != WORKSPACE_INVALID && HOME != ACTIVE->m_id && shouldShowOverviewWindow(window);
     }
 
+    int gridReleaseMs() {
+        return sc<int>(sc<float>(ScrollOverview::Config::getMissionControlReflowMs()) * GRID_RELEASE_SPEEDUP);
+    }
+
     // OVERVIEW_CPP_SPEC 13.2 F3-b, the symmetric half: "released back OUT to its
     // own desktop as the query stops matching". The instant a promoted window
     // stops matching it leaves the grid, so gridReflowBox is never called for it
     // and it cuts -- the exact mirror of the pull-in defect. Keep it promoted for
-    // one reflow after the match dies so it still has somewhere to travel FROM.
+    // one release after the match dies so it still has somewhere to travel FROM.
     bool overviewGridReleasing(const PHLWINDOW& window, PHLMONITOR monitor) {
-        const int DURATION = ScrollOverview::Config::getMissionControlReflowMs();
+        const int DURATION = gridReleaseMs();
         if (DURATION <= 0 || !window)
             return false;
 
@@ -313,16 +317,35 @@ namespace OvInternal {
         return ScrollOverview::Geometry::lerpBox(from, to, t);
     }
 
-    float gridReflowEase(float t) {
-        return houseEase(true, t);
+    // WHY THE RELEASE NEEDS ITS OWN CURVE, and it is not a taste question.
+    //
+    // A reflow ENDS somewhere the user is looking at -- a slot in the grid -- so
+    // the house decel curve is right: it spends its speed early and settles in
+    // view. The release ENDS OFF THE MONITOR, at the window's real rect on a
+    // desktop that is two cards away, and the same decel curve then spends that
+    // speed getting there. Measured on 9c2742f at anim_scale 20 with the
+    // render-list trace (evidence: zrig/f3b/round1/): the tile is drawn every
+    // frame, correctly interpolated, and crosses the monitor edge at animated
+    // elapsed 24.4ms of a 300ms curve -- 8.1% of the animation, 42% of the
+    // travel, and ONE AND A HALF FRAMES at 60Hz once the slowdown is taken off.
+    // That is exactly the "'Fast' is not a licence to drop to one or two frames"
+    // that F3-b-ii forbids, and it is why the outbound reads as a cut.
+    //
+    // The house ACCEL curve (0.7,0 0.84,0) leaves slowly and then goes: the same
+    // 42% of travel now takes 87.4% of the duration, so the visible half of the
+    // journey gets the whole animation instead of its first twelfth. Same curve
+    // the overview's own close uses, and the same direction the Apple rule asks
+    // an exit to run in.
+    float gridReflowEase(float t, bool exiting) {
+        return houseEase(!exiting, t);
     }
 
     bool gridBoxesDiffer(const CBox& a, const CBox& b) {
         return ScrollOverview::Geometry::boxesDiffer(a, b);
     }
 
-    CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom, bool promoted) {
-        const int DURATION = ScrollOverview::Config::getMissionControlReflowMs();
+    CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom, bool promoted, bool exiting) {
+        const int DURATION = exiting ? gridReleaseMs() : ScrollOverview::Config::getMissionControlReflowMs();
         if (DURATION <= 0)
             return slot;
 
@@ -369,7 +392,7 @@ namespace OvInternal {
         entry.promotedLast = promoted;
 
         const float ELAPSED = ScrollOverview::Config::animElapsedMs(entry.start);
-        const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION));
+        const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION), exiting);
         const CBox  CURRENT = overviewGridLerpBox(entry.from, entry.to, T);
 
         if (gridBoxesDiffer(slot, entry.to)) {
