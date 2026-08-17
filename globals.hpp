@@ -95,10 +95,29 @@ namespace Membership {
         return ON;
     }
 
+    // THE RENDER-LIST SHADOW, and it measures a DIFFERENT thing from the one
+    // above. shadowEnabled() asks "does the membership CACHE agree with the
+    // live gate"; this one asks "does the list the render actually WALKS agree
+    // with the gate at all". `images[i]->windows` is a copy rebuilt only by
+    // redrawAll(), so a window that spawns, closes or changes workspace between
+    // rebuilds leaves the copy describing a desktop that no longer exists --
+    // the Z20 class. Same discipline as above: off unless asked for, and it
+    // writes to a file from inside the frame, so it is never a shipping path.
+    inline bool renderShadowEnabled() {
+        static const bool ON = std::getenv("HYPRDRIVE_RENDERLIST_SHADOW") != nullptr;
+        return ON;
+    }
+
     void bump(const char* why);
     bool lookup(const void* key, bool& out);
     void store(const void* key, bool member);
     void divergence(const std::string& cls, const std::string& title, bool live);
+
+    // RENDER-LIST SHADOW ONLY. `kind` is STALE (the copy holds a window the
+    // gate no longer puts on this card), MISSING (the gate does and the copy
+    // does not), DUP (the copy holds it twice) or CROSS (two cards hold it).
+    void renderDivergence(const char* kind, long long cardWs, long long liveWs, const std::string& cls, const std::string& title);
+    void renderPass();
 }
 
 bool ensureScrollOverviewHooks();

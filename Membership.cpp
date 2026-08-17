@@ -148,6 +148,26 @@ namespace Membership {
         g_cache[key] = SEntry{g_generation, member};
     }
 
+    // RENDER-LIST SHADOW ONLY. Counted per FRAME: one stale entry reported every
+    // frame for a second would drown the log, so each line carries the pass
+    // number and the running total, and the periodic report carries both.
+    namespace {
+        uint64_t g_renderPasses   = 0;
+        uint64_t g_renderDiverged = 0;
+    }
+
+    void renderDivergence(const char* kind, long long cardWs, long long liveWs, const std::string& cls, const std::string& title) {
+        ++g_renderDiverged;
+        say("RENDER-%-7s card=ws%lld  lives-on=ws%lld  class=%s  title=%s  pass %llu  total %llu\n", kind, cardWs, liveWs, cls.c_str(), title.c_str(),
+            (unsigned long long)g_renderPasses, (unsigned long long)g_renderDiverged);
+    }
+
+    void renderPass() {
+        ++g_renderPasses;
+        if (g_renderPasses % 600 == 0)
+            say("RENDER-REPORT  passes %llu  divergences %llu\n", (unsigned long long)g_renderPasses, (unsigned long long)g_renderDiverged);
+    }
+
     // SHADOW ONLY. The cache said one thing and the freshly computed answer said
     // another, which means the bump set has a hole. Records it once per entry
     // per generation -- see the file header for the two rounds of this that

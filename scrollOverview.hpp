@@ -146,6 +146,7 @@ class CScrollOverview : public IOverview {
     void   rebuildWorkspaceImages();
     void   seedRememberedSelections();
     void   redrawAll(bool forcelowres = false);
+    void   renderListShadow();
     void   onWorkspaceChange();
     void   renderGlobalWallpaper(PHLMONITOR monitor, const Time::steady_tp& now);
     void   renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now, float alpha = 1.F);

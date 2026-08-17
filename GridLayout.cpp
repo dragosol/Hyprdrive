@@ -152,6 +152,14 @@ namespace OvInternal {
         if (const auto EXCLUDED = grid().dragExcluded; EXCLUDED && target.get() != EXCLUDED)
             std::erase_if(WINDOWS, [EXCLUDED](const auto& window) { return window.get() == EXCLUDED; });
 
+        if (Membership::renderShadowEnabled()) {
+            for (size_t i = 0; i < WINDOWS.size(); ++i)
+                for (size_t j = i + 1; j < WINDOWS.size(); ++j)
+                    if (WINDOWS[i] == WINDOWS[j])
+                        Membership::renderDivergence("GRIDDUP", workspace->m_id, WINDOWS[i]->m_workspace ? WINDOWS[i]->m_workspace->m_id : WORKSPACE_INVALID,
+                                                     WINDOWS[i]->m_class, WINDOWS[i]->m_title);
+        }
+
         const auto TARGETIT = std::ranges::find(WINDOWS, target);
         if (TARGETIT == WINDOWS.end())
             return false;

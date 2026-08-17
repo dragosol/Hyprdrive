@@ -3206,6 +3206,22 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         if (!overviewBoxIntersectsMonitor(windowBox, monitor))
             return;
 
+        // INSTRUMENT (Membership::renderShadowEnabled). PAST the cull, so a line
+        // here means a rectangle really was painted on this output.
+        if (Membership::renderShadowEnabled()) {
+            const auto LIVEWS = window->m_workspace ? window->m_workspace->m_id : WORKSPACE_INVALID;
+            const auto CENTRE = windowBox.middle();
+            // Would the hit-test hand this tile back? Same walk windowAtOverviewPoint does.
+            const auto HIT    = windowAtOverviewPoint(CENTRE);
+            if (HIT != window)
+                Membership::renderDivergence("UNCLICK", workspace->m_id, LIVEWS, window->m_class,
+                                             window->m_title + std::format("  box={},{} {}x{}  hit={}", (int)windowBox.x, (int)windowBox.y, (int)windowBox.width,
+                                                                           (int)windowBox.height, HIT ? HIT->m_class : std::string{"(none)"}));
+            if (PROMOTED && g_search.query.text.empty())
+                Membership::renderDivergence("PROMONOQ", workspace->m_id, LIVEWS, window->m_class,
+                                             window->m_title + std::format("  box={},{} {}x{}", (int)windowBox.x, (int)windowBox.y, (int)windowBox.width, (int)windowBox.height));
+        }
+
         renderWindowLive(monitor, window, windowBox, renderScale, now, PROMOTED ? &ACTIVECARDBOX : &WORKSPACEBOX);
         tileChrome.emplace_back(window, windowBox);
     };
@@ -4466,6 +4482,57 @@ void CScrollOverview::refreshWindows() {
     redrawAll();
 }
 
+// P6i2 INSTRUMENT. See Membership::renderShadowEnabled. Runs at the end of
+// onPreRender -- after the rebuild decision, so it grades the list the frame
+// about to be drawn will actually walk, not the one before it.
+void CScrollOverview::renderListShadow() {
+    if (!Membership::renderShadowEnabled())
+        return;
+
+    std::unordered_map<const void*, WORKSPACEID> seenOnCard;
+
+    for (const auto& img : images) {
+        if (!img || !img->pWorkspace)
+            continue;
+
+        const auto CARDID = img->pWorkspace->m_id;
+
+        std::vector<PHLWINDOW> snapshot;
+        for (const auto& ref : img->windows) {
+            const auto WINDOW = getOverviewWindowToShow(ref.lock());
+            if (!WINDOW || !shouldShowOverviewWindow(WINDOW))
+                continue;
+
+            const auto LIVEWS = WINDOW->m_workspace ? WINDOW->m_workspace->m_id : WORKSPACE_INVALID;
+
+            if (std::ranges::find(snapshot, WINDOW) != snapshot.end()) {
+                Membership::renderDivergence("DUP", CARDID, LIVEWS, WINDOW->m_class, WINDOW->m_title);
+                continue;
+            }
+            snapshot.emplace_back(WINDOW);
+
+            if (const auto IT = seenOnCard.find(WINDOW.get()); IT != seenOnCard.end())
+                Membership::renderDivergence("CROSS", CARDID, IT->second, WINDOW->m_class, WINDOW->m_title);
+            else
+                seenOnCard.emplace(WINDOW.get(), CARDID);
+        }
+
+        const auto LIVE = overviewGridWindows(img->pWorkspace);
+
+        for (const auto& WINDOW : snapshot) {
+            if (std::ranges::find(LIVE, WINDOW) == LIVE.end())
+                Membership::renderDivergence("STALE", CARDID, WINDOW->m_workspace ? WINDOW->m_workspace->m_id : WORKSPACE_INVALID, WINDOW->m_class, WINDOW->m_title);
+        }
+
+        for (const auto& WINDOW : LIVE) {
+            if (std::ranges::find(snapshot, WINDOW) == snapshot.end())
+                Membership::renderDivergence("MISSING", CARDID, WINDOW->m_workspace ? WINDOW->m_workspace->m_id : WORKSPACE_INVALID, WINDOW->m_class, WINDOW->m_title);
+        }
+    }
+
+    Membership::renderPass();
+}
+
 void CScrollOverview::redrawAll(bool forcelowres) {
     rebuildWorkspaceImages();
     seedRememberedSelections();
@@ -5302,8 +5369,11 @@ void CScrollOverview::onPreRender() {
         redrawAll();
         syncSelectionToViewport();
         damage();
+        renderListShadow();
         return;
     }
+
+    renderListShadow();
 }
 
 void CScrollOverview::onWorkspaceChange() {
