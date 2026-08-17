@@ -108,6 +108,27 @@ namespace Membership {
         return ON;
     }
 
+    // THE DOCK-PREVIEW SHADOW. A third thing, and the only one aimed at a defect
+    // that has never been reproduced in the rig: "dock previews sometimes don't
+    // show, randomly, hard to reproduce" (user, 2026-08-17). Fifty laps across
+    // the four states y11/z1/x47 do not walk -- overview closed, overview open,
+    // a re-hover inside the 250ms TTL, and a hover straight after a flight --
+    // came back clean (scripts/dock_preview_soak.sh), so the instrument goes
+    // where the rig cannot: the user's own session.
+    //
+    // It measures the one thing the suspects have in common. A live preview
+    // keeps itself alive by being DRAWN: renderLivePreview stamps g_previewed,
+    // and the overview's frame hook consults it to decide whether the client is
+    // allowed another frame. Miss the 250ms window -- because the dock stopped
+    // asking for frames, or because a hover re-armed the panel just as the sweep
+    // ran -- and the client stops drawing, which is an invisible preview and no
+    // other symptom at all. So: how long has it been since this window's last
+    // preview draw, and had its entry already lapsed by the time we got here.
+    inline bool previewShadowEnabled() {
+        static const bool ON = std::getenv("HYPRDRIVE_PREVIEW_SHADOW") != nullptr;
+        return ON;
+    }
+
     void bump(const char* why);
     bool lookup(const void* key, bool& out);
     void store(const void* key, bool member);
@@ -118,6 +139,13 @@ namespace Membership {
     // does not), DUP (the copy holds it twice) or CROSS (two cards hold it).
     void renderDivergence(const char* kind, long long cardWs, long long liveWs, const std::string& cls, const std::string& title);
     void renderPass();
+
+    // DOCK-PREVIEW SHADOW ONLY. `gapMs` is real milliseconds since this window
+    // was last drawn as a preview (-1 the first time), `lapsed` is whether its
+    // liveness entry had already expired when this draw began. Lives here
+    // because this file owns the shadow log; nothing else about it is
+    // membership.
+    void previewGap(const std::string& cls, float gapMs, bool lapsed, bool suspended);
 }
 
 bool ensureScrollOverviewHooks();

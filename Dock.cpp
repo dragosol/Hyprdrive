@@ -2942,6 +2942,18 @@ void notePreviewing(const PHLWINDOW& window) {
 
 void renderLivePreview(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& box, const Time::steady_tp& now, float alpha = 1.F, bool asOverviewTile = false,
                        bool ownsRenderPass = true) {
+    // BEFORE notePreviewing, which is what refreshes the entry -- asking after
+    // it would always answer "healthy". See Membership::previewShadowEnabled.
+    if (Membership::previewShadowEnabled()) {
+        static std::unordered_map<const void*, Time::steady_tp> LASTDRAWN;
+        const auto IT   = LASTDRAWN.find(window.get());
+        const float GAP = IT == LASTDRAWN.end() ? -1.F : realElapsedMs(IT->second);
+        Membership::previewGap(window->m_class, GAP, !isPreviewing(window), window->m_suspended);
+        LASTDRAWN[window.get()] = Time::steadyNow();
+        if (LASTDRAWN.size() > 64)
+            LASTDRAWN.clear();
+    }
+
     notePreviewing(window);
 
     const bool STASHED = Minimize::isMinimized(window);

@@ -162,6 +162,18 @@ namespace Membership {
             (unsigned long long)g_renderPasses, (unsigned long long)g_renderDiverged);
     }
 
+    // DOCK-PREVIEW SHADOW ONLY. Quiet by design: a preview redrawn every frame
+    // is the healthy case and would write sixty lines a second, so only a gap
+    // WIDER than the liveness window is written down -- that is the moment the
+    // client is about to be told to stop drawing. The first draw of a hover has
+    // no previous one and is reported once, as the baseline.
+    void previewGap(const std::string& cls, float gapMs, bool lapsed, bool suspended) {
+        if (gapMs >= 0.F && gapMs < 250.F && !lapsed && !suspended)
+            return;
+
+        say("PREVIEW-GAP  class=%-24s gap=%8.1fms  lapsed=%d  suspended=%d\n", cls.c_str(), gapMs, (int)lapsed, (int)suspended);
+    }
+
     void renderPass() {
         ++g_renderPasses;
         if (g_renderPasses % 600 == 0)
