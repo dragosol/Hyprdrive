@@ -62,24 +62,44 @@ cfg "autohide=false"; cfg "show_favorites=false"; cfg "show_trash=false"; cfg "s
 
 case "$W" in
   z7)
+    # V6 (user amendment, V11_SPEC 2026-08-17) SUPERSEDES Z7 for this gesture.
+    # Z7 was "if window is open in another workspace... just go to that
+    # workspace and focus the window"; V6 is "0 windows of the app on the
+    # active workspace (regardless of other workspaces) -> launch here". Both
+    # are the user's words, ten days apart, and the dock obeys the later one --
+    # so what this arm asserts is the OPPOSITE of what it used to.
+    #
+    # The fixture class owns no desktop entry, so "launch here" has nothing to
+    # exec and the click is observably a no-op. That is deliberate: the half
+    # this arm can still carry is the regression risk that outlived the
+    # supersession -- the click must not TELEPORT the session, and must not
+    # touch the app's window on the other desktop. The launch half is
+    # v6_dock_ws_scope's LAUNCH arm, whose fixture does have an entry.
     ws 2; spawn; ws 1
     click; sleep 2.0
     A=$(activews); F=$(focusedc); X=$(fixws)
-    [ "$A" = 2 ] && [ "$F" = zfix ] && [ "$X" = 2 ] && echo "z7 PASS (ws=$A focus=$F fixws=$X)" \
-                                                   || echo "z7 FAIL (ws=$A focus=$F fixws=$X)"
+    [ "$A" = 1 ] && [ "$F" != zfix ] && [ "$X" = 2 ] && echo "z7 PASS (ws=$A focus=$F fixws=$X)" \
+                                                    || echo "z7 FAIL (ws=$A focus=$F fixws=$X)"
     ;;
   z6)
     ws 2; spawn
     click; sleep 2.0                                  # minimize, on its own desktop
-    # Gate the INTERMEDIATE state: if this click missed, the restore click below
-    # exercises Z7's goto-branch instead and the final asserts pass for the
-    # wrong reason -- the two behaviours are indistinguishable from the end
-    # state alone.
+    # Gate the INTERMEDIATE state: if this click missed, the restore below has
+    # nothing stashed to restore and the final asserts pass for the wrong reason
+    # -- the two behaviours are indistinguishable from the end state alone.
     [ "$(fixws)" = special:minimized ] || { echo "z6 FAIL (minimize step missed, fixws=$(fixws))"; exit 1; }
     ws 1; sleep 0.5
-    clickcenter                                       # restore: must switch back + land
+    # The RESTORE used to be a dock click from desktop 1. V6 took that gesture
+    # away: a window minimized from desktop 2 counts toward desktop 2, so from
+    # desktop 1 the app has nothing here and the click launches rather than
+    # restores. The CLAIM is unchanged and is not about the dock -- it is that a
+    # cross-desktop restore switches the workspace when it is ASKED, not when
+    # the flight lands ("maximizing in the wrong place") -- and that lives in
+    # Flight::restore, which the minimize dispatcher's `restore` reaches through
+    # Dock::restoreWithFlight, the same call the click used to make.
+    dsp "hl.plugin.$RIG_NS.minimize([[restore]])"
     sleep 0.15; MID=$(activews)                       # DURING the flight: the switch
-                                                      # happens at CLICK time now; the
+                                                      # happens at REQUEST time now; the
                                                       # old code switched at LANDING,
                                                       # reaching the same END state
     sleep 3.0

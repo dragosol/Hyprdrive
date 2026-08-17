@@ -21,9 +21,11 @@ A mission-control overview and a full dock for [Hyprland](https://hyprland.org) 
 
 **Dock**:
 
-- GNOME Dash-to-Dock behavior by window count: launch, focus, cycle, whole-app
-  minimize/restore — plus favorites, running dots, notification badges, urgency
-  wiggle, autohide with pressure reveal, and app hotkeys.
+- GNOME Dash-to-Dock behavior by window count, counted over the **desktop you
+  are on**: launch, focus, cycle, whole-app minimize/restore — plus favorites,
+  running dots, notification badges, urgency wiggle, autohide with pressure
+  reveal, and app hotkeys. The running dots stay global (is this app up at
+  all); the click acts here.
 - Minimize/restore with the GNOME 400 ms shrink-into-the-icon flight; minimized
   windows stay live for previews.
 - Hover an icon for a frosted panel of that app's **live** windows — including

@@ -78,6 +78,12 @@
 // Dock.hpp, an include knot) into this TU; they now live in their own header.
 #include "OverviewChrome.hpp"
 
+// V6: the ONE answer to "which desktop does this window live on". A stashed
+// window's own m_workspace is the minimize stash, so only this knows it belongs
+// to the desktop it will come back to (GridLayout.hpp, 46bccac). Same include
+// rules as OverviewChrome above; scrollOverview.hpp is already in this TU.
+#include "GridLayout.hpp"
+
 // The dock's FLIGHT subsystem -- the whole Z4-Z20 saga -- is its own module now:
 // an explicit state machine with named phases instead of five sentinel fields.
 // Included AFTER the private-access blocks, like OverviewChrome, because the
@@ -1367,6 +1373,15 @@ void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& it
     // WINDOW. Row one keeps today's exact position and grows outward from the
     // icon's centre; overflow wraps to a second row underneath; two rows max,
     // and windows beyond that are simply not shown.
+    //
+    // V6 scoped the CLICK to the active desktop and left this GLOBAL, on
+    // purpose: the dots answer "is this app running, and how much of it" --
+    // which is what makes it worth walking to another desktop for -- while the
+    // click answers "do something here". A dot count that emptied out as you
+    // walked away would be the reference's `isolate-workspaces`, which is a
+    // config key of its own (dock:isolate_workspaces, default false) and is not
+    // what the amendment asked for. `interesting()` is what that key moves, so
+    // turning it on scopes both together, exactly as the reference does.
     size_t count = 0;
     for (const auto& WINDOW : Desktop::windowState()->windows())
         if (interesting(WINDOW) && WINDOW->m_class == item.wmClass)
@@ -1636,6 +1651,40 @@ std::vector<PHLWINDOW> classWindows(const std::string& wmClass) {
     return out;
 }
 
+// V6 (user, 2026-08-17): "if I have multiple windows of the same app e.g.
+// nautilus open and i click its icon, it should only minimizes/maximizes the
+// window in the current workspace." The click ladder keeps its shape; what
+// changes is the set it is computed over -- the app's windows on the ACTIVE
+// DESKTOP, and nothing else. Zero here launches here even with windows
+// elsewhere, one here toggles that one, N here cycle among those N.
+//
+// A minimized window counts toward the desktop it will COME BACK TO, which is
+// the only reading that keeps the toggle reversible: minimize on desktop 2,
+// walk to desktop 3, and the app is not there -- walk back and the click that
+// put it away is the click that brings it out. Its own m_workspace is the
+// stash and answers no useful question, so this goes through the overview's
+// one home-desktop helper (46bccac) rather than inventing a second answer.
+//
+// SCOPED IS THE CLICK, not the dock. runningClasses/dockItems are untouched:
+// an app running on another desktop keeps its icon and its running DOT, which
+// answer "is this app up at all" -- the reference's own `isolate-workspaces`
+// key (dock:isolate_workspaces, default false) is what changes that, and the
+// amendment did not ask for it. So the dock still says nautilus is running;
+// clicking it now acts here.
+std::vector<PHLWINDOW> classWindowsHere(const std::string& wmClass, PHLMONITOR monitor) {
+    const auto ACTIVE = monitor ? monitor->m_activeWorkspace : nullptr;
+    if (!ACTIVE)
+        return classWindows(wmClass);
+
+    std::vector<PHLWINDOW> out;
+    for (const auto& WINDOW : classWindows(wmClass)) {
+        if (OvInternal::overviewGridHomeWorkspace(WINDOW) == ACTIVE->m_id)
+            out.emplace_back(WINDOW);
+    }
+
+    return out;
+}
+
 // The reference's `Main.activateWindow`, which is what every X33 path ends in.
 // Focus alone is not enough: the window may be on another desktop, it may be
 // minimized, and X43 already established that focus and stacking are separate
@@ -1675,8 +1724,14 @@ struct SCycle {
 
 std::optional<SCycle> g_cycle;
 
-void cycleThroughWindows(const std::string& wmClass, bool reversed) {
-    const auto WINDOWS = classWindows(wmClass);
+// V6 gives this an explicit list: the CLICK cycles the active desktop's windows
+// (`N > 1 here -> the existing cycle behavior, scoped to those N`), while the
+// scroll-wheel and middle-click actions below still cycle the whole app. The
+// staleness test then does the right thing for free -- walking to another
+// desktop changes the count, which drops the memory and restarts the cycle at
+// the top of the new set instead of stepping into a remembered window that is
+// no longer here.
+void cycleThroughWindows(const std::string& wmClass, bool reversed, const std::vector<PHLWINDOW>& WINDOWS) {
     if (WINDOWS.empty())
         return;
 
@@ -1703,6 +1758,10 @@ void cycleThroughWindows(const std::string& wmClass, bool reversed) {
     }
 
     activateWindow(WINDOW);
+}
+
+void cycleThroughWindows(const std::string& wmClass, bool reversed) {
+    cycleThroughWindows(wmClass, reversed, classWindows(wmClass));
 }
 
 // The reference's shared entry point for a cycle: if the app already has focus
@@ -1783,9 +1842,19 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl =
         return;
     }
 
-    const auto windows = classWindows(item.wmClass);
+    // V6. Every count and every target below is the ACTIVE DESKTOP's windows.
+    const auto windows = classWindowsHere(item.wmClass, monitor);
 
     // Y4. NO WINDOWS: launch. X45's first branch, and the only one it keeps.
+    //
+    // V6 widened what "no windows" means, and deliberately: none HERE launches
+    // here even when the app has windows on other desktops ("regardless of
+    // other workspaces"). That supersedes Z7, whose whole branch was the
+    // opposite reading of the same gesture -- go to the other desktop and focus
+    // the window there. Both are the user's words ten days apart; the later one
+    // is the one the dock obeys. The go-there is not gone from the product, it
+    // is gone from THIS gesture: the hover panel's previews still travel to a
+    // window wherever it lives, which is where "show me that window" belongs.
     if (windows.empty()) {
         launchApp(monitor, item);
         return;
@@ -1796,8 +1865,10 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl =
     // there was consequently no gesture that could put a multi-window app away.
     // activateWindow() restores a minimized window on the way, so the cycle
     // still reaches windows sitting in the icon as well as windows on screen.
+    // V6 scopes it to the same set as the rest of the ladder: `N > 1 here ->
+    // the existing cycle behavior, scoped to those N`.
     if (ctrl) {
-        cycleThroughWindows(item.wmClass, false);
+        cycleThroughWindows(item.wmClass, false, windows);
         return;
     }
 
@@ -1820,29 +1891,21 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl =
     // stashed until landing), so without this a spam of clicks re-restored
     // forever instead of toggling. Count it as visible; minimizeWithFlightImpl
     // then reverses its flight in place.
-    bool anyFlight = false;
     for (const auto& WINDOW : windows) {
-        if (!Flight::hasFlight(WINDOW))
-            continue;
-        anyFlight = true;
-        if (Flight::isRestoreFlight(WINDOW) && Minimize::isMinimized(WINDOW))
+        if (Flight::hasFlight(WINDOW) && Flight::isRestoreFlight(WINDOW) && Minimize::isMinimized(WINDOW))
             visible.emplace_back(WINDOW);
     }
 
-    // Z7 (user, 2026-08-07): "if window is open in another workspace, instead
-    // of the functionality being minimize, just go to that workspace and focus
-    // the window. Then it's ok to minimize/maximize." So: visible windows, none
-    // of them on THIS workspace, nothing mid-flight -> the click is a GO-THERE,
-    // not a minimize. activateWindow already is the reference's
-    // Main.activateWindow: switch, raise, focus.
-    if (!anyFlight && !visible.empty() && monitor && monitor->m_activeWorkspace) {
-        const bool ANYHERE = std::ranges::any_of(visible, [&](const PHLWINDOW& w) { return w->m_workspace == monitor->m_activeWorkspace; });
-        if (!ANYHERE) {
-            activateWindow(visible.front());
-            return;
-        }
-    }
-
+    // Z7's GO-THERE branch stood here and V6 deleted it rather than left it
+    // unreachable. Z7 (user, 2026-08-07) was "if window is open in another
+    // workspace... just go to that workspace and focus the window"; V6 (user,
+    // 2026-08-17) is "0 windows here -> launch here, regardless of other
+    // workspaces". Both cannot be the same click, and the later one wins. With
+    // the ladder scoped, every window that reaches this point already lives on
+    // the active desktop -- a visible one has m_workspace == the active
+    // workspace by construction -- so the test could only ever have answered
+    // "something is here". The `anyFlight` flag went with it: it existed to keep
+    // a mid-flight app out of the go-there, and nothing else read it.
     if (visible.empty()) {
         for (const auto& WINDOW : windows)
             Flight::restore(monitor, WINDOW);
@@ -1864,6 +1927,14 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl =
 // `minimize` routes back through activateItem so the two buttons cannot drift
 // apart -- it is the left button's action, and a user who sets middle to
 // `minimize` means that one.
+//
+// V6 scoped the left button, and this table is deliberately NOT scoped with it.
+// The amendment is about "i click its icon"; these are the reference's actions
+// over an app, and `quit` that killed only the windows on this desktop, or
+// `skip` that could not reach the window you can see running elsewhere, would be
+// a different feature nobody asked for. `minimize` is the one action V6 names,
+// and it inherits the scoping through activateItem, which is the point of
+// routing it there.
 void applyClickAction(PHLMONITOR monitor, const SItem& item, const std::string& action, bool shift) {
     // X35. Every one of the reference's five actions is about an app's windows,
     // and a location has none -- `launch` is the only one it can answer, and

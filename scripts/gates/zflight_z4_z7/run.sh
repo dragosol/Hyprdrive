@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # zflight_z4_z7 -- guest-side orchestrator for all six z_rig.sh arms.
-#   z7  dock click on an app on another desktop goes there (ws + focus + fixws)
-#   z6  restore switches workspace at CLICK time (mid-flight sample)
+#   z7  dock click on a desktop the app has nothing on does NOT travel to it
+#       (V6 superseded Z7's go-there; ws + focus + fixws)
+#   z6  restore switches workspace at REQUEST time (mid-flight sample)
 #   z4  no hole at restore landing            (filmed, zflight_gate.py)
 #   z4t tiled restore flies to its tile       (filmed, zflight_gate.py)
 #   z4c 3 cycles with a zombie overview leave geometry byte-identical
