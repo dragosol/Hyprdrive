@@ -5,6 +5,7 @@
 
 #include "AppSearch.hpp"
 #include "OverviewRender.hpp"
+#include "WindowPill.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -321,6 +322,13 @@ CBox closeButtonHitBox(const PHLWINDOW& window, const CBox& tileBox, float monit
 
     const float SCALE = std::max(monitorScale, 0.01F);
 
+    // V2. SUPER held: the pill has taken the close-X's place, and it is wider
+    // than the disc it replaced. Hand back the pill's box so the hover stays
+    // alive for the whole reach -- the button being aimed at is the third one
+    // along, ~90 px further out than the X ever was.
+    if (WindowPill::superHeld())
+        return WindowPill::box(nullptr, tileBox, SCALE).expand(CLOSE_SLOP * SCALE);
+
     return closeButtonDisc(tileBox, SCALE).expand(CLOSE_SLOP * SCALE);
 }
 
@@ -412,6 +420,24 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
         }
     }
 
+    // V2 (user, 2026-08-17): "on tile mouseover the existing hover CLOSE button
+    // is temporarily REPLACED by the 3-button pill". A CROSS-FADE rather than a
+    // swap: the pill fades up on its own reveal ease and the X fades out on the
+    // complement of the same number, so neither pops and they are never both
+    // solid. Both ride the SAME hover ramp above CLOSE_VISIBLE_AT the X already
+    // rode, so the pill appears exactly where and when the X used to.
+    //
+    // UNCLAMPED -- no monitor is passed -- because closeButtonHitBox has no
+    // monitor to clamp against either, and a drawn box and a hit box that
+    // disagree is the whole class of defect X55 was fixing.
+    const float PILL = WindowPill::progress();
+    if (PILL > 0.001F) {
+        const auto* const PSTATE = stateFor(window, false);
+        const float       PALPHA = (PSTATE ? std::clamp((easedHover(PSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F) * FADE;
+        if (PALPHA > 0.F)
+            WindowPill::render(nullptr, tileBox, SCALE, PALPHA);
+    }
+
     const auto BUTTON = closeButtonBox(window, tileBox, monitorScale);
     if (BUTTON.empty())
         return;
@@ -420,7 +446,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // 100ms. Driven off the hover ramp above CLOSE_VISIBLE_AT, so it needs no
     // state of its own and cannot disagree with the threshold the hit-test uses.
     const auto* const CSTATE = stateFor(window, false);
-    const float       ALPHA  = (CSTATE ? std::clamp((easedHover(CSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F) * FADE;
+    const float       ALPHA  = (CSTATE ? std::clamp((easedHover(CSTATE->hover) - CLOSE_VISIBLE_AT) / (1.F - CLOSE_VISIBLE_AT), 0.F, 1.F) : 1.F) * FADE * (1.F - PILL);
     if (ALPHA <= 0.F)
         return;
 

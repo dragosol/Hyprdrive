@@ -18,8 +18,10 @@
 #include "AppSearch.hpp"
 #include "SearchSession.hpp"
 #include "TileChrome.hpp"
+#include "WindowPill.hpp"
 
 namespace TileChrome = ScrollOverview::TileChrome;
+namespace WindowPill = ScrollOverview::WindowPill;
 
 #include <drm_fourcc.h>
 #include <hyprgraphics/image/Image.hpp>

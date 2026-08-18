@@ -5408,6 +5408,16 @@ void CScrollOverview::onPreRender() {
     if (TileChrome::animating())
         grid().reflowActive = true;
 
+    // V2. The SUPER-hold pill eases on the same kind of wall clock, and inside
+    // an overview it needs the frames asked for the same way: hkScheduleFrame
+    // throttles AQ_SCHEDULE_DAMAGE for as long as an overview is open, so the
+    // dock's pumpFrame -- a plain damageMonitor -- is swallowed here and the
+    // reveal would freeze half out over a still cursor. Joining the reflow
+    // pacer rather than adding a fourth pump, for the reason Dock::needsFrames
+    // gives: one list, in one place.
+    if (WindowPill::animating())
+        grid().reflowActive = true;
+
     if (grid().reflowActive) {
         grid().reflowActive = false;
         reflowPacer->setValueAndWarp(0.F);

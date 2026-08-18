@@ -386,10 +386,30 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 // User request 2026-08-02: an X on the top right of the hovered
                 // tile. Drop the hover first so the button cannot be clicked
                 // twice while the window takes its time going away.
+                //
+                // V2: with SUPER held that box is the PILL's, not the X's --
+                // closeButtonHitBox hands back the pill while the modifier is
+                // down, so this branch is entered over the whole capsule. WHICH
+                // button then decides what happens, and a point on the capsule
+                // that is on no button is NOT ours: "the pill never steals a
+                // click that misses its buttons", so it falls through to the
+                // tile's own click below exactly as a point next to the X did.
                 if (const auto HOVERED = TileChrome::hovered(); HOVERED && tileCloseButtonBox(HOVERED).containsPoint(lastMousePosLocal)) {
-                    TileChrome::setHovered(PHLWINDOW{});
-                    HOVERED->sendClose();
-                    return;
+                    if (WindowPill::superHeld()) {
+                        const auto MONITOR = pMonitor.lock();
+                        const auto BUTTON  = WindowPill::buttonAt(nullptr, tileBox(HOVERED), MONITOR ? MONITOR->m_scale : 1.F, lastMousePosLocal);
+                        if (BUTTON != WindowPill::EButton::None) {
+                            TileChrome::setHovered(PHLWINDOW{});
+                            WindowPill::activate(MONITOR, HOVERED, BUTTON);
+                            damage();
+                            requestInputFrame();
+                            return;
+                        }
+                    } else {
+                        TileChrome::setHovered(PHLWINDOW{});
+                        HOVERED->sendClose();
+                        return;
+                    }
                 }
 
                 // The other half of the one-gesture-at-a-time rule; see the

@@ -44,6 +44,12 @@ CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorS
 // The close button's HIT area: the same geometry, but independent of the
 // visibility ramp and with slop. Use this for hover keep-alive and for clicks;
 // closeButtonBox() is what gets DRAWN.
+//
+// V2: WHILE SUPER IS HELD THIS IS THE PILL'S BOX, not the close-X's, because
+// while SUPER is held the pill is what the tile is wearing. One function, so
+// the hover keep-alive (the tile must not shrink away as the cursor reaches for
+// a button that overhangs it) and the click hit-test cannot end up asking about
+// two different shapes -- which is the exact defect X55 fixed for the close-X.
 CBox closeButtonHitBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale);
 
 // App icon (X8) + close button, drawn over an already-rendered tile.
