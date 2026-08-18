@@ -595,6 +595,21 @@ inline bool overviewTileShown(const PHLWINDOW& window, PHLMONITOR monitor, bool*
     return PROMOTED || shouldShowOverviewWindow(window);
 }
 
+// THE MINI PREDICATE. A strip mini answers a DIFFERENT question from a tile:
+// not "is this window drawn on this card" but "does this window LIVE on this
+// desktop". The two were the same question for as long as a card's render list
+// only ever held its own windows, and X58(a)'s homeless promoted window
+// (redrawAll) is what breaks the tie: it is listed under the ACTIVE card
+// because that is where its TILE is laid out, and drawing its mini there too
+// would put a window on a desktop it is not on -- the user report 46bccac
+// closed. HOME is the same rule that decides its slot, asked one more time.
+inline bool overviewStripMiniShown(const PHLWINDOW& window, const PHLWORKSPACE& workspace) {
+    if (!workspace || !shouldShowOverviewWindow(window))
+        return false;
+
+    return overviewGridHomeWorkspace(window) == workspace->m_id;
+}
+
 inline bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
     const auto WINDOW = getOverviewWindowToShow(window);
 

@@ -3439,7 +3439,7 @@ PHLWINDOW CScrollOverview::windowAtStripPoint(const Vector2D& point, CBox* miniB
 
         for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
             const auto WINDOW = getOverviewWindowToShow(it->lock());
-            if (!shouldShowOverviewWindow(WINDOW))
+            if (!overviewStripMiniShown(WINDOW, wimg->pWorkspace))
                 continue;
 
             const auto MINI = stripMiniBox(CELL, WINDOW, MONITOR);
@@ -3646,7 +3646,7 @@ void CScrollOverview::renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, c
 
     for (const auto& windowRef : wimg->windows) {
         const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
-        if (!shouldShowOverviewWindow(WINDOW) || WINDOW == DRAGGED)
+        if (!overviewStripMiniShown(WINDOW, wimg->pWorkspace) || WINDOW == DRAGGED)
             continue;
 
         const auto MINI = stripMiniBox(CELL, WINDOW, monitor);
@@ -4589,6 +4589,12 @@ void CScrollOverview::redrawAll(bool forcelowres) {
     std::vector<PHLWINDOW> addedPinnedFloatingWindows;
     addedPinnedFloatingWindows.reserve(Desktop::windowState()->windows().size());
 
+    // X58(a)'s remaining half needs the ACTIVE card by id, not by pointer: the
+    // fallback below hands a homeless promoted window to it.
+    const auto MONITOR  = pMonitor.lock();
+    const auto ACTIVEWS = MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{};
+    const auto ACTIVEID = ACTIVEWS ? ACTIVEWS->m_id : WORKSPACE_INVALID;
+
     const auto addOverviewWindow = [&](const PHLWINDOW& window) {
         const auto overviewWindow = getOverviewWindowToShow(window);
         if (!shouldShowOverviewWindow(overviewWindow) || !overviewWindow->m_workspace)
@@ -4609,7 +4615,34 @@ void CScrollOverview::redrawAll(bool forcelowres) {
         if (homeId == WORKSPACE_INVALID)
             homeId = overviewWindow->m_workspace->m_id;
 
-        const auto imageIt = imagesByWorkspace.find(homeId);
+        auto imageIt = imagesByWorkspace.find(homeId);
+
+        // X58(a), the half Y9 could not reach: THE HOME DESKTOP CAN BE GONE.
+        // Minimizing the LAST window of a desktop lets Hyprland reap it -- the
+        // same reap Minimize::restore already re-creates around -- so the home
+        // id above names a desktop with no card, no image, and no place in a
+        // render list that is keyed by card. The window was dropped here, and a
+        // query could never bring it back: X58(a)'s "into the grid like any
+        // other match" failing on exactly the windows Y9 made findable.
+        //
+        // Measured on b05b72c (zrig/v1/probeA): the SAME stashed window, same
+        // query, viewed from desktop 3 -- with a second window keeping desktop 5
+        // alive it promotes at 310720 px; with desktop 5 reaped it is 0 px. And
+        // the grid had already solved for it either way, because
+        // overviewMainGridWindows scans every window rather than a card's list:
+        // the survivor in the reaped run sits a half-tile left of centre with an
+        // empty slot beside it. So this was never a membership question -- the
+        // layout said the tile was there and only the DRAWING disagreed.
+        //
+        // The active card is where a promoted tile is laid out (overviewGridSlot)
+        // and drawn (its per-card offset is suppressed), so it is the honest
+        // owner for one that has no card of its own. Scoped to promotable: with
+        // an empty query shouldShowOverviewWindow already dropped the window
+        // above, so Y9's "put away stays put away" is untouched, and a window
+        // whose home card still exists never reaches this line.
+        if (imageIt == imagesByWorkspace.end() && ACTIVEID != WORKSPACE_INVALID && overviewGridPromotable(overviewWindow, MONITOR))
+            imageIt = imagesByWorkspace.find(ACTIVEID);
+
         if (imageIt == imagesByWorkspace.end())
             return;
 

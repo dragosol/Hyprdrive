@@ -24,13 +24,16 @@
 #                that was NEVER minimized. Red P2 means the rig's click did not
 #                land and P1's verdict is worth nothing either way.
 #
-# SCOPE. The fixture is stashed FROM the desktop the overview is opened on,
-# because that is the only case the build actually presents: a window stashed
-# from ANOTHER desktop is not promoted into the active grid under a query at all
-# (measured, same session: not-stashed cross-desktop 338550 px, stashed
-# cross-desktop 0 px, stashed on its own desktop 338202 px -- zrig/f3b/dbg2).
-# That gap is X58(a) against Y9 and is not what this gate is for; the fix under
-# it is written so it needs no second case when the gap closes.
+#   P3 CROSS-DESKTOP  the same claim from the OTHER side of the gap this gate
+#                  used to declare out of scope. A window stashed from a desktop
+#                  that no longer EXISTS -- it was that desktop's last window, so
+#                  Hyprland reaped it -- must still come into the grid under a
+#                  query and still restore-and-go when clicked. The old
+#                  measurement was 0 px against 338550 px for the same window
+#                  un-stashed (zrig/f3b/dbg2), and the arm asserts desktop 5 is
+#                  really gone before it photographs anything: with the desktop
+#                  still alive the case passes on every build and the arm would
+#                  be measuring nothing.
 set -u
 cd "$(dirname "$0")/../../.."
 source scripts/lib/rig.sh
@@ -150,6 +153,71 @@ read -r WS2 CLS2 <<< "$(state)"
 echo "    after the click: workspace $WS2, focused $CLS2"
 [ "$CLS2" = "F3BHOME" ] || bad "P2 CONTROL the rig's click does not land at all (focused $CLS2) -- P1 proves nothing"
 [ "$WS2" = 5 ]          || bad "P2 CONTROL the click left desktop 5 for $WS2"
+
+echo "--- P3 CROSS-DESKTOP: stashed from a desktop that has since been reaped"
+ov off; sleep 1.5
+
+# F3BHOME leaves desktop 5 so the stash below is that desktop's LAST window, and
+# lands on 3 so the query still has a second match: a lone match fills the grid
+# and the tile stops being smaller than the window, which is what P1's size
+# proof rests on.
+hyprctl clients -j | python3 -c "
+import json,sys
+for c in json.load(sys.stdin):
+    if c.get('class')=='F3BHOME' and c.get('pid',0)>0: print(c['pid'])" | xargs -r kill -9 2>/dev/null
+sleep 1.5
+dsp 'hl.dsp.focus({workspace = 3})'; sleep 0.8
+fixture_kitty F3BFAR 1400 400 $FW $FH '#00c000' 'clear; sleep infinity' || exit 1
+
+dsp 'hl.dsp.focus({workspace = 5})'; sleep 0.8
+dsp 'hl.dsp.focus({window = [[class:F3BSTASH]]})'; sleep 0.8
+dsp "hl.plugin.$RIG_NS.minimize([[window]])"; sleep 2.5
+dsp 'hl.dsp.focus({workspace = 3})'; sleep 2.0
+
+wsgone() { hyprctl workspaces -j | python3 -c "
+import json,sys
+print('gone' if 5 not in [w['id'] for w in json.load(sys.stdin)] else 'alive')"; }
+
+echo "    F3BSTASH parked on: $(parked); desktop 5 is $(wsgone)"
+[ "$(parked)" = "special:minimized" ] || { echo "FAIL P3 the fixture never got stashed -- rig fault"; exit 1; }
+# THE PRECONDITION. A live desktop 5 still owns a card, the window is listed
+# under it, and every build promotes it -- so without this the arm is green on
+# the build it is meant to catch.
+[ "$(wsgone)" = "gone" ] || { echo "FAIL P3 desktop 5 survived the stash -- this is not the case the arm is for"; exit 1; }
+
+ov on; sleep 2.0
+ydotool type 'F3B'; sleep 2.5
+
+grim "$OUT/p3-grid.png" 2>/dev/null
+read -r RX RY RW RH RAREA <<< "$(locate "$OUT/p3-grid.png" magenta)"
+if [ -z "${RAREA:-}" ]; then
+    bad "P3 X58(a): a window stashed from a desktop that no longer exists never joins the grid under a query"
+else
+    echo "    cross-desktop stashed tile at ${RX},${RY}  ${RW}x${RH}  area ${RAREA}"
+    python3 -c "import sys; sys.exit(0 if $RW < 830 else 1)" \
+        || bad "P3 the grid drew it at ${RW}px, its full desktop width -- tile and window are then the same measurement"
+
+    warp "$RX" "$RY"; sleep 0.5
+    ydotool click 0x40 >/dev/null 2>&1; sleep 0.12; ydotool click 0x80 >/dev/null 2>&1
+    sleep 3.0
+
+    read -r WS3 CLS3 <<< "$(state)"
+    NOWWS3=$(parked)
+    grim "$OUT/p3-after.png" 2>/dev/null
+    read -r BX BY BW BH BAREA <<< "$(locate "$OUT/p3-after.png" magenta 0)"
+    echo "    after the click: workspace $WS3, focused $CLS3, F3BSTASH on $NOWWS3"
+    echo "    magenta on screen: ${BW:-0}x${BH:-0}  (its own size is ${FW}x${FH})"
+
+    [ "$NOWWS3" = "special:minimized" ] && bad "P3 the click is dead: the window is still stashed"
+    [ "$WS3" = 5 ]           || bad "P3 the overview closed onto desktop $WS3, not the window's home desktop 5"
+    [ "$CLS3" = "F3BSTASH" ] || bad "P3 the restored window is not focused (focused $CLS3)"
+    if [ -z "${BAREA:-}" ]; then
+        bad "P3 the window is nowhere on screen after the click"
+    else
+        python3 -c "import sys; sys.exit(0 if 850 <= $BW <= 950 and 520 <= $BH <= 600 else 1)" \
+            || bad "P3 the window came back at ${BW}x${BH}, not its own ${FW}x${FH}"
+    fi
+fi
 
 echo
 [ $FAIL = 0 ] && echo "PASS f3b_stash_click" || echo "FAIL f3b_stash_click"
