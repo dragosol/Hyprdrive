@@ -19,6 +19,9 @@
 
 #include <hyprutils/os/Process.hpp>
 
+// V3. The compositor's own exec, for the one launch that carries a window rule.
+#include <hyprland/src/config/supplementary/executor/Executor.hpp>
+
 using namespace Hyprutils::OS;
 
 namespace AppSearch {
@@ -875,31 +878,72 @@ namespace AppSearch {
         return "";
     }
 
-    bool launch(const SEntry& entry, const std::string& terminalCmd) {
+    // The argv a launch would run: field codes stripped, and Terminal= entries
+    // wrapped in the terminal exactly once. Empty when there is nothing to run.
+    // Both launch paths build their command HERE so a targeted launch can never
+    // disagree with a plain one about what the entry means.
+    static std::vector<std::string> launchArgv(const SEntry& entry, const std::string& terminalCmd) {
         auto args = splitArgs(stripFieldCodes(entry.exec));
         if (args.empty())
-            return false;
+            return {};
 
         if (entry.terminal) {
             const char* ENVTERM = std::getenv("TERMINAL");
             const auto  TERM    = !terminalCmd.empty() ? terminalCmd : (ENVTERM && *ENVTERM ? std::string{ENVTERM} : std::string{});
             if (TERM.empty())
-                return false;
+                return {};
 
             auto termArgs = splitArgs(TERM);
             if (termArgs.empty())
-                return false;
+                return {};
 
             termArgs.emplace_back("-e");
             termArgs.insert(termArgs.end(), args.begin(), args.end());
             args = std::move(termArgs);
         }
 
+        return args;
+    }
+
+    // One argv word as /bin/sh will read it back. Single quotes, because inside
+    // them the shell expands nothing at all -- the only escape needed is for a
+    // single quote itself, which closes, escapes and reopens.
+    static std::string shellQuote(const std::string& word) {
+        std::string out = "'";
+        for (const char C : word) {
+            if (C == '\'')
+                out += "'\\''";
+            else
+                out += C;
+        }
+        return out + "'";
+    }
+
+    bool launch(const SEntry& entry, const std::string& terminalCmd) {
+        auto args = launchArgv(entry, terminalCmd);
+        if (args.empty())
+            return false;
+
         const auto BINARY = args.front();
         args.erase(args.begin());
 
         CProcess process(BINARY, args);
         return process.runAsync();
+    }
+
+    bool launchWithRule(const SEntry& entry, const std::string& terminalCmd, const std::string& execRule) {
+        if (execRule.empty())
+            return launch(entry, terminalCmd);
+
+        const auto ARGS = launchArgv(entry, terminalCmd);
+        if (ARGS.empty() || !::Config::Supplementary::executor())
+            return false;
+
+        std::string cmd = "[" + execRule + "]";
+        for (const auto& WORD : ARGS)
+            cmd += " " + shellQuote(WORD);
+
+        return ::Config::Supplementary::executor()->spawn(cmd).has_value();
     }
 
     bool strictMatch(const std::string& query, const std::string& text) {

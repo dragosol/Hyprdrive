@@ -63,6 +63,13 @@ class IOverviewGeometry {
     // the offscreen fallback aimed at the NEXT desktop for a window whose home
     // IS the active one.
     virtual CBox overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const = 0;
+    // V3. The desktop whose STRIP CARD is under a monitor-local render-px point,
+    // or null. Asked by the dock's icon drop, which is why it is here rather
+    // than left private to the overview: while the overview is up the cards ARE
+    // the desktops, and a card is the only thing an icon can be dropped onto.
+    // Same point space `tileBox` answers in and `Dock::pillContains` tests, so
+    // the drop can ask both without converting anything.
+    virtual PHLWORKSPACE stripWorkspaceAt(const Vector2D& point) const = 0;
     // Z20. Rebuild the per-card window lists from live state. setHidden fires
     // no compositor event, so a window unhidden at a flight's landing is
     // otherwise never re-added to workspaceImage->windows -- the grid and

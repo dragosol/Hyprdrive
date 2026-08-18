@@ -3403,6 +3403,10 @@ PHLWORKSPACE CScrollOverview::workspaceAtStripPoint(const Vector2D& point, size_
     return nullptr;
 }
 
+PHLWORKSPACE CScrollOverview::stripWorkspaceAt(const Vector2D& point) const {
+    return workspaceAtStripPoint(point);
+}
+
 // Minis map the window's REAL desktop rect into the cell, not its grid slot: a
 // thumbnail of the desktop, not a second copy of the grid. Shared by the render
 // and the D6 hit-test so the two can never disagree about where a mini is.

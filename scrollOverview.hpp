@@ -163,6 +163,9 @@ class CScrollOverview : public IOverview {
     CBox         stripCellLogicalBox(size_t workspaceIdx) const;
     CBox         stripCellBox(size_t workspaceIdx, PHLMONITOR monitor, float renderScale) const;
     PHLWORKSPACE workspaceAtStripPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx = nullptr) const;
+    // V3. IOverviewGeometry's name for the line above -- the dock reaches it
+    // through the interface, and a defaulted out-parameter cannot be a virtual.
+    PHLWORKSPACE stripWorkspaceAt(const Vector2D& point) const override;
     CBox         stripMiniBox(const CBox& cell, PHLWINDOW window, PHLMONITOR monitor) const;
     PHLWINDOW    windowAtStripPoint(const Vector2D& point, CBox* miniBox = nullptr) const;
     void         focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx);

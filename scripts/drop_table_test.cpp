@@ -1,4 +1,7 @@
-// Exhaustive table test for ScrollOverview::Drop::resolve().
+// Exhaustive table tests for the two ladders in DropDecision.hpp:
+// ScrollOverview::Drop::resolve() (a released WINDOW drag) and V3's
+// resolveIcon() (a released DOCK ICON drag). Two gestures, two tables, one
+// file -- they end on the same screen and must not grow apart.
 //
 // The drop resolution came out of endWindowDrag()'s 277 lines as a pure
 // function precisely so it could be checked without a compositor: 16 boolean
@@ -142,6 +145,132 @@ static std::string describe(unsigned bits) {
     return s.empty() ? "(nothing set)" : s;
 }
 
+// ------------------------------------------------------- V3 icon drops --
+// The second table in this file, and the reason it is in this file: a dock icon
+// released on the screen and a window released on the screen are two gestures
+// that ask the same question, and keeping the two ladders side by side is what
+// stops the second one from being reinvented inside an input hook.
+//
+// 7 facts, 128 rows, walked exhaustively -- but there is no PARENT ladder to
+// diff against here (the parent does nothing at all with this release), so the
+// check is a different one: every row must satisfy the INVARIANTS the feature
+// is defined by, every action must be reachable, and the named cases the spec
+// itself lists must come out the way the spec says.
+static const char* iconActionName(EIconAction a) {
+    switch (a) {
+        case EIconAction::Click: return "Click";
+        case EIconAction::Reorder: return "Reorder";
+        case EIconAction::LaunchHere: return "LaunchHere";
+        case EIconAction::LaunchThere: return "LaunchThere";
+        case EIconAction::Cancel: return "Cancel";
+    }
+    return "?";
+}
+
+static SIconFacts iconFactsFromBits(unsigned bits) {
+    SIconFacts f;
+    f.haveItem          = bits & (1u << 0);
+    f.live              = bits & (1u << 1);
+    f.nearStart         = bits & (1u << 2);
+    f.onPill            = bits & (1u << 3);
+    f.overviewOpen      = bits & (1u << 4);
+    f.onStripCard       = bits & (1u << 5);
+    f.stripCardIsActive = bits & (1u << 6);
+    return f;
+}
+
+static int iconTable() {
+    int failures  = 0;
+    int counts[5] = {};
+
+    for (unsigned bits = 0; bits < (1u << 7); ++bits) {
+        const SIconFacts  F = iconFactsFromBits(bits);
+        const EIconAction A = resolveIcon(F);
+
+        counts[static_cast<int>(A)]++;
+
+        const auto bad = [&](const char* why) {
+            if (++failures <= 20)
+                std::printf("ICON MISMATCH bits=0x%02x -> %s : %s\n", bits, iconActionName(A), why);
+        };
+
+        // NOTHING HAPPENS WITHOUT A LIVE DRAG. The press may have landed on
+        // padding, on a preview, or on an icon with no desktop id, and a
+        // sub-threshold wobble is a click -- all three are the caller's click,
+        // never a launch (this is the X16 half, and it is why the dock stopped
+        // being dead in the first place).
+        if ((!F.haveItem || !F.live || F.nearStart) && A != EIconAction::Click)
+            bad("a press that never became a drag must fall through to the click ladder");
+
+        // NOTHING LAUNCHES ON THE PILL. The pill is where the icon came from;
+        // dropping it back is X32's reorder and cannot also start the app.
+        if (F.haveItem && F.live && !F.nearStart && F.onPill && A != EIconAction::Reorder)
+            bad("a live drop inside the pill is the reorder and nothing else");
+
+        // A DROP ON THE DESKTOP LAUNCHES HERE. With no overview up there is
+        // nothing else off the pill to hit, so there is no cancel to reach.
+        if (F.haveItem && F.live && !F.nearStart && !F.onPill && !F.overviewOpen && A != EIconAction::LaunchHere)
+            bad("with the overview closed, off the pill IS the active desktop");
+
+        // A CARD IS ALWAYS A LAUNCH, and never the wrong one: the active card
+        // launches here (focused), any other card launches there (silent).
+        if (F.overviewOpen && F.onStripCard && F.haveItem && F.live && !F.nearStart && !F.onPill) {
+            if (F.stripCardIsActive && A != EIconAction::LaunchHere)
+                bad("the card of the desktop being viewed is the active desktop");
+            if (!F.stripCardIsActive && A != EIconAction::LaunchThere)
+                bad("another desktop's card launches on THAT desktop");
+        }
+
+        // AND THE NEAR MISS EXISTS. With the overview up and no card under the
+        // release, nothing may be started -- this is the arm that makes "a drop
+        // that misses both targets cancels" a testable claim rather than a note.
+        if (F.overviewOpen && !F.onStripCard && F.haveItem && F.live && !F.nearStart && !F.onPill && A != EIconAction::Cancel)
+            bad("a release on the overview but on no card must start nothing");
+
+        // LaunchThere is SILENT by construction, so it must never be reachable
+        // for the desktop the session is already on -- that would be a silent
+        // launch onto the visible desktop, which is a launch with no feedback.
+        if (A == EIconAction::LaunchThere && F.stripCardIsActive)
+            bad("the active desktop must never be launched on silently");
+    }
+
+    std::printf("icon rows %u\n", 1u << 7);
+    for (int i = 0; i < 5; ++i) {
+        std::printf("  %-13s %6d\n", iconActionName(static_cast<EIconAction>(i)), counts[i]);
+        if (counts[i] == 0) {
+            std::printf("UNREACHED icon action %s\n", iconActionName(static_cast<EIconAction>(i)));
+            ++failures;
+        }
+    }
+
+    // The four gestures the spec names, by hand.
+    struct SIconCase {
+        const char* name;
+        SIconFacts  facts;
+        EIconAction want;
+    };
+    const SIconCase ICONCASES[] = {
+        {"drag to the desktop centre, overview closed", SIconFacts{.haveItem = true, .live = true}, EIconAction::LaunchHere},
+        {"drag onto another desktop's strip card",
+         SIconFacts{.haveItem = true, .live = true, .overviewOpen = true, .onStripCard = true}, EIconAction::LaunchThere},
+        {"drag onto the card of the desktop being viewed",
+         SIconFacts{.haveItem = true, .live = true, .overviewOpen = true, .onStripCard = true, .stripCardIsActive = true}, EIconAction::LaunchHere},
+        {"released just outside every card", SIconFacts{.haveItem = true, .live = true, .overviewOpen = true}, EIconAction::Cancel},
+        {"released back on the pill", SIconFacts{.haveItem = true, .live = true, .onPill = true}, EIconAction::Reorder},
+        {"released where it was pressed", SIconFacts{.haveItem = true, .live = true, .nearStart = true}, EIconAction::Click},
+    };
+
+    for (const auto& C : ICONCASES) {
+        const EIconAction GOT = resolveIcon(C.facts);
+        const bool        OK  = GOT == C.want;
+        std::printf("  %-46s %-12s %s\n", C.name, iconActionName(GOT), OK ? "ok" : "WRONG");
+        if (!OK)
+            ++failures;
+    }
+
+    return failures;
+}
+
 int main() {
     int failures = 0;
     int counts[7] = {};
@@ -209,6 +338,8 @@ int main() {
         if (!OK)
             ++failures;
     }
+
+    failures += iconTable();
 
     std::printf(failures ? "DROP_TABLE FAIL (%d)\n" : "DROP_TABLE OK (%d)\n", failures);
     return failures ? 1 : 0;

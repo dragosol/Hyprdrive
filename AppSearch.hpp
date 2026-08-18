@@ -63,6 +63,24 @@ namespace AppSearch {
     // $TERMINAL.
     bool launch(const SEntry& entry, const std::string& terminalCmd);
 
+    // V3. The same launch, ON a named desktop. `execRule` is a Hyprland exec
+    // rule WITHOUT its brackets ("workspace 5 silent"), and an empty one means
+    // "here", which is plain launch().
+    //
+    // A rule cannot be handed to CProcess, because a rule is not a property of
+    // the process: Hyprland matches it against the WINDOW when it maps, through
+    // a token it plants in the child's environment. So a targeted launch is the
+    // one path that goes out through the compositor's own executor -- the same
+    // machinery `exec = [workspace 5 silent] foo` in a config uses, and the
+    // only mechanism here that does not depend on `misc:initial_workspace_
+    // tracking`, which this rice turns OFF (so the HL_INITIAL_WORKSPACE_TOKEN
+    // route would silently place nothing).
+    //
+    // The executor takes a SHELL STRING and we hold argv, so the argv is
+    // re-quoted rather than re-parsed: field codes are stripped and Terminal=
+    // wrapped exactly once, here, by the same code plain launch() uses.
+    bool launchWithRule(const SEntry& entry, const std::string& terminalCmd, const std::string& execRule);
+
     // OVERVIEW_CPP_SPEC §13.7 X18, open-window half. Parity with
     // windows-search-provider@G-dH, read off the HOST's own settings rather
     // than its defaults: search-method=0 is Strict, not fuzzy. Strict means
