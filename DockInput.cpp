@@ -1,5 +1,7 @@
 #include "DockInput.hpp"
 
+#include "DockStacks.hpp"
+
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 
@@ -26,6 +28,11 @@ SClaim handleMenu(PHLMONITOR mon, const Vector2D& local, EButton role, bool pres
     // does. Only the PRESS opens; the release that follows lands outside the plate
     // and treating it as a click would dismiss the menu in the same gesture.
     if (role == EButton::Menu && pressed && !windowDragActive && Dock::pillContains(mon, local)) {
+        // V11 V4. A right-click on a cell is the stack's settings, so the fan
+        // must get out of the way first -- two plates over one cell, one of
+        // them modal, is the stack the menu branch already refuses to draw.
+        Stacks::close();
+        Stacks::abandonItemDrag();
         Dock::openMenu(mon, local);
         out.claimed = true;
         return out;
@@ -77,6 +84,16 @@ SClaim handlePill(PHLMONITOR mon, const Vector2D& local, EButton role, bool pres
     SClaim out;
     if (role != EButton::Main)
         return out;
+
+    // V11 V4. The stack popup floats above BOTH the pill and the hover panel,
+    // so it is asked before either. It also answers a RELEASE that has wandered
+    // off it, because a release always belongs to the press that started it --
+    // that release is how a file gets moved onto another cell.
+    if (!windowDragActive && Stacks::click(mon, local, !pressed)) {
+        out.claimed    = true;
+        out.needsFrame = true;
+        return out;
+    }
 
     // Z2. The hover panel floats above the pill, so it is asked first -- a press
     // over a preview would otherwise reach the tile below. Behind the window-drag

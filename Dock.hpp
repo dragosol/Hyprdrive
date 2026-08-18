@@ -38,6 +38,17 @@ struct SItem {
     bool        mounted    = true;  // false: an fstab point offering Mount instead
 
     bool        trashEmpty = true;  // no `Empty Trash` row while it is
+
+    // V11 V4. A STACK -- a file or folder the user pinned. `uri` is set to its
+    // file:// form as well, deliberately: every `!uri.empty()` branch in
+    // Dock.cpp already means "not an app, so no badge, no wiggle, no window
+    // list, name from locationName", and all of that is true of a stack. The
+    // handful of places a stack differs from a location test `stack` FIRST.
+    // That is one added field on nine existing branches rather than a third
+    // arm on each of them.
+    bool        stack    = false;
+    std::string stackPath;          // absolute, no trailing slash
+    bool        stackDir = false;   // a folder fans; a file just opens
 };
 
 struct SLayout {

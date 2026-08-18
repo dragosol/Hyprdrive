@@ -125,6 +125,23 @@ SDispatcher* findDispatcher(const std::string_view name) {
             },
         },
         {
+            // V11 V4. The path is the tail of the argument and is deliberately
+            // NOT constrained: a stack is any path the user has, and a pattern
+            // strict enough to be worth writing would reject the ones with
+            // spaces, brackets or non-ASCII in them. The VERB is checked here;
+            // the path is checked by the filesystem, which is the only thing
+            // that can actually answer.
+            .name            = "stack",
+            .argPattern      = std::regex{"^(clear|(pin|unpin|toggle) .+|view (fan|grid) .+|sort (name|mtime) .+)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected: pin <path> | unpin <path> | toggle <path> | view fan|grid <path> | sort name|mtime <path> | clear",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "stack"); },
+            .luaLegacy       = [](lua_State* L) {
+                ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.stack");
+                return dispatcherFactoryLua(L, "stack");
+            },
+        },
+        {
             .name            = "window",
             .argPattern      = std::regex{"^(select|close|click)$"},
             .typeArgError    = "expected a string argument",

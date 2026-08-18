@@ -30,6 +30,7 @@
 #include "DropDecision.hpp" // V3: where a released icon drag goes, as a pure function
 #include "IOverview.hpp"
 #include "LauncherEntry.hpp"
+#include "DockStacks.hpp"
 #include "Locations.hpp"
 #include "Minimize.hpp"
 #include "OverviewPassElement.hpp"
@@ -766,6 +767,26 @@ std::vector<SItem> dockItems() {
         });
     }
 
+    // V11 V4. STACKS come after the locations, which is the end of the dock.
+    // The reference appends to the dash for the same reason: a stack is the
+    // user's own shelf and it should not push the apps around.
+    //
+    // A stack carries `uri` as well as `stack`, so the nine `!uri.empty()`
+    // branches this file already has treat it as the not-an-app it is.
+    for (const auto& STACK : Stacks::all()) {
+        std::error_code ec;
+        const bool      DIR = std::filesystem::is_directory(STACK.path, ec);
+
+        out.emplace_back(SItem{
+            .icon         = Stacks::iconFor(STACK.path),
+            .uri          = "file://" + STACK.path,
+            .locationName = Stacks::labelFor(STACK.path),
+            .stack        = true,
+            .stackPath    = STACK.path,
+            .stackDir     = DIR && !ec,
+        });
+    }
+
     return out;
 }
 
@@ -858,6 +879,11 @@ struct SDockItemState {
 };
 
 struct SDockVisualState {
+    // V11 V4. The stack popup's whole appearance as one string -- see
+    // Stacks::visualState. A string rather than fields because the popup's
+    // contents are a directory listing and the dock has no business modelling
+    // one twice.
+    std::string stacks;
     // No pill -- dock off, or fully hidden. Everything else is then moot, and
     // the default-constructed state is exactly "nothing to draw", which is what
     // the first call on a monitor has to compare equal to.
@@ -1193,7 +1219,7 @@ void updateAutohide(PHLMONITOR monitor) {
         // pill, so the icon under the pointer would go with it. The return
         // flight holds it for the other half: an icon cannot land in a cell
         // that has left the screen.
-        if (menuOpen() || panelHoldsDock(monitor) || dragging() || ghostFlying())
+        if (menuOpen() || panelHoldsDock(monitor) || Stacks::holdsDock(monitor) || dragging() || ghostFlying())
             want = true;
         else if (CBox reach = slidPill(monitor); !reach.empty()) {
             // X77: the SLID pill, not the resting one. While it is still easing
@@ -1884,6 +1910,14 @@ void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl =
     // X35. A location has no windows to minimize: it is opened. Nautilus raises
     // the window it already has for a location rather than opening a second
     // one, so this is the reference's "focus it" too.
+    // V11 V4. A STACK opens its fan or its grid rather than launching --
+    // tested before the location branch, because a stack carries a uri too.
+    // A pinned FILE has nothing to fan, and Stacks::open opens it instead.
+    if (item.stack) {
+        Stacks::open(monitor, item, item.iconBox);
+        return;
+    }
+
     if (!item.uri.empty()) {
         launchApp(monitor, item);
         return;
@@ -2013,7 +2047,7 @@ void applyClickAction(PHLMONITOR monitor, const SItem& item, const std::string& 
 
 // ---------------------------------------------------------------- X28 menu --
 
-enum class ERow : uint8_t { Separator, Action, Window, Details, Favorite, Quit, EmptyTrash, Mount, Unmount, Eject };
+enum class ERow : uint8_t { Separator, Action, Window, Details, Favorite, Quit, EmptyTrash, Mount, Unmount, Eject, StackView, StackSort, StackOpen, StackUnpin };
 
 struct SRow {
     ERow         kind = ERow::Separator;
@@ -2049,6 +2083,25 @@ std::string elide(const std::string& text) {
     return text.substr(0, cut) + "…";
 }
 
+// V11 V4. What the stack's own store says about it, for the menu labels --
+// the row has to name the state it will move TO, so it has to read the state
+// it is in.
+bool stackIsGrid(const SItem& item) {
+    for (const auto& S : Stacks::all()) {
+        if (S.path == item.stackPath)
+            return S.grid;
+    }
+    return false;
+}
+
+bool stackIsByTime(const SItem& item) {
+    for (const auto& S : Stacks::all()) {
+        if (S.path == item.stackPath)
+            return S.sortByTime;
+    }
+    return false;
+}
+
 // Spec §13.9 X28, in the order the spec lists them: .desktop Actions, window
 // list, Show Details, Add/Remove from Favorites, Quit.
 std::vector<SRow> buildRows(const SItem& item) {
@@ -2058,6 +2111,21 @@ std::vector<SRow> buildRows(const SItem& item) {
     // window list, no favourite, no Quit: none of those has an answer for a
     // thing that is not an app. An empty trash lists no action at all, so its
     // menu is a bare plate, which is what the reference shows too.
+    // V11 V4. A stack's settings ARE this menu -- the spec is explicit that
+    // there is no external prefs panel, which is the reference's one real
+    // design mistake (its stack icon has no context menu at all, and a folder
+    // can only be unpinned from a GTK preferences window two clicks away).
+    if (item.stack) {
+        if (item.stackDir) {
+            rows.emplace_back(SRow{.kind = ERow::StackView, .label = stackIsGrid(item) ? "Show as Fan" : "Show as Grid"});
+            rows.emplace_back(SRow{.kind = ERow::StackSort, .label = stackIsByTime(item) ? "Sort by Name" : "Sort by Date"});
+            rows.emplace_back(SRow{.kind = ERow::Separator});
+        }
+        rows.emplace_back(SRow{.kind = ERow::StackOpen, .label = "Open in Files"});
+        rows.emplace_back(SRow{.kind = ERow::StackUnpin, .label = "Unpin from Dock"});
+        return rows;
+    }
+
     if (!item.uri.empty()) {
         if (item.mount) {
             // An fstab point that is not up yet offers the opposite action --
@@ -2111,6 +2179,13 @@ void activateRow(PHLMONITOR monitor, const SItem& item, const SRow& row) {
 
     switch (row.kind) {
         case ERow::Separator: return;
+
+        // V11 V4. Per-STACK, and written straight to the store: the toggle is
+        // the setting, so there is nowhere else for it to live.
+        case ERow::StackView: Stacks::setView(item.stackPath, !stackIsGrid(item)); return;
+        case ERow::StackSort: Stacks::setSort(item.stackPath, !stackIsByTime(item)); return;
+        case ERow::StackOpen: Locations::activate(item.uri); return;
+        case ERow::StackUnpin: Stacks::unpin(item.stackPath); return;
 
         case ERow::EmptyTrash: Locations::emptyTrash(); return;
         case ERow::Mount: Locations::mount(item.uri); return;
@@ -2991,6 +3066,12 @@ bool needsFrames(PHLMONITOR monitor, const SLayout& layout) {
     // X25/X47/Y6/Y8. A minimized window's commits damage no monitor, the hover
     // panel's entrance and live previews need frames of their own, and a bounce
     // or a launch zoom runs on a dock nothing else is touching.
+    // V11 V4. The stack popup's entrance, its drag ghost, and the hop or the
+    // shake that acknowledges a move. Asked here rather than pumped from its
+    // own module for the reason stated at the top of this function: ONE list.
+    if (Stacks::needsFrames())
+        return true;
+
     return Flight::any() || panelUp() || !g_flight.bounces.empty() || !g_flight.launchZooms.empty();
 }
 
@@ -3064,6 +3145,11 @@ bool damageIfChanged(PHLMONITOR monitor) {
                 break;
             }
         }
+
+        // V11 V4. Everything the popup draws, in one string. Without it an
+        // open fan is invisible to the comparison and its entrance stops on
+        // its first frame -- the same failure the hover panel had.
+        state.stacks = Stacks::visualState();
 
         state.hoverShowApps = !LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(MOUSE);
         state.caret         = caretIndex();
@@ -3743,6 +3829,15 @@ void render(PHLMONITOR monitor) {
             // from reading as the whole cell coming loose.
             data.box.y -= bounceLift(ITEM.wmClass, sc<float>(ITEM.iconBox.height));
 
+            // V11 V4. A stack has no window class, so Y8's hop cannot key on
+            // one -- its acknowledgement and its refusal are keyed on the path
+            // instead. Both are additive with the app hop above, which cannot
+            // be running on the same cell.
+            if (ITEM.stack) {
+                data.box.y -= Stacks::bounceLift(ITEM.stackPath, sc<float>(ITEM.iconBox.height));
+                data.box.x += Stacks::shakeOffset(ITEM.stackPath, sc<float>(ITEM.iconBox.width));
+            }
+
             // X31 `dance-urgent-applications`. CBox::rot is radians about the
             // box's own centre, which is the reference's pivot (0.5, 0.5) --
             // so the wiggle is one assignment, not a transform stack.
@@ -3859,6 +3954,13 @@ void render(PHLMONITOR monitor) {
 
     // Above the pill by construction (MENU_GAP), so the previews below cannot
     // overdraw it and it does not have to wait for them.
+    // V11 V4. Over the icon row, under the menu: the menu is modal and the
+    // popup is not, so a menu opened over an open fan must be on top of it.
+    // Its own clock, because render()'s NOW is declared below this point --
+    // and the popup eases off wall time rather than off the frame stamp, so
+    // the two cannot drift apart in any way a reader would notice.
+    Stacks::render(monitor, LAYOUT, Time::steadyNow());
+
     renderMenu(monitor, LAYOUT);
 
     const auto NOW = Time::steadyNow();

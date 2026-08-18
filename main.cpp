@@ -34,6 +34,7 @@ using namespace Hyprutils::String;
 #include "AppSearch.hpp"
 #include "Config.hpp"
 #include "Dock.hpp"
+#include "DockStacks.hpp"
 #include "FlightController.hpp"
 #include "DockInput.hpp"
 #include "LauncherEntry.hpp"
@@ -949,6 +950,89 @@ static SDispatchResult onHotkeyDispatcher(std::string arg) {
     return {};
 }
 
+// V11 SPEC V4. THE STACK DISPATCHER, and the reason there is one at all.
+//
+// A stack is meant to be created by dragging a file out of a file manager and
+// onto the dock. That gesture cannot reach this plugin: in Hyprland 0.56 the
+// drop target of an XDG drag is always a wl_surface (CSeatManager's
+// dndPointerFocus is a WP<CWLSurfaceResource>) and this dock is not a surface
+// -- it is drawn straight into the render pass -- while every member that
+// would let a non-surface claim the offer is private on CWLDataDeviceProtocol
+// with `friend` limited to CSeatManager. The full finding is in DockStacks.hpp.
+//
+// So the pin is a DISPATCHER, which is the same shape every other scriptable
+// thing in this plugin has, and a Nautilus script wraps it for the file
+// manager's own right-click menu (scripts/install-nautilus-pin.sh).
+//
+//     hyprdrive:stack pin /home/you/Downloads
+//     hyprdrive:stack unpin /home/you/Downloads
+//     hyprdrive:stack toggle /home/you/Downloads     -- pin if not pinned, else unpin
+//     hyprdrive:stack view grid /home/you/Downloads
+//     hyprdrive:stack sort mtime /home/you/Downloads
+//     hyprdrive:stack clear                          -- every stack, for gate_slate
+//
+// A path is taken RAW to the end of the line: paths contain spaces, and any
+// splitting cleverer than "the verb, then the rest" would refuse the ones that
+// need this most.
+static SDispatchResult onStackDispatcher(std::string arg) {
+    const auto CUT  = arg.find(' ');
+    const auto VERB = arg.substr(0, CUT);
+    auto       rest = CUT == std::string::npos ? std::string{} : arg.substr(CUT + 1);
+    while (!rest.empty() && rest.front() == ' ')
+        rest.erase(rest.begin());
+
+    if (VERB == "clear") {
+        ScrollOverview::Stacks::clearAll();
+        return {};
+    }
+
+    if (VERB == "view" || VERB == "sort") {
+        const auto CUT2 = rest.find(' ');
+        if (CUT2 == std::string::npos)
+            return {.success = false, .error = "expected a mode and a path"};
+
+        const auto MODE = rest.substr(0, CUT2);
+        auto       path = rest.substr(CUT2 + 1);
+        while (!path.empty() && path.front() == ' ')
+            path.erase(path.begin());
+
+        if (VERB == "view") {
+            if (MODE != "fan" && MODE != "grid")
+                return {.success = false, .error = "expected fan or grid"};
+            ScrollOverview::Stacks::setView(path, MODE == "grid");
+            return {};
+        }
+
+        if (MODE != "name" && MODE != "mtime")
+            return {.success = false, .error = "expected name or mtime"};
+        ScrollOverview::Stacks::setSort(path, MODE == "mtime");
+        return {};
+    }
+
+    if (rest.empty())
+        return {.success = false, .error = "expected a path"};
+
+    if (VERB == "pin") {
+        if (!ScrollOverview::Stacks::pin(rest))
+            return {.success = false, .error = "not pinned: the path does not exist, or is already a stack"};
+        return {};
+    }
+
+    if (VERB == "unpin") {
+        if (!ScrollOverview::Stacks::unpin(rest))
+            return {.success = false, .error = "not a stack"};
+        return {};
+    }
+
+    if (VERB == "toggle") {
+        if (!ScrollOverview::Stacks::unpin(rest) && !ScrollOverview::Stacks::pin(rest))
+            return {.success = false, .error = "the path does not exist"};
+        return {};
+    }
+
+    return {.success = false, .error = "expected pin, unpin, toggle, view, sort or clear"};
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     SCROLLOVERVIEW_HANDLE = handle;
 
@@ -1200,6 +1284,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("window", ::onWindowDispatcher);
     ScrollOverview::Config::registerDispatcher("minimize", ::onMinimizeDispatcher);
     ScrollOverview::Config::registerDispatcher("hotkey", ::onHotkeyDispatcher);
+    ScrollOverview::Config::registerDispatcher("stack", ::onStackDispatcher);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
     registerTapSuper();
