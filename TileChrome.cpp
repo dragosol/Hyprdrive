@@ -354,15 +354,46 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // the user's words were "little icons under the windows" -- rather than the
     // deprecated overview's top-left inset. Centred, so it reads as a label for
     // the tile rather than as part of its content.
+    //
+    // V1 (user, 2026-08-17): "Start of animation - size 0. End of overview
+    // animation - whatever size the icons in the bottom middle of the windows
+    // end up at. So both fade and grow."
+    //
+    // The grow rides FADE, which is the number the fade already rides: the
+    // overview's OWN open progress (overviewGridProgress off the animated
+    // scale). It is deliberately not a timeline -- there is no clock here, no
+    // start stamp and no state -- so an open that is interrupted, reversed or
+    // re-opened carries the icon with it frame for frame instead of finishing a
+    // flight the overview abandoned. That is the FlightController lesson written
+    // as an absence: a second timeline is the thing that cannot be kept in sync,
+    // so there isn't one.
+    //
+    // The three laws then fall out of the driver instead of being policed on top
+    // of it. gridProgress CLAMPS at 1, so the icon cannot pass its resting size
+    // however the scale curve behaves near the end (zero overshoot). It reaches
+    // 1 exactly when the scale reaches its target, so the icon cannot finish
+    // after the overview. And the scale animates on the house DECEL bezier on
+    // open, so the growth decelerates because the overview decelerates -- one
+    // curve family, not a matching curve.
+    //
+    // Scaling SIDE alone grows it IN PLACE. The box is centred on the tile's
+    // bottom-middle point, so shrinking SIDE keeps that point fixed and the icon
+    // does not crawl out of a corner. Below one device pixel there is nothing
+    // honest to draw -- a rounded box of zero width is not a small icon, it is a
+    // no-op with a texture bound -- so the draw starts when the box does.
     if (const auto TEX = OverviewRender::appIcon(AppSearch::iconForClass(window->m_class))) {
-        const float SIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE);
+        const float SIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE) * FADE;
 
-        CTexPassElement::SRenderData icon;
-        icon.tex = TEX;
-        icon.box = CBox{sc<float>(tileBox.x + tileBox.w / 2.0) - SIDE / 2.F, sc<float>(tileBox.y + tileBox.h) - SIDE / 2.F, SIDE, SIDE};
-        icon.box.round();
-        icon.a = FADE;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(icon));
+        CBox iconBox = CBox{sc<float>(tileBox.x + tileBox.w / 2.0) - SIDE / 2.F, sc<float>(tileBox.y + tileBox.h) - SIDE / 2.F, SIDE, SIDE};
+        iconBox.round();
+
+        if (iconBox.width >= 1 && iconBox.height >= 1) {
+            CTexPassElement::SRenderData icon;
+            icon.tex = TEX;
+            icon.box = iconBox;
+            icon.a   = FADE;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(icon));
+        }
     }
 
     // X57. The tile's CAPTION -- the overview had none at all. Same pill as the
@@ -372,6 +403,9 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     if (const auto* const HSTATE = stateFor(window, false)) {
         const float A = std::clamp(easedHover(HSTATE->hover), 0.F, 1.F) * FADE;
         if (A > 0.01F) {
+            // RESTING side, not the growing one above: the caption is a hover
+            // surface and is only ever seen at FADE 1, and pinning it here stops
+            // the pill sliding up the screen if a hover lands mid-open.
             const float ICONSIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE);
             const float BOTTOM   = sc<float>(tileBox.y + tileBox.h) + ICONSIDE / 2.F + CAPTION_GAP * SCALE;
             OverviewRender::labelPill(monitor, window->m_title, sc<float>(tileBox.x + tileBox.w / 2.0), BOTTOM + CAPTION_H * SCALE, A, SCALE);
