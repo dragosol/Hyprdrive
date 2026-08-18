@@ -27,6 +27,7 @@
 #include "AppSearch.hpp"
 #include "globals.hpp"
 #include "Config.hpp"
+#include "DropDecision.hpp" // V3: where a released icon drag goes, as a pure function
 #include "IOverview.hpp"
 #include "LauncherEntry.hpp"
 #include "Locations.hpp"
@@ -873,6 +874,12 @@ struct SDockVisualState {
     // X32/G12. The insertion caret moves on a bare pointer move exactly as the
     // hover highlight does, and nothing else asks for a frame during a drag.
     int caret = -1;
+    // V3. And once the drag leaves the pill the caret is gone, so the icon under
+    // the pointer is the ONLY thing changing between two motion events: without
+    // its position in here the ghost is drawn once and then frozen while the
+    // pointer walks away from it (the desktop's hook damages from this diff and
+    // nothing else).
+    int ghostX = -1, ghostY = -1;
     // X34. The hotkey overlay's numbers arrive and leave without a single box
     // moving, so the frame that draws them -- and the one that clears them --
     // has to be asked for from here.
@@ -1796,7 +1803,22 @@ void cycleOrActivate(const std::string& wmClass, bool reversed) {
 std::unordered_map<std::string, Time::steady_tp> g_pendingLaunches;
 constexpr float                                  LAUNCH_PENDING_MS = 30000.F;
 
-void launchApp(PHLMONITOR monitor, const SItem& item) {
+// V3 widened this in two places, both in its signature, and both because a
+// DRAG is a different statement from a click:
+//   `onWorkspace`  where the app is to start. Null is "here", which is every
+//                  caller that existed before -- a plain spawn lands on the
+//                  active desktop and the overview gets out of its way.
+//                  Non-null goes out through the exec rule and is SILENT, so
+//                  the overview stays up and the session does not move.
+//   `deliberate`   skip Z11's spam guard. Z11 exists because a launcher can be
+//                  double-CLICKED faster than an app can map, and the second
+//                  click is not a second intention. A drag is not that: it is a
+//                  press, a journey and a release aimed at a named desktop, and
+//                  "drop kitty on 3, then drop kitty on 5" must give two
+//                  kittys. The guard's other half is untouched -- an app with
+//                  windows already never reaches it (FIRSTINSTANCE), so this
+//                  only differs for the app that is still coming up.
+void launchApp(PHLMONITOR monitor, const SItem& item, PHLWORKSPACE onWorkspace = nullptr, bool deliberate = false) {
     // Y6. Armed here rather than in activateItem so every path that actually
     // starts something gets the blow-up -- a click on a closed app, a hotkey,
     // and `middle-click-action=launch` alike. GNOME calls animateLaunch() from
@@ -1806,20 +1828,29 @@ void launchApp(PHLMONITOR monitor, const SItem& item) {
 
     const bool  FIRSTINSTANCE = item.uri.empty() ? classWindows(item.wmClass).empty() : true;
     const auto  PENDKEY       = !item.uri.empty() ? item.uri : (item.desktopId.empty() ? item.wmClass : item.desktopId);
-    if (FIRSTINSTANCE && !PENDKEY.empty()) {
+    if (!deliberate && FIRSTINSTANCE && !PENDKEY.empty()) {
         if (const auto IT = g_pendingLaunches.find(PENDKEY); IT != g_pendingLaunches.end() && elapsedMs(IT->second) < LAUNCH_PENDING_MS)
             return; // the zoom above replays; the exec does not
         g_pendingLaunches[PENDKEY] = Time::steadyNow();
     }
 
+    // A SILENT launch leaves the overview where it is. The close below exists
+    // because "a window that maps behind an open overview is a window the user
+    // cannot see they just started" -- and that is exactly backwards for a drop
+    // onto another desktop's card, where the overview IS how they see it happen.
+    const bool SILENT = onWorkspace && onWorkspace != (monitor ? monitor->m_activeWorkspace : PHLWORKSPACE{});
+    const auto closeOverview = [&] {
+        if (SILENT)
+            return;
+        if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
+            OVERVIEW->close();
+    };
+
     // X35. `new-window` on a location is opening it -- the reference's fake
     // ShellApp answers `open_new_window` with the same `launch` either way.
     if (!item.uri.empty()) {
         Locations::activate(item.uri);
-
-        if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
-            OVERVIEW->close();
-
+        closeOverview();
         return;
     }
 
@@ -1828,10 +1859,13 @@ void launchApp(PHLMONITOR monitor, const SItem& item) {
     if (!ENTRY)
         return;
 
-    AppSearch::launch(*ENTRY, Config::getTerminal());
+    // `workspace <name> silent`: Hyprland's own exec rule, matched against the
+    // window when it maps through a token in the child's environment. The NAME
+    // rather than the id, because that is what a workspace rule matches on and
+    // what a named desktop would need.
+    AppSearch::launchWithRule(*ENTRY, Config::getTerminal(), SILENT ? "workspace " + onWorkspace->m_name + " silent" : "");
 
-    if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
-        OVERVIEW->close();
+    closeOverview();
 }
 
 void activateItem(PHLMONITOR monitor, const SItem& item, bool shift, bool ctrl = false) {
@@ -2247,6 +2281,29 @@ struct SDockDrag {
     Vector2D    start;
     bool        live   = false;
     int         insert = -1;
+
+    // V3. What it takes to DRAW the thing being dragged, recorded at the press
+    // because the layout under it will move: pulling an icon out of the pill
+    // reflows the neighbours, and by release its cell is not where it was.
+    // `grab` is the offset from the cell's origin to the press point, so the
+    // ghost stays under the same part of the icon the user picked it up by
+    // rather than snapping its corner to the pointer.
+    std::string icon;
+    CBox        home;
+    Vector2D    grab;
+    Vector2D    at;
+};
+
+// V3. The cancel: an icon released on nothing FLIES BACK to its cell instead of
+// vanishing under the pointer. Same shape as every other thing the dock
+// animates (a box, a start time, a curve) and deliberately NOT a Flight:: --
+// a flight owns a window, hides it, and has a landing contract about focus and
+// geometry; this owns a texture and owes nothing to anybody when it ends.
+struct SDockGhostFlight {
+    std::string     icon;
+    CBox            from;
+    CBox            home;
+    Time::steady_tp startedAt;
 };
 
 // The two things that can be moving an icon: the dock's own drag, and G12's
@@ -2254,8 +2311,9 @@ struct SDockDrag {
 // hands the dock an index to draw, so the two sources cannot both think they
 // own the gesture. One struct, so a reader can see there are exactly two.
 struct SDockDragState {
-    std::optional<SDockDrag> drag;
-    int                      foreignInsert = -1;
+    std::optional<SDockDrag>        drag;
+    std::optional<SDockGhostFlight> ghostHome; // V3, the cancel above
+    int                             foreignInsert = -1;
 };
 
 SDockDragState g_dockDrag;
@@ -2281,6 +2339,37 @@ std::vector<size_t> favoriteSlots(const SLayout& layout) {
 int caretIndex() {
     return g_dockDrag.drag && g_dockDrag.drag->live ? g_dockDrag.drag->insert : g_dockDrag.foreignInsert;
 }
+
+// V3. The dragged icon's box THIS FRAME: the cell it came out of, carried to
+// where the pointer is and clamped to the monitor so it cannot be dragged off
+// the screen edge and become impossible to see coming back.
+CBox ghostBoxAt(PHLMONITOR monitor, const CBox& home, const Vector2D& grab, const Vector2D& at) {
+    if (!monitor || home.width < 1)
+        return {};
+
+    const float MONW = sc<float>(monitor->m_size.x) * monitor->m_scale;
+    const float MONH = sc<float>(monitor->m_size.y) * monitor->m_scale;
+    const float W    = sc<float>(home.width);
+    const float H    = sc<float>(home.height);
+
+    return CBox{std::clamp(sc<float>(at.x - grab.x), 0.F, std::max(0.F, MONW - W)), std::clamp(sc<float>(at.y - grab.y), 0.F, std::max(0.F, MONH - H)), W, H}.round();
+}
+
+// V3. Is a dragged icon being drawn under the pointer right now? Only once it
+// is OFF the pill: over the pill the gesture is X32's reorder, which already
+// says what it is doing with the insertion caret, and a second icon floating
+// over the row it is being inserted into would be two answers to one question.
+bool ghostShowing() {
+    return g_dockDrag.drag && g_dockDrag.drag->live && g_dockDrag.drag->insert < 0 && !g_dockDrag.drag->icon.empty();
+}
+
+// V3. The return flight is an EXIT -- the gesture is over and the icon is
+// leaving -- so it accelerates, and at the short end of the house band. Erased
+// by the render that finds it expired, exactly like a bounce or a launch zoom.
+constexpr float GHOST_HOME_MS = 220.F;
+// Not opaque: what is under the pointer is a copy of an icon that is still in
+// the dock, and it says so.
+constexpr float GHOST_ALPHA = 0.85F;
 
 // Where the caret sits for an insertion index: hard against the left edge of
 // the icon that would follow it, or past the last favourite when it is the end.
@@ -2567,13 +2656,20 @@ bool dragBegin(PHLMONITOR monitor, const Vector2D& point) {
     if (ITEM == LAYOUT.items.end() || ITEM->desktopId.empty())
         return false;
 
-    g_dockDrag.drag = SDockDrag{.id = ITEM->desktopId, .start = point};
+    g_dockDrag.drag = SDockDrag{.id      = ITEM->desktopId,
+                                .start   = point,
+                                .icon    = ITEM->icon,
+                                .home    = ITEM->iconBox,
+                                .grab    = point - Vector2D{ITEM->iconBox.x, ITEM->iconBox.y},
+                                .at      = point};
     return true;
 }
 
 bool dragMove(PHLMONITOR monitor, const Vector2D& point) {
     if (!g_dockDrag.drag || !monitor)
         return false;
+
+    g_dockDrag.drag->at = point;
 
     if (!g_dockDrag.drag->live) {
         const float T = dragThresholdPx(monitor);
@@ -2587,15 +2683,19 @@ bool dragMove(PHLMONITOR monitor, const Vector2D& point) {
     return true;
 }
 
-bool dragEnd(PHLMONITOR monitor, const Vector2D& point) {
+// V3. The release, resolved. Everything below the ladder is the SAME code X32
+// ran; what is new is that a drop which leaves the pill now has somewhere to go
+// other than nowhere.
+//
+// Returns whether the gesture was a DROP. False means "this was a click" and
+// the caller runs its click ladder -- which is the X16 recovery X32 wrote, kept
+// where it was in the order.
+bool dragRelease(PHLMONITOR monitor, const Vector2D& point) {
     if (!g_dockDrag.drag)
         return false;
 
     const auto DRAG = *g_dockDrag.drag;
     g_dockDrag.drag.reset();
-
-    if (!DRAG.live)
-        return false;
 
     // USER-REPORTED P0 2026-08-06: "I cant use the dock clicking it does
     // nothing". This is X16's lesson arriving on the dock, and it is why the
@@ -2611,17 +2711,63 @@ bool dragEnd(PHLMONITOR monitor, const Vector2D& point) {
     // A release that lands near where the press did is a CLICK, whatever the
     // pointer did in between. Same 3x tolerance X16 settled on for window tiles.
     const float CLICKTOL = 3.F * dragThresholdPx(monitor);
-    if (DRAG.start.distanceSq(point) <= CLICKTOL * CLICKTOL)
-        return false;
 
-    // A drop that leaves the pill is a CANCEL, not an unpin. Losing a favourite
-    // to a slipped gesture is not a thing to offer, and X26 already owns
-    // dragging in the other direction.
-    const int INDEX = dropIndexAt(monitor, point);
-    if (INDEX < 0)
-        return false;
+    const int  INDEX   = dropIndexAt(monitor, point);
+    const auto OVERVIEW = openScrollOverviewForMonitor(monitor);
+    const auto STRIPWS  = OVERVIEW ? OVERVIEW->stripWorkspaceAt(point) : PHLWORKSPACE{};
+    const auto ACTIVEWS = monitor ? monitor->m_activeWorkspace : PHLWORKSPACE{};
 
-    pinAt(DRAG.id, INDEX);
+    const Drop::SIconFacts FACTS{
+        .haveItem          = !DRAG.id.empty(),
+        .live              = DRAG.live,
+        .nearStart         = DRAG.start.distanceSq(point) <= CLICKTOL * CLICKTOL,
+        .onPill            = INDEX >= 0,
+        .overviewOpen      = OVERVIEW != nullptr,
+        .onStripCard       = STRIPWS != nullptr,
+        .stripCardIsActive = STRIPWS && STRIPWS == ACTIVEWS,
+    };
+
+    // The dragged item, found again by the id the press recorded. The layout has
+    // reflowed since (an app can have opened or closed mid-drag), so this is a
+    // fresh lookup and not the SItem copy the press held -- what is carried over
+    // from the press is the drag's own memory: the icon and the cell it left.
+    const auto LAYOUT = layout(monitor);
+    const auto ITEM   = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return item.desktopId == DRAG.id; });
+
+    switch (Drop::resolveIcon(FACTS)) {
+        case Drop::EIconAction::Click: return false;
+
+        // X32's reorder, unchanged: a favourite moved to the slot the caret drew.
+        case Drop::EIconAction::Reorder: pinAt(DRAG.id, INDEX); return true;
+
+        // V3 (spec V3): "anywhere on the active desktop -> launch on the active
+        // workspace". Focused, and the overview (if this was its own card) closes
+        // behind it -- it is where the user is, and they have just said so twice.
+        case Drop::EIconAction::LaunchHere:
+            if (ITEM != LAYOUT.items.end())
+                launchApp(monitor, *ITEM, nullptr, true);
+            return true;
+
+        // "...onto any workspace card in the overview strip -> launch on THAT
+        // workspace". SILENT, because the user is looking at a strip of desktops
+        // and pointed at one that is not this one: stealing the session to it
+        // would be answering a different question.
+        case Drop::EIconAction::LaunchThere:
+            if (ITEM != LAYOUT.items.end())
+                launchApp(monitor, *ITEM, STRIPWS, true);
+            return true;
+
+        // Missed everything. X26's near miss, in the other direction: the icon
+        // goes home rather than being lost or silently unpinned.
+        case Drop::EIconAction::Cancel:
+            if (!DRAG.icon.empty())
+                g_dockDrag.ghostHome = SDockGhostFlight{.icon      = DRAG.icon,
+                                                        .from      = ghostBoxAt(monitor, DRAG.home, DRAG.grab, point),
+                                                        .home      = ITEM != LAYOUT.items.end() ? ITEM->iconBox : DRAG.home,
+                                                        .startedAt = Time::steadyNow()};
+            return true;
+    }
+
     return true;
 }
 
@@ -2807,6 +2953,13 @@ bool needsFrames(PHLMONITOR monitor, const SLayout& layout) {
     if (WindowPill::animating())
         return true;
 
+    // V3. The icon flying home after a missed drop. It runs after the button
+    // came up, so no pointer motion is left to repaint it -- this is the only
+    // thing asking for those frames, in both contexts (the overview throttles
+    // plain damage, which is why the ONE list is also the right list here).
+    if (g_dockDrag.ghostHome)
+        return true;
+
     // X25/X47/Y6/Y8. A minimized window's commits damage no monitor, the hover
     // panel's entrance and live previews need frames of their own, and a bounce
     // or a launch zoom runs on a dock nothing else is touching.
@@ -2887,6 +3040,12 @@ bool damageIfChanged(PHLMONITOR monitor) {
         state.hoverShowApps = !LAYOUT.showApps.empty() && hoverBox(LAYOUT.showApps, monitor->m_scale).containsPoint(MOUSE);
         state.caret         = caretIndex();
         state.overlay       = overlayUp();
+
+        if (ghostShowing()) {
+            const auto GHOST = ghostBoxAt(monitor, g_dockDrag.drag->home, g_dockDrag.drag->grab, g_dockDrag.drag->at);
+            state.ghostX     = sc<int>(GHOST.x);
+            state.ghostY     = sc<int>(GHOST.y);
+        }
 
         if (g_menu && g_menu->monitor == monitor->m_id) {
             state.menuUp    = true;
@@ -3460,6 +3619,9 @@ void render(PHLMONITOR monitor) {
     // dock still needs frames.
     std::erase_if(g_flight.bounces, [](const SBounce& b) { return elapsedMs(b.startedAt) >= BOUNCE_MS; });
     std::erase_if(g_flight.launchZooms, [](const SLaunchZoom& z) { return elapsedMs(z.startedAt) >= LAUNCH_ZOOM_MS; });
+    // V3. Same retirement, same place: the icon that flew home has arrived.
+    if (g_dockDrag.ghostHome && elapsedMs(g_dockDrag.ghostHome->startedAt) >= GHOST_HOME_MS)
+        g_dockDrag.ghostHome.reset();
 
     const auto LAYOUT = layout(monitor);
     if (LAYOUT.pill.empty())
@@ -3595,6 +3757,37 @@ void render(PHLMONITOR monitor) {
             data.tex = TEX;
             data.box = LAYOUT.showApps;
             data.a   = 1.F;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+        }
+    }
+
+    // V3. THE ICON THE POINTER IS CARRYING, and the one flying home after a
+    // miss. Both are the same clone of the same texture at the same cell size,
+    // which is the point: the thing that lands back in the pill has to be the
+    // thing that left it. Drawn over the whole icon row (it passes across it on
+    // the way out) and under the launch blow-up (which is the answer to a drop
+    // that DID land, and belongs on top of the one that did not).
+    //
+    // No frost: this is an icon clone, exactly as the launch zoom is, not a
+    // plate. The dock's glass is the surface it comes off and goes back to.
+    if (const auto TEX = ghostShowing() ? OverviewRender::appIcon(g_dockDrag.drag->icon) : nullptr; TEX) {
+        CTexPassElement::SRenderData data;
+        data.tex = TEX;
+        data.box = ghostBoxAt(monitor, g_dockDrag.drag->home, g_dockDrag.drag->grab, g_dockDrag.drag->at);
+        data.a   = GHOST_ALPHA;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+    }
+
+    if (g_dockDrag.ghostHome) {
+        const float E = houseEase(false, std::clamp(elapsedMs(g_dockDrag.ghostHome->startedAt) / GHOST_HOME_MS, 0.F, 1.F));
+
+        if (const auto TEX = OverviewRender::appIcon(g_dockDrag.ghostHome->icon); TEX) {
+            CTexPassElement::SRenderData data;
+            data.tex = TEX;
+            data.box = lerpBox(g_dockDrag.ghostHome->from, g_dockDrag.ghostHome->home, E).round();
+            // Fades as it arrives, so the clone and the real icon underneath it
+            // are never two solid icons in one cell for a frame.
+            data.a = GHOST_ALPHA * (1.F - E);
             g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
         }
     }

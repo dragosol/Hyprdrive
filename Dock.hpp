@@ -132,9 +132,24 @@ void unpin(const std::string& desktopId);
 // X32. The dock's own drag, which is why the pill's press is no longer its
 // click: press remembers, motion past the threshold commits to a drag, and only
 // the release decides which of the two gestures happened.
+//
+// V3 (spec V11 V3) gave the release somewhere to go OFF the pill: the active
+// desktop, or a workspace card in the overview strip, and the app launches
+// there. `dragRelease` is the old dragEnd with that ladder in front of it --
+// one entry point, because the decision has to be the same one wherever the
+// button happened to come up. It is Drop::resolveIcon, and it is a pure
+// function for the same reason the window drop's is (DropDecision.hpp).
+//
+// Returns whether the gesture was a DROP. False is "this was a click after all"
+// (X16's recovery: a release near its own press), and the caller runs click().
 bool dragBegin(PHLMONITOR monitor, const Vector2D& point);
 bool dragMove(PHLMONITOR monitor, const Vector2D& point);
-bool dragEnd(PHLMONITOR monitor, const Vector2D& point);
+bool dragRelease(PHLMONITOR monitor, const Vector2D& point);
+// ABANDON a drag that will never get a release: the overview closing under a
+// held button (Escape, a keybind, a window taking focus). Deliberately NOT
+// dragRelease with a miss -- there was no drop, so nothing launches and nothing
+// flies home; the gesture simply stops existing, which is what it did before V3
+// gave the release its meanings.
 void dragCancel();
 bool dragPending();
 bool dragging();

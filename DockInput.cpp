@@ -93,18 +93,21 @@ SClaim handlePill(PHLMONITOR mon, const Vector2D& local, EButton role, bool pres
     if (!windowDragActive && Dock::pillContains(mon, local)) {
         if (pressed)
             Dock::dragBegin(mon, local);
-        else if (!Dock::dragEnd(mon, local))
+        else if (!Dock::dragRelease(mon, local))
             Dock::click(mon, local, shiftHeld(), false, ctrlHeld()); // Y4: CTRL cycles, a plain click minimizes the app
         out.claimed = true;
         return out;
     }
 
-    // X32. A drag released OFF the pill is a cancel: its press belonged to the
-    // pill, so this release must not also read as a click on whatever the pointer
-    // has since wandered over. The snap-back needs a frame the overview would not
-    // otherwise ask for.
+    // X32. A release OFF the pill still belongs to the press that started on it,
+    // so it must not read as a click on whatever the pointer has since wandered
+    // over. V3 gave that release a MEANING as well: the same dragRelease decides
+    // whether it launched the app on the desktop under it, on the strip card
+    // under it, or missed and sent the icon home. The frame is asked for either
+    // way -- a cancel's flight and a launch's blow-up both start here, and the
+    // overview asks for frames its own way.
     if (!pressed && Dock::dragPending()) {
-        Dock::dragCancel();
+        Dock::dragRelease(mon, local);
         out.claimed    = true;
         out.needsFrame = true;
         return out;
