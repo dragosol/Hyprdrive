@@ -11,7 +11,7 @@
 # floating flag read out of `hyprctl clients -j`, so no wallpaper, frame rate or
 # capture pipeline can enter the verdict. The pixel half is v2_super_pill.
 #
-# SEVEN ARMS, and what each proves:
+# NINE ARMS, and what each proves:
 #   MIN      the minimize button stashes the window on special:minimized. That
 #            is the dock FLIGHT's own landing state (X54), so it also proves the
 #            button went through the dock rather than calling Minimize:: behind
@@ -31,6 +31,22 @@
 #   DRAG     the same gesture 300 px INTO the window body moves it. The
 #            pass-through, and the regression guard: green on the parent too.
 #   DOUBLE   double-click on the body flips floating, twice, round trip.
+#   TILED    the pill follows a rect the LAYOUT chose. Every window in this rice
+#            floats by rule, so a tiled window is a maximised one: its top edge
+#            is 6 px from the top of the output and the capsule clamps onto the
+#            output instead of straddling. That is the one case a pixel arm
+#            cannot grade -- the shell's own bar comes out while SUPER is held
+#            and covers exactly those rows -- so this one presses the button at
+#            the position the tiled rect predicts and asks the window. MINIMIZE
+#            and not maximize: a layout-maximised window already IS the size
+#            FSMODE_MAXIMIZED would give it, so a geometry read could not tell a
+#            working button from a missed one.
+#   OVBTN    the capsule's buttons act on a TILE. v2_super_pill proves it is
+#            drawn in the overview; this proves it is the thing you hit, and the
+#            overview reaches it down a different road (closeButtonHitBox hands
+#            back the capsule instead of the X, and the click handler then asks
+#            which button) -- a geometry that disagreed between the two would
+#            close a window with the cursor over minimize.
 #   OVDBL    the same double-click inside the overview changes nothing: window
 #            count, geometry, workspace and floating flag all as they were.
 #            Green on both builds -- it is the guard that the desktop's new
@@ -51,7 +67,8 @@
 # harmless, and 8 px in is inside the button (the disc spans +-17 px of the edge
 # with its slop) while being a plain click on the window for the control.
 set -u
-cd "$(dirname "$0")/../../.."
+REPO=$(cd "$(dirname "$0")/../../.." && pwd)
+cd "$REPO"
 source scripts/lib/rig.sh
 rig_env || exit 1
 
@@ -88,7 +105,7 @@ activews() { hyprctl monitors -j | python3 -c "import json,sys; print(json.load(
 
 spawn() {
     pkill -x kitty 2>/dev/null; sleep 1.2
-    fixture_kitty V2ACT $FX $FY $FW $FH '#101820' 'clear; sleep infinity' >/dev/null || exit 1
+    fixture_kitty V2ACT $FX $FY $FW $FH '#1030c0' 'clear; sleep infinity' >/dev/null || exit 1
     sleep 0.8
 }
 
@@ -233,6 +250,79 @@ else
     [ "${A%% *}" = special:minimized ] \
         || bad "TILED -- the minimize button at the position the tiled rect predicts did nothing (window is on '${A%% *}'): the pill does not follow a layout-chosen rect"
 fi
+
+############################################################ OVBTN
+# THE PILL'S BUTTONS INSIDE THE OVERVIEW. v2_super_pill proves the capsule is
+# DRAWN there; this proves it is the thing you hit. It matters because the
+# overview reaches the pill down a different road: closeButtonHitBox hands back
+# the capsule instead of the X while SUPER is held, and the click handler then
+# asks which button -- so a geometry that disagreed between the two would
+# either swallow the press into nothing or, worse, close a window when the
+# cursor was over minimize.
+#
+# The cursor goes to the tile's CENTRE first (that is what starts the hover)
+# and then to its top-right corner, which is inside the X's own keep-alive
+# without SUPER and inside the capsule's with it. That corner is 9 px from the
+# CLOSE button's centre, so it is the same point both builds treat as live.
+#
+# THE TILE IS MEASURED TWICE, and that is not belt and braces. X7 GROWS a
+# hovered tile by 5% about its centre and the capsule hangs off the GROWN box,
+# so a button aimed from the resting box is ~24 px right and ~16 px low of
+# where it actually is. Worse, TileChrome holds a 2000 ms LINGER on a tile the
+# cursor left into empty space, so a locate shot taken straight after parking
+# the pointer can catch the PREVIOUS arm's tile still blown up -- measured, the
+# first cut of this arm located 1752,632 on one lap and 1728,648 on the next,
+# which is exactly the grow, and its minimize press missed by that much.
+# So: park, wait the linger out, locate the resting box to find the centre;
+# hover the centre, wait for the ease, locate again; aim at THAT.
+say "--- OVBTN (the capsule's buttons act on the tile)"
+ovtile() { # ovtile TAG -> "LEFT RIGHT TOP BOTTOM" of the fixture's tile
+    grim "$OUT/ov-$1.png" 2>/dev/null
+    python3 "$REPO/scripts/x43_tilebox.py" "$OUT/ov-$1.png" blue 2>&1 \
+        | sed -n 's/.*x=\[\([0-9]*\),\([0-9]*\)\] y=\[\([0-9]*\),\([0-9]*\)\].*/\1 \2 \3 \4/p'
+}
+
+for BTN in close minimize; do
+    spawn
+    dsp 'hl.dsp.focus({workspace = 1})'; sleep 0.5
+    ov on; sleep 3
+    warp 120 1450; sleep 2.6                       # past HOVER_LINGER_MS + the shrink
+    read -r RL RR RT RB <<< "$(ovtile rest-$BTN)"
+    if [ -z "${RR:-}" ]; then
+        bad "OVBTN/$BTN -- could not locate the fixture tile in the overview"
+        ov_off_settled; continue
+    fi
+    warp_or_die $(( (RL+RR)/2 )) $(( (RT+RB)/2 )); sleep 1.4    # hover it, let X7 settle
+    read -r GL GR GT GB <<< "$(ovtile hover-$BTN)"
+    if [ -z "${GR:-}" ]; then
+        bad "OVBTN/$BTN -- could not locate the HOVERED tile"
+        ov_off_settled; continue
+    fi
+    # The capsule hangs off the tile exactly as it does off a window: its close
+    # button lands 9 px left of the corner, its minimize button 77 px left.
+    HITX=$GR; [ "$BTN" = minimize ] && HITX=$(( GR - 77 ))
+    say "  tile rest ${RL}..${RR},${RT}  hovered ${GL}..${GR},${GT}   $BTN button at $HITX,$GT"
+    # SUPER GOES DOWN FIRST, AND THAT IS THE GESTURE, not a convenience. The
+    # hover keep-alive box IS the chrome the tile is wearing: without SUPER it
+    # is X55's disc on the corner, and every one of the capsule's other buttons
+    # lies outside it AND above the tile's own unscaled slot, so travelling
+    # there before pressing SUPER un-hovers the tile and there is nothing left
+    # to click. Held first, the keep-alive is the capsule and the whole of it is
+    # reachable -- which is how a person does it: hold, look at what appeared,
+    # aim at a button. (Measured: aiming first put minimize at 1675,632 with the
+    # hover already dropped, and the press landed on nothing.)
+    ydotool key 125:1; sleep 0.9
+    warp_or_die "$HITX" "$GT"; sleep 1.0                        # onto the button
+    ydotool click 0x40; sleep 0.12; ydotool click 0x80; sleep 0.4
+    ydotool key 125:0; sleep 2.0
+    ov_off_settled
+    alive_or_die "after the overview $BTN press"
+    A=$(st); say "  after  $A"
+    case $BTN in
+        close)    [ "$A" = GONE ] || bad "OVBTN/close -- the tile's close button left the client alive ($A)" ;;
+        minimize) [ "${A%% *}" = special:minimized ] || bad "OVBTN/minimize -- the tile's minimize button did not stash the window (it is on '${A%% *}')" ;;
+    esac
+done
 
 ############################################################ OVDBL
 say "--- OVDBL (double-click inside the overview is a no-op)"
