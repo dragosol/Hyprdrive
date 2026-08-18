@@ -32,6 +32,10 @@ A mission-control overview and a full dock for [Hyprland](https://hyprland.org) 
   minimized windows and windows on other workspaces.
 - Trash and mounted locations, GNOME-style right-click menus, drag-to-pin,
   drag-a-window-to-the-dock to minimize.
+- **Drag an icon off the dock to launch it somewhere.** On the desktop it
+  starts the app here; onto a workspace card in the overview strip it starts it
+  on THAT desktop, silently, without taking the session there. A drop that hits
+  neither sends the icon flying back to its cell.
 
 ## Building
 
