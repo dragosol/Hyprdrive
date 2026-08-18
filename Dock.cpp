@@ -1140,6 +1140,11 @@ SLayout baseLayout(PHLMONITOR monitor) {
 // must hold the dock out, exactly as an open menu already does.
 bool panelHoldsDock(PHLMONITOR monitor);
 
+// V3. Is an icon on its way back to its cell after a missed drop? Declared here
+// for the same reason panelHoldsDock is: the autohide has to ask, and the state
+// it reads lives with the drag much further down.
+bool ghostFlying();
+
 void updateAutohide(PHLMONITOR monitor) {
     if (!monitor)
         return;
@@ -1181,7 +1186,14 @@ void updateAutohide(PHLMONITOR monitor) {
         // reaching into it necessarily takes the pointer off the pill. Without
         // this the dock slides out from under the previews the user is reaching
         // for, which is the second half of the reported bug.
-        if (menuOpen() || panelHoldsDock(monitor))
+        // V3. And an icon being dragged holds it too, for the third time and
+        // the sharpest reason: pulling one OFF the pill takes the pointer off
+        // the pill by definition, so without this the dock slides away under a
+        // gesture that started on it -- and render() returns early on an empty
+        // pill, so the icon under the pointer would go with it. The return
+        // flight holds it for the other half: an icon cannot land in a cell
+        // that has left the screen.
+        if (menuOpen() || panelHoldsDock(monitor) || dragging() || ghostFlying())
             want = true;
         else if (CBox reach = slidPill(monitor); !reach.empty()) {
             // X77: the SLID pill, not the resting one. While it is still easing
@@ -2363,6 +2375,10 @@ bool ghostShowing() {
     return g_dockDrag.drag && g_dockDrag.drag->live && g_dockDrag.drag->insert < 0 && !g_dockDrag.drag->icon.empty();
 }
 
+bool ghostFlying() {
+    return g_dockDrag.ghostHome.has_value();
+}
+
 // V3. The return flight is an EXIT -- the gesture is over and the icon is
 // leaving -- so it accelerates, and at the short end of the house band. Erased
 // by the render that finds it expired, exactly like a bounce or a launch zoom.
@@ -2957,7 +2973,7 @@ bool needsFrames(PHLMONITOR monitor, const SLayout& layout) {
     // came up, so no pointer motion is left to repaint it -- this is the only
     // thing asking for those frames, in both contexts (the overview throttles
     // plain damage, which is why the ONE list is also the right list here).
-    if (g_dockDrag.ghostHome)
+    if (ghostFlying())
         return true;
 
     // X25/X47/Y6/Y8. A minimized window's commits damage no monitor, the hover
