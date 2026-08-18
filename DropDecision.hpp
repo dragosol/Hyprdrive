@@ -149,6 +149,14 @@ namespace ScrollOverview::Drop {
     //     is a grid of windows, not a desktop, so a drop there names nothing
     //     and cancels -- which is also what gives the gesture a near miss to
     //     have (X26 P2's 28px above the pill, in the other direction).
+    //
+    // ASKED IN TWO STAGES, like resolve() above and for the same reason: the
+    // gathering is not free, and every dock CLICK in the session comes through
+    // here. The first four fields are what the dock already knows, and because
+    // Click and Reorder sit ABOVE every overview question in the ladder, those
+    // two answers are FINAL from stage one alone -- whatever the overview is
+    // doing cannot change them. Anything else means the caller has to go and
+    // look at the strip and ask again.
     struct SIconFacts {
         bool haveItem          = false; // the press landed on an icon with a desktop id
         bool live              = false; // the pointer passed the drag threshold

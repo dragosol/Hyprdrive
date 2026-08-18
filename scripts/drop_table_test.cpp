@@ -232,6 +232,18 @@ static int iconTable() {
         // launch onto the visible desktop, which is a launch with no feedback.
         if (A == EIconAction::LaunchThere && F.stripCardIsActive)
             bad("the active desktop must never be launched on silently");
+
+        // THE STAGING CONTRACT, checked rather than asserted in a comment. The
+        // caller asks with the last three facts still false and acts at once on
+        // Click or Reorder; that is only sound if those two answers cannot be
+        // changed by anything the second stage would fill in. So: whenever the
+        // stage-one view of these facts answers Click or Reorder, the full view
+        // must answer the same.
+        SIconFacts stage1  = F;
+        stage1.overviewOpen = stage1.onStripCard = stage1.stripCardIsActive = false;
+        const EIconAction EARLY = resolveIcon(stage1);
+        if ((EARLY == EIconAction::Click || EARLY == EIconAction::Reorder) && EARLY != A)
+            bad("stage one answered early and stage two disagreed -- the caller acts on that answer");
     }
 
     std::printf("icon rows %u\n", 1u << 7);

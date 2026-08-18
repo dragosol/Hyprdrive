@@ -2728,20 +2728,39 @@ bool dragRelease(PHLMONITOR monitor, const Vector2D& point) {
     // pointer did in between. Same 3x tolerance X16 settled on for window tiles.
     const float CLICKTOL = 3.F * dragThresholdPx(monitor);
 
-    const int  INDEX   = dropIndexAt(monitor, point);
+    // IN TWO STAGES, for the reason DropDecision.hpp gives for the window
+    // drop's own ladder: the gathering is not free, and resolveIcon is total at
+    // every stage. Stage one is what the dock already knew, and the two
+    // conclusions it can reach on its own -- a click and a reorder -- are the
+    // COMMON path. Every dock click in the session comes through here, so
+    // walking the overview's strip and rebuilding the item model to answer
+    // "was that a click" would be a cost paid by the gesture that needs none
+    // of it.
+    const int        INDEX = dropIndexAt(monitor, point);
+    Drop::SIconFacts facts{
+        .haveItem  = !DRAG.id.empty(),
+        .live      = DRAG.live,
+        .nearStart = DRAG.start.distanceSq(point) <= CLICKTOL * CLICKTOL,
+        .onPill    = INDEX >= 0,
+    };
+
+    switch (Drop::resolveIcon(facts)) {
+        case Drop::EIconAction::Click: return false;
+
+        // X32's reorder, unchanged: a favourite moved to the slot the caret drew.
+        case Drop::EIconAction::Reorder: pinAt(DRAG.id, INDEX); return true;
+
+        default: break;
+    }
+
+    // Stage two: the overview, and where in it the button came up.
     const auto OVERVIEW = openScrollOverviewForMonitor(monitor);
     const auto STRIPWS  = OVERVIEW ? OVERVIEW->stripWorkspaceAt(point) : PHLWORKSPACE{};
     const auto ACTIVEWS = monitor ? monitor->m_activeWorkspace : PHLWORKSPACE{};
 
-    const Drop::SIconFacts FACTS{
-        .haveItem          = !DRAG.id.empty(),
-        .live              = DRAG.live,
-        .nearStart         = DRAG.start.distanceSq(point) <= CLICKTOL * CLICKTOL,
-        .onPill            = INDEX >= 0,
-        .overviewOpen      = OVERVIEW != nullptr,
-        .onStripCard       = STRIPWS != nullptr,
-        .stripCardIsActive = STRIPWS && STRIPWS == ACTIVEWS,
-    };
+    facts.overviewOpen      = OVERVIEW != nullptr;
+    facts.onStripCard       = STRIPWS != nullptr;
+    facts.stripCardIsActive = STRIPWS && STRIPWS == ACTIVEWS;
 
     // The dragged item, found again by the id the press recorded. The layout has
     // reflowed since (an app can have opened or closed mid-drag), so this is a
@@ -2750,12 +2769,7 @@ bool dragRelease(PHLMONITOR monitor, const Vector2D& point) {
     const auto LAYOUT = layout(monitor);
     const auto ITEM   = std::ranges::find_if(LAYOUT.items, [&](const SItem& item) { return item.desktopId == DRAG.id; });
 
-    switch (Drop::resolveIcon(FACTS)) {
-        case Drop::EIconAction::Click: return false;
-
-        // X32's reorder, unchanged: a favourite moved to the slot the caret drew.
-        case Drop::EIconAction::Reorder: pinAt(DRAG.id, INDEX); return true;
-
+    switch (Drop::resolveIcon(facts)) {
         // V3 (spec V3): "anywhere on the active desktop -> launch on the active
         // workspace". Focused, and the overview (if this was its own card) closes
         // behind it -- it is where the user is, and they have just said so twice.
@@ -2775,7 +2789,7 @@ bool dragRelease(PHLMONITOR monitor, const Vector2D& point) {
 
         // Missed everything. X26's near miss, in the other direction: the icon
         // goes home rather than being lost or silently unpinned.
-        case Drop::EIconAction::Cancel:
+        default:
             if (!DRAG.icon.empty())
                 g_dockDrag.ghostHome = SDockGhostFlight{.icon      = DRAG.icon,
                                                         .from      = ghostBoxAt(monitor, DRAG.home, DRAG.grab, point),
@@ -2783,8 +2797,6 @@ bool dragRelease(PHLMONITOR monitor, const Vector2D& point) {
                                                         .startedAt = Time::steadyNow()};
             return true;
     }
-
-    return true;
 }
 
 void dragCancel() {
