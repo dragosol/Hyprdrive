@@ -34,6 +34,7 @@
 #include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
 #include "Window.hpp"
+#include "WindowPill.hpp"
 
 #include <algorithm>
 #include <array>
@@ -2798,6 +2799,14 @@ bool needsFrames(PHLMONITOR monitor, const SLayout& layout) {
     if (!g_tip.name.empty() && elapsedMs(g_tip.since) < (g_tip.out ? TOOLTIP_FADE_OUT_MS : TOOLTIP_FADE_MS))
         return true;
 
+    // V2. The SUPER-hold pill eases in and out over windows on a desktop where
+    // nothing else is repainting, exactly like everything above it. It is asked
+    // here rather than pumped from its own module for the reason this function
+    // exists at all: one list, in one place, so a new animation cannot join two
+    // of the three pumps and be forgotten by the third.
+    if (WindowPill::animating())
+        return true;
+
     // X25/X47/Y6/Y8. A minimized window's commits damage no monitor, the hover
     // panel's entrance and live previews need frames of their own, and a bounce
     // or a launch zoom runs on a dock nothing else is touching.
@@ -2908,6 +2917,16 @@ bool damageIfChanged(PHLMONITOR monitor) {
 // came back EMPTY rather than wrong.
 void setWindowDragActive(bool active) {
     g_flight.windowDragActive = active;
+}
+
+// V2. The window pill draws on the dock's glass rather than on a second copy of
+// it; see the note in Dock.hpp.
+void queueFrost(PHLMONITOR monitor, const CBox& box, int rounding, float alpha) {
+    queueDockFrost(monitor, box, rounding, alpha);
+}
+
+CHyprColor plateColor() {
+    return background();
 }
 
 void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand) {

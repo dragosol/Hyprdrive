@@ -224,6 +224,15 @@ void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window);
 // arrived -- and render() returns early on an empty pill, so it was never drawn.
 void revealNow(PHLMONITOR monitor);
 
+// V2. THE DOCK'S GLASS, lent to the window pill. Both of these live in Dock.cpp's
+// anonymous namespace and are exported as one-line forwarders rather than copied:
+// the pill is a second frosted plate in the same rice and has to re-theme with
+// the first one, not beside it. queueFrost is the live dual-kawase that inherits
+// decoration:blur:* through the -1 sentinels (X71); plateColor is the tint that
+// goes on top of it.
+void       queueFrost(PHLMONITOR monitor, const CBox& box, int rounding, float alpha);
+CHyprColor plateColor();
+
 // Y8/Z10. Hop the icon that is receiving something, once, on acknowledgement.
 void armBounce(const std::string& wmClass);
 
