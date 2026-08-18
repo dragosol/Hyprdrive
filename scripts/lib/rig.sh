@@ -42,7 +42,8 @@ RIG_NS=${RIG_NS:-hyprdrive}
 RIG_KEY=plugin:$RIG_NS                                          # config-key prefix
 RIG_SO=$RIG_NS.so                                               # built artifact
 RIG_FAV=${XDG_STATE_HOME:-$HOME/.local/state}/$RIG_NS/favorites # dock favorites store
-export RIG_NS RIG_KEY RIG_SO RIG_FAV
+RIG_STACKS=${XDG_STATE_HOME:-$HOME/.local/state}/$RIG_NS/stacks # V4 dock stacks store
+export RIG_NS RIG_KEY RIG_SO RIG_FAV RIG_STACKS
 RIG_CELL_PY=${RIG_CELL_PY:-$RIG_LIB_DIR/../x24_cell.py}    # dock cell predictor [x24_cell.py:1-9]
 # Headless output mode. The dock geometry the cell predictor computes and the
 # ydotool half-space rule are both functions of THIS mode, so the headless
@@ -609,6 +610,22 @@ print('%s %d %d' % (ms[0]['name'], ms[0]['width'], ms[0]['height']) if len(ms)==
     sleep 0.5
     opt_want $RIG_KEY:dock:autohide true \
         || { echo "slate($label): dock config did not take" >&2; return 1; }
+
+    # V11 V4. NO STACKS, for every gate that is not a stack gate.
+    #
+    # A stack is a dock CELL. It changes items.size(), which changes `slots`,
+    # which changes what metrics() returns for the icon size AND the pill
+    # width -- so one pinned folder moves every cell on the dock and silently
+    # invalidates x24_cell, x28_cell, x45dock_cell, x47_cell and x32_cell,
+    # every one of which PREDICTS the layout rather than reading it back.
+    #
+    # The smallest blast radius available is therefore: stacks exist only
+    # while a stack gate is running, and the slate is what guarantees it. A
+    # stack gate pins its fixtures after the slate and the next slate clears
+    # them, so no other gate ever sees a dock that is not stack-free.
+    dsp 'hl.plugin.hyprdrive.stack([[clear]])' >/dev/null 2>&1
+    rm -f "$RIG_STACKS"
+    sleep 0.3
 
     dsp "hl.dsp.focus({workspace = 1})"; sleep 0.5
 
