@@ -184,6 +184,14 @@ std::vector<PHLWINDOW> desktopWindows(PHLMONITOR monitor) {
         // ask the ledger rather than trusting the flags.
         if (Minimize::isMinimized(WINDOW))
             continue;
+        // A window BEHIND a fullscreen one is still mapped and still not
+        // hidden: the compositor buries it by driving its fullscreen alpha to
+        // zero, which is a property of how it is DRAWN and not of the flags
+        // this loop reads. Without this the pills of every window on the
+        // desktop float over the fullscreen window -- chrome for windows the
+        // user cannot see, on top of the one thing they asked to see alone.
+        if (WINDOW->isBlockedByFullscreen())
+            continue;
 
         const auto BOX = frameOf(monitor, WINDOW);
         if (BOX.w < 1 || BOX.h < 1)
