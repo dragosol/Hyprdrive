@@ -299,7 +299,92 @@ def arm_overview(argv):
     return 0
 
 
-ARMS = {"straddle": arm_straddle, "absent": arm_absent, "motion": arm_motion, "overview": arm_overview}
+def straddle_of(blob, fx, fy, fw, fh, label):
+    """The four inequalities, against one window's own top-right corner."""
+    x, y, w, h, area = blob
+    right, bottom = x + w, y + h
+    ex, ey = fx + fw, fy
+    print("    %-8s blob x %d..%d y %d..%d (%dx%d ~%d px)  corner %d,%d"
+          % (label, x, right, y, bottom, w, h, area, ex, ey))
+    bad = 0
+    if w < 56 or h < 20 or area < 1500:
+        print("      FAIL %s -- %dx%d (~%d px) is not the capsule" % (label, w, h, area))
+        bad = 1
+    for ok, msg in ((y < ey - 4, "nothing above the top edge"),
+                    (bottom > ey + 4, "nothing below the top edge"),
+                    (right > ex + 4, "does not reach past the right edge"),
+                    (x < ex - 4, "starts past the right edge -- beside the window, not on it")):
+        if not ok:
+            print("      FAIL %s -- %s" % (label, msg))
+            bad = 1
+    if not bad:
+        print("      %s OK: %d above / %d below, %d past / %d inside" % (label, ey - y, bottom - ey, right - ex, ex - x))
+    return bad
+
+
+def arm_multi(argv):
+    """EVERY visible window grows one, wherever and whatever size it is.
+
+    V2 says "each window", and one fixture cannot show that: a pill hard-coded
+    to one window, or one that only lands correctly on a floating rect, passes
+    the single-window arm. Three windows here -- a large floating one, a small
+    floating one and a TILED one, whose rect the layout chose rather than the
+    rig -- and each is graded against ITS OWN corner with the same four
+    inequalities. The geometries are read live out of `hyprctl clients -j` by
+    the caller, so the tiled one is measured where the layout actually put it.
+
+    The blob count is graded too: exactly as many capsules as there are windows.
+    A build that drew one on a window that has none, or that drew the same pill
+    twice, passes every per-window check and fails here.
+    """
+    ctrl_a, meas, ctrl_b = (load(p) for p in argv[:3])
+    wins = []
+    for spec in argv[3:]:
+        name, x, y, w, h = spec.split(":")
+        wins.append((name, int(x), int(y), int(w), int(h)))
+
+    if np.array_equal(ctrl_a, ctrl_b) and np.array_equal(ctrl_a, meas):
+        print("FAIL multi -- IDENTICAL FRAMES, the capture pipeline is stale")
+        return 1
+
+    noise = dilate(changed(ctrl_a, ctrl_b), DILATE)
+    noise[:BAR_H, :] = True
+    full = changed(ctrl_a, meas) & ~noise
+
+    bad = 0
+    for name, fx, fy, fw, fh in wins:
+        # Look ONLY around where this window's own corner is -- with three
+        # capsules on screen the global largest blob is one arbitrary one of
+        # them. The window's corner is where the search starts and the
+        # inequalities are still what decides, so a pill in the wrong place
+        # inside the search region fails exactly as it would globally.
+        m = np.zeros_like(full)
+        x0, y0 = max(0, fx + fw - 200), max(0, fy - 100)
+        m[y0:fy + 100, x0:fx + fw + 120] = full[y0:fy + 100, x0:fx + fw + 120]
+        found = largest_of(m)
+        if not found:
+            print("    %-8s FAIL no capsule anywhere near its top-right corner (%d,%d)" % (name, fx + fw, fy))
+            bad = 1
+            continue
+        bad |= straddle_of(found, fx, fy, fw, fh, name)
+
+    # ONE per window, no more. Peel the biggest blob off and look again.
+    left, n = full.copy(), 0
+    for _ in range(len(wins) + 3):
+        f = largest_of(left)
+        if not f or f[4] < 1500:
+            break
+        n += 1
+        left[f[1]:f[1] + f[3], f[0]:f[0] + f[2]] = False
+    print("    %d capsule-sized blobs for %d windows" % (n, len(wins)))
+    if n != len(wins):
+        print("      FAIL %d windows should grow %d pills, not %d" % (len(wins), len(wins), n))
+        bad = 1
+    return bad
+
+
+ARMS = {"straddle": arm_straddle, "absent": arm_absent, "motion": arm_motion,
+        "overview": arm_overview, "multi": arm_multi}
 
 if __name__ == "__main__":
     sys.exit(ARMS[sys.argv[1]](sys.argv[2:]))

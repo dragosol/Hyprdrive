@@ -165,6 +165,53 @@ else
 fi
 ov_off_settled
 
+############################################################ P5
+# THREE WINDOWS, THREE SIZES, THREE CORNERS. V2 says "each window", and one
+# fixture cannot show that: a pill hard-coded to the focused window, or one
+# whose geometry only works out at one size, passes P1.
+#
+# All three FLOAT, and the TILED case is deliberately not photographed here.
+# Every window in this rice floats by rule, so a tiled window is a MAXIMISED
+# one -- its rect is the whole output, its top edge is 6 px from the top, and
+# the capsule clamps onto the output rather than straddling anything. Measured
+# 2026-08-17: the pill is drawn there and is clickable there, but the shell's
+# own bar comes out while SUPER is held and covers those rows, so a pixel arm
+# aimed at them would be grading quickshell. The tiled rect is proved instead
+# by v2_pill_actions' TILED arm, which presses the button at the position the
+# tiled geometry predicts and asserts the window obeyed -- no pixels involved,
+# and a stronger claim than "something was painted there".
+echo "--- P5 MULTI: three windows, three sizes"
+pkill -x kitty 2>/dev/null; sleep 1.2
+fixture_kitty V2BIG   150  250 1300 800 '#1030c0' 'clear; sleep infinity' || exit 1
+fixture_kitty V2SMALL 300 1150  380 260 '#1030c0' 'clear; sleep infinity' || exit 1
+fixture_kitty V2MID  1700  900  700 420 '#1030c0' 'clear; sleep infinity' || exit 1
+warp 60 1560; sleep 0.8
+
+# LIVE geometry per window, never the numbers typed above: a fixture that did
+# not land where it was put would otherwise be graded against where it was
+# meant to be.
+GEOM=$(hyprctl clients -j | python3 -c "
+import json,sys
+want=('V2BIG','V2SMALL','V2MID')
+out={}
+for c in json.load(sys.stdin):
+    if c.get('class') in want and c.get('mapped'):
+        out[c['class']]='%s:%d:%d:%d:%d' % (c['class'],c['at'][0],c['at'][1],c['size'][0],c['size'][1])
+print(' '.join(out[k] for k in want if k in out))")
+echo "  $GEOM"
+if [ "$(echo "$GEOM" | wc -w)" != 3 ]; then
+    echo "FAIL P5 -- wanted three fixtures, have '$GEOM'"; FAIL=1
+else
+    grim "$OUT/h-multi-ctrl0.png"
+    sleep 0.4
+    ydotool key 125:1; sleep 0.9
+    grim "$OUT/i-multi-super.png"
+    ydotool key 125:0; sleep 1.0
+    grim "$OUT/j-multi-ctrl1.png"
+    # shellcheck disable=SC2086
+    python3 scripts/v2_pill_gate.py multi "$OUT/h-multi-ctrl0.png" "$OUT/i-multi-super.png" "$OUT/j-multi-ctrl1.png" $GEOM || FAIL=1
+fi
+
 alive_or_die "after the pill arms"
 echo
 [ $FAIL = 0 ] && echo "PASS v2_super_pill" || echo "FAIL v2_super_pill"

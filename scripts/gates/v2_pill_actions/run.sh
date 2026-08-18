@@ -188,6 +188,52 @@ superdouble $(( FX + 300 )) $(( FY + 300 ))
 A2=$(st); F2=${A2##*float=}; say "  again  $A2"
 [ "$F2" = "$F0" ] || bad "DOUBLE -- the second double-click did not put it back ($F0 -> $F1 -> $F2)"
 
+############################################################ TILED
+# THE PILL ON A TILED WINDOW, proved by hitting it rather than by photographing
+# it. Every window in this rice floats by rule, so "tiled" here means the
+# layout has maximised it: its rect is the whole output and its top edge is a
+# few px from the top, which is the one case where the capsule cannot straddle
+# and is clamped onto the output instead. That is also the one case a pixel arm
+# cannot grade -- the shell's own bar comes out while SUPER is held and covers
+# exactly those rows (measured 2026-08-17, zrig/v2/pill/i-multi-super.png).
+#
+# So: take the window tiled, read the rect the LAYOUT gave it, predict the
+# clamped capsule from that rect, and press its maximize button. If the window
+# obeys, the pill is where the tiled geometry says it is. Nothing about this
+# depends on what is painted over it.
+say "--- TILED (the pill follows a rect the layout chose)"
+spawn
+dsp 'hl.dsp.focus({window = [[class:V2ACT]]})'; sleep 0.5
+dsp 'hl.dsp.window.float()'; sleep 1.5
+TF=$(hyprctl clients -j | python3 -c "
+import json,sys
+for c in json.load(sys.stdin):
+    if c.get('class')=='V2ACT': print(c['floating']); break
+else: print('?')")
+B=$(st); say "  tiled  $B   floating=$TF"
+if [ "$TF" != "False" ]; then
+    bad "TILED -- could not take the fixture out of floating (floating=$TF); the arm would measure a floating window"
+else
+    TX=$(echo "$B" | awk -F'[ ,x]' '{print $2}'); TY=$(echo "$B" | awk -F'[ ,x]' '{print $3}')
+    TW=$(echo "$B" | awk -F'[ ,x]' '{print $4}'); TH=$(echo "$B" | awk -F'[ ,x]' '{print $5}')
+    # box() clamps into the output: x into [0, MONW-112], y into [0, MONH-40].
+    TPX=$(( TX + TW - 112 + 13 )); [ $TPX -gt $(( RIG_W - 112 )) ] && TPX=$(( RIG_W - 112 )); [ $TPX -lt 0 ] && TPX=0
+    TPY=$(( TY - 20 ));            [ $TPY -lt 0 ] && TPY=0
+    # THE MINIMIZE BUTTON, not the maximize one: a layout-maximised window IS
+    # already the size FSMODE_MAXIMIZED would give it, so pressing maximize on
+    # it is a geometry no-op and an arm reading geometry could not tell that
+    # from a button that was never hit (measured -- the first cut of this arm
+    # read `6,6 2548x1588` before and after and called it a miss). The stash is
+    # unambiguous whatever the rect was.
+    TBMIN=$(( TPX + 9 + 13 )); TBY=$(( TPY + 20 ))
+    say "  rect $TX,$TY ${TW}x${TH}  ->  capsule $TPX,$TPY   minimize button $TBMIN,$TBY"
+    superclick $TBMIN $TBY
+    alive_or_die "after the tiled minimize press"
+    A=$(st); say "  after  $A"
+    [ "${A%% *}" = special:minimized ] \
+        || bad "TILED -- the minimize button at the position the tiled rect predicts did nothing (window is on '${A%% *}'): the pill does not follow a layout-chosen rect"
+fi
+
 ############################################################ OVDBL
 say "--- OVDBL (double-click inside the overview is a no-op)"
 spawn
