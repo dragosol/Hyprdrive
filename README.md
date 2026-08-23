@@ -36,6 +36,9 @@ A mission-control overview and a full dock for [Hyprland](https://hyprland.org) 
   starts the app here; onto a workspace card in the overview strip it starts it
   on THAT desktop, silently, without taking the session there. A drop that hits
   neither sends the icon flying back to its cell.
+- **Stacks**: pin a folder to the dock and click it open as a fan or a grid of
+  its contents. Hover an item and press **space** for a GNOME-style quick look
+  — the same previewer, and the same spacebar, that Files uses.
 
 ## Building
 
@@ -209,6 +212,30 @@ mechanism (`write`, `raw`, `check`) and it is what the settings app calls.
 
 `.conf` fragments are reserved for the legacy (hyprlang) parser and are skipped
 by the Lua loader, which cannot source them.
+
+### Quick look (space)
+
+Hover an item in an open stack and press **space**: the file is previewed by
+[GNOME Sushi](https://gitlab.gnome.org/GNOME/sushi), driven over the same D-Bus
+interface Files itself calls (`org.gnome.NautilusPreviewer2.ShowFile`, with
+`closeIfAlreadyShown` — so space again puts it away and space over a different
+item swaps the preview, which is the previewer's own behaviour rather than
+anything reimplemented here). Space is claimed **only** while a stack is open
+with an item under the pointer; everywhere else it reaches the focused
+application untouched.
+
+Sushi is an optional runtime dependency and is not bundled. Without it nothing
+breaks and nothing appears. Mind the package name: on Fedora it is **`sushi`**,
+and `gnome-sushi` resolves to nothing there — no package, and no `Provides`:
+
+```bash
+sudo dnf install sushi        # Fedora
+sudo apt install gnome-sushi  # Debian/Ubuntu
+```
+
+The preview window is dressed by the shipped `25-rules.lua` fragment — float,
+centred, blurred, and translucent enough for the blur to show, because an
+opaque window has nothing behind it to frost.
 
 ### Theme adoption
 
