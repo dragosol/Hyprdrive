@@ -446,8 +446,9 @@ constexpr float DRAG_GLOW_ALPHA = 0.55F;
 
 // Y8. macOS hops the icon a thing LANDS in -- once, not a decaying train, and
 // on arrival rather than on release. Up decelerates and down accelerates, which
-// is both the house rule and what falling actually does.
-constexpr float BOUNCE_MS       = 420.F;
+// is both the house rule and what falling actually does. The DURATION is
+// Dock::HOP_MS in the header, because V4's stack cells hop too and there is only
+// one hop; the shape below is what HOP_MS is the length of.
 constexpr float BOUNCE_HEIGHT   = 0.34F; // of one icon height
 constexpr float BOUNCE_UP_SHARE = 0.42F; // the hop is quicker up than down
 
@@ -2276,14 +2277,7 @@ void renderMenu(PHLMONITOR monitor, const SLayout& layout) {
     g_menu->box = plate;
 
     // X13/X29/X86: menu frost -- shared chrome sample in overview, live on desktop.
-    queueDockFrost(monitor, plate, sc<int>(std::round(MENU_RADIUS * SCALE)), 1.F);
-
-    CRectPassElement::SRectData bg;
-    bg.box           = plate;
-    bg.color         = background();
-    bg.round         = sc<int>(std::round(MENU_RADIUS * SCALE));
-    bg.roundingPower = 2.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+    frostedPlate(monitor, plate, sc<int>(std::round(MENU_RADIUS * SCALE)), 1.F);
 
     const auto MOUSE = (g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale;
 
@@ -2457,10 +2451,9 @@ bool ghostFlying() {
 // V3. The return flight is an EXIT -- the gesture is over and the icon is
 // leaving -- so it accelerates, and at the short end of the house band. Erased
 // by the render that finds it expired, exactly like a bounce or a launch zoom.
+// (The ghost's OPACITY is Dock::DRAG_GHOST_ALPHA in the header: a stack's item
+// drag draws the same kind of clone and must not pick its own number.)
 constexpr float GHOST_HOME_MS = 220.F;
-// Not opaque: what is under the pointer is a copy of an icon that is still in
-// the dock, and it says so.
-constexpr float GHOST_ALPHA = 0.85F;
 
 // Where the caret sits for an insertion index: hard against the left edge of
 // the icon that would follow it, or past the last favourite when it is the end.
@@ -3192,14 +3185,20 @@ void setWindowDragActive(bool active) {
     g_flight.windowDragActive = active;
 }
 
-// V2. The window pill draws on the dock's glass rather than on a second copy of
-// it; see the note in Dock.hpp.
-void queueFrost(PHLMONITOR monitor, const CBox& box, int rounding, float alpha) {
+// THE ONE FROSTED PLATE. Every plate in this rice is the same two draws in the
+// same order -- the live blur behind it, then the theme's tint on top, both at
+// the caller's alpha -- and they were five copies of that pair before V2 and V4
+// each added a sixth. See the note in Dock.hpp.
+void frostedPlate(PHLMONITOR monitor, const CBox& box, int rounding, float alpha) {
     queueDockFrost(monitor, box, rounding, alpha);
-}
 
-CHyprColor plateColor() {
-    return background();
+    const auto                  TINT = background();
+    CRectPassElement::SRectData bg;
+    bg.box           = box;
+    bg.color         = CHyprColor{TINT.r, TINT.g, TINT.b, TINT.a * alpha};
+    bg.round         = rounding;
+    bg.roundingPower = 2.F;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
 }
 
 void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand) {
@@ -3557,15 +3556,7 @@ void renderHoverPreview(PHLMONITOR monitor, const SLayout& layout, const CBox& a
     const int   ROUNDED = sc<int>(std::round(PANEL_RADIUS * SCALE));
 
     // X13/X29/X86: panel frost shares overview chrome blur when Super is open.
-    queueDockFrost(monitor, DRAWN, ROUNDED, ALPHA);
-
-    auto                        colour = background();
-    CRectPassElement::SRectData bg;
-    bg.box           = DRAWN;
-    bg.color         = CHyprColor{colour.r, colour.g, colour.b, colour.a * ALPHA};
-    bg.round         = ROUNDED;
-    bg.roundingPower = 2.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+    frostedPlate(monitor, DRAWN, ROUNDED, ALPHA);
 
     // Cells are laid out inside the box that is actually on screen this frame,
     // not inside the settled one -- otherwise the contents would overflow the
@@ -3689,6 +3680,13 @@ bool panelClick(PHLMONITOR monitor, const Vector2D& point, bool release) {
     return true;
 }
 
+// Y8's hop, evaluated. Exported (Dock.hpp) because a stack cell hops with the
+// same motion off a ledger of its own -- the curve and HOP_MS are shared, the
+// ledgers are not.
+float hopLift(float t, float iconHeight) {
+    return bounceCurve(std::clamp(t, 0.F, 1.F)) * BOUNCE_HEIGHT * iconHeight;
+}
+
 // Y8. How far this app's icon is lifted out of the pill right now. Reads the
 // largest of any overlapping hops rather than summing them, so two windows
 // landing together is one bounce and not a double-height launch.
@@ -3698,7 +3696,7 @@ float bounceLift(const std::string& wmClass, float iconHeight) {
         if (BOUNCE.wmClass != wmClass)
             continue;
 
-        lift = std::max(lift, bounceCurve(std::clamp(elapsedMs(BOUNCE.startedAt) / BOUNCE_MS, 0.F, 1.F)) * BOUNCE_HEIGHT * iconHeight);
+        lift = std::max(lift, hopLift(elapsedMs(BOUNCE.startedAt) / HOP_MS, iconHeight));
     }
 
     return lift;
@@ -3731,7 +3729,7 @@ float dragGlow(PHLMONITOR monitor, const SLayout& layout, const Vector2D& mouse)
 void render(PHLMONITOR monitor) {
     // Y6/Y8. Retire what has run its course before anything asks whether the
     // dock still needs frames.
-    std::erase_if(g_flight.bounces, [](const SBounce& b) { return elapsedMs(b.startedAt) >= BOUNCE_MS; });
+    std::erase_if(g_flight.bounces, [](const SBounce& b) { return elapsedMs(b.startedAt) >= HOP_MS; });
     std::erase_if(g_flight.launchZooms, [](const SLaunchZoom& z) { return elapsedMs(z.startedAt) >= LAUNCH_ZOOM_MS; });
     // V3. Same retirement, same place: the icon that flew home has arrived.
     if (g_dockDrag.ghostHome && elapsedMs(g_dockDrag.ghostHome->startedAt) >= GHOST_HOME_MS)
@@ -3769,14 +3767,7 @@ void render(PHLMONITOR monitor) {
     // X13/X29/X86: dock pill. Live on the desktop (single surface). In overview
     // it samples the same decoration:blur:* behind-chrome buffer as the strip
     // so strength cannot drift with search-result count.
-    queueDockFrost(monitor, LAYOUT.pill, LAYOUT.rounding, 1.F);
-
-    CRectPassElement::SRectData bg;
-    bg.box           = LAYOUT.pill;
-    bg.color         = background();
-    bg.round         = LAYOUT.rounding;
-    bg.roundingPower = 2.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+    frostedPlate(monitor, LAYOUT.pill, LAYOUT.rounding, 1.F);
 
     // (user, 2026-08-03): GNOME lights the hovered app cell with a translucent
     // lighter fill and a slightly stronger outline, and labels it. Mouse coords
@@ -3897,7 +3888,7 @@ void render(PHLMONITOR monitor) {
         CTexPassElement::SRenderData data;
         data.tex = TEX;
         data.box = ghostBoxAt(monitor, g_dockDrag.drag->home, g_dockDrag.drag->grab, g_dockDrag.drag->at);
-        data.a   = GHOST_ALPHA;
+        data.a   = DRAG_GHOST_ALPHA;
         g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
     }
 
@@ -3910,7 +3901,7 @@ void render(PHLMONITOR monitor) {
             data.box = lerpBox(g_dockDrag.ghostHome->from, g_dockDrag.ghostHome->home, E).round();
             // Fades as it arrives, so the clone and the real icon underneath it
             // are never two solid icons in one cell for a frame.
-            data.a = GHOST_ALPHA * (1.F - E);
+            data.a = DRAG_GHOST_ALPHA * (1.F - E);
             g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
         }
     }
@@ -3956,10 +3947,10 @@ void render(PHLMONITOR monitor) {
     // overdraw it and it does not have to wait for them.
     // V11 V4. Over the icon row, under the menu: the menu is modal and the
     // popup is not, so a menu opened over an open fan must be on top of it.
-    // Its own clock, because render()'s NOW is declared below this point --
-    // and the popup eases off wall time rather than off the frame stamp, so
-    // the two cannot drift apart in any way a reader would notice.
-    Stacks::render(monitor, LAYOUT, Time::steadyNow());
+    // It reads its own clock, like every other easing surface here: the popup
+    // runs off wall time rather than off the frame stamp, so there is nothing
+    // for a caller to hand it.
+    Stacks::render(monitor, LAYOUT);
 
     renderMenu(monitor, LAYOUT);
 

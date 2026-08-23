@@ -656,7 +656,7 @@ static bool handleSearchPress(uint32_t keycode) {
     return true;
 }
 
-static CHyprSignalListener g_pTapSuperKeyHook;
+static CHyprSignalListener g_pRawKeyHook;
 static CHyprSignalListener g_pTapSuperButtonHook;
 static bool                g_tapSuperCandidate = false;
 static uint32_t            g_tapSuperPressedAt = 0;
@@ -673,8 +673,13 @@ static uint32_t            g_tapSuperPressedAt = 0;
 // answering logo=0 for the second key of a SUPER chord in this VM.
 static int g_heldSuperKeys = 0;
 
-static void                registerTapSuper() {
-    g_pTapSuperKeyHook = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
+// ONE raw-key listener, and it owns five things in this order: the guard-
+// modifier count, V5's SPACE preview, the search keys, V2's SUPER hold and the
+// SUPER tap. The order is load-bearing at every step (each branch says why), and
+// they are one listener because they read one key stream and each has to decide
+// whether the key survives to the next -- two listeners could not.
+static void                registerRawKeyHooks() {
+    g_pRawKeyHook = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
         const bool PRESSED = event.state == WL_KEYBOARD_KEY_STATE_PRESSED;
         const bool ISSUPER = event.keycode == EVDEV_KEY_LEFTMETA || event.keycode == EVDEV_KEY_RIGHTMETA;
 
@@ -1314,7 +1319,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("stack", ::onStackDispatcher);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
-    registerTapSuper();
+    registerRawKeyHooks();
 
     // ONE RELEASE. Pinned dock apps are user data; they do not get to disappear
     // because the plugin changed its name. Both are one-shot and no-ops once
@@ -1334,7 +1339,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    g_pTapSuperKeyHook.reset();
+    g_pRawKeyHook.reset();
     g_pTapSuperButtonHook.reset();
 
     g_unloading = true;

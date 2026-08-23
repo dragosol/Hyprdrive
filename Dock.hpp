@@ -250,17 +250,32 @@ void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window);
 // arrived -- and render() returns early on an empty pill, so it was never drawn.
 void revealNow(PHLMONITOR monitor);
 
-// V2. THE DOCK'S GLASS, lent to the window pill. Both of these live in Dock.cpp's
-// anonymous namespace and are exported as one-line forwarders rather than copied:
-// the pill is a second frosted plate in the same rice and has to re-theme with
-// the first one, not beside it. queueFrost is the live dual-kawase that inherits
-// decoration:blur:* through the -1 sentinels (X71); plateColor is the tint that
-// goes on top of it.
-void       queueFrost(PHLMONITOR monitor, const CBox& box, int rounding, float alpha);
-CHyprColor plateColor();
+// THE DOCK'S GLASS, and the one way to put a frosted plate on this desktop.
+// FIVE surfaces wear it -- the pill, the context menu, the hover panel, V4's
+// stack popup and V2's window pill -- and it is one call rather than five copies
+// of the same six lines, so a re-theme moves all of them together instead of
+// four of them. The blur is the live dual-kawase, inheriting decoration:blur:*
+// through the -1 sentinels (X71); the tint on top is the dock's background
+// colour, and `alpha` is multiplied into both.
+void frostedPlate(PHLMONITOR monitor, const CBox& box, int rounding, float alpha);
+
+// A dragged icon is drawn as a translucent CLONE -- the original is still in its
+// cell, and the copy under the pointer says so. ONE token because there are two
+// such gestures on one dock: an icon pulled off the pill (Dock.cpp) and a file
+// pulled out of an open stack (DockStacks.cpp). Two ghosts at two opacities
+// would be a difference nobody could explain.
+inline constexpr float DRAG_GHOST_ALPHA = 0.85F;
 
 // Y8/Z10. Hop the icon that is receiving something, once, on acknowledgement.
 void armBounce(const std::string& wmClass);
+
+// Y8's hop as ONE motion, evaluated. Two ledgers arm it -- an app's keyed on
+// window class, a stack's keyed on path (DockStacks) -- because they key on
+// different things; the DURATION and the CURVE live here so the two cannot drift
+// into being two different hops. `t` runs 0..1 across HOP_MS, and the result is
+// how far the icon is lifted out of the pill, in `iconHeight`'s own units.
+inline constexpr float HOP_MS = 420.F;
+float                  hopLift(float t, float iconHeight);
 
 // Z15. A flight click kills the Y1 hover panel INSTANTLY -- leaving it alive
 // re-eased it from a stale parked box, which read as "a panel dragged from the

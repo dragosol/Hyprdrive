@@ -329,14 +329,7 @@ void render(PHLMONITOR monitor, const CBox& frame, float scale, float alpha) {
     // the -1 sentinels (X71) unless the dock keys override them. Frost is on by
     // default on every surface in this rice, and a second frost implementation
     // is a second thing to re-theme.
-    Dock::queueFrost(monitor, PILL, ROUND, A);
-
-    CRectPassElement::SRectData plate;
-    plate.box           = PILL;
-    plate.color         = Dock::plateColor().modifyA(Dock::plateColor().a * A);
-    plate.round         = ROUND;
-    plate.roundingPower = 2.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(plate));
+    Dock::frostedPlate(monitor, PILL, ROUND, A);
 
     // The BUTTONS are X55's close-X three times over, and the treatment is
     // copied rather than improved on for a reason it already records: the

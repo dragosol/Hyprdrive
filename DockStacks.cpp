@@ -25,7 +25,6 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
-#include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 
 using namespace ScrollOverview;
@@ -396,16 +395,13 @@ namespace {
     std::optional<SItemDrag> g_itemDrag;
 
     constexpr float DRAG_THRESHOLD = 12.F; // px, the reference's, and euclidean here
-    constexpr float GHOST_ALPHA    = 0.85F;
     constexpr float GHOST_SIZE     = 48.F;
 
     // ------------------------------------------------------------ animations --
-    // Y8's hop, keyed on a PATH. armBounce keys on wmClass and a stack has
-    // none, which is the whole reason this is a second implementation rather
-    // than a call into the first.
-    constexpr float BOUNCE_MS       = 420.F;
-    constexpr float BOUNCE_HEIGHT   = 0.34F;
-    constexpr float BOUNCE_UP_SHARE = 0.42F;
+    // Y8's hop, keyed on a PATH: armBounce keys on wmClass and a stack has none,
+    // so the LEDGER is a second one. The motion is not -- the duration and the
+    // curve are Dock::HOP_MS and Dock::hopLift, so a stack cell and an app icon
+    // hop identically and cannot be re-timed apart.
 
     // The ERROR SHAKE V4 asks for, which this dock did not have -- the nearest
     // thing was X31's urgent wiggle, and that is a 3000 ms attention loop, not
@@ -425,10 +421,6 @@ namespace {
 
     float elapsed(const Time::steady_tp& since) {
         return std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count();
-    }
-
-    float bounceCurve(float t) {
-        return t < BOUNCE_UP_SHARE ? houseEase(true, t / BOUNCE_UP_SHARE) : 1.F - houseEase(false, (t - BOUNCE_UP_SHARE) / (1.F - BOUNCE_UP_SHARE));
     }
 
     // ------------------------------------------------------------ fan layout --
@@ -1041,10 +1033,8 @@ namespace ScrollOverview::Stacks {
     }
 
     // ---------------------------------------------------------------- paint --
-    void render(PHLMONITOR monitor, const Dock::SLayout& layout, const Time::steady_tp& now) {
-        (void)now;
-
-        std::erase_if(g_bounces, [](const SHop& h) { return elapsed(h.startedAt) > BOUNCE_MS; });
+    void render(PHLMONITOR monitor, const Dock::SLayout& layout) {
+        std::erase_if(g_bounces, [](const SHop& h) { return elapsed(h.startedAt) > Dock::HOP_MS; });
         std::erase_if(g_shakes, [](const SHop& h) { return elapsed(h.startedAt) > SHAKE_MS; });
 
         if (!g_popup || !monitor || g_popup->monitor != monitor->m_id)
@@ -1081,24 +1071,14 @@ namespace ScrollOverview::Stacks {
         else
             layoutFan(*g_popup, monitor, layout.pill, PROGRESS);
 
-        auto        colour  = Dock::plateColor();
-        const auto  PLATEC  = [&](float a) { return CHyprColor{colour.r, colour.g, colour.b, colour.a * a}; };
-
+        // FROST. User law: every new surface, by default -- and through the
+        // dock's own plate call, so the popup re-themes with the rest of the
+        // dock rather than beside it. The 2 px floor is the popup's own: a
+        // plate that thin is the entrance's first frame, not a surface.
         const auto drawPlate = [&](const CBox& box, float radius, float alpha) {
             if (box.width < 2.0 || box.height < 2.0)
                 return;
-            const int ROUNDED = sc<int>(std::round(radius * SCALE));
-            // FROST. User law: every new surface, by default. The hover panel's
-            // exact primitive, so the popup re-themes with the rest of the dock
-            // rather than beside it.
-            Dock::queueFrost(monitor, box, ROUNDED, alpha);
-
-            CRectPassElement::SRectData bg;
-            bg.box           = box;
-            bg.color         = PLATEC(alpha);
-            bg.round         = ROUNDED;
-            bg.roundingPower = 2.F;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(bg));
+            Dock::frostedPlate(monitor, box, sc<int>(std::round(radius * SCALE)), alpha);
         };
 
         const auto drawTex = [&](const SP<Render::ITexture>& tex, const CBox& box, float alpha, float rot = 0.F) {
@@ -1124,7 +1104,7 @@ namespace ScrollOverview::Stacks {
                 return;
             const float SZ = GHOST_SIZE * SCALE;
             drawTex(OverviewRender::appIcon(g_itemDrag->icon), CBox{std::round(MOUSE.x - SZ / 2.0), std::round(MOUSE.y - SZ / 2.0), std::round(SZ), std::round(SZ)},
-                    GHOST_ALPHA);
+                    Dock::DRAG_GHOST_ALPHA);
         };
 
         if (g_popup->grid) {
@@ -1250,8 +1230,7 @@ namespace ScrollOverview::Stacks {
         for (const auto& B : g_bounces) {
             if (B.path != CANON)
                 continue;
-            const float T = std::clamp(elapsed(B.startedAt) / BOUNCE_MS, 0.F, 1.F);
-            out           = std::max(out, bounceCurve(T) * BOUNCE_HEIGHT * iconHeight);
+            out = std::max(out, Dock::hopLift(elapsed(B.startedAt) / Dock::HOP_MS, iconHeight));
         }
         return out;
     }

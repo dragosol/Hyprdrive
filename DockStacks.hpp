@@ -116,7 +116,7 @@ namespace ScrollOverview::Stacks {
     std::string visualState();
 
     // Drawn from Dock::render, after the icons and before the menu.
-    void render(PHLMONITOR monitor, const Dock::SLayout& layout, const Time::steady_tp& now);
+    void render(PHLMONITOR monitor, const Dock::SLayout& layout);
 
     // ---- the move ---------------------------------------------------------
     // gio semantics and nothing hand-rolled: g_file_move, which does the
