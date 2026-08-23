@@ -3,6 +3,7 @@
 #include "AppSearch.hpp"
 #include "Compat.hpp"
 #include "Config.hpp"
+#include "LauncherEntry.hpp"
 #include "OverviewRender.hpp"
 #include "OverviewPassElement.hpp"
 
@@ -25,6 +26,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 
 using namespace ScrollOverview;
 
@@ -592,6 +594,61 @@ namespace {
         g_free(uri);
     }
 
+    // ---------------------------------------------------------- the preview --
+    // V11 SPEC V5. GNOME-SUSHI, over the interface Nautilus itself calls.
+    // MEASURED in the guest rather than guessed --
+    //
+    //   busctl --user introspect org.gnome.NautilusPreviewer \
+    //                            /org/gnome/NautilusPreviewer
+    //   org.gnome.NautilusPreviewer2.ShowFile(s uri, s windowHandle,
+    //                                         b closeIfAlreadyShown,
+    //                                         s activationToken)
+    //   org.gnome.NautilusPreviewer2.Close()
+    //
+    // -- and note the 2: the bus NAME and the OBJECT are NautilusPreviewer,
+    // the INTERFACE is NautilusPreviewer2. Guessing the obvious one is a
+    // silent UnknownMethod on a call that asks for no answer.
+    //
+    // closeIfAlreadyShown = TRUE IS THE WHOLE TOGGLE, and it is sushi's own
+    // semantics rather than an invention here: measured in the guest, the same
+    // uri while the previewer is up CLOSES it, the same uri again brings it
+    // back, and a DIFFERENT uri swaps the preview without closing anything.
+    // That is exactly what V5 asks SPACE to do -- "space again, or hover
+    // elsewhere + space" -- so this end keeps no state at all. There is
+    // nothing to get out of step with a window the plugin does not own.
+    //
+    // windowHandle is left EMPTY. It is an xdg-foreign exported handle, which
+    // Nautilus can produce because it has a surface to export and this dock
+    // has none (DockStacks.hpp records why). Sushi treats an empty handle as
+    // "no parent", which under Hyprland means an ordinary floating toplevel
+    // -- and that is the window config/hyprdrive/25-rules.lua dresses.
+    void showPreview(const char* uri) {
+        sd_bus* bus = LauncherEntry::sessionBus();
+        if (!bus)
+            return;
+
+        sd_bus_message* m = nullptr;
+        if (sd_bus_message_new_method_call(bus, &m, "org.gnome.NautilusPreviewer", "/org/gnome/NautilusPreviewer", "org.gnome.NautilusPreviewer2", "ShowFile") < 0)
+            return;
+
+        // NO REPLY EXPECTED, which is what keeps a dbus round trip off the
+        // compositor's frame. Sushi is D-BUS ACTIVATED: the first preview of a
+        // session costs the bus daemon a fork and an exec, and a call that
+        // waited for its answer would wait for all of it. Queued instead --
+        // the daemon reads the message, starts the service and delivers it,
+        // and this returns in the time it takes to write ~200 bytes to a unix
+        // socket. The flush is the other half of that promise: this
+        // connection's event source watches READABLE only (LauncherEntry.cpp),
+        // so a message left in the write queue would have nothing to push it
+        // out. Empty queue -- the normal case -- and it returns immediately.
+        if (sd_bus_message_append(m, "ssbs", uri, "", 1, "") >= 0) {
+            sd_bus_message_set_expect_reply(m, 0);
+            if (sd_bus_send(bus, m, nullptr) >= 0)
+                sd_bus_flush(bus);
+        }
+        sd_bus_message_unref(m);
+    }
+
 } // anonymous namespace
 
 // ============================================================================
@@ -785,6 +842,59 @@ namespace ScrollOverview::Stacks {
                 return true;
         }
         return false;
+    }
+
+    // V11 SPEC V5. WHAT IS UNDER THE POINTER, and therefore what SPACE means.
+    //
+    // Deliberately NOT a second hit test: it walks the same `rows` that
+    // contains() and click() walk, in the same DRAWN coordinates, so a fan
+    // that has not finished growing reports the row where the row actually is
+    // this frame. The action row is skipped -- "Open in Files" is not a file
+    // and has nothing to preview -- which is also why the empty answer is the
+    // common one and why it has to be cheap.
+    std::string hoveredItemPath() {
+        if (!g_popup || g_popup->leaving)
+            return {};
+
+        PHLMONITOR monitor = nullptr;
+        for (const auto& M : State::monitorState()->monitors()) {
+            if (M && M->m_id == g_popup->monitor) {
+                monitor = M;
+                break;
+            }
+        }
+        if (!monitor)
+            return {};
+
+        const Vector2D POINT = (g_pInputManager->getMouseCoordsInternal() - monitor->m_position) * monitor->m_scale;
+
+        for (const auto& R : g_popup->rows) {
+            if (!R.action && !R.path.empty() && R.box.containsPoint(POINT))
+                return R.path;
+        }
+        return {};
+    }
+
+    bool previewHovered() {
+        const auto PATH = hoveredItemPath();
+        if (PATH.empty())
+            return false;
+
+        // A path that will not become a uri is a path sushi cannot open, so
+        // NOTHING is claimed and SPACE goes where it was going. The claim and
+        // the action are the same decision on purpose: there is no branch here
+        // that swallows the key and then does not preview.
+        GError* err = nullptr;
+        char*   uri = g_filename_to_uri(PATH.c_str(), nullptr, &err);
+        if (!uri) {
+            if (err)
+                g_error_free(err);
+            return false;
+        }
+
+        showPreview(uri);
+        g_free(uri);
+        return true;
     }
 
     bool holdsDock(PHLMONITOR monitor) {

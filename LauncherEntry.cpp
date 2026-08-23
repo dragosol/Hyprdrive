@@ -173,6 +173,15 @@ SState state(const std::string& desktopId) {
     return {};
 }
 
+sd_bus* sessionBus() {
+    // start() is idempotent and cheap once the bus is up, so this is an
+    // ensure rather than a getter: the preview path can be the first thing in
+    // a session to want a bus (badges off, or nothing has broadcast yet).
+    if (!g_bus)
+        start();
+    return g_bus;
+}
+
 void start() {
     if (g_bus)
         return;
@@ -195,9 +204,12 @@ void start() {
 
     // On the compositor's OWN event loop rather than a worker thread: the
     // handler's whole job is to damage monitors, which is a main-thread act.
-    // ponytail: READABLE only. A listener never fills a send buffer, so the
-    // writable half of sd_bus_get_events has nothing to wait for -- revisit if
-    // this ever makes a method call.
+    //
+    // READABLE only, still, and V5 is the method call the old note said to
+    // revisit this for. It does not change the answer: the preview call sets
+    // expect_reply=0 and flushes itself, so nothing this connection sends ever
+    // waits on POLLOUT. Add the writable half the day something here wants an
+    // answer back.
     g_source = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, sd_bus_get_fd(g_bus), WL_EVENT_READABLE, onBusReadable, nullptr);
 }
 

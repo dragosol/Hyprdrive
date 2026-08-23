@@ -94,6 +94,22 @@ namespace ScrollOverview::Stacks {
     bool click(PHLMONITOR monitor, const Vector2D& point, bool release);
     // A wheel tick over the popup: the grid scrolls, the fan swallows.
     bool scroll(PHLMONITOR monitor, const Vector2D& point, bool up);
+
+    // ---- V11 SPEC V5, the spacebar preview --------------------------------
+    // The fan/grid ITEM under the pointer right now, or empty -- read off the
+    // boxes DRAWN last frame, exactly as contains() and click() do, so the
+    // preview and the click can never disagree about what is hovered. The
+    // action row (Open in Files, N more...) is not an item and answers
+    // empty.
+    std::string hoveredItemPath();
+
+    // Toggle a gnome-sushi preview of that item, and report whether SPACE was
+    // CLAIMED. False whenever there is no popup or nothing under the pointer,
+    // and that is the ENTIRE scope of the claim: everywhere else -- every app,
+    // the bare desktop, the overview's own search field -- the key falls
+    // through untouched. A key that ate space anywhere else would be a
+    // regression far larger than the feature.
+    bool previewHovered();
     // Frames are needed while it animates or while it is up at all.
     bool needsFrames();
     // A signature of everything drawn, for the dock's damage comparison.

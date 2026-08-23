@@ -1,5 +1,7 @@
 #pragma once
 
+#include <systemd/sd-bus.h>
+
 #include <string>
 
 // OVERVIEW_CPP_SPEC §13.9 X31. Where the dock's badges come FROM.
@@ -41,5 +43,16 @@ SState state(const std::string& desktopId);
 // so a dock switched off never opens a bus connection at all.
 void start();
 void stop();
+
+// V11 SPEC V5. THE SESSION BUS ITSELF, because the plugin now has a second
+// thing to say on it -- the gnome-sushi preview a fan item's SPACE fires --
+// and two connections to the same bus from one process is a connection this
+// file already has. start()s the connection if it is not up: badges can be
+// switched off (damageIfChanged only opens the bus when badge or urgent-notify
+// is on) and a preview must still work.
+//
+// Null if the bus cannot be opened at all, which every caller must treat as
+// the session has no bus, not as an error to report.
+sd_bus* sessionBus();
 
 }
