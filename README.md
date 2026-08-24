@@ -40,6 +40,107 @@ A mission-control overview and a full dock for [Hyprland](https://hyprland.org) 
   its contents. Hover an item and press **space** for a GNOME-style quick look
   — the same previewer, and the same spacebar, that Files uses.
 
+## New in v1.1
+
+Six things, each of them asked for by name.
+
+**Tile icons grow as they arrive.** The app icon under an overview tile used to
+fade in at full size. It now starts at nothing and reaches its resting size
+exactly as the overview finishes opening — it rides the overview's own progress
+rather than a clock of its own, so it cannot overshoot, cannot finish late, and
+an open you interrupt carries the icon back with it frame for frame.
+
+**Hold Super and every window grows a pill.** Three buttons — minimize, maximize,
+close — on a frosted capsule straddling the window's top-right corner: not
+entirely over the window, and not entirely outside it either. Let Super go and it
+leaves. While it is out, Hyprland's own `SUPER + drag` still moves windows, because
+the pill claims its three buttons and nothing else; **double-click** a window's
+body and it flips between floating and tiled. In the overview the same capsule
+takes the hovered tile's close-X's place for as long as Super is down, and
+double-click there does nothing at all.
+
+**Drag an icon off the dock to start an app somewhere.** Drop it on the desktop
+and the app starts here. Drop it on a workspace card in the overview strip and it
+starts on *that* desktop, silently — the strip is how you watch it happen, so
+nothing drags the session over there. A drop that lands on neither sends the icon
+flying back to its cell; nothing is unpinned by a slipped gesture.
+
+**Stacks: a folder can live on the dock.** Pin a file or a folder and it takes a
+cell of its own beside the apps. Click a pinned folder and it opens as a **fan**
+of its contents or a **grid** of them; right-click it for that stack's own
+settings — fan or grid, sort by name or by date, open in Files, unpin. There is no
+preferences window: the menu is the settings. Drag a file out of one open stack
+onto another stack's cell and the file is **moved** there through gio, and the
+destination cell hops once to say so — after the move has reported success, never
+before. A move that is refused shakes the cell instead, and the file has not
+moved.
+
+Pinning is a dispatcher, and a Nautilus script that wraps it:
+
+```bash
+scripts/install-nautilus-pin.sh   # then: right-click → Scripts → Pin to Dock
+hyprctl dispatch 'hl.plugin.hyprdrive.stack([[toggle /home/you/Downloads]])'
+```
+
+It is not drag-a-folder-onto-the-dock, and that is a platform limit rather than a
+shortcut: in Hyprland 0.56 the drop target of an XDG drag is always a
+`wl_surface`, and this dock is not one — it draws straight into the monitor's
+render pass. The finding is written out in `DockStacks.hpp`.
+
+**Space is quick look.** Hover an item in an open stack and press space to preview
+it, the same previewer and the same key Files uses. See
+[Quick look (space)](#quick-look-space) for the optional dependency and the window
+rules it ships with.
+
+**A dock click means the desktop you are on.** In the user's words: "if I have
+multiple windows of the same app e.g. nautilus open and i click its icon, it
+should only minimizes/maximizes the window in the current workspace." The
+launch/focus/cycle/minimize ladder is unchanged; what changed is the set it counts
+over. None of the app here launches here, even when it has windows elsewhere; one
+here toggles that one; several here cycle those. A window minimized into the dock
+counts toward the desktop it will come back to, so the click that put it away is
+the click that brings it out. The running **dots** stay global on purpose — they
+answer "is this app up at all", which is what makes it worth walking to another
+desktop for. `dock:isolate_workspaces` is the key that scopes those too.
+
+### Known behaviors
+
+Five things behave the way they do by design. They are written down so that
+meeting one is recognition and not a bug report.
+
+- **Tapping Super flashes the pills.** A tap is a press and a release, and the
+  pill answers the press: its acceptance criterion is that it is out within 150 ms
+  of Super going down, which leaves no room for a hold threshold in front of it.
+  So a tap on the way to the overview shows a frame or two of pill. A debounce
+  would make every deliberate hold late in order to hide something nobody is
+  looking at.
+
+- **A maximized window's pill can end up under your top bar.** The capsule
+  straddles the window's top-right corner, and a window the layout has maximized
+  has its top edge a few pixels below the top of the output — so the capsule
+  clamps onto the output instead of hanging off it, which is exactly where a top
+  bar lives. It is still there and still takes the press. If your bar is a layer
+  surface, an exclusive zone or a top gap around 44 px is the fix, and it is a
+  question about your bar rather than about the plugin.
+
+- **Clicking an app on an empty desktop, fast, can start more than one of it.**
+  The launch-spam guard only ever covered an app's *first* instance, and the click
+  is now counted over the desktop you are on: with the app running elsewhere,
+  every click here is a first instance for here. That is `isolate-workspaces`
+  behaving as it does in the reference, and it is the same reason a drag onto two
+  different workspace cards gives you two windows rather than one.
+
+- **A quick-look window gets a dock cell with no icon on it.** Anything that maps
+  a toplevel gets a running cell, and the GNOME previewer is an ordinary toplevel
+  that ships no desktop entry — there is nothing for the icon lookup to resolve.
+  The cell goes when the preview does. Filtering it out would mean a rule about
+  which windows are furniture, and this dock deliberately does not have one.
+
+- **On more than one monitor, the drag ghost and the insertion caret draw on every
+  dock.** Each monitor draws its own whole dock, and both of those are part of what
+  a dock draws. The gesture still resolves on the monitor the pointer is on: it is
+  the drawing that is repeated, never the drop.
+
 ## Building
 
 ```bash
@@ -224,13 +325,17 @@ anything reimplemented here). Space is claimed **only** while a stack is open
 with an item under the pointer; everywhere else it reaches the focused
 application untouched.
 
-Sushi is an optional runtime dependency and is not bundled. Without it nothing
-breaks and nothing appears. Mind the package name: on Fedora it is **`sushi`**,
-and `gnome-sushi` resolves to nothing there — no package, and no `Provides`:
+Sushi is an **optional runtime dependency** and is not bundled. Without it
+nothing breaks and nothing appears — the key still falls through to whatever has
+the focus. Mind the package name: it is the upstream project's name on some
+distributions and the GNOME-prefixed one on others, and Fedora is the trap,
+because `gnome-sushi` resolves to nothing there — no package, and no `Provides`
+either (measured: the package that owns `/usr/libexec/org.gnome.NautilusPreviewer`
+on the validation guest is `sushi-50.0-1.fc44`).
 
 ```bash
 sudo dnf install sushi        # Fedora
-sudo apt install gnome-sushi  # Debian/Ubuntu
+sudo apt install gnome-sushi  # Debian / Ubuntu
 ```
 
 The preview window is dressed by the shipped `25-rules.lua` fragment — float,
@@ -317,11 +422,11 @@ both failure modes above.
 
 ## Dispatchers
 
-Five, all under `hyprdrive:`. `overview`, `navigate` and `window` validate
-their argument and print the accepted set on a mistake; `minimize` treats
-anything that is not `restore` as a minimize, and `hotkey` wants a number. On
-the **Lua** path every one of the five is additionally checked against the
-argument pattern registered with it (`Config.cpp`), which is the stricter
+Six, all under `hyprdrive:`. `overview`, `navigate`, `window` and `stack`
+validate their argument and print the accepted set on a mistake; `minimize`
+treats anything that is not `restore` as a minimize, and `hotkey` wants a
+number. On the **Lua** path every one of the six is additionally checked against
+the argument pattern registered with it (`Config.cpp`), which is the stricter
 route.
 
 | dispatcher | argument | default | what it does |
@@ -331,6 +436,7 @@ route.
 | `window` | `select`, `close`, `click` | — | Act on the window under the cursor. |
 | `minimize` | `window`, `restore` | `window` | Minimize the focused window into the dock, or restore the most recently minimized one. Both go through the dock, so both FLY from and into the icon; nothing teleports. |
 | `hotkey` | `overlay`, or `1`–`10` optionally prefixed with `shift ` or `ctrl ` | — | Activate a dock slot the way Dash-to-Dock's `<Super>N` does — `10` is the tenth slot, i.e. `<Super>0`. `ctrl ` launches (a new window of a running app, a start for a stopped one); `shift ` takes `shift_middle_click_action`'s branch; plain activates. `overlay` just draws the slot numbers on the icons. |
+| `stack` | `pin <path>`, `unpin <path>`, `toggle <path>`, `view fan\|grid <path>`, `sort name\|mtime <path>`, `clear` | — | Pin a file or folder to the dock as a stack, or set that stack's view and sort order. The path is taken raw to the end of the argument, so it needs no quoting — a path with spaces in it is the case this exists for. `clear` unpins every stack. Per-stack state lives in `~/.local/state/hyprdrive/stacks`, beside the favourites, because it is runtime state and not configuration. |
 
 Slot numbers are the reference's, not the digits on the keys, and the
 accelerators themselves are Hyprland `bind` lines — this plugin does not own a
