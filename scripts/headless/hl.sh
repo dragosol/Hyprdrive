@@ -47,6 +47,10 @@
 #                                           ~/.local/lib/hyprdrive (default: repo build)
 # Needs (hyprtest): pywayland for ptr/vkbd (pip install --user pywayland==0.4.18), wtype, grim, kitty, mutter.
 # Env: HL_STATE (default /tmp/hyprdrive-hl), HL_USER (default hyprtest).
+#      HL_STATE is also how two runs coexist: HL_STATE=/tmp/hyprdrive-hl-search
+#      gives that run its own runtime dir, sockets, bus and pids. It is handed
+#      through the `env -i` to the inner side -- it used to be scrubbed there,
+#      so every inner command silently drove the DEFAULT instance instead.
 set -euo pipefail
 
 HL_USER=${HL_USER:-hyprtest}
@@ -77,7 +81,7 @@ if [ "${1:-}" != __inner ]; then
             rm -rf "$tmp"; exit 0 ;;
         shot)
             out=${1:-}; [ -n "$out" ] || die "usage: shot <file.png> [OUTPUT]"
-            as env -i HOME=/nonexistent PATH=/usr/bin bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
+            as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
             [ -s "$out.tmp" ] || { rm -f "$out.tmp"; die "empty screenshot"; }
             mv "$out.tmp" "$out"; echo "$out"; exit 0 ;;
     esac
@@ -91,7 +95,7 @@ if [ "${1:-}" != __inner ]; then
     done
     since=$(date '+%Y-%m-%d %H:%M:%S')
     rc=0
-    as env -i HOME=/nonexistent PATH=/usr/bin bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
+    as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
     if [ "$cmd" = stop ]; then
         # coredumpctl as dragos does list hyprtest's crashes (metadata only).
         st=$(as cat "$STATE/started-at" 2>/dev/null || echo "$since")
@@ -199,6 +203,9 @@ start)
         --env) case $2 in *=*) envs+=("$2") ;; *) die "start: --env wants K=V" ;; esac; shift ;;
         *) die "start: unknown arg $1" ;;
     esac; shift; done
+    # The default config is generated: write it before asking whether it is
+    # readable, or a fresh HL_STATE (no test.lua yet) can never start.
+    [ "$cfg" != "$STATE/test.lua" ] || write_config
     [ -r "$cfg" ] || die "start: config not readable as $(id -un): $cfg"
     running && die "already running (hl.sh stop first)"
     [ -z "$(ours)" ] || die "leftover processes on $RT: $(ours | tr '\n' ' ') -- run hl.sh stop"
