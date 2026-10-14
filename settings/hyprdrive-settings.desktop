@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Hyprdrive Settings
+GenericName=Overview and Dock Settings
+Comment=The overview, the dock, animation, motion blur, gestures and Mosaic
+Exec=hyprdrive-settings
+Icon=preferences-desktop
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=hyprdrive;overview;dock;blur;gestures;hyprland;
+StartupNotify=false
+# The window's Wayland app_id is org.quickshell (Quickshell 0.3 sets it per
+# process and has no override), so there is no class that is this window's
+# alone; window rules match the title instead (36-settings-app.lua). Left as
+# the name the window ought to report.
+StartupWMClass=hyprdrive-settings

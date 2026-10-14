@@ -3,6 +3,8 @@
 #
 #   - the plugin:        $PREFIX/lib/hyprdrive/ (PREFIX default ~/.local)
 #   - the CLI:           $PREFIX/bin/hyprdrive-integration
+#   - the settings app:  $PREFIX/bin/hyprdrive-settings, $PREFIX/share/hyprdrive,
+#                        its .desktop entry (plain Hyprland installs)
 #   - the fragments:     ~/.config/hypr/hyprdrive/  (moved aside, not deleted:
 #                        their raw-snippet blocks are the user's own edits)
 #   - the loader:        ~/.config/hypr/hyprdrive.lua
@@ -29,6 +31,14 @@ PANEL=$CONFIG/omarchy/plugins/dragos.hyprdrive
 
 if [ -d "$LIBDIR" ]; then rm -rf "$LIBDIR"; echo "removed $LIBDIR"; fi
 if [ -f "$CLI" ]; then rm -f "$CLI"; echo "removed $CLI"; fi
+for f in "$PREFIX/bin/hyprdrive-settings" "$PREFIX/share/applications/hyprdrive-settings.desktop"; do
+    if [ -f "$f" ]; then rm -f "$f"; echo "removed $f"; fi
+done
+if [ -d "$PREFIX/share/hyprdrive/settings" ]; then
+    rm -rf "$PREFIX/share/hyprdrive/settings"
+    rmdir "$PREFIX/share/hyprdrive" 2>/dev/null || true
+    echo "removed the settings app from $PREFIX/share/hyprdrive"
+fi
 
 if [ -d "$FRAGS" ]; then
     BACKUP="$FRAGS.removed-$(date +%Y%m%d-%H%M%S)"
