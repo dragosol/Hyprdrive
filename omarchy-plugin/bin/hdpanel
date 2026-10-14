@@ -1,23 +1,37 @@
 #!/usr/bin/env python3
-"""Hyprdrive Omarchy panel back end.
+"""Hyprdrive settings back end -- the Omarchy panel's and the standalone app's.
 
-Live preview is `hyprctl keyword`. Durable writes land in
+Live preview is `hyprctl eval hl.config(...)`. Durable writes land in
 ~/.config/hypr/hyprdrive/40-panel.lua (keys) and 35-gestures.lua (gestures).
 AC/battery profiles live in ~/.local/state/hyprdrive/panel.json.
+
+ONE BACK END, TWO DESKTOPS (native port, audit A19/A20). Both front ends --
+omarchy-plugin/HyprdrivePanel.qml in the Omarchy shell and settings/ on plain
+Hyprland -- run this same file. Where the two desktops differ it asks
+integration() (Integration.hpp's answer, through scripts/hyprdrive-integration)
+and never stat()s an Omarchy path of its own:
+  - compositor animations back on: Omarchy's looknfeel leaves on Omarchy, a
+    snapshot of the user's own `hyprctl animations -j` elsewhere;
+  - Mosaic's chords: plugin:hyprdrive:mosaic:cycle_bind / focus_binds, whose
+    "auto" means Omarchy's Super+L / Super+arrows there and nothing here;
+  - where Super+L's per-workspace layouts persist (layouts_store()).
 """
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
 
 STATE = pathlib.Path(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))) / "hyprdrive"
 STORE = STATE / "panel.json"
-FRAGDIR = pathlib.Path(os.environ.get("HYPRDRIVE_FRAGMENTS", os.path.expanduser("~/.config/hypr/hyprdrive")))
+FRAGDIR = pathlib.Path(os.environ.get("HYPRDRIVE_FRAGMENTS") or
+                       pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")) / "hypr" / "hyprdrive")
 PANEL_FRAG = "40-panel.lua"
 GESTURE_FRAG = "35-gestures.lua"
 BEGIN = "-- BEGIN raw-snippet (hand edits below survive regeneration)"
@@ -157,6 +171,10 @@ KEY_META = [
     # profiles: see PROFILE_SKIP.
     _k(PLUGIN + "mosaic:enabled", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:default", "bool", "mosaic", False),
+    # The chords Mosaic takes (A20). Free text in the config; the panel offers
+    # presets plus whatever is set now (chord_options(), per dump).
+    _k(PLUGIN + "mosaic:cycle_bind", "str", "mosaic", "auto"),
+    _k(PLUGIN + "mosaic:focus_binds", "str", "mosaic", "auto"),
 ]
 
 # Groups a power profile neither saves nor applies. Mosaic rebinds Super+L and
@@ -165,12 +183,79 @@ PROFILE_SKIP = {"mosaic"}
 
 MOSAIC_ON = PLUGIN + "mosaic:enabled"
 MOSAIC_DEFAULT = PLUGIN + "mosaic:default"
+MOSAIC_CYCLE = PLUGIN + "mosaic:cycle_bind"
+MOSAIC_FOCUS = PLUGIN + "mosaic:focus_binds"
+# What "auto" means for those two on Omarchy -- the chords its bindings.lua
+# ships (the layout toggle, and movefocus on the arrows). Off Omarchy "auto"
+# is no chord at all: those keys belong to the user's own config.
+OMARCHY_CYCLE_CHORD = "SUPER + L"
+OMARCHY_FOCUS_MODS = "SUPER"
 # Super+L's script while Mosaic is on. It ships beside this file, so an
 # installed panel binds the installed copy and a dev checkout its own.
 LAYOUT_CYCLE = pathlib.Path(__file__).resolve().parent / "hd-layout-cycle"
 # Where omarchy-hyprland-workspace-layout-toggle (and hd-layout-cycle) persist
-# each workspace's layout. Omarchy hard-codes ~/.local/state, so this does too.
+# each workspace's layout ON OMARCHY. Omarchy hard-codes ~/.local/state, so
+# this does too; its workspace-layouts.lua replays the files on every parse.
 OMARCHY_LAYOUTS = pathlib.Path(os.path.expanduser("~/.local/state/omarchy/workspace-layouts"))
+# ...and everywhere else (A18): one fragment of ours, which the loader sources
+# like every other, so a mosaic workspace survives a reload or a reboot with no
+# Omarchy replaying anything. hd-layout-cycle writes it; the format is one
+# hl.workspace_rule line per workspace.
+NATIVE_LAYOUTS = FRAGDIR / "45-workspace-layouts.lua"
+LAYOUT_RULE = re.compile(r'hl\.workspace_rule\(\{\s*workspace\s*=\s*"(-?\d+)"\s*,\s*layout\s*=\s*"([a-z_]+)"\s*\}\)')
+
+
+_INTEGRATION = None
+
+
+def integration():
+    """'omarchy' | 'none' -- Integration.hpp's answer, asked once per run.
+
+    Through scripts/hyprdrive-integration when it is installed (on PATH, or in
+    the bin/ beside a native PREFIX's lib/hyprdrive), so this, the plugin and
+    the installer cannot disagree. The marketplace copy of the Omarchy panel has
+    no CLI beside it; then the same rule is applied here, the running plugin's
+    own answer first.
+    """
+    global _INTEGRATION
+    if _INTEGRATION is not None:
+        return _INTEGRATION
+    here = pathlib.Path(__file__).resolve().parent
+    cands = [shutil.which("hyprdrive-integration"),
+             str(here.parent.parent / "bin" / "hyprdrive-integration"),
+             os.path.expanduser("~/.local/bin/hyprdrive-integration")]
+    env = _env() or dict(os.environ)
+    for c in cands:
+        if c and os.access(c, os.X_OK):
+            try:
+                r = subprocess.run([c], capture_output=True, text=True, timeout=10, env=env)
+                name = (r.stdout or "").split("\n", 1)[0].strip()
+                if name in ("omarchy", "none"):
+                    _INTEGRATION = name
+                    return name
+            except (OSError, subprocess.SubprocessError):
+                pass
+    if os.environ.get("HYPRDRIVE_NO_OMARCHY") == "1":
+        _INTEGRATION = "none"
+        return _INTEGRATION
+    forced = os.environ.get("HYPRDRIVE_INTEGRATION", "")
+    if forced in ("omarchy", "none"):
+        _INTEGRATION = forced
+        return forced
+    out = hyprctl("hyprdrive-integration")
+    name = (out or "").split("\n", 1)[0].strip()
+    if name in ("omarchy", "none"):
+        _INTEGRATION = name
+        return name
+    state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    on_path = any(os.path.isfile(os.path.join(d or ".", "omarchy")) and os.access(os.path.join(d or ".", "omarchy"), os.X_OK)
+                  for d in os.environ.get("PATH", "").split(":"))
+    _INTEGRATION = "omarchy" if on_path and os.path.exists(os.path.join(state, "omarchy", "current")) else "none"
+    return _INTEGRATION
+
+
+def omarchy():
+    return integration() == "omarchy"
 
 DEFAULT_GESTURES = [
     {"fingers": 3, "direction": "up", "action": "overview", "mods": "", "scale": 1, "disable_inhibit": False, "arg": ""},
@@ -323,21 +408,115 @@ def anim_leaf_lua(leaf, enabled, speed=None, curve=None, style=None):
 DISABLE_EXTRA_LEAVES = ("windowsMove",)
 
 
-def compositor_anim_lua(enabled, restore_leaves):
+# ------------------------------------------------- animations off Omarchy (A19)
+#
+# OMARCHY_ANIM_LEAVES is Omarchy's looknfeel.lua, and its beziers
+# (easeOutQuint, almostLinear, quick) exist only because looknfeel defines
+# them: replayed on plain Hyprland it named curves that are not there. So off
+# Omarchy, "animations back on" restores the USER'S tree instead -- every
+# overridden leaf as `hyprctl animations -j` reported it the moment before they
+# were switched off, kept in panel.json as animSnapshot. With no snapshot (they
+# were off before this ran, e.g. since the last boot via 40-panel.lua) the
+# honest restore is a re-parse of the user's own config: set_keys reloads.
+
+def anim_tree():
+    """-> (leaves, bezier names) from `hyprctl animations -j`, or ([], set())."""
+    try:
+        d = json.loads(hyprctl("animations", "-j") or "[]")
+    except ValueError:
+        return [], set()
+    if not isinstance(d, list) or not d or not isinstance(d[0], list):
+        return [], set()
+    leaves = [a for a in d[0] if isinstance(a, dict) and a.get("name") and not str(a["name"]).startswith("__")]
+    beziers = {b.get("name") for b in (d[1] if len(d) > 1 and isinstance(d[1], list) else []) if isinstance(b, dict)}
+    return leaves, beziers
+
+
+def snapshot_animations(store):
+    """Remember the user's animation tree before hyprdrive switches it off.
+
+    Only while animations are still on: a snapshot of an already-disabled tree
+    would "restore" everything to off. Overridden leaves only -- the rest
+    inherit from their parent and come back with it."""
+    if omarchy() or getoption("animations:enabled") in (0, False):
+        return
+    leaves, _ = anim_tree()
+    snap = [{k: a.get(k) for k in ("name", "enabled", "speed", "bezier", "style")} for a in leaves if a.get("overridden")]
+    if snap:
+        store["animSnapshot"] = snap
+
+
+def anim_disable_names(store):
+    """Every leaf to switch off: Omarchy's list there; elsewhere every leaf the
+    user overrides (live or remembered), plus global, which the rest inherit."""
+    if omarchy():
+        return [leaf for leaf, *_ in OMARCHY_ANIM_LEAVES] + list(DISABLE_EXTRA_LEAVES)
+    names = ["global"]
+    for a in (store or {}).get("animSnapshot") or []:
+        if a.get("name") and a["name"] not in names:
+            names.append(a["name"])
+    for leaf in DISABLE_EXTRA_LEAVES:
+        if leaf not in names:
+            names.append(leaf)
+    return names
+
+
+def anim_restore_lines(store):
+    """hl.animation lines putting the remembered tree back, or None (no
+    snapshot: the caller reloads). A curve that is gone since the snapshot falls
+    back to Hyprland's own `default` rather than naming a missing bezier."""
+    if omarchy():
+        return [anim_leaf_lua(leaf, on, speed, curve, style) for leaf, on, speed, curve, style in OMARCHY_ANIM_LEAVES]
+    snap = (store or {}).get("animSnapshot") or []
+    if not snap:
+        return None
+    _, beziers = anim_tree()
+    lines = []
+    for a in snap:
+        curve = a.get("bezier") or None
+        if curve and beziers and curve not in beziers:
+            curve = "default"
+        speed = a.get("speed")
+        lines.append(anim_leaf_lua(a["name"], bool(a.get("enabled")), speed if speed else None, curve, a.get("style") or None))
+    # The extra leaves were switched off explicitly, which makes them
+    # overridden: they no longer inherit, so they come back on explicitly too,
+    # at global's speed and curve (what they inherited before).
+    named = {a.get("name") for a in snap}
+    glob = next((a for a in snap if a.get("name") == "global"), None) or {}
+    for leaf in DISABLE_EXTRA_LEAVES:
+        if leaf not in named:
+            curve = glob.get("bezier") or None
+            if curve and beziers and curve not in beziers:
+                curve = "default"
+            lines.append(anim_leaf_lua(leaf, True, glob.get("speed") or 1, curve or "default"))
+    return lines
+
+
+def compositor_anim_lua(enabled, store=None):
+    """-> (lua, restored). restored is False when the leaves could not be put
+    back from a snapshot and only a reload will (off Omarchy, no snapshot)."""
     lines = ["hl.config({ animations = { enabled = %s } })" % lua_lit(bool(enabled))]
-    if enabled and restore_leaves:
-        for leaf, on, speed, curve, style in OMARCHY_ANIM_LEAVES:
-            lines.append(anim_leaf_lua(leaf, on, speed, curve, style))
-    elif not enabled:
-        for leaf, on, speed, curve, style in OMARCHY_ANIM_LEAVES:
+    restored = True
+    if enabled:
+        back = anim_restore_lines(store)
+        if back is None:
+            restored = False
+        else:
+            lines += back
+    else:
+        for leaf in anim_disable_names(store):
             lines.append(anim_leaf_lua(leaf, False))
-        for leaf in DISABLE_EXTRA_LEAVES:
-            lines.append(anim_leaf_lua(leaf, False))
-    return "\n".join(lines)
+    return "\n".join(lines), restored
 
 
-def apply_live_many(pairs):
+# Set by apply_live_many when animations came back on with nothing to restore
+# them from; set_keys reloads once 40-panel.lua no longer turns them off.
+_NEEDS_RELOAD = False
+
+
+def apply_live_many(pairs, store=None):
     """Omarchy uses the Lua config parser; hyprctl keyword is a no-op. eval hl.config."""
+    global _NEEDS_RELOAD
     anim = None
     rest = []
     for key, value in pairs:
@@ -352,9 +531,16 @@ def apply_live_many(pairs):
         if not eval_lua("hl.config(%s)" % emit_table(tree, 0)):
             return False
     if anim is not None:
-        # Live on must restore leaves because looknfeel.lua is not re-run.
-        if not eval_lua(compositor_anim_lua(anim, restore_leaves=True)):
+        store = store if store is not None else load_store()
+        if not anim:
+            snapshot_animations(store)
+        # Live on must restore leaves because looknfeel.lua (or the user's own
+        # animation lines) is not re-run.
+        lua, restored = compositor_anim_lua(anim, store)
+        if not eval_lua(lua):
             return False
+        if not restored:
+            _NEEDS_RELOAD = True
     return True
 
 
@@ -479,18 +665,16 @@ def write_panel_fragment(store):
     keys = dict(store.get("keys", {}))
     anim = keys.pop("animations:enabled", None)
     body = [
-        "-- hyprdrive fragment 40-panel -- Omarchy settings panel.",
+        "-- hyprdrive fragment 40-panel -- written by the Hyprdrive settings (hdpanel).",
         "-- MACHINE-OWNED above the raw-snippet marker.",
     ]
     # animations.enabled is a compositor key. Keep it (and leaf disables)
     # outside hyprdrive_loaded() so a reload cannot re-enable Omarchy's
-    # looknfeel leaves before the plugin guard runs.
+    # looknfeel leaves (or the user's own) before the plugin guard runs.
     if anim is not None:
         body.append("hl.config({ animations = { enabled = %s } })" % lua_lit(bool(anim)))
         if not anim:
-            for leaf, on, speed, curve, style in OMARCHY_ANIM_LEAVES:
-                body.append(anim_leaf_lua(leaf, False))
-            for leaf in DISABLE_EXTRA_LEAVES:
+            for leaf in anim_disable_names(store):
                 body.append(anim_leaf_lua(leaf, False))
     tree = {}
     for k, v in keys.items():
@@ -527,38 +711,119 @@ def mosaic_state(store):
     return on, on and bool(keys.get(MOSAIC_DEFAULT, False))
 
 
+def chord_setting(store, key):
+    """A Mosaic chord key's value: the panel's own choice, else the live
+    config (a hyprland.lua may set it), else "auto"."""
+    v = (store.get("keys") or {}).get(key)
+    if v is None:
+        v = getoption(key)
+    v = str(v or "").strip()
+    return "auto" if v in ("", "[[EMPTY]]") else v
+
+
+def mosaic_chords(store):
+    """-> (cycle chord or "", focus modifiers or "", auto_cycle, auto_focus).
+
+    "auto" is resolved at PARSE time, in the fragment (hyprdrive_omarchy()),
+    so a desktop that gains or loses Omarchy is right on its next reload; the
+    returned chord for auto is Omarchy's, to be wrapped in that check."""
+    cycle = chord_setting(store, MOSAIC_CYCLE)
+    focus = chord_setting(store, MOSAIC_FOCUS)
+    auto_cycle, auto_focus = cycle == "auto", focus == "auto"
+    if auto_cycle:
+        cycle = OMARCHY_CYCLE_CHORD
+    if auto_focus:
+        focus = OMARCHY_FOCUS_MODS
+    if cycle.lower() in ("none", "off", "false", "0"):
+        cycle = ""
+    if focus.lower() in ("none", "off", "false", "0"):
+        focus = ""
+    return cycle, focus, auto_cycle, auto_focus
+
+
 def mosaic_lua(store):
     on, default = mosaic_state(store)
     lines = []
     if on:
-        lines += [
-            "",
-            "-- Mosaic: Super+L cycles dwindle -> scrolling -> mosaic. A second bind",
-            "-- of a chord does not replace the first (both would fire), so drop",
-            "-- Omarchy's toggle first -- the unbind-then-bind its bindings.lua",
-            "-- template documents. Mosaic off removes these lines, and the next",
-            "-- parse binds Omarchy's toggle again untouched.",
-            "hl.unbind(%s)" % lua_lit("SUPER + L"),
-            "hl.bind(%s, hl.dsp.exec_cmd(%s), { description = %s })" % (
-                lua_lit("SUPER + L"), lua_lit(shlex.quote(str(LAYOUT_CYCLE))), lua_lit("Cycle workspace layout")),
-            "",
-            "-- Mosaic: Super+arrows move focus by position on a mosaic desktop (its",
-            "-- bunched windows rarely share the edges Hyprland's movefocus looks",
-            "-- for) and fall through to movefocus everywhere else.",
-        ]
-        for chord, d, word in (("SUPER + LEFT", "l", "left"), ("SUPER + RIGHT", "r", "right"), ("SUPER + UP", "u", "up"), ("SUPER + DOWN", "d", "down")):
+        cycle, focus, auto_cycle, auto_focus = mosaic_chords(store)
+
+        def guarded(auto, body):
+            # "auto" takes the chord only on Omarchy, where it replaces the
+            # toggle Omarchy ships on it; elsewhere the chord is the user's.
+            if not body:
+                return []
+            if not auto:
+                return body
+            return ["if hyprdrive_omarchy() then"] + ["    " + b if b else "" for b in body] + ["end"]
+
+        if cycle:
             lines += [
-                "hl.unbind(%s)" % lua_lit(chord),
-                "hl.bind(%s, hl.plugin.hyprdrive.focus(%s), { description = %s })" % (lua_lit(chord), lua_lit(d), lua_lit("Focus on %s window" % word)),
+                "",
+                "-- Mosaic: %s cycles dwindle -> scrolling -> mosaic. A second bind" % cycle,
+                "-- of a chord does not replace the first (both would fire), so drop",
+                "-- whatever had it first -- on Omarchy its two-way layout toggle, the",
+                "-- unbind-then-bind its bindings.lua template documents. Mosaic off",
+                "-- removes these lines, and the next parse binds the old one untouched.",
+                "-- The chord is plugin:hyprdrive:mosaic:cycle_bind (auto = Super+L on",
+                "-- Omarchy, nothing elsewhere).",
             ]
+            lines += guarded(auto_cycle, [
+                "hl.unbind(%s)" % lua_lit(cycle),
+                "hl.bind(%s, hl.dsp.exec_cmd(%s), { description = %s })" % (
+                    lua_lit(cycle), lua_lit(shlex.quote(str(LAYOUT_CYCLE))), lua_lit("Cycle workspace layout")),
+            ])
+        if focus:
+            lines += [
+                "",
+                "-- Mosaic: %s+arrows move focus by position on a mosaic desktop (its" % focus,
+                "-- bunched windows rarely share the edges Hyprland's movefocus looks",
+                "-- for) and fall through to movefocus everywhere else.",
+                "-- plugin:hyprdrive:mosaic:focus_binds (auto = SUPER on Omarchy only).",
+            ]
+            body = []
+            for arrow, d, word in (("LEFT", "l", "left"), ("RIGHT", "r", "right"), ("UP", "u", "up"), ("DOWN", "d", "down")):
+                chord = "%s + %s" % (focus, arrow)
+                body += [
+                    "hl.unbind(%s)" % lua_lit(chord),
+                    "hl.bind(%s, hl.plugin.hyprdrive.focus(%s), { description = %s })" % (lua_lit(chord), lua_lit(d), lua_lit("Focus on %s window" % word)),
+                ]
+            lines += guarded(auto_focus, body)
     if default:
         lines += [
             "",
-            "-- Mosaic is the default: workspaces with no Super+L choice start in it.",
-            "-- Loaded after looknfeel.lua, so this wins; off, looknfeel's stands.",
+            "-- Mosaic is the default: workspaces with no layout of their own start in it.",
+            "-- Loaded after looknfeel.lua / the user's general block, so this wins; off,",
+            "-- theirs stands.",
             "hl.config({ general = { layout = 'mosaic' } })",
         ]
     return lines
+
+
+def native_layouts():
+    """{workspace id: layout} from 45-workspace-layouts.lua (off Omarchy)."""
+    try:
+        text = NATIVE_LAYOUTS.read_text()
+    except OSError:
+        return {}
+    return {m.group(1): m.group(2) for m in LAYOUT_RULE.finditer(text)}
+
+
+def write_native_layouts(chosen):
+    """The fragment hd-layout-cycle keeps, rewritten whole. Same header and
+    format as the script's (it parses this back)."""
+    def num(w):
+        try:
+            return (0, int(w))
+        except ValueError:
+            return (1, w)
+    lines = [
+        "-- hyprdrive fragment 45-workspace-layouts -- each workspace's tiled layout,",
+        "-- as the layout cycle (hd-layout-cycle) last left it. Written by hyprdrive;",
+        "-- one line per workspace. Not used on Omarchy, which keeps its own.",
+    ]
+    lines += ['hl.workspace_rule({ workspace = "%s", layout = "%s" })' % (w, chosen[w]) for w in sorted(chosen, key=num)]
+    FRAGDIR.mkdir(parents=True, exist_ok=True)
+    write_fragment(NATIVE_LAYOUTS, "\n".join(lines) + "\n")
 
 
 def revert_mosaic_workspaces(fallback, chosen_too):
@@ -569,20 +834,28 @@ def revert_mosaic_workspaces(fallback, chosen_too):
     Omarchy's state file saying so; with `chosen_too` (Mosaic itself is going
     away) that file, which every parse replays, is rewritten to dwindle -- the
     cycle's first mode and Omarchy's own default -- and the workspace follows.
-    Without it (only "default" turned off) a chosen mosaic stays.
+    Without it (only "default" turned off) a chosen mosaic stays. Off Omarchy
+    the record is 45-workspace-layouts.lua instead, handled the same way.
     """
     persisted = set()
-    if OMARCHY_LAYOUTS.is_dir():
-        for f in sorted(OMARCHY_LAYOUTS.glob("*.lua")):
-            try:
-                text = f.read_text()
-            except OSError:
-                continue
-            if '"mosaic"' not in text:
-                continue
-            persisted.add(f.stem)
-            if chosen_too:
-                f.write_text('hl.workspace_rule({ workspace = "%s", layout = "dwindle" })\n' % f.stem)
+    if omarchy():
+        if OMARCHY_LAYOUTS.is_dir():
+            for f in sorted(OMARCHY_LAYOUTS.glob("*.lua")):
+                try:
+                    text = f.read_text()
+                except OSError:
+                    continue
+                if '"mosaic"' not in text:
+                    continue
+                persisted.add(f.stem)
+                if chosen_too:
+                    f.write_text('hl.workspace_rule({ workspace = "%s", layout = "dwindle" })\n' % f.stem)
+    else:
+        # Our own fragment (A18): the same rewrite, one line per workspace.
+        chosen = native_layouts()
+        persisted = {w for w, l in chosen.items() if l == "mosaic"}
+        if chosen_too and persisted:
+            write_native_layouts({w: ("dwindle" if l == "mosaic" else l) for w, l in chosen.items()})
     try:
         workspaces = json.loads(hyprctl("-j", "workspaces") or "[]")
     except ValueError:
@@ -614,7 +887,7 @@ def mosaic_before_write(store, before):
         revert_mosaic_workspaces(store.get("mosaicPrevLayout") or "dwindle", chosen_too=was_on and not on)
 
 
-def mosaic_after_write(store, before):
+def mosaic_after_write(store, before, binds_changed=False):
     """40-panel.lua changed its Mosaic lines: make them live.
 
     Super+L and general.layout follow from a parse of the config, so this
@@ -625,7 +898,7 @@ def mosaic_after_write(store, before):
     explicit `hyprctl reload`. One ~100 ms hitch, and only when Mosaic's own
     switches change.
     """
-    if mosaic_state(store) == before:
+    if mosaic_state(store) == before and not binds_changed:
         return
     hyprctl("reload")
     was_default = before[1]
@@ -640,8 +913,19 @@ def commit_store(store, before):
     """Save the store and 40-panel.lua, with Mosaic's side effects around it."""
     mosaic_before_write(store, before)
     save_store(store)
+    old = _bind_lines(FRAGDIR / PANEL_FRAG)
     write_panel_fragment(store)
-    mosaic_after_write(store, before)
+    # A chord changed while Mosaic stays on (cycle_bind / focus_binds) is a
+    # bind change too, and binds only follow a parse.
+    mosaic_after_write(store, before, binds_changed=old != _bind_lines(FRAGDIR / PANEL_FRAG))
+
+
+def _bind_lines(path):
+    try:
+        text = path.read_text()
+    except OSError:
+        return []
+    return [l.strip() for l in text.splitlines() if "hl.bind(" in l or "hl.unbind(" in l or "hyprdrive_omarchy()" in l]
 
 
 def lua_direction(direction):
@@ -800,14 +1084,57 @@ def monitor_options(current):
     return opts
 
 
+def chord_options(key, current):
+    """Mosaic's chord rows: Auto (the row's description says what it means on
+    each desktop), the usual choices, None -- and whatever the config says now
+    when it is something else, so a hand-set chord still shows as chosen."""
+    if key == MOSAIC_CYCLE:
+        opts = [
+            {"value": "auto", "label": "Auto"},
+            {"value": "SUPER + L", "label": "Super+L"},
+            {"value": "SUPER + M", "label": "Super+M"},
+            {"value": "none", "label": "None"},
+        ]
+    else:
+        opts = [
+            {"value": "auto", "label": "Auto"},
+            {"value": "SUPER", "label": "Super"},
+            {"value": "SUPER + ALT", "label": "Super+Alt"},
+            {"value": "none", "label": "None"},
+        ]
+    if current and current not in [o["value"] for o in opts]:
+        opts.insert(len(opts) - 1, {"value": current, "label": current.title().replace(" ", "")})
+    return opts
+
+
+def plugin_version():
+    """The loaded plugin's version (`hyprctl plugin list`), for a native
+    install with no manifest.json beside it."""
+    try:
+        for p in json.loads(hyprctl("plugin", "list", "-j") or "[]"):
+            if isinstance(p, dict) and p.get("name") == "hyprdrive":
+                return str(p.get("version") or "")
+    except ValueError:
+        pass
+    return ""
+
+
 def dump():
     store = load_store()
     live = live_keys()
     # Hyprlang reports an empty string option as [[EMPTY]].
     mon_key = PLUGIN + "dock:monitor"
-    if live.get(mon_key) == "[[EMPTY]]":
-        live[mon_key] = ""
-    meta = [dict(m, options=monitor_options(live.get(mon_key, ""))) if m["key"] == mon_key else m for m in KEY_META]
+    for k in (mon_key, MOSAIC_CYCLE, MOSAIC_FOCUS):
+        if live.get(k) == "[[EMPTY]]":
+            live[k] = ""
+
+    def with_options(m):
+        if m["key"] == mon_key:
+            return dict(m, options=monitor_options(live.get(mon_key, "")))
+        if m["key"] in (MOSAIC_CYCLE, MOSAIC_FOCUS):
+            return dict(m, options=chord_options(m["key"], chord_setting(store, m["key"]) if live.get(m["key"]) is None else (live.get(m["key"]) or "auto")))
+        return m
+    meta = [with_options(m) for m in KEY_META]
     gestures = store.get("gestures")
     if not gestures:
         gestures = [dict(g) for g in DEFAULT_GESTURES]
@@ -827,8 +1154,11 @@ def dump():
         version = json.loads(mf.read_text()).get("version", "") if mf else ""
     except (OSError, ValueError):
         pass
+    if not version:
+        version = plugin_version()
     return {
         "version": version,
+        "integration": integration(),
         "keys": live,
         "owned": store.get("keys", {}),
         "gestures": gestures,
@@ -865,17 +1195,22 @@ def set_keys(pairs, preview=False):
         coerced.append((MOSAIC_DEFAULT, False))
     if asked.get(MOSAIC_DEFAULT) is True and not asked.get(MOSAIC_ON, mosaic_state(store)[0]):
         raise SystemExit("hdpanel: turn Mosaic on before making it the default")
-    if not apply_live_many(coerced):
+    before = mosaic_state(store)
+    if not apply_live_many(coerced, store):
         raise SystemExit("hdpanel: live apply failed")
     if preview:
         return coerced
-    before = mosaic_state(store)
     store.setdefault("keys", {})
     for key, value in coerced:
         store["keys"][key] = value
         if key == PLUGIN + "dock:corner_radius" and int(value) > 0:
             store["roundedRadius"] = int(value)
     commit_store(store, before)
+    if _NEEDS_RELOAD:
+        # Animations back on with no snapshot to restore them from (off
+        # Omarchy): 40-panel.lua no longer switches them off, so a re-parse
+        # brings back exactly what the user's config says.
+        hyprctl("reload")
     return coerced
 
 
@@ -907,8 +1242,8 @@ def reset_keys(store, group):
     if not metas:
         return
     pairs = [(m["key"], coerce(m, default_of(m))) for m in metas]
-    apply_live_many(pairs)
     before = mosaic_state(store)
+    apply_live_many(pairs, store)
     owned = store.setdefault("keys", {})
     for key, _ in pairs:
         owned.pop(key, None)
@@ -940,16 +1275,18 @@ def cmd_reset(args):
     if not metas:
         raise SystemExit("hdpanel: nothing to reset in %s" % group)
     pairs = [(m["key"], coerce(m, default_of(m))) for m in metas]
-    if not apply_live_many(pairs):
-        raise SystemExit("hdpanel: live reset failed")
     store = load_store()
     before = mosaic_state(store)
+    if not apply_live_many(pairs, store):
+        raise SystemExit("hdpanel: live reset failed")
     owned = store.setdefault("keys", {})
     for key, _ in pairs:
         owned.pop(key, None)
     if group == "dock":
         store["roundedRadius"] = 24
     commit_store(store, before)
+    if _NEEDS_RELOAD:
+        hyprctl("reload")
     print(json.dumps({"ok": True, "group": group, "keys": {k: v for k, v in pairs}}))
     return 0
 
@@ -1009,10 +1346,12 @@ def apply_profile(name):
         v = coerce(meta, v)
         pairs.append((k, v))
         store.setdefault("keys", {})[k] = v
-    if pairs and not apply_live_many(pairs):
+    if pairs and not apply_live_many(pairs, store):
         raise SystemExit("hdpanel: profile apply failed")
     save_store(store)
     write_panel_fragment(store)
+    if _NEEDS_RELOAD:
+        hyprctl("reload")
     return len(pairs)
 
 
