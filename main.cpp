@@ -65,6 +65,7 @@ using namespace Hyprutils::String;
 #include <hyprland/src/managers/SessionLockManager.hpp>
 
 #include "Compat.hpp"
+#include "Integration.hpp"
 #include "AppSearch.hpp"
 #include "OmarchySearch.hpp"
 #include "Config.hpp"
@@ -2113,6 +2114,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // copied onto its plugin:hyprdrive: twin here and nowhere else, so the
         // rest of the codebase only ever knows the new name. ONE RELEASE.
         ScrollOverview::Compat::adoptLegacyValues();
+        // Straight after: everything below may ask Integration::omarchy(), and
+        // plugin:hyprdrive:integration (or the env) may have just changed.
+        ScrollOverview::Integration::reevaluate();
         // A reload writes the user's render:new_render_scheduling back.
         ScrollOverview::FramePacing::apply();
         // A reload can drop plugin-registered beziers, and may have changed the
@@ -2400,6 +2404,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("debug", ::onDebugDispatcher);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
+    // The Omarchy-or-not answer, now that its key exists, and the hyprctl
+    // command scripts ask it through (Integration.hpp).
+    ScrollOverview::Integration::init();
     // The "mosaic" layout (Mosaic.hpp). Registered whether or not the panel has
     // enabled it: a desktop whose saved layout is mosaic must find it at login.
     ScrollOverview::Mosaic::registerLayout(SCROLLOVERVIEW_HANDLE);
@@ -2478,6 +2485,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    ScrollOverview::Integration::shutdown(); // its hyprctl lambda lives in this .so
     // FIRST: Hyprland hands every mosaic desktop back to its default layout and
     // destroys our algorithm objects -- while their code is still mapped.
     ScrollOverview::Mosaic::shutdown();

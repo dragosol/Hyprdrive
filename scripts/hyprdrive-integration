@@ -1,0 +1,114 @@
+#!/bin/sh
+# hyprdrive-integration -- is this an Omarchy desktop, as Hyprdrive sees it?
+#
+# The shell face of Integration.hpp, for code that runs outside the compositor:
+# `make install` (does the Omarchy panel go in?), hdpanel, the settings app.
+#
+#   hyprdrive-integration              print omarchy | none
+#   hyprdrive-integration -q           print nothing; exit 0 = omarchy, 1 = none
+#   hyprdrive-integration --why        also print "source: ..." and "reason: ..."
+#   hyprdrive-integration --offline    never ask the running plugin
+#   hyprdrive-integration --config V   the plugin:hyprdrive:integration value to
+#                                      assume offline (default: ask hyprctl
+#                                      getoption, else auto)
+#
+# ONLINE FIRST. With a running Hyprland that has the plugin loaded, the answer is
+# `hyprctl hyprdrive-integration` -- the plugin's own cached decision, so a
+# script and the overview cannot disagree. Otherwise (install time, no
+# compositor, the plugin not loaded) the same rule is applied here.
+#
+# THE RULE is IntegrationRule.hpp's, line for line; scripts/integration_test.cpp
+# runs this script offline against decide() for every case, so the two cannot
+# drift silently:
+#   1. HYPRDRIVE_NO_OMARCHY=1                  -> none
+#   2. HYPRDRIVE_INTEGRATION=omarchy|none      -> that (auto/unknown fall through)
+#   3. plugin:hyprdrive:integration            -> that (auto/unknown fall through)
+#   4. auto: `omarchy` executable on PATH AND
+#      ${XDG_STATE_HOME:-~/.local/state}/omarchy/current exists -> omarchy, else none
+set -u
+
+quiet=0 why=0 offline=0 cfg= cfg_given=0
+while [ $# -gt 0 ]; do
+    case $1 in
+        -q|--quiet) quiet=1 ;;
+        --why) why=1 ;;
+        --offline) offline=1 ;;
+        --config) [ $# -ge 2 ] || { echo "hyprdrive-integration: --config needs a value" >&2; exit 2; }
+                  cfg=$2; cfg_given=1; shift ;;
+        -h|--help) sed -n '2,/^set -u/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+        *) echo "hyprdrive-integration: unknown argument $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+answer() { # name source reason
+    if [ $quiet = 0 ]; then
+        echo "$1"
+        [ $why = 0 ] || printf 'source: %s\nreason: %s\n' "$2" "$3"
+    fi
+    # Only -q speaks through the exit status: a plain call exits 0 either way,
+    # so `x=$(hyprdrive-integration)` under set -e does not die on "none".
+    [ $quiet = 0 ] && exit 0
+    [ "$1" = omarchy ]
+    exit $?
+}
+
+# --- online: the running plugin's answer --------------------------------------
+if [ $offline = 0 ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v hyprctl >/dev/null 2>&1; then
+    out=$(hyprctl hyprdrive-integration 2>/dev/null) || out=
+    name=$(printf '%s\n' "$out" | sed -n 1p)
+    case $name in
+        omarchy|none)
+            src=$(printf '%s\n' "$out" | sed -n 's/^source: //p')
+            rsn=$(printf '%s\n' "$out" | sed -n 's/^reason: //p')
+            answer "$name" "plugin ($src)" "$rsn" ;;
+    esac
+    # Plugin not loaded: hyprctl says "unknown request". Fall through, but take
+    # the key's value from the compositor if it has one (it will not: the key is
+    # the plugin's, so it only exists while the plugin is loaded).
+    if [ $cfg_given = 0 ]; then
+        cfg=$(hyprctl getoption plugin:hyprdrive:integration 2>/dev/null | sed -n 's/^str: //p' | head -1)
+    fi
+fi
+
+# --- offline: the rule -------------------------------------------------------
+note=
+if [ "${HYPRDRIVE_NO_OMARCHY:-}" = 1 ]; then
+    answer none env:HYPRDRIVE_NO_OMARCHY "HYPRDRIVE_NO_OMARCHY=1"
+fi
+forced() { # value source label
+    case $1 in
+        omarchy|none) answer "$1" "$2" "$3=$1" ;;
+        auto|'') ;;
+        *) note="$note$3=\"$1\" is not auto|omarchy|none, treated as auto; " ;;
+    esac
+}
+forced "${HYPRDRIVE_INTEGRATION:-}" env:HYPRDRIVE_INTEGRATION HYPRDRIVE_INTEGRATION
+forced "$cfg" config plugin:hyprdrive:integration
+
+on_path=0
+# Every PATH entry, an executable regular file -- Integration.cpp's
+# omarchyOnPath(), not `command -v` (which would also accept an alias or a
+# function from a sourcing shell).
+IFS_SAVE=$IFS; IFS=:; set -f
+for d in ${PATH:-}; do
+    [ -n "$d" ] || d=.
+    if [ -f "$d/omarchy" ] && [ -x "$d/omarchy" ]; then on_path=1; break; fi
+done
+IFS=$IFS_SAVE; set +f
+
+if [ -n "${XDG_STATE_HOME:-}" ]; then st=$XDG_STATE_HOME/omarchy/current
+elif [ -n "${HOME:-}" ]; then st=$HOME/.local/state/omarchy/current
+else st=; fi
+state=0
+[ -n "$st" ] && [ -e "$st" ] && state=1
+
+if [ $on_path = 1 ] && [ $state = 1 ]; then
+    answer omarchy auto "${note}omarchy on PATH and omarchy state dir present"
+elif [ $on_path = 0 ] && [ $state = 0 ]; then
+    answer none auto "${note}no omarchy on PATH, no omarchy state dir"
+elif [ $on_path = 0 ]; then
+    answer none auto "${note}omarchy state dir present but no omarchy on PATH"
+else
+    answer none auto "${note}omarchy on PATH but no omarchy state dir"
+fi
