@@ -93,7 +93,9 @@ def main():
     d.roundtrip()
     os.close(fd)
     print("vkbd: virtual keyboard attached", flush=True)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    # os._exit, never a normal interpreter teardown: pywayland's finalizers
+    # on a dead/closing display SEGV python (one core per hl.sh stop)
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
 
     mods = 0
 
@@ -157,7 +159,7 @@ def main():
         for k, _ in sel.select():
             if k.data == "wl":
                 if d.dispatch(block=True) == -1:
-                    return
+                    os._exit(0)  # compositor gone
             else:
                 buf += os.read(ffd, 65536)
                 while b"\n" in buf:
@@ -176,4 +178,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        sys.stdout.flush()
+        os._exit(0)

@@ -86,7 +86,9 @@ if [ "${1:-}" != __inner ]; then
     if [ "$cmd" = stop ]; then
         # coredumpctl as dragos does list hyprtest's crashes (metadata only).
         st=$(as cat "$STATE/started-at" 2>/dev/null || echo "$since")
-        cores=$(coredumpctl list --no-legend --since "$st" 2>/dev/null | awk '$5==1001 || $4==1001' || true)
+        # columns: DOW DATE TIME TZ PID UID GID SIG COREFILE EXE SIZE
+        uid=$(id -u "$HL_USER")
+        cores=$(coredumpctl list --no-legend --no-pager --since "$st" 2>/dev/null | awk -v u="$uid" '$6==u' || true)
         if [ -n "$cores" ]; then echo "hl: COREDUMPS since $st:"; echo "$cores"; rc=3
         else echo "hl: no coredumps since $st"; fi
     fi
@@ -239,6 +241,8 @@ start)
     fi
     ;;
 stop)
+    # input helpers first, while the display is still alive
+    [ -f "$STATE/vkbd.pid" ] && kill "$(cat "$STATE/vkbd.pid")" 2>/dev/null || true
     if running; then
         hc eval 'hl.dispatch(hl.dsp.exit())' >/dev/null 2>&1 || true
         for _ in $(seq 25); do running || break; sleep 0.2; done

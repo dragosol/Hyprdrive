@@ -9,6 +9,7 @@ it). Events go through Hyprland's real pointer path (keybinds, plugin input
 hooks), unlike hl.dsp.cursor.move, which only warps. Needs the bindings that
 hl.sh generates with pywayland.scanner into $PYTHONPATH/hlproto.
 """
+import os
 import sys
 import time
 
@@ -90,3 +91,4 @@ def main(argv):
 
 if __name__ == "__main__":
     main(sys.argv)
+    os._exit(0)  # skip pywayland finalizers (they can SEGV at teardown)
