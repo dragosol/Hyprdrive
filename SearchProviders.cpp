@@ -235,6 +235,13 @@ namespace SearchProviders {
         std::atomic<int64_t>                      g_busFailedAt{0}; // steady_clock ns, 0 = never failed
         std::atomic<uint64_t>                     g_busFailures{0};
 
+        // setActivation(): null = may activate (see the header).
+        std::atomic<bool (*)()>                   g_autoStart{nullptr};
+        bool                                      autoStartAllowed() {
+            const auto FN = g_autoStart.load();
+            return FN ? FN() : true;
+        }
+
         int64_t                                   steadyNs() {
             return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         }
@@ -513,6 +520,8 @@ namespace SearchProviders {
             sd_bus_message* req = nullptr;
             if (sd_bus_message_new_method_call(bus, &req, PROV.busName.c_str(), PROV.objectPath.c_str(), IFACE, "GetResultMetas") < 0)
                 return 0;
+            if (!autoStartAllowed())
+                sd_bus_message_set_auto_start(req, 0); // it just answered; if it has quit since, let it stay quit
             auto ARGV = cstrv(missing);
             sd_bus_message_append_strv(req, ARGV.data());
 
@@ -572,6 +581,7 @@ namespace SearchProviders {
             // X20: when the query only got longer, hand back the previous ids so
             // providers narrow instead of searching from scratch.
             const bool EXTENDS = !w_prevQuery.empty() && w_query.starts_with(w_prevQuery);
+            const bool AUTOSTART = autoStartAllowed();
 
             for (size_t i = 0; i < g_providers.size(); ++i) {
                 const auto&     PROV = g_providers[i];
@@ -581,6 +591,9 @@ namespace SearchProviders {
                 if (sd_bus_message_new_method_call(bus, &req, PROV.busName.c_str(), PROV.objectPath.c_str(), IFACE,
                                                    SUB ? "GetSubsearchResultSet" : "GetInitialResultSet") < 0)
                     continue;
+                // Off Omarchy: ask only providers that are already running.
+                if (!AUTOSTART)
+                    sd_bus_message_set_auto_start(req, 0);
 
                 if (SUB) {
                     auto PREV_ARGV = cstrv(prev[i]);
@@ -742,6 +755,11 @@ namespace SearchProviders {
     }
 
     void warm() {
+        // Off Omarchy: launching every provider's app at each open is exactly
+        // what is not wanted (header, setActivation). Not even the worker
+        // starts for it -- the first keystroke does that.
+        if (!autoStartAllowed())
+            return;
         providers();
         ensureWorker();
         {
@@ -801,6 +819,10 @@ namespace SearchProviders {
             fd = -1;
         }
         g_running = false;
+    }
+
+    void setActivation(bool (*autoStart)()) {
+        g_autoStart = autoStart;
     }
 
     uint64_t busFailures() {

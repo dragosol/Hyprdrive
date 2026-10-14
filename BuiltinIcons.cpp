@@ -67,6 +67,33 @@ namespace {
     constexpr char SCRATCHPAD_SVG[] = {
 #embed "assets/scratchpad-symbolic.svg"
         , 0};
+    constexpr char AGENT_SVG[] = {
+#embed "assets/icons/agent.svg"
+        , 0};
+
+    // Each agent's tile, top and bottom of its gradient. Our own picks, chosen
+    // to tell nine rows apart at 20 px on a dark or a light card -- not any
+    // vendor's brand colours.
+    struct SAgentTint {
+        std::string_view prefix, top, bot;
+    };
+    constexpr SAgentTint AGENT_TINTS[] = {
+        {"claude", "#e08a5c", "#b85a34"},   {"codex", "#3fb68b", "#1f7f5e"},   {"gemini", "#5b8def", "#3159c4"},
+        {"agy", "#8b6cf0", "#5a3fc4"},      {"grok", "#6b7280", "#3b4150"},    {"opencode", "#f0b13c", "#c27d12"},
+        {"copilot", "#a35ee0", "#7134b0"},  {"crush", "#ec5f86", "#bb3159"},   {"pi", "#38b2ac", "#1f7f7a"},
+    };
+    constexpr SAgentTint AGENT_DEFAULT_TINT{"", "#64748b", "#3f4a5c"};
+
+    std::string agentSvg(std::string_view prefix) {
+        const SAgentTint* tint = &AGENT_DEFAULT_TINT;
+        for (const auto& T : AGENT_TINTS)
+            if (T.prefix == prefix)
+                tint = &T;
+        std::string out = AGENT_SVG;
+        replaceAll(out, "#TILE_TOP", tint->top);
+        replaceAll(out, "#TILE_BOT", tint->bot);
+        return out;
+    }
 }
 
 namespace ScrollOverview::BuiltinIcons {
@@ -79,6 +106,7 @@ namespace ScrollOverview::BuiltinIcons {
         std::string out = name.starts_with(TRASH_PREFIX) ? trashSvg(name.substr(TRASH_PREFIX.size())) : name == STACK_EMPTY ? std::string(STACK_EMPTY_SVG) :
             name == SWAP                                                                    ? std::string(SWAP_SVG) :
             name == SCRATCHPAD                                                              ? std::string(SCRATCHPAD_SVG) :
+            name.starts_with(AGENT_PREFIX)                                                  ? agentSvg(name.substr(AGENT_PREFIX.size())) :
                                                                                               std::string();
         constexpr std::string_view TOKEN = "#ACCENT";
         for (size_t at = out.find(TOKEN); at != std::string::npos; at = out.find(TOKEN, at + accentHex.size()))

@@ -14,6 +14,8 @@
 #                     twin scripts/hyprdrive-integration, case for case.
 #   search_providers_nobus_test  the GNOME search worker with no session bus
 #                     (the std::terminate that took the compositor down).
+#   native_search_test  NativeSearch.hpp: the leading-program parse and the
+#                     terminal choice the search uses off Omarchy.
 #
 # Anything that needs a running Hyprland is a GATE (scripts/gates/), not a host
 # test, and lives in scripts/suite.sh instead.
@@ -65,6 +67,7 @@ run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-con
 run stack_reader_test scripts/stack_reader_test.cpp StackReader.cpp StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
 run omarchy_search_test scripts/omarchy_search_test.cpp OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
 run integration_test scripts/integration_test.cpp
+run native_search_test scripts/native_search_test.cpp
 # shellcheck disable=SC2046
 run search_providers_nobus_test scripts/search_providers_nobus_test.cpp SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
 

@@ -21,6 +21,11 @@ namespace ScrollOverview::BuiltinIcons {
     // still has it; Scratchpad::iconName() is its only reader, and it hands
     // the dock a FILE (see there), so this name is never drawn directly.
     inline constexpr std::string_view SCRATCHPAD  = "hyprdrive-scratchpad";
+    // The AI & Tools agent rows off Omarchy (native port): one tile template
+    // (assets/icons/agent.svg) in each agent's colour, named
+    // "hyprdrive-agent-<prefix>" (grok, agy, gemini, claude, opencode, codex,
+    // copilot, crush, pi). An unknown prefix gets a neutral slate tile.
+    inline constexpr std::string_view AGENT_PREFIX = "hyprdrive-agent-";
 
     // The SVG source for `name`, with #ACCENT replaced by `accentHex`
     // ("#rrggbb"). Empty for an unknown name.

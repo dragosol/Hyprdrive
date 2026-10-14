@@ -425,6 +425,7 @@ namespace {
         for (const auto& M : State::monitorState()->monitors())
             if (M)
                 key += std::format("|{}", M->m_scale);
+        key += "|" + OmarchySearch::menuRootTitle(); // column 0's heading follows Integration
         return key;
     }
 
@@ -449,7 +450,7 @@ namespace {
                 g_warmTexts.push_back({TOOL, FG, px(13.F, S), 500});
             for (int n = 30; n >= 1; --n)
                 g_warmTexts.push_back({"+" + std::to_string(n), MUTED, px(11.F, S), 500}); // a card's "+N more"
-            for (const char* TITLE : {"Files & Folders", "AI & Tools", "Omarchy Menu"})
+            for (const std::string& TITLE : {std::string{"Files & Folders"}, std::string{"AI & Tools"}, OmarchySearch::menuRootTitle()})
                 g_warmTexts.push_back({TITLE, HEADING, px(12.F, S), 600}); // the card headings
         }
         for (const float S : scales) {

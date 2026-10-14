@@ -525,6 +525,16 @@ static void registerConfigValuesFor() {
                                     Hyprlang::STRING{""}));
     addKey(makeShared<CStringValue>(KEY("terminal"), "terminal used to launch Terminal=true desktop entries; empty falls back to $TERMINAL",
                                     Hyprlang::STRING{""}));
+    // NATIVE PORT A7. The terminal an AI agent row opens in when this is not
+    // Omarchy (on Omarchy agents go through omarchy-launch-tui, unchanged).
+    // A command the agent's argv is appended to ("kitty", "foot --app-id ai"),
+    // or a line with {cmd} where it goes ("wezterm start --cwd ~ -- {cmd}").
+    // Empty detects: plugin:hyprdrive:terminal, $TERMINAL, xdg-terminal-exec,
+    // then kitty, foot, alacritty, ghostty, wezterm, konsole, gnome-terminal,
+    // ptyxis -- each told to run a program its own way (NativeSearch.hpp).
+    addKey(makeShared<CStringValue>(KEY("search:terminal"),
+                                    "terminal AI agent rows open in off Omarchy: a command the agent is appended to, or one with {cmd}; empty = plugin:hyprdrive:terminal, $TERMINAL, xdg-terminal-exec, kitty, foot, alacritty...",
+                                    Hyprlang::STRING{""}));
     addKey(makeShared<CIntValue>(KEY("input:scroll_event_delay"), "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
     addKey(makeShared<CFloatValue>(KEY("input:touchpad_scroll_factor"), "overview touchpad scroll factor", 1.F,
                                    SFloatValueOptions{.min = 0.F}));
@@ -1389,6 +1399,10 @@ std::string getSearchTranslateTarget() {
 
 std::string getTerminal() {
     return getValue<std::string>("plugin:hyprdrive:terminal");
+}
+
+std::string getSearchTerminal() {
+    return getValue<std::string>("plugin:hyprdrive:search:terminal");
 }
 
 ELayout getLayout() {
