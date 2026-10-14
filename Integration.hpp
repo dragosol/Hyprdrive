@@ -12,7 +12,8 @@
 // The rule (precedence, values, why both halves of auto) is in IntegrationRule.hpp.
 // In one line: HYPRDRIVE_NO_OMARCHY=1 > HYPRDRIVE_INTEGRATION > the config key
 // plugin:hyprdrive:integration (auto|omarchy|none, default auto) > auto
-// (`omarchy` on PATH AND ~/.local/state/omarchy/current).
+// (an Omarchy install -- `omarchy` on PATH, ~/.local/share/omarchy/bin/omarchy or
+// $OMARCHY_PATH -- AND ~/.local/state/omarchy/current).
 //
 // ---- C++ (this header) -----------------------------------------------------
 //

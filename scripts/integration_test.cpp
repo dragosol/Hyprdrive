@@ -27,8 +27,14 @@ static int g_checks = 0, g_failed = 0;
         }                                                                                                                                                                          \
     } while (0)
 
-static SProbe P(bool off, std::string env, std::string cfg, bool path, bool state) {
-    return SProbe{.noOmarchyEnv = off, .envValue = std::move(env), .configValue = std::move(cfg), .omarchyOnPath = path, .omarchyState = state};
+static SProbe P(bool off, std::string env, std::string cfg, bool path, bool state, bool installed = false, bool pathEnv = false) {
+    return SProbe{.noOmarchyEnv     = off,
+                  .envValue         = std::move(env),
+                  .configValue      = std::move(cfg),
+                  .omarchyOnPath    = path,
+                  .omarchyInstalled = installed,
+                  .omarchyPathEnv   = pathEnv,
+                  .omarchyState     = state};
 }
 
 static std::string sq(const std::string& s) { // single-quote for sh
@@ -49,6 +55,18 @@ int main() {
     CHECK(decide(P(false, "", "", false, true)).desktop == EDesktop::None);  // hyprtest on fedora
     CHECK(decide(P(false, "", "", false, false)).desktop == EDesktop::None);
     CHECK(decide(P(false, "", "auto", true, true)).source == ESource::Auto);
+
+    // The install half has three signals: PATH, ~/.local/share/omarchy/bin,
+    // $OMARCHY_PATH. Any one of them, with the state dir, is Omarchy -- a
+    // Hyprland started before the PATH carries Omarchy's bin dir (uwsm, a
+    // display manager, a nested test) still finds it. None of them alone is.
+    CHECK(decide(P(false, "", "", false, true, true, false)).desktop == EDesktop::Omarchy);
+    CHECK(decide(P(false, "", "", false, true, false, true)).desktop == EDesktop::Omarchy);
+    CHECK(decide(P(false, "", "", false, false, true, true)).desktop == EDesktop::None);
+    CHECK(decide(P(false, "", "", false, true, true, false)).reason == "omarchy in ~/.local/share/omarchy/bin and omarchy state dir present");
+    CHECK(decide(P(false, "", "", false, true, false, true)).reason == "OMARCHY_PATH set and omarchy state dir present");
+    CHECK(decide(P(false, "", "", true, true, true, true)).reason == "omarchy on PATH and omarchy state dir present"); // first signal names it
+    CHECK(decide(P(false, "none", "", true, true, true, true)).desktop == EDesktop::None);                             // overrides still win
 
     // The force-off beats everything, including an explicit omarchy.
     CHECK(decide(P(true, "omarchy", "omarchy", true, true)).desktop == EDesktop::None);
@@ -79,6 +97,12 @@ int main() {
     std::filesystem::create_directories(TMP / "empty");
     std::filesystem::create_directories(TMP / "state/omarchy/current");
     std::filesystem::create_directories(TMP / "nostate");
+    std::filesystem::create_directories(TMP / "home/.local/share/omarchy/bin");
+    if (FILE* F = std::fopen((TMP / "home/.local/share/omarchy/bin/omarchy").c_str(), "w")) {
+        std::fputs("#!/bin/sh\n", F);
+        std::fclose(F);
+    }
+    chmod((TMP / "home/.local/share/omarchy/bin/omarchy").c_str(), 0755);
     if (FILE* F = std::fopen((TMP / "bin/omarchy").c_str(), "w")) {
         std::fputs("#!/bin/sh\n", F);
         std::fclose(F);
@@ -91,14 +115,18 @@ int main() {
         for (const auto& ENV : VALUES)
             for (const auto& CFG : VALUES)
                 for (const bool PATH_ : {false, true})
-                    for (const bool STATE : {false, true}) {
-                        const auto  WANT = decide(P(OFF, ENV, CFG, PATH_, STATE));
+                    for (const bool STATE : {false, true})
+                        for (const bool INST : {false, true})
+                            for (const bool OPENV : {false, true}) {
+                        const auto  WANT = decide(P(OFF, ENV, CFG, PATH_, STATE, INST, OPENV));
                         // env -i: nothing of the test runner's own environment
                         // (a real HYPRDRIVE_* or an Omarchy PATH) leaks in. The
                         // offline path uses only shell builtins, so a PATH of
                         // just the fake bin dir (or an empty one) is enough.
-                        std::string cmd = "env -i HOME=/nonexistent PATH=" + sq((TMP / (PATH_ ? "bin" : "empty")).string()) +
-                            " XDG_STATE_HOME=" + sq((TMP / (STATE ? "state" : "nostate")).string());
+                        std::string cmd = "env -i HOME=" + (INST ? sq((TMP / "home").string()) : std::string{"/nonexistent"}) +
+                            " PATH=" + sq((TMP / (PATH_ ? "bin" : "empty")).string()) + " XDG_STATE_HOME=" + sq((TMP / (STATE ? "state" : "nostate")).string());
+                        if (OPENV)
+                            cmd += " OMARCHY_PATH=" + sq((TMP / "home/.local/share/omarchy").string());
                         if (OFF)
                             cmd += " HYPRDRIVE_NO_OMARCHY=1";
                         if (!ENV.empty())
@@ -116,9 +144,9 @@ int main() {
                         ++shellCases;
                         CHECK(out == EXPECT);
                         if (out != EXPECT)
-                            std::printf("  case off=%d env=%s cfg=%s path=%d state=%d\n  want:\n%s  got:\n%s", OFF, ENV.c_str(), CFG.c_str(), PATH_, STATE, EXPECT.c_str(),
-                                        out.c_str());
-                    }
+                            std::printf("  case off=%d env=%s cfg=%s path=%d state=%d inst=%d openv=%d\n  want:\n%s  got:\n%s", OFF, ENV.c_str(), CFG.c_str(), PATH_, STATE,
+                                        INST, OPENV, EXPECT.c_str(), out.c_str());
+                            }
 
     // -q speaks through the exit status only.
     {

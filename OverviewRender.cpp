@@ -894,18 +894,31 @@ SP<Render::ITexture> glyph(const std::string& str, const CHyprColor& color, int 
     if (!ScrollOverview::Glyphs::containsPrivateUse(str))
         return text(str, color, px, false, family, 0, weight);
 
-    bool covered = true;
-    for (size_t at = 0; at < str.size() && covered;) {
-        const char32_t CP = ScrollOverview::Glyphs::decode(str, at);
-        if (ScrollOverview::Glyphs::isPrivateUse(CP) && !glyphFontCovers(CP))
-            covered = false;
-    }
-    if (covered) {
-        const auto& ICONFAMILY = ScrollOverview::Fonts::iconFamily(ScrollOverview::Config::glyphFontSetting());
-        const auto& FAMILY     = !family.empty() && familyInstalled(family) ? family : ICONFAMILY;
-        return textImpl(str, color, px, false, FAMILY, 0, weight);
-    }
+    // Does `covers` have every PUA codepoint of the string?
+    const auto ALLCOVERED = [&](auto&& covers) {
+        for (size_t at = 0; at < str.size();) {
+            const char32_t CP = ScrollOverview::Glyphs::decode(str, at);
+            if (ScrollOverview::Glyphs::isPrivateUse(CP) && !covers(CP))
+                return false;
+        }
+        return true;
+    };
 
+    // 1. The font the caller NAMED (an Omarchy menu entry's own font), by ITS
+    //    coverage. It used to be asked only whether it was installed, while
+    //    coverage was the icon font's: a menu glyph the icon font has and the
+    //    named font lacks was drawn in the named font -- pango then fell back
+    //    to whatever answered first (a box, or the "fl" ligature) -- and one the
+    //    named font has but the icon font lacks never reached it at all.
+    if (!family.empty() && familyInstalled(family) &&
+        ALLCOVERED([&](char32_t cp) { return ScrollOverview::Fonts::familyCovers(family, cp); }))
+        return textImpl(str, color, px, false, family, 0, weight);
+
+    // 2. The icon font chosen for plugin:hyprdrive:glyph_font.
+    if (ALLCOVERED(glyphFontCovers))
+        return textImpl(str, color, px, false, ScrollOverview::Fonts::iconFamily(ScrollOverview::Config::glyphFontSetting()), 0, weight);
+
+    // 3. The builtin SVG, for a single glyph we ship.
     if (const char32_t CP = ScrollOverview::Glyphs::single(str); CP && ScrollOverview::Glyphs::hasSvg(CP))
         return glyphSvg(CP, color, px);
     return nullptr; // a codepoint nobody can draw: no icon, never a box

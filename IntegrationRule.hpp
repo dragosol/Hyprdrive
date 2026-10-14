@@ -14,9 +14,14 @@
 //      root-owned /usr/share/omarchy is why this exists)
 //   2. HYPRDRIVE_INTEGRATION=auto|omarchy|none   -> that     (auto falls through)
 //   3. plugin:hyprdrive:integration = auto|omarchy|none -> that (auto falls through)
-//   4. auto: `omarchy` is an executable on PATH AND
-//      $XDG_STATE_HOME/omarchy/current (default ~/.local/state/omarchy/current)
-//      exists                                    -> omarchy, else none
+//   4. auto: an Omarchy INSTALL is there -- the first of
+//        a. `omarchy` is an executable on PATH,
+//        b. ~/.local/share/omarchy/bin/omarchy is an executable (Omarchy's own
+//           install dir: Hyprland is often started with a PATH that does not
+//           carry it yet -- uwsm/a display manager, a nested test session),
+//        c. $OMARCHY_PATH is set (Omarchy's uwsm env exports it)
+//      AND $XDG_STATE_HOME/omarchy/current (default
+//      ~/.local/state/omarchy/current) exists    -> omarchy, else none
 //
 // Env beats the config key because the env is the per-session override (a test
 // run, a nested instance) and the key is the standing preference. BOTH halves of
@@ -51,8 +56,10 @@ namespace ScrollOverview::Integration {
         bool        noOmarchyEnv = false; // HYPRDRIVE_NO_OMARCHY is "1" (exactly; "0" and "" are not a force-off)
         std::string envValue;             // HYPRDRIVE_INTEGRATION, "" when unset
         std::string configValue;          // plugin:hyprdrive:integration, "" before the key exists
-        bool        omarchyOnPath = false;
-        bool        omarchyState  = false;
+        bool        omarchyOnPath    = false; // an executable `omarchy` in a PATH entry
+        bool        omarchyInstalled = false; // ~/.local/share/omarchy/bin/omarchy is executable
+        bool        omarchyPathEnv   = false; // OMARCHY_PATH is set and non-empty
+        bool        omarchyState     = false;
     };
 
     struct SDecision {
@@ -108,11 +115,17 @@ namespace ScrollOverview::Integration {
         if (auto d = FORCED(parseValue(p.configValue), ESource::Config, "plugin:hyprdrive:integration", p.configValue))
             return *d;
 
-        const bool OMARCHY = p.omarchyOnPath && p.omarchyState;
-        std::string why    = OMARCHY ? "omarchy on PATH and omarchy state dir present" :
-                (!p.omarchyOnPath && !p.omarchyState) ? "no omarchy on PATH, no omarchy state dir" :
-                !p.omarchyOnPath                       ? "omarchy state dir present but no omarchy on PATH" :
-                                                         "omarchy on PATH but no omarchy state dir";
+        // The install half: which signal found it (the first, in rule order),
+        // or nothing.
+        const char* const CMD = p.omarchyOnPath ? "omarchy on PATH" :
+            p.omarchyInstalled                  ? "omarchy in ~/.local/share/omarchy/bin" :
+            p.omarchyPathEnv                    ? "OMARCHY_PATH set" :
+                                                  nullptr;
+        const bool        OMARCHY = CMD && p.omarchyState;
+        std::string       why     = OMARCHY ? std::string{CMD} + " and omarchy state dir present" :
+                (!CMD && !p.omarchyState) ? std::string{"no omarchy install (PATH, ~/.local/share/omarchy/bin, OMARCHY_PATH), no omarchy state dir"} :
+                !CMD                      ? std::string{"omarchy state dir present but no omarchy install (PATH, ~/.local/share/omarchy/bin, OMARCHY_PATH)"} :
+                                            std::string{CMD} + " but no omarchy state dir";
         return {OMARCHY ? EDesktop::Omarchy : EDesktop::None, ESource::Auto, note + why};
     }
 }

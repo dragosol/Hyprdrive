@@ -57,6 +57,18 @@ namespace ScrollOverview::Integration {
             }
         }
 
+        // Omarchy's own install: ~/.local/share/omarchy/bin/omarchy (what
+        // $OMARCHY_PATH points at on a stock install). Hyprland is often
+        // started with a PATH that does not carry that bin dir yet.
+        bool omarchyInstalled() {
+            const char* const HOME = std::getenv("HOME");
+            if (!HOME || !*HOME)
+                return false;
+            const std::string CAND = std::string{HOME} + "/.local/share/omarchy/bin/omarchy";
+            struct stat       st {};
+            return stat(CAND.c_str(), &st) == 0 && S_ISREG(st.st_mode) && access(CAND.c_str(), X_OK) == 0;
+        }
+
         // The same directory Config.cpp's omarchyTheme() reads colors.toml from:
         // $XDG_STATE_HOME/omarchy/current, else ~/.local/state/omarchy/current.
         // A symlink to a theme counts (stat follows it); a dangling one does not.
@@ -106,6 +118,9 @@ namespace ScrollOverview::Integration {
         p.envValue            = ENV ? ENV : "";
         p.configValue         = std::string{cfg};
         p.omarchyOnPath       = omarchyOnPath();
+        p.omarchyInstalled    = omarchyInstalled();
+        const char* const OP  = std::getenv("OMARCHY_PATH");
+        p.omarchyPathEnv      = OP && *OP;
         p.omarchyState        = omarchyState();
         return p;
     }

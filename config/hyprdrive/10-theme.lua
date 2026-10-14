@@ -25,7 +25,7 @@
 -- freeze the last value and stop following `omarchy theme set`.
 -- To pin deliberately, put the key in the raw-snippet block below.
 
-if hyprdrive_loaded() then
+if hyprdrive_loaded and hyprdrive_loaded() then
     hl.config({
         plugin = {
             hyprdrive = {

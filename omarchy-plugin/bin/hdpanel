@@ -250,6 +250,8 @@ def integration():
     state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     on_path = any(os.path.isfile(os.path.join(d or ".", "omarchy")) and os.access(os.path.join(d or ".", "omarchy"), os.X_OK)
                   for d in os.environ.get("PATH", "").split(":"))
+    on_path = (on_path or os.access(os.path.expanduser("~/.local/share/omarchy/bin/omarchy"), os.X_OK)
+               or bool(os.environ.get("OMARCHY_PATH")))
     _INTEGRATION = "omarchy" if on_path and os.path.exists(os.path.join(state, "omarchy", "current")) else "none"
     return _INTEGRATION
 
@@ -681,7 +683,7 @@ def write_panel_fragment(store):
         nest_set(tree, k, v)
     mosaic = mosaic_lua(store)
     if tree or mosaic:
-        body.append("if hyprdrive_loaded() then")
+        body.append("if hyprdrive_loaded and hyprdrive_loaded() then")
         if tree:
             body.append("    hl.config(%s)" % emit_table(tree, 4))
         body.extend("    " + line if line else "" for line in mosaic)
@@ -754,7 +756,7 @@ def mosaic_lua(store):
                 return []
             if not auto:
                 return body
-            return ["if hyprdrive_omarchy() then"] + ["    " + b if b else "" for b in body] + ["end"]
+            return ["if hyprdrive_omarchy and hyprdrive_omarchy() then"] + ["    " + b if b else "" for b in body] + ["end"]
 
         if cycle:
             lines += [
@@ -985,7 +987,7 @@ def write_gesture_fragment(gestures):
     for g in native:
         lines.append("pcall(function() hl.gesture({ %s }) end)" % ", ".join(gesture_fields(g, include_arg=bool(g.get("arg")))))
     if workspace:
-        lines.append("if hyprdrive_loaded() then")
+        lines.append("if hyprdrive_loaded and hyprdrive_loaded() then")
         for g in workspace:
             lines.append("    pcall(function() hl.plugin.hyprdrive.gesture({ %s }) end)" % ", ".join(gesture_fields(g)))
         lines.append("else")
@@ -993,7 +995,7 @@ def write_gesture_fragment(gestures):
             lines.append("    pcall(function() hl.gesture({ %s }) end)" % ", ".join(gesture_fields(g, include_arg=False)))
         lines.append("end")
     if plugin:
-        lines.append("if hyprdrive_loaded() then")
+        lines.append("if hyprdrive_loaded and hyprdrive_loaded() then")
         for g in plugin:
             lines.append("    pcall(function() hl.plugin.hyprdrive.gesture({ %s }) end)" % ", ".join(gesture_fields(g)))
         lines.append("end")

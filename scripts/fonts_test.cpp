@@ -90,11 +90,19 @@ static int runMode(const std::string& mode) {
             CHECK(!Fonts::iconCovers("auto", CP));
         CHECK(Fonts::iconFamily("Iosevka Nerd Font").empty()); // named but absent: detect -> none
         CHECK(!Fonts::installed("Iosevka Nerd Font"));
+        CHECK(!Fonts::familyCovers("Iosevka Nerd Font", 0xF07C)); // named, not installed: covers nothing
+        CHECK(!Fonts::familyCovers("", 0xF07C));
         (void)Fonts::matchFamily("monospace"); // no fonts: must simply not crash
         CHECK(Fonts::matchFamily("").empty());
     } else if (mode == "ligature") {
         CHECK(Fonts::iconFamily("auto").empty());
         CHECK(!Fonts::iconCovers("auto", 0xF002)); // the font HAS it -- as "fl"
+        // A NAMED family is answered from its own charset, not the icon
+        // font's: this one has U+F002 and lacks the anchor U+F07C.
+        const auto ONLY = Fonts::matchFamily("sans-serif"); // the one font installed
+        CHECK(!ONLY.empty() && Fonts::installed(ONLY));
+        CHECK(Fonts::familyCovers(ONLY, 0xF002));
+        CHECK(!Fonts::familyCovers(ONLY, 0xF07C));
     } else if (mode == "host") {
         const auto& FAM = Fonts::iconFamily("auto");
         if (!FAM.empty()) {
@@ -103,6 +111,8 @@ static int runMode(const std::string& mode) {
             CHECK(static_cast<double>(Fonts::iconCoverage("auto")) >= Fonts::MIN_COVERAGE * static_cast<double>(Glyphs::named().size()));
             // Naming the chosen family explicitly chooses it.
             CHECK(Fonts::iconFamily(FAM) == FAM);
+            // Its own coverage, asked by name, agrees with the choice.
+            CHECK(Fonts::familyCovers(FAM, 0xF07C));
         }
         CHECK(Fonts::iconFamily("builtin").empty() && !Fonts::iconCovers("builtin", 0xF07C));
         CHECK(!Fonts::matchFamily("monospace").empty());

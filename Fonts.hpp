@@ -48,6 +48,13 @@ namespace ScrollOverview::Fonts {
     // menu icon, say) is answered from that font's charset all the same.
     bool iconCovers(std::string_view setting, char32_t cp);
 
+    // Does the font a CALLER named (an Omarchy menu entry's "JetBrainsMono Nerd
+    // Font", say) have a glyph for `cp` in every one of its faces? False when no
+    // face of exactly that family is installed. Independent of the icon-font
+    // choice above: a menu's own font may cover icons the chosen one lacks, and
+    // the other way round. Cached per family.
+    bool familyCovers(const std::string& family, char32_t cp);
+
     // How many of Glyphs::named() the chosen font covers (diagnostics: the
     // `debug glyphs` line and the host test).
     size_t iconCoverage(std::string_view setting);

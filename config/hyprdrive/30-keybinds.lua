@@ -20,7 +20,7 @@
 -- because these binds exist). Inside it the global SUPER+mouse:272 window.drag
 -- bind cannot match, so a click with SUPER still held reaches the overview
 -- instead of being eaten by the drag bind.
-if hyprdrive_loaded() then
+if hyprdrive_loaded and hyprdrive_loaded() then
     hl.define_submap("hyprdrive", function()
         hl.bind("mouse:272",         hl.plugin.hyprdrive.window([[click]]), { mouse = true, description = "Overview: select" })
         hl.bind("SUPER + mouse:272", hl.plugin.hyprdrive.window([[click]]), { mouse = true, description = "Overview: select (SUPER held)" })

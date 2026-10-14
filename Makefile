@@ -69,6 +69,7 @@ check: hyprdrive.so
 	python3 scripts/private_modes_test.py
 	python3 scripts/hdicons_test.py
 	python3 scripts/settings_app_test.py
+	python3 scripts/integration_fallbacks_test.py
 
 PREFIX ?= $(HOME)/.local
 

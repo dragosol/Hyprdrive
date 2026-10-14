@@ -17,7 +17,7 @@ Prefix: `plugin:hyprdrive:`
 
 | key | type | default | range | description |
 | --- | --- | --- | --- | --- |
-| `integration` | string | `"auto"` |  | Omarchy integration: auto, omarchy or none (omarchy = use Omarchy's menu, theme files, agents and panel; auto = omarchy on PATH and ~/.local/state/omarchy/current exists) |
+| `integration` | string | `"auto"` |  | Omarchy integration: auto, omarchy or none (omarchy = use Omarchy's menu, theme files, agents and panel; auto = omarchy on PATH, in ~/.local/share/omarchy/bin or OMARCHY_PATH set, and ~/.local/state/omarchy/current exists) |
 | `gesture_distance` | int | `200` | >= 1 | gesture distance in pixels |
 | `gesture_detent` | float | `0.35` | 0 .. 0.9 | magnetic detent strength on the 3-finger workspace drag; 0 = linear |
 | `gesture_detent_label` | int | `1` | 0 .. 1 | show the workspace name pill on the card the workspace drag is settling on |

@@ -308,7 +308,7 @@ def render(vals, pins, palette_path, notes):
     for n in notes:
         A("-- note:   %s" % n)
     A("")
-    A("if hyprdrive_loaded() then")
+    A("if hyprdrive_loaded and hyprdrive_loaded() then")
     A("    hl.config({")
     A("        plugin = {")
     A("            hyprdrive = {")

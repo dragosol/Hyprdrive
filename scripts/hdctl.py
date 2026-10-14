@@ -311,7 +311,7 @@ def render_fragment(sch, pane, values):
     if plugin_pairs:
         # The guard: plugin:hyprdrive:* does not exist until the .so has
         # registered it, and an unguarded block throws on every boot [00-plugin].
-        L.append("if hyprdrive_loaded() then")
+        L.append("if hyprdrive_loaded and hyprdrive_loaded() then")
         L.append("    hl.config({")
         L.append("        plugin = {")
         L.append("            hyprdrive = {")

@@ -30,6 +30,10 @@ namespace {
 
     std::unordered_map<std::string, SIconChoice> g_choices; // setting -> choice
 
+    // family -> the intersection of its faces' charsets (owned), nullptr when
+    // no face of that family is installed.
+    std::unordered_map<std::string, FcCharSet*> g_familySets;
+
     bool fcReady() {
         static const bool OK = FcInit() == FcTrue;
         return OK;
@@ -204,6 +208,36 @@ namespace ScrollOverview::Fonts {
         return C.charset && FcCharSetHasChar(C.charset, cp);
     }
 
+    bool familyCovers(const std::string& family, char32_t cp) {
+        if (family.empty())
+            return false;
+        auto IT = g_familySets.find(family);
+        if (IT == g_familySets.end()) {
+            if (g_familySets.size() > 64) {
+                for (auto& [_, cs] : g_familySets)
+                    if (cs)
+                        FcCharSetDestroy(cs);
+                g_familySets.clear();
+            }
+            // Every face, intersected: the face pango picks for a weight must
+            // have it, and detect() grades a family by its worst face too.
+            FcCharSet* all = nullptr;
+            // (FcFontList matched the family against every name a face has, as
+            // installed() relies on, so no second filter on the first name.)
+            listFaces(family.c_str(), false, [&](const std::string&, FcCharSet* cs) {
+                if (!all)
+                    all = FcCharSetCopy(cs);
+                else {
+                    FcCharSet* const AND = FcCharSetIntersect(all, cs);
+                    FcCharSetDestroy(all);
+                    all = AND;
+                }
+            });
+            IT = g_familySets.emplace(family, all).first;
+        }
+        return IT->second && FcCharSetHasChar(IT->second, cp);
+    }
+
     size_t iconCoverage(std::string_view setting) {
         return choice(setting).covered;
     }
@@ -213,5 +247,9 @@ namespace ScrollOverview::Fonts {
             if (c.charset)
                 FcCharSetDestroy(c.charset);
         g_choices.clear();
+        for (auto& [_, cs] : g_familySets)
+            if (cs)
+                FcCharSetDestroy(cs);
+        g_familySets.clear();
     }
 }

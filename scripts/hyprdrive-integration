@@ -23,7 +23,8 @@
 #   1. HYPRDRIVE_NO_OMARCHY=1                  -> none
 #   2. HYPRDRIVE_INTEGRATION=omarchy|none      -> that (auto/unknown fall through)
 #   3. plugin:hyprdrive:integration            -> that (auto/unknown fall through)
-#   4. auto: `omarchy` executable on PATH AND
+#   4. auto: an Omarchy install -- `omarchy` executable on PATH, or
+#      ~/.local/share/omarchy/bin/omarchy executable, or $OMARCHY_PATH set -- AND
 #      ${XDG_STATE_HOME:-~/.local/state}/omarchy/current exists -> omarchy, else none
 set -u
 
@@ -106,12 +107,20 @@ else st=; fi
 state=0
 [ -n "$st" ] && [ -e "$st" ] && state=1
 
-if [ $on_path = 1 ] && [ $state = 1 ]; then
-    answer omarchy auto "${note}omarchy on PATH and omarchy state dir present"
-elif [ $on_path = 0 ] && [ $state = 0 ]; then
-    answer none auto "${note}no omarchy on PATH, no omarchy state dir"
-elif [ $on_path = 0 ]; then
-    answer none auto "${note}omarchy state dir present but no omarchy on PATH"
+cmd=
+if [ $on_path = 1 ]; then cmd="omarchy on PATH"
+elif [ -n "${HOME:-}" ] && [ -f "$HOME/.local/share/omarchy/bin/omarchy" ] && [ -x "$HOME/.local/share/omarchy/bin/omarchy" ]; then
+    cmd="omarchy in ~/.local/share/omarchy/bin"
+elif [ -n "${OMARCHY_PATH:-}" ]; then cmd="OMARCHY_PATH set"
+fi
+noinst="no omarchy install (PATH, ~/.local/share/omarchy/bin, OMARCHY_PATH)"
+
+if [ -n "$cmd" ] && [ $state = 1 ]; then
+    answer omarchy auto "${note}$cmd and omarchy state dir present"
+elif [ -z "$cmd" ] && [ $state = 0 ]; then
+    answer none auto "${note}$noinst, no omarchy state dir"
+elif [ -z "$cmd" ]; then
+    answer none auto "${note}omarchy state dir present but $noinst"
 else
-    answer none auto "${note}omarchy on PATH but no omarchy state dir"
+    answer none auto "${note}$cmd but no omarchy state dir"
 fi

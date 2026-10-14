@@ -73,7 +73,7 @@ check("omarchy: off disables Omarchy's leaves + windowsMove",
 check("omarchy: on restores looknfeel's curves", restored and "easeOutQuint" in on and "popin 87%" in on)
 lines = "\n".join(om.mosaic_lua({"keys": {om.MOSAIC_ON: True}}))
 check("omarchy: auto = Super+L + Super+arrows, under hyprdrive_omarchy()",
-      "if hyprdrive_omarchy() then" in lines and "hl.unbind('SUPER + L')" in lines and "SUPER + LEFT" in lines)
+      "if hyprdrive_omarchy and hyprdrive_omarchy() then" in lines and "hl.unbind('SUPER + L')" in lines and "SUPER + LEFT" in lines)
 
 na = load("none")
 check("integration forced none", na.integration() == "none")

@@ -465,12 +465,12 @@ static void registerConfigValuesFor() {
     using namespace ::Config::Values;
 
     // NATIVE PORT P0-1 (Integration.hpp). The standing answer to "is this
-    // Omarchy?": auto detects (omarchy on PATH and its state dir), omarchy and
+    // Omarchy?": auto detects (an omarchy install and its state dir), omarchy and
     // none force it. HYPRDRIVE_NO_OMARCHY=1 / HYPRDRIVE_INTEGRATION beat it for a
     // session. Read on every reload by Integration::reevaluate(); a value that is
     // not one of the three is auto, and `hyprctl hyprdrive-integration` says so.
     addKey(makeShared<CStringValue>(KEY("integration"),
-                                    "Omarchy integration: auto, omarchy or none (omarchy = use Omarchy's menu, theme files, agents and panel; auto = omarchy on PATH and ~/.local/state/omarchy/current exists)",
+                                    "Omarchy integration: auto, omarchy or none (omarchy = use Omarchy's menu, theme files, agents and panel; auto = omarchy on PATH, in ~/.local/share/omarchy/bin or OMARCHY_PATH set, and ~/.local/state/omarchy/current exists)",
                                     Hyprlang::STRING{"auto"}));
     addKey(makeShared<CIntValue>(KEY("gesture_distance"), "gesture distance in pixels", 200, SIntValueOptions{.min = 1}));
     // MAGNETIC DETENT on the 3-finger workspace drag. The accumulator stays

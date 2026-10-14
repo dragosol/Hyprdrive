@@ -80,8 +80,9 @@ end
 -- loaded (it also sees plugin:hyprdrive:integration); otherwise the same rule
 -- here, minus the config key (which cannot exist without the plugin):
 --   HYPRDRIVE_NO_OMARCHY=1 -> none; HYPRDRIVE_INTEGRATION=omarchy|none -> that;
---   else omarchy only if an `omarchy` file is on PATH AND the omarchy state dir
---   exists. (Lua cannot test the exec bit without spawning, and Hyprland reaps
+--   else omarchy only if an Omarchy install is there (an `omarchy` file on PATH,
+--   ~/.local/share/omarchy/bin/omarchy, or $OMARCHY_PATH set) AND the omarchy
+--   state dir exists. (Lua cannot test the exec bit without spawning, and Hyprland reaps
 --   its own children, so "on PATH" here is "a readable file named omarchy".)
 -- The type checks are for Omarchy's keybinding scanner, whose stub `hl`
 -- answers every lookup with a table.
@@ -107,6 +108,10 @@ function hyprdrive_integration()
             on_path = true
             break
         end
+    end
+    if not on_path then
+        local op = os.getenv("OMARCHY_PATH")
+        on_path = file_exists(home .. "/.local/share/omarchy/bin/omarchy") or (op ~= nil and op ~= "")
     end
     local state = os.getenv("XDG_STATE_HOME")
     if not state or state == "" then

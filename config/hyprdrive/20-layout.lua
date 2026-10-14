@@ -4,7 +4,7 @@
 -- above BEGIN is rewritten wholesale when this fragment is regenerated;
 -- everything between BEGIN and END is carried across verbatim.
 
-if hyprdrive_loaded() then
+if hyprdrive_loaded and hyprdrive_loaded() then
     hl.config({
         plugin = {
             hyprdrive = {
