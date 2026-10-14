@@ -3394,7 +3394,10 @@ enum class ERow : uint8_t {
 
 // OMARCHY-STYLE ROWS: a Nerd Font glyph column, the label, and a dim hint on the
 // right -- the way the Omarchy menu lays its own rows out. The glyphs are all
-// from the Font Awesome block, which every Nerd Font release carries.
+// from the Font Awesome block, which every Nerd Font release carries. Without
+// one installed (plain Hyprland), OverviewRender::glyph draws hyprdrive's own
+// SVG of each instead, and the "›" in a hint is text()'s stand-in: every
+// codepoint below has an entry in Glyphs.cpp, and the host test checks that.
 namespace MenuGlyph {
     inline constexpr const char* NEW      = "\uf067"; // plus
     inline constexpr const char* ACTION   = "\uf054"; // chevron-right
@@ -4071,7 +4074,7 @@ void renderMenu(PHLMONITOR monitor, const SLayout& layout) {
             continue;
         }
         if (!ROW.glyph.empty())
-            t.glyph = OverviewRender::text(ROW.glyph, ROW.disabled ? DIM_COLOR.modifyA(0.45F) : ROW.danger ? DANGER_COLOR : DIM_COLOR.modifyA(0.8F), FONTPX, false, "JetBrainsMono Nerd Font", 0, 400);
+            t.glyph = OverviewRender::glyph(ROW.glyph, ROW.disabled ? DIM_COLOR.modifyA(0.45F) : ROW.danger ? DANGER_COLOR : DIM_COLOR.modifyA(0.8F), FONTPX, 400);
         if (!ROW.hint.empty())
             t.hint = OverviewRender::text(ROW.hint, DIM_COLOR, FONTPX, false, "", 0, 400);
 

@@ -14,6 +14,14 @@
 #                     twin scripts/hyprdrive-integration, case for case.
 #   search_providers_nobus_test  the GNOME search worker with no session bus
 #                     (the std::terminate that took the compositor down).
+#   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
+#                     that renders, and labels never keep an uncovered PUA
+#                     codepoint (no tofu on a desktop without a Nerd Font).
+#   fonts_test        Fonts.cpp against fontconfig configs it writes itself:
+#                     no icon font, a stand-in "fl"-ligature font, and the
+#                     host's real fonts.
+#   palette_file_test PaletteFile.cpp -- theme:palette_file's three shapes
+#                     (colors.toml, pywal, matugen 2.x/3.x) onto the roles.
 #
 # Anything that needs a running Hyprland is a GATE (scripts/gates/), not a host
 # test, and lives in scripts/suite.sh instead.
@@ -65,6 +73,11 @@ run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-con
 run stack_reader_test scripts/stack_reader_test.cpp StackReader.cpp StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
 run omarchy_search_test scripts/omarchy_search_test.cpp OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
 run integration_test scripts/integration_test.cpp
+# shellcheck disable=SC2046
+run glyphs_test scripts/glyphs_test.cpp Glyphs.cpp $(pkg-config --cflags --libs librsvg-2.0)
+# shellcheck disable=SC2046
+run fonts_test scripts/fonts_test.cpp Fonts.cpp Glyphs.cpp $(pkg-config --cflags --libs fontconfig)
+run palette_file_test scripts/palette_file_test.cpp PaletteFile.cpp
 # shellcheck disable=SC2046
 run search_providers_nobus_test scripts/search_providers_nobus_test.cpp SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
 

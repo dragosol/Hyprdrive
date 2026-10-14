@@ -1897,8 +1897,11 @@ namespace ScrollOverview::Stacks {
         }
     }
 
+    // auto (the default) and its old name omarchy: the Omarchy theme's icons
+    // on Omarchy, GTK's elsewhere -- omarchyIconTheme() is empty off Omarchy
+    // (audit A16). gtk, or anything else, is GTK's.
     std::string themePrefix(const std::string& which) {
-        if (which != "omarchy")
+        if (which != "omarchy" && which != "auto")
             return "";
         const auto T = AppSearch::omarchyIconTheme();
         return T.empty() ? "" : "@" + T + ":";

@@ -93,6 +93,19 @@ inline constexpr float LABEL_PILL_GAP = 8.F;
 // becomes cached by gaining a prefix and nothing else.
 SP<Render::ITexture> text(const std::string& str, const CHyprColor& color, int fontSize, bool italic = false, const std::string& fontFamily = "", int maxWidth = 0,
                           int weight = 0);
+// text() never hands pango a Private Use Area codepoint it has no font for:
+// such a codepoint becomes its plain-Unicode stand-in ("›", "↑") or is dropped
+// (Glyphs::substitute), and one the icon font covers is drawn FROM that font.
+
+// ONE UI GLYPH -- a Font Awesome codepoint the plugin names (""), or an
+// Omarchy menu entry's icon. Drawn from the icon font (Fonts::iconFamily for
+// plugin:hyprdrive:glyph_font; `family` first when the caller names one that
+// is installed) when it covers the codepoint, else hyprdrive's own SVG of it
+// (Glyphs::svg) at px x px in `color`, else nothing -- nullptr, which every
+// caller already treats as "no glyph". A string with no PUA codepoint (an
+// emoji) is plain text(). Never a tofu box, and never the "fl" ligature some
+// UI fonts keep at U+F002.
+SP<Render::ITexture> glyph(const std::string& str, const CHyprColor& color, int px, int weight = 0, const std::string& family = "");
 // Pango wrap inside maxW×maxH. Used by the inspector so long paths and hints
 // stay inside the results plate instead of painting off the card.
 SP<Render::ITexture> textWrapped(const std::string& str, const CHyprColor& color, int fontSize, int maxW, int maxH, bool italic = false, const std::string& fontFamily = "",

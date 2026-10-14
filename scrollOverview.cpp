@@ -7336,8 +7336,10 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(data));
     };
 
-    const auto GLYPHTEX = OverviewRender::text("\uF002", ScrollOverview::Config::highlightForeground().modifyA(0.92F), std::max(1, sc<int>(std::round(OVERVIEW_PILL_GLYPHPX * SCALE))), false,
-                                                      "JetBrainsMono Nerd Font", 0);
+    // glyph(), not text(): the magnifier is U+F002, which is the "fl" ligature
+    // in fonts that are not icon fonts -- see Glyphs.hpp.
+    const auto GLYPHTEX =
+        OverviewRender::glyph("\uF002", ScrollOverview::Config::highlightForeground().modifyA(0.92F), std::max(1, sc<int>(std::round(OVERVIEW_PILL_GLYPHPX * SCALE))));
     if (DRAWPILL && GLYPHTEX && GLYPHTEX->ok()) {
         CBox glyphBox = {
             BADGE.x + std::round((BADGE.width - sc<float>(GLYPHTEX->m_size.x)) / 2.F),
@@ -7372,7 +7374,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         // Glyph, headword, source -- and on the right, what Enter does.
         const char* GLYPH  = L.tool.kind == 1 ? "\uf02d" : "\uf1ab"; // book / language
         float       headX  = HEAD.x;
-        if (const auto GTEX = OverviewRender::text(GLYPH, ACCENT, std::max(1, sc<int>(std::round(20.F * SCALE))), false, "JetBrainsMono Nerd Font", 0); GTEX && GTEX->ok()) {
+        if (const auto GTEX = OverviewRender::glyph(GLYPH, ACCENT, std::max(1, sc<int>(std::round(20.F * SCALE)))); GTEX && GTEX->ok()) {
             CBox g{HEAD.x, HEAD.y + std::round((HEAD.height - sc<float>(GTEX->m_size.y)) / 2.F), sc<float>(GTEX->m_size.x), sc<float>(GTEX->m_size.y)};
             ADDTEX(GTEX, g.round());
             headX += sc<float>(GTEX->m_size.x) + std::round(12.F * SCALE);
@@ -7501,10 +7503,10 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
             const float ICOND = std::round(18.F * SCALE);
             if (OmarchySearch::isGlyphIcon(ITEM.icon)) {
                 const int         GLYPHPX = std::max(1, sc<int>(std::round(16.F * SCALE)));
-                const std::string FAMILY  = ITEM.iconFont.empty() ? "JetBrainsMono Nerd Font" : ITEM.iconFont;
-                const auto        GLYPHTEX =
-                    OverviewRender::text(ITEM.icon, ITEM.selected ? ScrollOverview::Config::themeSelectedText() : ScrollOverview::Config::themeForeground(), GLYPHPX, false,
-                                         FAMILY, sc<int>(ICOND + std::round(8.F * SCALE)), 400);
+                // The entry's own family when it names an installed one, else
+                // the detected icon font, else hyprdrive's SVG -- never a box.
+                const auto GLYPHTEX = OverviewRender::glyph(ITEM.icon, ITEM.selected ? ScrollOverview::Config::themeSelectedText() : ScrollOverview::Config::themeForeground(),
+                                                            GLYPHPX, 400, ITEM.iconFont);
                 if (GLYPHTEX && GLYPHTEX->ok()) {
                     CBox glyphBox{ROW.x + ROWPAD, ROW.y + std::round((ROW.height - sc<float>(GLYPHTEX->m_size.y)) / 2.F), sc<float>(GLYPHTEX->m_size.x),
                                   sc<float>(GLYPHTEX->m_size.y)};

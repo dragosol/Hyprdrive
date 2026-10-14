@@ -2,7 +2,9 @@
 #include "FlightBlur.hpp"
 
 #include "Compat.hpp"
+#include "Fonts.hpp"
 #include "Integration.hpp"
+#include "PaletteFile.hpp"
 
 #include <chrono>
 
@@ -24,6 +26,11 @@
 #include <deque>
 #include <fstream>
 #include <initializer_list>
+#include <iterator>
+#include <sstream>
+#include <tuple>
+#include <unordered_map>
+#include <cctype>
 #include <array>
 #include <optional>
 #include <regex>
@@ -483,8 +490,49 @@ static void registerConfigValuesFor() {
     // Default alpha 0 = unset; highlightColor() then falls back to the theme's
     // border accent, which is what every build before this one used.
     addKey(makeShared<CGradientValue>(KEY("col_highlight"),
-                                      "colour of the selection/hover highlights; unset falls back to general:col.active_border",
+                                      "colour of the selection/hover highlights; unset falls back to theme:accent, then general:col.active_border",
                                       CHyprColor{0.F, 0.F, 0.F, 0.F}));
+
+    // THE PALETTE, EXPLICITLY (native port A12, P2-8). Every surface the plugin
+    // draws reads six roles -- background, foreground, muted text, accent,
+    // selection, urgent -- through the theme*() accessors in this file. Each
+    // role resolves, first answer wins:
+    //   1. its key below, when set (alpha 0, the default, = unset);
+    //   2. theme:palette_file, when set (colors.toml-style key = "#hex" lines,
+    //      a pywal colors.json or a matugen JSON export);
+    //   3. on Omarchy (Integration::omarchy()), the current theme's
+    //      colors.toml -- exactly what every build before this one read;
+    //   4. otherwise derived from Hyprland's own live values:
+    //      misc:background_color, general:col.active_border /
+    //      col.inactive_border, group:groupbar:text_color -- each only where
+    //      it still reads against the background.
+    // A reload re-resolves all of it (invalidateThemeCache), so a theme tool
+    // that rewrites the file and runs `hyprctl reload` retints every surface.
+    addKey(makeShared<CColorValue>(KEY("theme:background"), "palette: plate/background colour (alpha 0 = palette file, Omarchy colors.toml, else misc:background_color)",
+                                   (Hyprlang::INT)0));
+    addKey(makeShared<CColorValue>(KEY("theme:foreground"),
+                                   "palette: text colour (alpha 0 = palette file, Omarchy colors.toml, else group:groupbar:text_color if it reads on the background, else white/near-black)",
+                                   (Hyprlang::INT)0));
+    addKey(makeShared<CColorValue>(KEY("theme:muted"), "palette: secondary text (alpha 0 = palette file, Omarchy colors.toml, else general:col.inactive_border if it reads, else a fg/bg mix)",
+                                   (Hyprlang::INT)0));
+    addKey(makeShared<CColorValue>(KEY("theme:accent"), "palette: accent for headings, rings and badges (alpha 0 = palette file, Omarchy colors.toml, else the highlight colour)",
+                                   (Hyprlang::INT)0));
+    addKey(makeShared<CColorValue>(KEY("theme:selection"), "palette: selected-row fill (alpha 0 = palette file, Omarchy colors.toml, else the highlight at 35%)",
+                                   (Hyprlang::INT)0));
+    addKey(makeShared<CColorValue>(KEY("theme:urgent"), "palette: destructive/urgent colour (alpha 0 = palette file, Omarchy colors.toml red, else a soft red)",
+                                   (Hyprlang::INT)0));
+    addKey(makeShared<CStringValue>(KEY("theme:palette_file"),
+                                    "palette file for the theme:* roles: colors.toml-style (key = \"#hex\"), pywal colors.json or matugen JSON; ~ expands; empty = none",
+                                    Hyprlang::STRING{""}));
+    // THE FONT (A14, P2-9). Empty = misc:font_family when it is pinned (not
+    // Hyprland's "Sans" default), else the Omarchy monospace on Omarchy
+    // (fonts.conf, as before), else what fontconfig resolves "monospace" to.
+    addKey(makeShared<CStringValue>(KEY("font"), "font family for overview/dock text; empty = misc:font_family if set, else the fontconfig monospace (Omarchy: omarchy font set)",
+                                    Hyprlang::STRING{""}));
+    // THE GLYPH FONT (A15, P1-6; Glyphs.hpp, Fonts.hpp).
+    addKey(makeShared<CStringValue>(KEY("glyph_font"),
+                                    "font for menu/search glyphs: auto (an installed Nerd/Symbols font that covers them), builtin (hyprdrive's own drawn icons), or a family name",
+                                    Hyprlang::STRING{"auto"}));
     addKey(makeShared<CFloatValue>(KEY("scale"), "overview scale", 0.82F, SFloatValueOptions{.min = 0.1F, .max = 0.9F}));
     // GLOBAL ANIMATION SPEED. 1 = shipped timings, higher = slower, and it
     // reaches EVERYTHING through animElapsedMs: the overview's open/close, the
@@ -762,8 +810,8 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CBoolValue>(KEY("dock:builtin_icons"),
                                   "dock stacks: hyprdrive's own empty-stack artwork (false = the folder icon)", true));
     addKey(makeShared<CStringValue>(KEY("dock:stack_icon_theme"),
-                                    "dock stacks: icon theme for stacks and their files -- omarchy (the current Omarchy theme's icons) or gtk",
-                                    Hyprlang::STRING{"omarchy"}));
+                                    "dock stacks: icon theme for stacks and their files -- auto (the Omarchy theme's icons on Omarchy, else GTK's), omarchy (alias of auto) or gtk",
+                                    Hyprlang::STRING{"auto"}));
     addKey(makeShared<CStringValue>(KEY("dock:trash_icon"), "dock: the Trash's icon -- hyprdrive (its own artwork), omarchy or gtk", Hyprlang::STRING{"hyprdrive"}));
     addKey(makeShared<CStringValue>(KEY("dock:trash_style"), "dock: hyprdrive Trash glass -- auto (follows the theme), light, dark or clear",
                                     Hyprlang::STRING{"auto"}));
@@ -900,21 +948,20 @@ static CHyprColor colorFromArgb(uint32_t argb, float alphaOverride = -1.F) {
     return CHyprColor{sc<float>((argb >> 16) & 0xFF) / 255.F, sc<float>((argb >> 8) & 0xFF) / 255.F, sc<float>(argb & 0xFF) / 255.F, a};
 }
 
-struct SOmarchyThemeColors {
-    bool     valid           = false;
-    bool     isLight         = false;
-    uint32_t background      = 0xFF0c0b0c;
-    uint32_t foreground      = 0xFFFAFCFB;
-    uint32_t muted           = 0xFF584e51;
-    uint32_t accent          = 0xFFb59790;
-    uint32_t selection       = 0xFF584e51;
-    uint32_t darkForeground  = 0;
-    uint32_t lightForeground = 0;
-    uint32_t urgent          = 0xFFa55555;
-    bool     hasDarkFg       = false;
-    bool     hasLightFg      = false;
-    bool     hasUrgent       = false;
-};
+// ---- THE PALETTE (native port A12/A13, P2-8) --------------------------------
+//
+// Six roles -- background, foreground, muted, accent, selection, urgent -- and
+// the first answer wins, per role (the keys' registration, above, has the list):
+// theme:<role> key > theme:palette_file > Omarchy's colors.toml (on Omarchy
+// only) > derived from Hyprland's live values. The FILE half is SPalette: one
+// parse of whichever file applies, cached on its path and mtime.
+//
+// Omarchy's colors.toml keeps the exact semantics every earlier build had: a
+// role the file omits takes the fixed default below (the old
+// SOmarchyThemeColors initialisers), and the file counts as having it. A
+// palette_file does NOT: a role it omits falls through to the derivation, so a
+// pywal file with no "selection" still gets a sensible one.
+using SPalette = ScrollOverview::PaletteFile::SPalette;
 
 static float relLuma(const CHyprColor& c) {
     return (0.2126F * c.r) + (0.7152F * c.g) + (0.0722F * c.b);
@@ -939,7 +986,11 @@ static CHyprColor readableOn(const CHyprColor& bg, std::initializer_list<CHyprCo
     return relLuma(bg) <= 0.55F ? CHyprColor{1.F, 1.F, 1.F, 1.F} : CHyprColor{0.12F, 0.12F, 0.12F, 1.F};
 }
 
-// How often the theme file is looked at, at most. omarchyTheme() sits behind
+static CHyprColor mixColor(const CHyprColor& a, const CHyprColor& b, float t) {
+    return CHyprColor{a.r * (1.F - t) + b.r * t, a.g * (1.F - t) + b.g * t, a.b * (1.F - t) + b.b * t, 1.F};
+}
+
+// How often the theme file is looked at, at most. palette() sits behind
 // six colour accessors and every one of those is read per card per frame, so
 // the mtime check ran -- getenv, a path concatenation and a stat() -- thousands
 // of times a second to notice a file the user changes by hand. Same number and
@@ -955,6 +1006,62 @@ void invalidateThemeCache() {
     ++g_themeGeneration;
 }
 
+// A plugin colour key's value when it is SET (alpha > 0), read through the
+// cached handle. Before registration there is no key to read -- binding one
+// aborts Hyprland (Config.hpp, earlyPluginKey) -- so it is simply unset.
+static std::optional<CHyprColor> explicitColor(std::string_view key, CConfigValue<Hyprlang::INT>** slot) {
+    if (!g_pluginKeysRegistered)
+        return std::nullopt;
+    if (!*slot)
+        *slot = &valueRef<Hyprlang::INT>(key);
+    const uint32_t ARGB = sc<uint32_t>(***slot);
+    if ((ARGB >> 24) == 0)
+        return std::nullopt;
+    return colorFromArgb(ARGB);
+}
+
+#define THEME_KEY(NAME)                                                                                                                                                            \
+    ([] {                                                                                                                                                                          \
+        static CConfigValue<Hyprlang::INT>* slot = nullptr;                                                                                                                       \
+        return explicitColor("plugin:hyprdrive:theme:" NAME, &slot);                                                                                                               \
+    }())
+
+// The value of a plugin string key, or `fallback` before registration.
+static std::string pluginString(std::string_view key, std::string_view fallback = {}) {
+    if (!g_pluginKeysRegistered)
+        return std::string{fallback};
+    auto v = getValue<std::string>(key);
+    if (v == STRVAL_EMPTY)
+        v.clear();
+    return v;
+}
+
+static std::string expandHome(std::string path) {
+    if (path.starts_with("~/")) {
+        const char* HOME = std::getenv("HOME");
+        path             = (HOME && *HOME) ? std::string{HOME} + path.substr(1) : std::string{};
+    }
+    return path;
+}
+
+// Which file the palette comes from: theme:palette_file when set, else
+// Omarchy's colors.toml ON OMARCHY ONLY (Integration.hpp -- fedora's hyprtest
+// has the state files and no Omarchy, and a vanilla box that once had Omarchy
+// keeps them), else none. `omarchy` says which rules apply to what is read.
+static std::string paletteFilePath(bool& omarchy) {
+    omarchy = false;
+    if (auto file = expandHome(pluginString("plugin:hyprdrive:theme:palette_file")); !file.empty())
+        return file;
+    if (!ScrollOverview::Integration::omarchy())
+        return {};
+    omarchy                 = true;
+    const char* const STATE = std::getenv("XDG_STATE_HOME");
+    const char* const HOME  = std::getenv("HOME");
+    return (STATE && *STATE) ? std::string{STATE} + "/omarchy/current/theme/colors.toml" :
+        (HOME && *HOME)      ? std::string{HOME} + "/.local/state/omarchy/current/theme/colors.toml" :
+                               std::string{};
+}
+
 // Omarchy writes the active palette into colors.toml on `omarchy theme set`
 // and reloads Hyprland. Cached on mtime so a frame does not reopen the file,
 // and the mtime itself behind THEME_POLL_MS so a frame does not stat it either.
@@ -962,28 +1069,28 @@ void invalidateThemeCache() {
 // `last` is what the previous FULL check resolved to, and the throttled path
 // returns exactly that -- handing back `cachedTheme` would resurrect a palette
 // whose file has since gone away.
-static const SOmarchyThemeColors& omarchyTheme() {
-    static const SOmarchyThemeColors  NONE{};
-    static SOmarchyThemeColors        cachedTheme;
-    static const SOmarchyThemeColors* last = &NONE;
-    static std::string                cachedPath;
-    static time_t                     cachedMtime = 0;
-    static Time::steady_tp            checkedAt{};
-    static uint64_t                   seenGeneration = 0;
+static const SPalette& palette() {
+    static const SPalette  NONE{};
+    static SPalette        cachedTheme;
+    static const SPalette* last = &NONE;
+    static std::string     cachedPath;
+    static time_t          cachedMtime = 0;
+    static Time::steady_tp checkedAt{};
+    static uint64_t        seenGeneration = 0;
 
     const auto NOW = Time::steadyNow();
     if (seenGeneration == g_themeGeneration && std::chrono::duration<float, std::milli>(NOW - checkedAt).count() < THEME_POLL_MS)
         return *last;
 
-    checkedAt      = NOW;
-    seenGeneration = g_themeGeneration;
-    last           = &NONE;
+    // A reload can change WHICH file applies (palette_file, the integration),
+    // not just its contents: a new generation re-parses whatever it lands on.
+    const bool NEWGEN = seenGeneration != g_themeGeneration;
+    checkedAt         = NOW;
+    seenGeneration    = g_themeGeneration;
+    last              = &NONE;
 
-    const char* const STATE = std::getenv("XDG_STATE_HOME");
-    const char* const HOME  = std::getenv("HOME");
-    const std::string PATH  = (STATE && *STATE) ? std::string{STATE} + "/omarchy/current/theme/colors.toml" :
-                              (HOME && *HOME)   ? std::string{HOME} + "/.local/state/omarchy/current/theme/colors.toml" :
-                                                  std::string{};
+    bool              omarchy = false;
+    const std::string PATH    = paletteFilePath(omarchy);
     if (PATH.empty())
         return NONE;
 
@@ -993,7 +1100,7 @@ static const SOmarchyThemeColors& omarchyTheme() {
 
     last = &cachedTheme;
 
-    if (cachedTheme.valid && cachedPath == PATH && cachedMtime == st.st_mtime)
+    if (!NEWGEN && cachedTheme.valid && cachedPath == PATH && cachedMtime == st.st_mtime)
         return cachedTheme;
 
     cachedTheme = {};
@@ -1004,59 +1111,13 @@ static const SOmarchyThemeColors& omarchyTheme() {
     if (!in)
         return cachedTheme;
 
-    static const std::regex RE_KEYVAL{R"(^\s*([a-zA-Z0-9_]+)\s*=\s*[\"']?([^\"'\r\n]+)[\"']?)"};
-    static const std::regex RE_HEX{R"(^#?([0-9A-Fa-f]{6}))"};
+    bool              explicitMode = false;
+    const std::string TEXT{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    // Omarchy's file is colors.toml by definition; a palette_file may be any
+    // of the three shapes (PaletteFile.hpp sniffs which).
+    cachedTheme = omarchy ? ScrollOverview::PaletteFile::parseKeyValues(TEXT, explicitMode) : ScrollOverview::PaletteFile::parse(TEXT, explicitMode);
 
-    std::string line;
-    bool hasBg = false, hasFg = false, hasMuted = false, hasAccent = false, hasSel = false;
-    bool explicitMode = false;
-
-    while (std::getline(in, line)) {
-        std::smatch match;
-        if (!std::regex_search(line, match, RE_KEYVAL))
-            continue;
-
-        const auto KEY = match[1].str();
-        const auto VAL = match[2].str();
-
-        if (KEY == "mode") {
-            cachedTheme.isLight = (VAL.find("light") != std::string::npos);
-            explicitMode = true;
-            continue;
-        }
-
-        std::smatch hexMatch;
-        if (std::regex_search(VAL, hexMatch, RE_HEX)) {
-            const uint32_t RGB = 0xFF000000u | sc<uint32_t>(std::strtoul(hexMatch[1].str().c_str(), nullptr, 16));
-            if (KEY == "background") {
-                cachedTheme.background = RGB;
-                hasBg = true;
-            } else if (KEY == "foreground") {
-                cachedTheme.foreground = RGB;
-                hasFg = true;
-            } else if (KEY == "muted") {
-                cachedTheme.muted = RGB;
-                hasMuted = true;
-            } else if (KEY == "accent") {
-                cachedTheme.accent = RGB;
-                hasAccent = true;
-            } else if (KEY == "selection") {
-                cachedTheme.selection = RGB;
-                hasSel = true;
-            } else if (KEY == "dark_foreground") {
-                cachedTheme.darkForeground = RGB;
-                cachedTheme.hasDarkFg      = true;
-            } else if (KEY == "light_foreground") {
-                cachedTheme.lightForeground = RGB;
-                cachedTheme.hasLightFg      = true;
-            } else if (KEY == "red") {
-                cachedTheme.urgent    = RGB;
-                cachedTheme.hasUrgent = true;
-            }
-        }
-    }
-
-    if (!explicitMode && hasBg) {
+    if (!explicitMode && cachedTheme.hasBg) {
         const float r = sc<float>((cachedTheme.background >> 16) & 0xFF) / 255.F;
         const float g = sc<float>((cachedTheme.background >> 8) & 0xFF) / 255.F;
         const float b = sc<float>(cachedTheme.background & 0xFF) / 255.F;
@@ -1064,56 +1125,110 @@ static const SOmarchyThemeColors& omarchyTheme() {
         cachedTheme.isLight = (LUMA > 0.55F);
     }
 
-    if (!hasFg)
-        cachedTheme.foreground = cachedTheme.isLight ? 0xFF141414u : 0xFFFAFCFBu;
-    if (!hasMuted)
-        cachedTheme.muted = cachedTheme.isLight ? 0xFF606060u : 0xFF8A8588u;
+    if (omarchy) {
+        // The old colors.toml rules, verbatim: a missing fg/muted follows the
+        // mode, and every role counts as present (with its fixed default).
+        if (!cachedTheme.hasFg)
+            cachedTheme.foreground = cachedTheme.isLight ? 0xFF141414u : 0xFFFAFCFBu;
+        if (!cachedTheme.hasMuted)
+            cachedTheme.muted = cachedTheme.isLight ? 0xFF606060u : 0xFF8A8588u;
+        cachedTheme.hasBg = cachedTheme.hasFg = cachedTheme.hasMuted = cachedTheme.hasAccent = cachedTheme.hasSel = true;
+    } else if (!explicitMode && !cachedTheme.hasBg) {
+        // A palette file with no background: its light/dark is the plate's.
+        const auto BG       = colorFromArgb(sc<uint32_t>(*valueRef<Hyprlang::INT>("misc:background_color")));
+        cachedTheme.isLight = relLuma(BG) > 0.55F;
+    }
 
     cachedTheme.valid = true;
     return cachedTheme;
 }
 
-static std::optional<uint32_t> omarchyThemeBackgroundRgb() {
-    const auto& T = omarchyTheme();
-    return T.valid ? std::optional<uint32_t>(T.background) : std::nullopt;
+// Is a Hyprland key the user's, or still its compiled-in default? Asked of the
+// config manager (SConfigOptionReply::setByUser) once per theme generation, not
+// per frame: the accent sits under every tile ring. One static slot per call
+// site, so the hot path is a compare, not a string-keyed lookup.
+struct SSetByUser {
+    const char* key;
+    uint64_t    generation = 0;
+    bool        value      = false;
+};
+
+static bool setByUser(SSetByUser& s) {
+    if (s.generation != g_themeGeneration) {
+        s.generation = g_themeGeneration;
+        s.value      = false;
+        if (const auto& MGR = ::Config::mgr())
+            s.value = MGR->getConfigValue(s.key).setByUser;
+    }
+    return s.value;
+}
+
+// The plate colour the text has to read against: the explicit/file background
+// when there is one, else the dock's (which is misc:background_color unless
+// dock:background_color pins it). Alpha is the plate's; contrast ignores it.
+static CHyprColor plateBackground() {
+    if (const auto BG = THEME_KEY("background"))
+        return BG->modifyA(1.F);
+    if (const auto& P = palette(); P.valid && P.hasBg)
+        return colorFromArgb(P.background, 1.F);
+    return dockBackgroundColor();
 }
 
 bool isLightTheme() {
-    const auto& T = omarchyTheme();
-    if (T.valid)
-        return T.isLight;
+    if (THEME_KEY("background"))
+        return relLuma(plateBackground()) > 0.55F;
+    const auto& P = palette();
+    if (P.valid)
+        return P.isLight;
     const auto BG = dockBackgroundColor();
     const float LUMA = (0.2126F * BG.r) + (0.7152F * BG.g) + (0.0722F * BG.b);
     return LUMA > 0.55F;
 }
 
 CHyprColor themeForeground() {
-    const auto& T = omarchyTheme();
-    if (T.valid)
-        return colorFromArgb(T.foreground, 1.F);
+    if (const auto FG = THEME_KEY("foreground"))
+        return FG->modifyA(1.F);
+    const auto& P = palette();
+    if (P.valid && P.hasFg)
+        return colorFromArgb(P.foreground, 1.F);
+    // Vanilla: the groupbar title colour is the one text colour Hyprland's own
+    // config carries -- the user's, when they set it and it reads on the plate.
+    static SSetByUser GROUPTEXT{"group:groupbar:text_color"};
+    if (setByUser(GROUPTEXT)) {
+        static auto& TEXT = valueRef<Hyprlang::INT>("group:groupbar:text_color");
+        const auto   C    = colorFromArgb(sc<uint32_t>(*TEXT), 1.F);
+        if (lumaDelta(C, plateBackground()) >= 0.28F)
+            return C;
+    }
     return isLightTheme() ? CHyprColor{0.08F, 0.08F, 0.08F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F};
 }
 
 CHyprColor themeMutedText() {
-    const auto& T = omarchyTheme();
-    const auto BG = T.valid ? colorFromArgb(T.background, 1.F) : dockBackgroundColor();
-    const auto FG = themeForeground();
+    if (const auto M = THEME_KEY("muted"))
+        return M->modifyA(1.F);
+    const auto& T  = palette();
+    const auto  BG = plateBackground();
+    const auto  FG = themeForeground();
 
     // `muted` in colors.toml is often a surface/overlay, not body text. Prefer
     // light_foreground (Omarchy subtext) then dark_foreground, then muted —
-    // whichever still contrasts with the plate.
+    // whichever still contrasts with the plate. Off Omarchy with no palette,
+    // the user's inactive border is the one grey Hyprland has to offer.
     //
     // A fixed array, not a vector: three candidates at most, and this is read
     // once per label per frame -- the vector was a heap allocation to hold
     // 48 bytes of colour.
+    static SSetByUser         INACTIVE{"general:col.inactive_border"};
     std::array<CHyprColor, 3> cands{};
     size_t                    nCands = 0;
     if (T.valid && T.hasLightFg)
         cands[nCands++] = colorFromArgb(T.lightForeground, 1.F);
     if (T.valid && T.hasDarkFg)
         cands[nCands++] = colorFromArgb(T.darkForeground, 1.F);
-    if (T.valid)
+    if (T.valid && T.hasMuted)
         cands[nCands++] = colorFromArgb(T.muted, 1.F);
+    else if (setByUser(INACTIVE))
+        cands[nCands++] = restingBorderColor().modifyA(1.F);
 
     CHyprColor best = FG;
     float      bestD = -1.F;
@@ -1136,28 +1251,29 @@ CHyprColor themeMutedText() {
 }
 
 CHyprColor themeAccent() {
-    const auto& T = omarchyTheme();
-    if (T.valid)
+    if (const auto A = THEME_KEY("accent"))
+        return A->modifyA(1.F);
+    const auto& T = palette();
+    if (T.valid && T.hasAccent)
         return colorFromArgb(T.accent, 1.F);
     return highlightColor();
 }
 
 CHyprColor themeHeading() {
-    const auto& T = omarchyTheme();
-    const auto BG = T.valid ? colorFromArgb(T.background, 1.F) : dockBackgroundColor();
-    return readableOn(BG, {themeAccent(), themeForeground()});
+    return readableOn(plateBackground(), {themeAccent(), themeForeground()});
 }
 
 CHyprColor themeSelection() {
-    const auto& T = omarchyTheme();
-    if (T.valid)
+    if (const auto S = THEME_KEY("selection"))
+        return S->modifyA(1.F);
+    const auto& T = palette();
+    if (T.valid && T.hasSel)
         return colorFromArgb(T.selection, 1.F);
     return highlightColor().modifyA(0.35F);
 }
 
 CHyprColor themeSelectedFill() {
-    const auto& T = omarchyTheme();
-    const auto BG = T.valid ? colorFromArgb(T.background, 1.F) : dockBackgroundColor();
+    const auto BG  = plateBackground();
     const auto SEL = themeSelection();
     if (lumaDelta(SEL, BG) >= 0.10F)
         return SEL.modifyA(0.92F);
@@ -1175,7 +1291,9 @@ CHyprColor themeSelectedText() {
 }
 
 CHyprColor themeUrgent() {
-    const auto& T = omarchyTheme();
+    if (const auto U = THEME_KEY("urgent"))
+        return U->modifyA(1.F);
+    const auto& T = palette();
     if (T.valid && T.hasUrgent)
         return colorFromArgb(T.urgent, 1.F);
     return CHyprColor{0.95F, 0.35F, 0.35F, 1.F};
@@ -1190,9 +1308,29 @@ CHyprColor highlightColor() {
     if (const auto* G = gradientPtr(HIGHLIGHT); G && !G->m_colors.empty() && G->m_colors[0].a > 0.001F)
         return G->m_colors[0];
 
+    if (const auto A = THEME_KEY("accent"))
+        return A->modifyA(1.F);
+
+    // The window border -- when it is a CHOICE. Hyprland's compiled-in
+    // active_border is plain white, and a config that never set it drew every
+    // card, plate and dock outline in the overview as a white frame (the
+    // "plain white outline frames" of docs/native/SETUP-REPORT.md). Omarchy
+    // always sets it, so this changes nothing there.
     static auto& ACCENT = valueRef<::Config::IComplexConfigValue>("general:col.active_border");
     const auto*  G      = gradientPtr(ACCENT);
-    return (!G || G->m_colors.empty()) ? CHyprColor{1.F, 1.F, 1.F, 1.F} : G->m_colors[0];
+    static SSetByUser ACTIVESET{"general:col.active_border"};
+    if (G && !G->m_colors.empty() && (ScrollOverview::Integration::omarchy() || setByUser(ACTIVESET)))
+        return G->m_colors[0];
+
+    if (const auto& T = palette(); T.valid && T.hasAccent)
+        return colorFromArgb(T.accent, 1.F);
+
+    // Nothing anywhere names an accent: a quiet one from the plate itself --
+    // the foreground halfway into the background, a ring that separates a card
+    // without shouting. Not themeForeground(): that can ask for the accent.
+    const auto BG = plateBackground();
+    const auto FG = relLuma(BG) > 0.55F ? CHyprColor{0.08F, 0.08F, 0.08F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F};
+    return mixColor(BG.modifyA(1.F), FG, 0.42F);
 }
 
 // The ring a grid tile wears when nothing is on it (the window's own inactive
@@ -1229,9 +1367,18 @@ float themeRoundingPower() {
     return std::clamp(POWER > 0.F ? POWER : 2.F, 1.F, 10.F);
 }
 
-// Omarchy's `omarchy font set` writes ~/.config/fontconfig/fonts.conf so the
-// "monospace" alias resolves to the chosen family. Hyprland's unset default is
-// Sans; that is not Omarchy's font. A user-set misc:font_family still wins.
+// THE FONT (A14, P2-9). First answer wins:
+//   plugin:hyprdrive:font            the plugin's own pin
+//   misc:font_family                 when pinned -- Hyprland's unset default is
+//                                    "Sans", which is nobody's choice
+//   Omarchy                          `omarchy font set` writes
+//                                    ~/.config/fontconfig/fonts.conf so the
+//                                    "monospace" alias resolves to the chosen
+//                                    family; its first <string> is that family
+//                                    (unchanged from every earlier build)
+//   anything else                    fontconfig's own answer for "monospace"
+//                                    (Fonts::matchFamily), aliases, rejects
+//                                    and all -- not a regex over a file
 //
 // Behind THEME_POLL_MS, and by reference. This runs inside OverviewRender::text()
 // for every caller that does not pin a family -- which is most of them -- so it
@@ -1243,6 +1390,8 @@ const std::string& themeFontFamily() {
     static std::string     parsed;                  // last successful fonts.conf parse
     static std::string     parsedPath;
     static time_t          parsedMtime = 0;
+    static std::string     matched;                 // Fonts::matchFamily("monospace"), per generation
+    static uint64_t        matchedGeneration = 0;
     static Time::steady_tp checkedAt{};
     static uint64_t        seenGeneration = 0;
 
@@ -1253,6 +1402,11 @@ const std::string& themeFontFamily() {
     checkedAt      = NOW;
     seenGeneration = g_themeGeneration;
 
+    if (auto own = pluginString("plugin:hyprdrive:font"); !own.empty()) {
+        resolved = std::move(own);
+        return resolved;
+    }
+
     const auto PIN = getValue<std::string>("misc:font_family");
     if (!PIN.empty() && PIN != STRVAL_EMPTY && PIN != "Sans") {
         resolved = PIN;
@@ -1260,6 +1414,16 @@ const std::string& themeFontFamily() {
     }
 
     resolved = "monospace";
+
+    if (!ScrollOverview::Integration::omarchy()) {
+        if (matchedGeneration != g_themeGeneration) {
+            matchedGeneration = g_themeGeneration;
+            matched           = ScrollOverview::Fonts::matchFamily("monospace");
+        }
+        if (!matched.empty())
+            resolved = matched;
+        return resolved;
+    }
 
     const char* const CFG  = std::getenv("XDG_CONFIG_HOME");
     const char* const HOME = std::getenv("HOME");
@@ -1305,6 +1469,18 @@ const std::string& themeFontFamily() {
     return resolved;
 }
 
+const std::string& glyphFontSetting() {
+    static std::string value{"auto"};
+    static uint64_t    seen = 0;
+    if (seen != g_themeGeneration && g_pluginKeysRegistered) {
+        seen  = g_themeGeneration;
+        value = pluginString("plugin:hyprdrive:glyph_font", "auto");
+        if (value.empty())
+            value = "auto";
+    }
+    return value;
+}
+
 CHyprColor dockIndicatorColor() {
     static auto&   VAL  = valueRef<Hyprlang::INT>("plugin:hyprdrive:dock:indicator_color");
     const uint32_t ARGB = sc<uint32_t>(*VAL);
@@ -1334,14 +1510,13 @@ CHyprColor dockBackgroundColor() {
         OPACITY = std::clamp(OPACITY, 0.F, 1.F);
 
     const uint32_t ARGB = sc<uint32_t>(*COLORVAL);
-    uint32_t       RGB  = ARGB;
-    if ((ARGB >> 24) == 0) {
-        if (const auto THEME = omarchyThemeBackgroundRgb())
-            RGB = *THEME;
-        else
-            RGB = sc<uint32_t>(*FALLBACK);
-    }
-    return colorFromArgb(RGB).modifyA(OPACITY);
+    if ((ARGB >> 24) != 0)
+        return colorFromArgb(ARGB).modifyA(OPACITY);
+    if (const auto BG = THEME_KEY("background"))
+        return BG->modifyA(OPACITY);
+    if (const auto& P = palette(); P.valid && P.hasBg)
+        return colorFromArgb(P.background).modifyA(OPACITY);
+    return colorFromArgb(sc<uint32_t>(*FALLBACK)).modifyA(OPACITY);
 }
 
 int dockCornerRadius() {
