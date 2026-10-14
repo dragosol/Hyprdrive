@@ -66,6 +66,7 @@ using namespace Hyprutils::String;
 
 #include "Compat.hpp"
 #include "Integration.hpp"
+#include "SettingsApp.hpp"
 #include "AppSearch.hpp"
 #include "OmarchySearch.hpp"
 #include "Config.hpp"
@@ -2402,11 +2403,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("stack", ::onStackDispatcher);
     ScrollOverview::Config::registerDispatcher("gesture", ::onGestureDispatcher);
     ScrollOverview::Config::registerDispatcher("debug", ::onDebugDispatcher);
+    // Open the settings (SettingsApp.hpp): the Omarchy panel or the standalone app.
+    ScrollOverview::Config::registerDispatcher("settings", ScrollOverview::SettingsApp::dispatch);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
     // The Omarchy-or-not answer, now that its key exists, and the hyprctl
     // command scripts ask it through (Integration.hpp).
     ScrollOverview::Integration::init();
+    // `hyprctl hyprdrive-theme`: the derived palette, for the settings app.
+    ScrollOverview::SettingsApp::init();
     // The "mosaic" layout (Mosaic.hpp). Registered whether or not the panel has
     // enabled it: a desktop whose saved layout is mosaic must find it at login.
     ScrollOverview::Mosaic::registerLayout(SCROLLOVERVIEW_HANDLE);
@@ -2486,6 +2491,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
 APICALL EXPORT void PLUGIN_EXIT() {
     ScrollOverview::Integration::shutdown(); // its hyprctl lambda lives in this .so
+    ScrollOverview::SettingsApp::shutdown(); // likewise
     // FIRST: Hyprland hands every mosaic desktop back to its default layout and
     // destroys our algorithm objects -- while their code is still mapped.
     ScrollOverview::Mosaic::shutdown();
