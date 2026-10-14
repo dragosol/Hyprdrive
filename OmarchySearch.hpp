@@ -40,6 +40,39 @@ struct SSearchItem {
 void init();
 void shutdown();
 
+// WHAT THIS FILE ASKS THE PLUGIN (native port, docs/native/OMARCHY-AUDIT.md
+// A4-A11). OmarchySearch.cpp is linked into a host test with no Hyprland in it,
+// so it cannot call Integration or Config itself: main.cpp hands it these at
+// PLUGIN_INIT, and the test hands it its own. Every one may be null.
+//
+//   omarchy           Integration::omarchy(). Null = true: the behaviour this
+//                     file had before the port, for any caller that never set it.
+//   terminalTemplate  plugin:hyprdrive:search:terminal -- the terminal an agent
+//                     opens in off Omarchy ("" = detect, NativeSearch.hpp).
+//   appTerminal       plugin:hyprdrive:terminal, the Terminal=true one; the
+//                     detection's second choice.
+//
+// With omarchy() true NOTHING below changes: the menu is Omarchy's, agents run
+// through omarchy-launch-tui, readiness is the agents plugins' usage files and
+// the default agent is Omarchy's file (now also mirrored to Hyprdrive's own).
+// With it false: a "System" column with native commands plus the user's
+// ~/.config/hyprdrive/menu.jsonc, agents in a real terminal when their binary
+// is on PATH, embedded agent icons, and ~/.config/hyprdrive/default-agent.
+struct SHost {
+    bool (*omarchy)()                 = nullptr;
+    std::string (*terminalTemplate)() = nullptr;
+    std::string (*appTerminal)()      = nullptr;
+};
+void setHost(const SHost& host);
+
+// "Omarchy Menu" or "System": column 0's title at the menu root.
+std::string menuRootTitle();
+
+// Forget every cached "is this program installed?" answer now rather than at
+// the end of its few-second window (OmarchySearch.cpp, resolveCached). For
+// tests that change PATH, and harmless anywhere else.
+void invalidateProgramLookups();
+
 // Keystroke query across all Omarchy providers
 void query(const std::string& text);
 
@@ -51,12 +84,15 @@ std::vector<SSearchItem> promptAllAgents(const std::string& prompt);
 bool                     isGlyphIcon(const std::string& icon);
 std::vector<SSearchItem> agentHelpItems();
 
-// OMARCHY'S DEFAULT CODING AGENT -- the one `omarchy agent` launches, stored in
-// ~/.config/omarchy/defaults/agent. Search does not keep a default of its own:
-// it reads and writes that file, so the overview, the Omarchy menu's checkmark
-// and `omarchy agent` can never disagree about which agent it is. The default
-// agent's rows lead the AI & Tools column. Ctrl x2 over an agent row sets it
-// (overviewHandleCtrlTap).
+// THE DEFAULT CODING AGENT. Its rows lead the AI & Tools column; Ctrl x2 over
+// an agent row sets it (overviewHandleCtrlTap).
+//   On Omarchy it is OMARCHY'S -- the one `omarchy agent` launches, in
+//   ~/.config/omarchy/defaults/agent. Search reads that file, so the overview,
+//   the Omarchy menu's checkmark and `omarchy agent` can never disagree; a
+//   Ctrl x2 writes it AND mirrors the choice into Hyprdrive's own file.
+//   Off Omarchy it is Hyprdrive's own: ${XDG_CONFIG_HOME:-~/.config}/hyprdrive/
+//   default-agent, one line, the agent's prefix ("claude", "agy"...). Omarchy's
+//   directory is never created there.
 bool canBeDefaultAgent(const SSearchItem& item);
 bool isDefaultAgent(const SSearchItem& item);
 bool setDefaultAgent(const SSearchItem& item);

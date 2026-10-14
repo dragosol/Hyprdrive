@@ -591,6 +591,8 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
     // each, 45s idle between). Launching them here overlaps the open animation
     // and the reach for the keyboard. Costs a respawn per open-after-idle;
     // that is the price of the results being up when the user looks at them.
+    // Off Omarchy warm() is a no-op: it would spawn every GNOME app that ships
+    // a provider (SearchProviders.hpp, setActivation).
     SearchProviders::warm();
     OmarchySearch::init();
 
@@ -2407,6 +2409,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // The Omarchy-or-not answer, now that its key exists, and the hyprctl
     // command scripts ask it through (Integration.hpp).
     ScrollOverview::Integration::init();
+    // ...which the search asks on every row build, through plain function
+    // pointers because OmarchySearch.cpp and SearchProviders.cpp are linked
+    // into host tests that have no Integration or Config (OmarchySearch.hpp
+    // SHost; SearchProviders.hpp setActivation). Live reads, not a snapshot:
+    // a reload that flips plugin:hyprdrive:integration is on the next frame.
+    OmarchySearch::setHost({
+        .omarchy          = [] { return ScrollOverview::Integration::omarchy(); },
+        .terminalTemplate = [] { return ScrollOverview::Config::getSearchTerminal(); },
+        .appTerminal      = [] { return ScrollOverview::Config::getTerminal(); },
+    });
+    SearchProviders::setActivation([] { return ScrollOverview::Integration::omarchy(); });
     // The "mosaic" layout (Mosaic.hpp). Registered whether or not the panel has
     // enabled it: a desktop whose saved layout is mosaic must find it at login.
     ScrollOverview::Mosaic::registerLayout(SCROLLOVERVIEW_HANDLE);

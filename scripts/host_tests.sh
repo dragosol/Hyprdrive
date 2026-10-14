@@ -22,6 +22,8 @@
 #                     host's real fonts.
 #   palette_file_test PaletteFile.cpp -- theme:palette_file's three shapes
 #                     (colors.toml, pywal, matugen 2.x/3.x) onto the roles.
+#   native_search_test  NativeSearch.hpp: the leading-program parse and the
+#                     terminal choice the search uses off Omarchy.
 #
 # Anything that needs a running Hyprland is a GATE (scripts/gates/), not a host
 # test, and lives in scripts/suite.sh instead.
@@ -73,6 +75,7 @@ run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-con
 run stack_reader_test scripts/stack_reader_test.cpp StackReader.cpp StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
 run omarchy_search_test scripts/omarchy_search_test.cpp OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
 run integration_test scripts/integration_test.cpp
+run native_search_test scripts/native_search_test.cpp
 # shellcheck disable=SC2046
 run glyphs_test scripts/glyphs_test.cpp Glyphs.cpp $(pkg-config --cflags --libs librsvg-2.0)
 # shellcheck disable=SC2046

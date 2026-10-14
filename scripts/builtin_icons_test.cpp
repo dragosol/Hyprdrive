@@ -76,6 +76,15 @@ int main() {
         const double C = coverage(SVG);
         CHECK(C > 0.02 && C < 0.5);
     }
+    // The agent tiles (native port): every agent and an unknown one render a
+    // mostly-solid tile, every token is replaced, and two agents differ.
+    for (const char* AGENT : {"claude", "codex", "gemini", "agy", "grok", "opencode", "copilot", "crush", "pi", "someone-new"}) {
+        const auto SVG = BuiltinIcons::svg(std::string(BuiltinIcons::AGENT_PREFIX) + AGENT, "#12ab34");
+        CHECK(SVG.starts_with("<svg") && SVG.find("#TILE_") == std::string::npos);
+        const double C = coverage(SVG);
+        CHECK(C > 0.6 && C < 0.9);
+    }
+    CHECK(BuiltinIcons::svg("hyprdrive-agent-claude", "#000") != BuiltinIcons::svg("hyprdrive-agent-codex", "#000"));
     CHECK(BuiltinIcons::svg("hyprdrive-nope", "#fff").empty());
     CHECK(BuiltinIcons::trashName(true, "x", "y") == "hyprdrive-trash-empty-light-white");
     CHECK(BuiltinIcons::trashName(false, "dark", "color") == "hyprdrive-trash-full-dark-color");

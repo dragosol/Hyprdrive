@@ -48,7 +48,27 @@ namespace SearchProviders {
     // Launches every provider's D-Bus service without searching. Call at
     // overview open: providers go cold after under a minute of idle, so
     // otherwise the first keystroke pays ~700ms of app startup.
+    // A no-op while activation is off (setActivation below).
     void warm();
+
+    // MAY A SEARCH START A PROVIDER'S APP? (native port, 2026-10-14.) Asked on
+    // every warm() and every query generation, from either thread; null (the
+    // default) = yes, the behaviour before the port.
+    //
+    // main.cpp answers Integration::omarchy(). Off Omarchy the answer is NO:
+    // on a plain Hyprland session with GNOME apps installed, warm() at every
+    // overview open D-Bus-activated ~30 of them (nautilus, firefox, evolution,
+    // gnome-software... measured on fedora's hyprtest) -- processes the user
+    // never asked for, for rows the overview does not even draw today
+    // (docs/native/FEATURE-INVENTORY.md F2). So off Omarchy warm() does
+    // nothing, and every search call goes out with NO_AUTO_START: a provider
+    // whose app is ALREADY RUNNING still answers (a running Nautilus, a
+    // running Settings), and one that is not fails at once with
+    // ServiceUnknown instead of being spawned. Providers stay discoverable
+    // and gsettings-ordered as before; nothing new is launched behind the
+    // user's back. ActivateResult -- the user pressing Enter on a row -- may
+    // still start its app.
+    void setActivation(bool (*autoStart)());
 
     // Snapshot of whatever has answered so far for the newest query, ordered by
     // provider then by the provider's own ranking. Safe to call every frame.

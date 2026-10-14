@@ -762,7 +762,7 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     return rows;
 }
 
-// X49. One card per column: Omarchy Menu (0), Files & Folders (1), AI & Tools (2).
+// X49. One card per column: Omarchy Menu / System (0), Files & Folders (1), AI & Tools (2).
 struct SSearchSection {
     std::string         title;
     std::string         icon;
@@ -775,7 +775,8 @@ struct SSearchSection {
 inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSearchRow>& rows) {
     std::vector<SSearchSection> out;
     std::string menuTitle = OmarchySearch::menuCurrentRouteTitle();
-    out.push_back({menuTitle.empty() ? "Omarchy Menu" : menuTitle, "system-run", {}, 0, false, 0});
+    // "Omarchy Menu" on Omarchy, "System" on plain Hyprland (native port A6).
+    out.push_back({menuTitle.empty() ? OmarchySearch::menuRootTitle() : menuTitle, "system-run", {}, 0, false, 0});
     out.push_back({"Files & Folders", "folder", {}, 0, false, 1});
     out.push_back({"AI & Tools", "utilities-terminal", {}, 0, false, 2});
 

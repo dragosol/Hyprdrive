@@ -232,6 +232,9 @@ start)
         --env) case $2 in *=*) envs+=("$2") ;; *) die "start: --env wants K=V" ;; esac; shift ;;
         *) die "start: unknown arg $1" ;;
     esac; shift; done
+    # The default config is generated: write it before asking whether it is
+    # readable, or a fresh HL_STATE (no test.lua yet) can never start.
+    [ "$cfg" != "$STATE/test.lua" ] || write_config
     [ -r "$cfg" ] || die "start: config not readable as $(id -un): $cfg"
     running && die "already running (hl.sh stop first)"
     [ -z "$(ours)" ] || die "leftover processes on $RT: $(ours | tr '\n' ' ') -- run hl.sh stop"

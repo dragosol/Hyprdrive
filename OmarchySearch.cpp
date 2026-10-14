@@ -1,5 +1,6 @@
 #include "OmarchySearch.hpp"
 #include "Launch.hpp"
+#include "NativeSearch.hpp"
 #include "ShellQuote.hpp"
 #include "ToolSearch.hpp"
 
@@ -28,6 +29,7 @@ using namespace Hyprutils::OS;
 #include <spawn.h>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <unistd.h>
 #include <signal.h>
@@ -41,6 +43,75 @@ extern char** environ;
 namespace fs = std::filesystem;
 
 namespace OmarchySearch {
+
+namespace Native = ScrollOverview::NativeSearch;
+
+// ============================================================================
+// The plugin's answers (OmarchySearch.hpp, SHost)
+// ============================================================================
+static SHost g_host;
+
+void setHost(const SHost& host) {
+    g_host = host;
+}
+
+// Null = Omarchy: this file's behaviour before the native port, which is what
+// a caller that never wired the host (an old test, a stray init order) expects.
+static bool omarchyMode() {
+    return g_host.omarchy ? g_host.omarchy() : true;
+}
+
+std::string menuRootTitle() {
+    return omarchyMode() ? "Omarchy Menu" : "System";
+}
+
+// PROGRAM LOOKUPS, CACHED FOR A FEW SECONDS. Off Omarchy every agent row, the
+// terminal choice and every menu row asks "is X installed?" -- per row, each
+// time the row memo is cold. One access() sweep of PATH per name per window of
+// RESOLVE_TTL, and the window's index is part of searchInputsGeneration, so
+// the memo rebuilds once per window and an agent (or grim) installed while
+// Hyprland runs shows up without a reload. The window is wall-clock, not "the
+// last lookup", or a memo hit -- no lookup at all -- would never roll it.
+constexpr auto                                      RESOLVE_TTL = std::chrono::seconds(3);
+static std::mutex                                   g_resolveMutex;
+static std::unordered_map<std::string, std::string> g_resolveCache;
+static uint64_t                                     g_resolveWindow = 0;
+
+static uint64_t resolveEpoch() {
+    return static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch() / RESOLVE_TTL);
+}
+
+static std::string resolveCached(std::string_view name) {
+    std::lock_guard lock(g_resolveMutex);
+    if (const auto W = resolveEpoch(); W != g_resolveWindow) {
+        g_resolveCache.clear();
+        g_resolveWindow = W;
+    }
+    const std::string KEY{name};
+    if (const auto IT = g_resolveCache.find(KEY); IT != g_resolveCache.end())
+        return IT->second;
+    auto path = Native::resolve(name);
+    g_resolveCache.emplace(KEY, path);
+    return path;
+}
+
+void invalidateProgramLookups() {
+    std::lock_guard lock(g_resolveMutex);
+    g_resolveCache.clear();
+}
+
+static const Native::FResolve& cachedResolver() {
+    static const Native::FResolve R = [](std::string_view n) { return resolveCached(n); };
+    return R;
+}
+
+// The terminal an agent opens in off Omarchy (NativeSearch.hpp, chooseTerminal).
+static Native::STerminal agentTerminal() {
+    const std::string SEARCH = g_host.terminalTemplate ? g_host.terminalTemplate() : std::string{};
+    const std::string APP    = g_host.appTerminal ? g_host.appTerminal() : std::string{};
+    const char*       ENV    = std::getenv("TERMINAL");
+    return Native::chooseTerminal(SEARCH, APP, ENV ? ENV : "", cachedResolver());
+}
 
 // ============================================================================
 // Quick Look (GNOME Sushi) State Machine
@@ -411,6 +482,34 @@ static const std::vector<SAgentDef>& agentDefs() {
     return AGENTS;
 }
 
+// OFF OMARCHY the same table is read without its launcher: every row but the
+// "Default Agent" one is `omarchy-launch-tui --app-id=... <binary> <args>`, and
+// `<binary> <args>` is exactly what a plain terminal is handed instead
+// (NativeSearch.hpp, STerminal). One table, so the two desktops can never
+// disagree about an agent's flags.
+static constexpr std::string_view OMARCHY_TUI = "omarchy-launch-tui --app-id=org.omarchy.agent ";
+
+static bool isDefaultAgentPseudo(const SAgentDef& AG) {
+    return AG.prefix == "agent";
+}
+
+// "claude" for the claude row; "" for the Default Agent pseudo-row.
+static std::string agentBinary(const SAgentDef& AG) {
+    if (!AG.commandTemplate.starts_with(OMARCHY_TUI))
+        return {};
+    const auto REST = std::string_view{AG.commandTemplate}.substr(OMARCHY_TUI.size());
+    return std::string{REST.substr(0, REST.find(' '))};
+}
+
+// The binary's arguments, %P% placeholders still in.
+static std::string agentArgs(const SAgentDef& AG) {
+    if (!AG.commandTemplate.starts_with(OMARCHY_TUI))
+        return {};
+    const auto REST  = std::string_view{AG.commandTemplate}.substr(OMARCHY_TUI.size());
+    const auto SPACE = REST.find(' ');
+    return SPACE == std::string_view::npos ? std::string{} : std::string{REST.substr(SPACE + 1)};
+}
+
 bool isAgentQuery(const std::string& query) {
     if (query.empty())
         return false;
@@ -455,19 +554,26 @@ static bool jsonFieldTrue(const std::string& body, const char* key) {
     return body.compare(pos, 4, "true") == 0;
 }
 
-static const std::unordered_set<std::string>& readyAgentIds() {
-    static std::unordered_set<std::string> ids;
-    static time_t                          mtime = 0;
-    const std::string                      dir   = agentUsageDir();
+// The usage records, read once per change of the directory: which ids have a
+// record at all, and which of those say "ready": true.
+struct SUsage {
+    std::unordered_set<std::string> ready;
+    std::unordered_set<std::string> present;
+};
+
+static const SUsage& usageRecords() {
+    static SUsage rec;
+    static time_t mtime = 0;
+    const std::string dir = agentUsageDir();
     if (dir.empty())
-        return ids;
+        return rec;
 
     struct stat st {};
     const time_t nowM = (stat(dir.c_str(), &st) == 0) ? st.st_mtime : 0;
-    if (nowM == mtime && !ids.empty())
-        return ids;
+    if (nowM == mtime && !rec.present.empty())
+        return rec;
 
-    ids.clear();
+    rec = {};
     mtime = nowM;
     std::error_code ec;
     for (const auto& ent : fs::directory_iterator(dir, ec)) {
@@ -480,18 +586,66 @@ static const std::unordered_set<std::string>& readyAgentIds() {
         if (!f)
             continue;
         std::string body((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        if (!jsonFieldTrue(body, "ready"))
-            continue;
-        ids.insert(name.substr(0, name.size() - 5));
+        const auto ID = name.substr(0, name.size() - 5);
+        rec.present.insert(ID);
+        if (jsonFieldTrue(body, "ready"))
+            rec.ready.insert(ID);
     }
-    return ids;
+    return rec;
 }
 
 static bool agentLoggedIn(const SAgentDef& AG) {
-    return readyAgentIds().contains(agentUsageId(AG));
+    return usageRecords().ready.contains(agentUsageId(AG));
+}
+
+static std::string defaultAgentName();
+
+// The SAgentDef the Default Agent pseudo-row stands for off Omarchy: whatever
+// Hyprdrive's default-agent file names, or null.
+static const SAgentDef* nativeDefaultDef() {
+    const auto NAME = defaultAgentName();
+    if (NAME.empty())
+        return nullptr;
+    for (const auto& AG : agentDefs())
+        if (!isDefaultAgentPseudo(AG) && AG.prefix == NAME)
+            return &AG;
+    return nullptr;
+}
+
+// READY = a row that would actually start something when activated.
+//   Omarchy: the agents plugins' usage record says "ready": true (logged in),
+//   exactly as before.
+//   Off Omarchy: the binary resolves (PATH, then ~/.local/bin) AND there is a
+//   terminal to open it in. A usage record is an optional extra: when one
+//   exists (the agents plugins left state behind, or a user keeps them) and
+//   says not ready, the agent is logged out and its row would only open an
+//   auth prompt -- hidden. No record says nothing either way.
+static bool agentReady(const SAgentDef& AG) {
+    if (omarchyMode())
+        return agentLoggedIn(AG);
+
+    if (isDefaultAgentPseudo(AG)) {
+        const auto* DEF = nativeDefaultDef();
+        return DEF && agentReady(*DEF);
+    }
+
+    const auto BIN = agentBinary(AG);
+    if (BIN.empty() || resolveCached(BIN).empty())
+        return false;
+    const auto& USAGE = usageRecords();
+    if (USAGE.present.contains(agentUsageId(AG)) && !USAGE.ready.contains(agentUsageId(AG)))
+        return false;
+    return agentTerminal().ok();
 }
 
 static std::string agentIconPath(const SAgentDef& AG) {
+    // Off Omarchy: Hyprdrive's own embedded tile (BuiltinIcons, original
+    // artwork), never a path into an Omarchy plugin's assets.
+    if (!omarchyMode()) {
+        const SAgentDef* SHOWN = isDefaultAgentPseudo(AG) ? nativeDefaultDef() : &AG;
+        return SHOWN ? "hyprdrive-agent-" + SHOWN->prefix : std::string{"utilities-terminal"};
+    }
+
     const std::string id = agentUsageId(AG);
     const char*       home = std::getenv("HOME");
     std::vector<std::string> cands;
@@ -506,19 +660,52 @@ static std::string agentIconPath(const SAgentDef& AG) {
     return "utilities-terminal";
 }
 
+// The `bash -c` line a row runs, with %P% already substituted in `args` form.
+// Omarchy: the template itself. Off Omarchy: <terminal> '<abs binary>' <args>.
+static std::string agentCommand(const SAgentDef& AG, const std::string& quotedPrompt) {
+    const auto fill = [&](std::string s) {
+        s = replaceAll(std::move(s), "\"%P%\"", quotedPrompt);
+        return replaceAll(std::move(s), "%P%", quotedPrompt);
+    };
+
+    if (omarchyMode())
+        return fill(AG.commandTemplate);
+
+    const SAgentDef* REAL = isDefaultAgentPseudo(AG) ? nativeDefaultDef() : &AG;
+    if (!REAL)
+        return {};
+    const auto PATH = resolveCached(agentBinary(*REAL));
+    const auto TERM = agentTerminal();
+    if (PATH.empty() || !TERM.ok())
+        return {};
+    std::string cmd = ScrollOverview::shellQuote(PATH);
+    if (const auto ARGS = fill(agentArgs(*REAL)); !ARGS.empty())
+        cmd += " " + ARGS;
+    // A help row's empty prompt leaves a trailing "-- " -- harmless to every
+    // agent, and the Omarchy line has had it all along.
+    while (!cmd.empty() && cmd.back() == ' ')
+        cmd.pop_back();
+    return TERM.wrap(cmd);
+}
+
 static SSearchItem agentItem(const SAgentDef& AG, const std::string& prompt) {
     SSearchItem item;
     item.kind     = EItemKind::Agent;
     item.id       = "agent:" + AG.prefix;
     item.category = "AI Agent";
     item.icon     = agentIconPath(AG);
+    // Off Omarchy the pseudo-row is Hyprdrive's default agent, by name.
+    const SAgentDef* SHOWN = !omarchyMode() && isDefaultAgentPseudo(AG) ? nativeDefaultDef() : nullptr;
     if (prompt.empty()) {
         item.name          = "/" + AG.prefix + " <prompt>";
-        item.description   = AG.name + " (" + AG.model + ") — " + AG.description;
-        item.actionCommand = replaceAll(AG.commandTemplate, "\"%P%\"", "");
-        item.actionCommand = replaceAll(item.actionCommand, "%P%", "");
+        item.description   = SHOWN ? "Default agent: " + SHOWN->name + " (" + SHOWN->model + ")" : AG.name + " (" + AG.model + ") — " + AG.description;
+        if (omarchyMode()) {
+            item.actionCommand = replaceAll(AG.commandTemplate, "\"%P%\"", "");
+            item.actionCommand = replaceAll(item.actionCommand, "%P%", "");
+        } else
+            item.actionCommand = agentCommand(AG, "");
     } else {
-        item.name        = "Ask " + AG.name;
+        item.name        = "Ask " + (SHOWN ? SHOWN->name : AG.name);
         item.description = prompt;
         // The prompt is user text going into a `bash -c` string (activate()):
         // one single-quoted word, so the shell expands none of it -- `$(...)`,
@@ -526,8 +713,7 @@ static SSearchItem agentItem(const SAgentDef& AG, const std::string& prompt) {
         // #11012). The templates wrap %P% in double quotes, which would expand;
         // the quoted word replaces the quotes too.
         const std::string QUOTED = ScrollOverview::shellQuote(prompt);
-        item.actionCommand       = replaceAll(AG.commandTemplate, "\"%P%\"", QUOTED);
-        item.actionCommand       = replaceAll(item.actionCommand, "%P%", QUOTED);
+        item.actionCommand       = agentCommand(AG, QUOTED);
     }
     return item;
 }
@@ -550,22 +736,43 @@ static std::string omarchyAgentName(const std::string& prefix) {
     return "";
 }
 
+// Off Omarchy there is no launcher to merge agy into gemini: every real agent
+// is its own default, under its own prefix.
+static std::string nativeAgentName(const std::string& prefix) {
+    for (const auto& AG : agentDefs())
+        if (!isDefaultAgentPseudo(AG) && AG.prefix == prefix)
+            return prefix;
+    return "";
+}
+
 static std::string agentPrefix(const SSearchItem& item) {
     constexpr std::string_view TAG = "agent:";
     return item.kind == EItemKind::Agent && item.id.starts_with(TAG) ? item.id.substr(TAG.size()) : std::string{};
 }
 
-static fs::path defaultAgentPath() {
+static fs::path omarchyDefaultAgentPath() {
     const char* HOME = std::getenv("HOME");
     return HOME && *HOME ? fs::path{HOME} / ".config" / "omarchy" / "defaults" / "agent" : fs::path{};
+}
+
+static fs::path hyprdriveDefaultAgentPath() {
+    return fs::path{Native::configPath("default-agent")};
+}
+
+// The file the default is READ from: Omarchy's on Omarchy (shared with
+// `omarchy agent`), Hyprdrive's own otherwise.
+static fs::path defaultAgentPath() {
+    return omarchyMode() ? omarchyDefaultAgentPath() : hyprdriveDefaultAgentPath();
 }
 
 // Re-read only when the file CHANGES: this is asked for every agent row on every
 // frame the results are up, and `omarchy default agent codex` run in a terminal
 // must still land without a restart. Same parse as the packaged getter: the
-// first line, surrounding whitespace dropped.
+// first line, surrounding whitespace dropped. Keyed on the path too, so an
+// Integration flip reads the other file at once.
 static std::string defaultAgentName() {
     static std::string        cached;
+    static fs::path           cachedFor;
     static fs::file_time_type seen{};
     static bool               loaded = false;
 
@@ -578,52 +785,69 @@ static std::string defaultAgentName() {
         return cached;
     }
 
-    if (!loaded || MTIME != seen) {
+    if (!loaded || MTIME != seen || PATH != cachedFor) {
         std::ifstream file(PATH);
         std::string   line;
         std::getline(file, line);
         const auto FIRST = line.find_first_not_of(" \t\r\n");
         const auto LAST  = line.find_last_not_of(" \t\r\n");
-        cached = FIRST == std::string::npos ? std::string{} : line.substr(FIRST, LAST - FIRST + 1);
-        seen   = MTIME;
-        loaded = true;
+        cached    = FIRST == std::string::npos ? std::string{} : line.substr(FIRST, LAST - FIRST + 1);
+        seen      = MTIME;
+        cachedFor = PATH;
+        loaded    = true;
     }
 
     return cached;
 }
 
 bool canBeDefaultAgent(const SSearchItem& item) {
-    return !omarchyAgentName(agentPrefix(item)).empty();
+    const auto PREFIX = agentPrefix(item);
+    return !(omarchyMode() ? omarchyAgentName(PREFIX) : nativeAgentName(PREFIX)).empty();
 }
 
 bool isDefaultAgent(const SSearchItem& item) {
-    const auto NAME = omarchyAgentName(agentPrefix(item));
+    const auto NAME = omarchyMode() ? omarchyAgentName(agentPrefix(item)) : nativeAgentName(agentPrefix(item));
     return !NAME.empty() && NAME == defaultAgentName();
 }
 
-bool setDefaultAgent(const SSearchItem& item) {
-    const auto NAME = omarchyAgentName(agentPrefix(item));
-    const auto PATH = defaultAgentPath();
-    if (NAME.empty() || PATH.empty())
+// Temp file + rename, so a reader never sees it half-written.
+static bool writeOneLine(const fs::path& path, const std::string& text) {
+    if (path.empty())
         return false;
-
-    // Written straight to the file, NOT through `omarchy default agent`: that
-    // command also installs the agent and LAUNCHES it, and a double tap in a
-    // search field must not open a terminal. Temp file + rename, so a reader
-    // never sees it half-written.
     std::error_code ec;
-    fs::create_directories(PATH.parent_path(), ec);
+    fs::create_directories(path.parent_path(), ec);
 
-    auto tmp = PATH;
+    auto tmp = path;
     tmp += ".hyprdrive-tmp";
     {
         std::ofstream file(tmp, std::ios::trunc);
-        if (!(file << NAME << '\n'))
+        if (!(file << text << '\n'))
             return false;
     }
 
-    fs::rename(tmp, PATH, ec);
+    fs::rename(tmp, path, ec);
     return !ec;
+}
+
+bool setDefaultAgent(const SSearchItem& item) {
+    const auto PREFIX = agentPrefix(item);
+
+    // Written straight to the file, NOT through `omarchy default agent`: that
+    // command also installs the agent and LAUNCHES it, and a double tap in a
+    // search field must not open a terminal.
+    if (omarchyMode()) {
+        const auto NAME = omarchyAgentName(PREFIX);
+        if (NAME.empty() || !writeOneLine(omarchyDefaultAgentPath(), NAME))
+            return false;
+        // Mirrored into Hyprdrive's own file, so the choice survives a move
+        // off Omarchy (or integration = none). Best effort: Omarchy's file is
+        // the one that counts here.
+        writeOneLine(hyprdriveDefaultAgentPath(), PREFIX);
+        return true;
+    }
+
+    const auto NAME = nativeAgentName(PREFIX);
+    return !NAME.empty() && writeOneLine(hyprdriveDefaultAgentPath(), NAME);
 }
 
 // The default agent's rows first, every other row in the order it already had.
@@ -656,8 +880,16 @@ std::vector<SSearchItem> searchAgents(const std::string& rawQuery) {
     for (const auto& AG : agentDefs()) {
         if (!lowerToken.empty() && AG.prefix.find(lowerToken) != 0 && lowerToken != AG.prefix)
             continue;
+        // An exact `/claude ...` skips the logged-in check on Omarchy, where
+        // omarchy-launch-tui can still start a logged-out agent's login. Off
+        // Omarchy an agent that is not installed has nothing to start at all,
+        // so its row would be one that does nothing (A7).
         const bool exact = lowerToken == AG.prefix;
-        if (!exact && !agentLoggedIn(AG))
+        if (!(exact && omarchyMode()) && !agentReady(AG))
+            continue;
+        // Off Omarchy the Default Agent row IS one of the others under a second
+        // name: only an explicit `/agent` asks for it, or "/" would list it twice.
+        if (!omarchyMode() && isDefaultAgentPseudo(AG) && !exact)
             continue;
         items.push_back(agentItem(AG, prompt));
     }
@@ -670,7 +902,7 @@ std::vector<SSearchItem> promptAllAgents(const std::string& prompt) {
     if (prompt.empty())
         return items;
     for (const auto& AG : agentDefs()) {
-        if (!agentLoggedIn(AG))
+        if (!agentReady(AG) || (!omarchyMode() && isDefaultAgentPseudo(AG)))
             continue;
         items.push_back(agentItem(AG, prompt));
     }
@@ -681,7 +913,7 @@ std::vector<SSearchItem> promptAllAgents(const std::string& prompt) {
 std::vector<SSearchItem> agentHelpItems() {
     std::vector<SSearchItem> items;
     for (const auto& AG : agentDefs()) {
-        if (!agentLoggedIn(AG))
+        if (!agentReady(AG) || (!omarchyMode() && isDefaultAgentPseudo(AG)))
             continue;
         items.push_back(agentItem(AG, ""));
     }
@@ -772,6 +1004,10 @@ struct SRawMenuItem {
     std::string when;
     std::string checked;
     std::vector<std::string> aliases;
+    // "requires": ["grim", "slurp"] -- programs that must resolve for the row
+    // to show (Hyprdrive's own key; Omarchy's menu has none, so it changes
+    // nothing there). The built-in System rows use it too.
+    std::vector<std::string> needs;
     std::string category = "Omarchy Menu";
     int order = 0;
 };
@@ -782,6 +1018,7 @@ static std::string g_menuCurrentRoute = "root";
 static std::vector<std::string> g_menuNavStack;
 static time_t g_menuSystemMtime = 0;
 static time_t g_menuUserMtime = 0;
+static int    g_menuMode = -1; // what g_menuItems was built for: 1 Omarchy, 0 native, -1 nothing yet
 static std::mutex g_menuMutex;
 
 void navigateMenu(const std::string& routeId) {
@@ -825,7 +1062,7 @@ std::string menuCurrentRoute() {
 std::string menuCurrentRouteTitle() {
     std::lock_guard<std::mutex> lock(g_menuMutex);
     if (g_menuCurrentRoute == "root")
-        return "Omarchy Menu";
+        return menuRootTitle();
     auto it = g_menuItems.find(g_menuCurrentRoute);
     if (it != g_menuItems.end())
         return it->second.label;
@@ -1049,6 +1286,15 @@ static bool evalWhenAtom(std::string expr) {
     if (expr.starts_with("[[") && expr.ends_with("]]"))
         return evalTestBracket(expr.substr(2, expr.size() - 4));
 
+    // The shell's own answers, so a user menu (~/.config/hyprdrive/menu.jsonc)
+    // can hide a built-in System row by its id: { "system.reboot": { "when":
+    // "false" } }. Same meaning bash gives them; unknown-predicate fail-open
+    // would have shown the row.
+    if (expr == "true")
+        return true;
+    if (expr == "false")
+        return false;
+
     if (expr.starts_with("omarchy-pkg-present ")) {
         std::istringstream iss(expr.substr(20));
         std::string pkg;
@@ -1262,6 +1508,7 @@ static void parseMenuFile(const std::string& path,
                     if (clean[pos] == '"') {
                         std::string elem = parseString();
                         if (propKey == "aliases") item.aliases.push_back(elem);
+                        else if (propKey == "requires") item.needs.push_back(elem);
                     } else {
                         ++pos;
                     }
@@ -1301,7 +1548,7 @@ static void parseMenuFile(const std::string& path,
         if (item.label.empty())
             item.label = item.id;
 
-        item.category = "Omarchy Menu";
+        item.category = menuRootTitle();
 
         if (outMap.find(item.id) == outMap.end()) {
             item.order = static_cast<int>(outOrder.size());
@@ -1313,30 +1560,85 @@ static void parseMenuFile(const std::string& path,
     }
 }
 
+// Off Omarchy, column 0's own rows (NativeSearch.hpp, systemRows), in the menu
+// schema so browse, search, aliases and a user override by id all work on them
+// exactly as on Omarchy's rows.
+static void addNativeSystemRows(std::unordered_map<std::string, SRawMenuItem>& outMap, std::vector<std::string>& outOrder) {
+    for (const auto& ROW : Native::systemRows()) {
+        SRawMenuItem item;
+        item.id          = ROW.id;
+        item.parent      = "root";
+        item.kind        = "action";
+        item.label       = ROW.label;
+        item.description = ROW.description;
+        item.action      = ROW.action;
+        item.icon        = ROW.icon;
+        item.needs       = ROW.needs;
+        item.aliases     = ROW.aliases;
+        item.category    = "System";
+        item.order       = static_cast<int>(outOrder.size());
+        outOrder.push_back(item.id);
+        outMap[item.id] = std::move(item);
+    }
+}
+
+// ON OMARCHY: Omarchy's menu plus the user's Omarchy extension, as always.
+// OFF IT: the built-in System rows plus ${XDG_CONFIG_HOME:-~/.config}/hyprdrive/
+// menu.jsonc -- the same schema (and parser) as Omarchy's menu, merged the way
+// Omarchy merges its extension: a known id replaces that row, a new id adds one,
+// "parent" or a dotted id nests it. /usr/share/omarchy is not read even when it
+// exists (fedora has one with no Omarchy around it: audit caveat).
 static void reloadMenuIfNeeded() {
     std::lock_guard<std::mutex> lock(g_menuMutex);
 
-    const std::string sysPath = "/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc";
-    const char* home = std::getenv("HOME");
-    const std::string userPath = home ? std::string(home) + "/.config/omarchy/extensions/omarchy-menu.jsonc" : "";
+    const bool        OMARCHY = omarchyMode();
+    const char*       home    = std::getenv("HOME");
+    const std::string sysPath = OMARCHY ? "/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc" : "";
+    const std::string userPath =
+        OMARCHY ? (home ? std::string(home) + "/.config/omarchy/extensions/omarchy-menu.jsonc" : "") : Native::configPath("menu.jsonc");
 
     struct stat stSys {};
     struct stat stUser {};
-    time_t sysMtime = (stat(sysPath.c_str(), &stSys) == 0) ? stSys.st_mtime : 0;
+    time_t sysMtime = (!sysPath.empty() && stat(sysPath.c_str(), &stSys) == 0) ? stSys.st_mtime : 0;
     time_t userMtime = (!userPath.empty() && stat(userPath.c_str(), &stUser) == 0) ? stUser.st_mtime : 0;
 
-    if (sysMtime == g_menuSystemMtime && userMtime == g_menuUserMtime && !g_menuItems.empty())
+    if (g_menuMode == (OMARCHY ? 1 : 0) && sysMtime == g_menuSystemMtime && userMtime == g_menuUserMtime && !g_menuItems.empty())
         return;
+
+    // A switch of desktop is a different menu: routes into the old one mean
+    // nothing in the new.
+    if (g_menuMode != (OMARCHY ? 1 : 0)) {
+        g_menuCurrentRoute = "root";
+        g_menuNavStack.clear();
+    }
 
     g_menuItems.clear();
     g_menuItemOrder.clear();
     g_whenCache.clear();
-    parseMenuFile(sysPath, g_menuItems, g_menuItemOrder);
+    if (OMARCHY)
+        parseMenuFile(sysPath, g_menuItems, g_menuItemOrder);
+    else
+        addNativeSystemRows(g_menuItems, g_menuItemOrder);
     if (!userPath.empty())
         parseMenuFile(userPath, g_menuItems, g_menuItemOrder);
 
     g_menuSystemMtime = sysMtime;
     g_menuUserMtime   = userMtime;
+    g_menuMode        = OMARCHY ? 1 : 0;
+}
+
+// Whether a row shows. Its `when`, its "requires" -- and off Omarchy also its
+// program: an action whose first program is not installed is never offered
+// (A5: five omarchy-* rows that did nothing, silently). On Omarchy that last
+// check is skipped, so its rows are exactly what they were.
+static bool menuRowVisible(const SRawMenuItem& raw) {
+    if (!raw.when.empty() && !evaluateWhen(raw.when))
+        return false;
+    if (!raw.needs.empty() && !Native::requirementsMet(raw.needs, cachedResolver()))
+        return false;
+    if (!omarchyMode() && raw.kind == "action" && !Native::actionRunnable(raw.action, cachedResolver()))
+        return false;
+    return true;
 }
 
 std::vector<SSearchItem> searchMenu(const std::string& rawQuery, size_t limit) {
@@ -1352,10 +1654,10 @@ std::vector<SSearchItem> searchMenu(const std::string& rawQuery, size_t limit) {
             backItem.kind        = EItemKind::Back;
             backItem.id          = "__back__";
             backItem.name        = "‹ Back";
-            backItem.category    = "Omarchy Menu";
+            backItem.category    = menuRootTitle();
             backItem.icon        = "go-previous";
 
-            std::string parentTitle = "Omarchy Menu";
+            std::string parentTitle = menuRootTitle();
             auto curIt = g_menuItems.find(g_menuCurrentRoute);
             if (curIt != g_menuItems.end() && !curIt->second.parent.empty() && curIt->second.parent != "root") {
                 auto pIt = g_menuItems.find(curIt->second.parent);
@@ -1372,12 +1674,12 @@ std::vector<SSearchItem> searchMenu(const std::string& rawQuery, size_t limit) {
             const auto& raw = it->second;
 
             if (raw.parent != g_menuCurrentRoute) continue;
-            if (!raw.when.empty() && !evaluateWhen(raw.when)) continue;
+            if (!menuRowVisible(raw)) continue;
 
             SSearchItem item;
             item.id       = raw.id;
             item.name     = raw.label;
-            item.category = "Omarchy Menu";
+            item.category = menuRootTitle();
             applyMenuVisuals(item, raw);
 
             if (raw.kind == "menu") {
@@ -1397,7 +1699,9 @@ std::vector<SSearchItem> searchMenu(const std::string& rawQuery, size_t limit) {
             if (matches.size() >= limit) break;
         }
 
-        if (matches.empty()) {
+        // Omarchy only: these five ARE omarchy-* commands. Off Omarchy an empty
+        // root means the user hid every System row, and empty is the answer.
+        if (matches.empty() && omarchyMode()) {
             static const std::vector<std::pair<std::string, std::pair<std::string, std::string>>> ROOT_DEFAULTS = {
                 {"Lock Screen", {"system.lock", "omarchy-system-lock"}},
                 {"Screenshot", {"trigger.capture.screenshot", "omarchy-capture-screenshot"}},
@@ -1433,7 +1737,7 @@ std::vector<SSearchItem> searchMenu(const std::string& rawQuery, size_t limit) {
 
     for (const auto& [_, it] : g_menuItems) {
         if (it.id == "root") continue;
-        if (!it.when.empty() && !evaluateWhen(it.when)) continue;
+        if (!menuRowVisible(it)) continue;
 
         int score = 0;
         std::string lowerLabel;
@@ -1476,7 +1780,7 @@ std::vector<SSearchItem> searchMenu(const std::string& rawQuery, size_t limit) {
         SSearchItem item;
         item.id       = raw->id;
         item.name     = raw->label;
-        item.category = "Omarchy Menu";
+        item.category = menuRootTitle();
         applyMenuVisuals(item, *raw);
 
         std::string breadcrumb = parentPathFor(g_menuItems, raw->id);
@@ -1892,21 +2196,35 @@ uint64_t searchInputsGeneration() {
             h *= 1099511628211ULL;
         };
 
-        const char* HOME = std::getenv("HOME");
+        const char* HOME    = std::getenv("HOME");
+        const bool  OMARCHY = omarchyMode();
+
+        // Which desktop: every reader below changes its source with it.
+        mix(OMARCHY ? 0x0A : 0x0B);
 
         struct stat st {};
-        mix(stat("/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc", &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
+        if (OMARCHY) {
+            mix(stat("/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc", &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
+        } else {
+            // Hyprdrive's own menu, and the program-lookup window: an agent
+            // or grim installed while Hyprland runs shows up within RESOLVE_TTL.
+            const auto MENU = Native::configPath("menu.jsonc");
+            mix(!MENU.empty() && stat(MENU.c_str(), &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
+            mix(resolveEpoch());
+        }
         if (HOME) {
-            const std::string USERMENU = std::string(HOME) + "/.config/omarchy/extensions/omarchy-menu.jsonc";
-            mix(stat(USERMENU.c_str(), &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
+            if (OMARCHY) {
+                const std::string USERMENU = std::string(HOME) + "/.config/omarchy/extensions/omarchy-menu.jsonc";
+                mix(stat(USERMENU.c_str(), &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
+            }
 
             // Which agents are logged in: one directory mtime, the same one
-            // readyAgentIds() keys its own cache on.
+            // usageRecords() keys its own cache on.
             const std::string USAGE = agentUsageDir();
             mix(!USAGE.empty() && stat(USAGE.c_str(), &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
 
-            // ...and which of them is Omarchy's default, because that decides
-            // the ORDER of the AI & Tools column.
+            // ...and which of them is the default, because that decides the
+            // ORDER of the AI & Tools column.
             const auto AGENT = defaultAgentPath();
             mix(!AGENT.empty() && stat(AGENT.c_str(), &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
         }

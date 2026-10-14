@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- hyprdrive's AI agent tile (native port, 2026-10-14). Original artwork,
+       no vendor logo: a rounded tile in the agent's own colour with a
+       terminal prompt on it. #TILE_TOP / #TILE_BOT are replaced per agent
+       (BuiltinIcons.cpp, AGENT_TINTS) when the texture is built; the mark is
+       always white. Used for the AI & Tools rows when Hyprdrive is not on
+       Omarchy, where the agents plugins' artwork is not ours to load. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#TILE_TOP"/>
+      <stop offset="1" stop-color="#TILE_BOT"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#tile)"/>
+  <rect x="16.75" y="16.75" width="222.5" height="222.5" rx="55.25" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="1.5"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="20">
+    <path d="M78 92 L118 128 L78 164"/>
+    <path d="M136 168 H180"/>
+  </g>
+</svg>

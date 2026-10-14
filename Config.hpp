@@ -280,6 +280,7 @@ EScrollAction getHorizontalScrollAction(ELayout layout);
 int           getWallpaperMode();
 bool          getBlur();
 std::string   getTerminal();
+std::string   getSearchTerminal(); // plugin:hyprdrive:search:terminal (AI agent rows off Omarchy)
 bool          getMissionControl();
 int           getMissionControlGap();
 int           getMissionControlReflowMs();
