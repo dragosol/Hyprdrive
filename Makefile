@@ -68,6 +68,7 @@ check: hyprdrive.so
 	python3 scripts/manifest_check.py
 	python3 scripts/private_modes_test.py
 	python3 scripts/hdicons_test.py
+	python3 scripts/settings_app_test.py
 
 PREFIX ?= $(HOME)/.local
 
@@ -79,7 +80,9 @@ PREFIX ?= $(HOME)/.local
 # scripts/hyprdrive-integration which one this is): the .so and the scratchpad
 # glyph under $(PREFIX)/lib/hyprdrive, the hyprdrive-integration CLI in
 # $(PREFIX)/bin, the Lua fragments + loader in ~/.config/hypr, one require line
-# in hyprland.lua, and the settings panel ONLY on Omarchy. Force a native
+# in hyprland.lua, and the settings panel ONLY on Omarchy -- elsewhere the
+# standalone settings app (settings/: $(PREFIX)/bin/hyprdrive-settings, its
+# QML in $(PREFIX)/share/hyprdrive, hdpanel/hdicons in lib). Force a native
 # install on a machine with Omarchy files: HYPRDRIVE_NO_OMARCHY=1 make install.
 install: hyprdrive.so check
 	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/hyprdrive.so

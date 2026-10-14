@@ -2,7 +2,9 @@
 # Install Hyprdrive: the .so, the Lua fragments and their loader, a require()
 # from ~/.config/hypr/hyprland.lua -- and, ON OMARCHY ONLY, the settings panel.
 #
-# One script for both desktops (native port P0-3). Which one this is comes from
+# One script for both desktops (native port P0-3); off Omarchy the settings
+# are the standalone app (settings/) instead of the panel (B1). Which one this
+# is comes from
 # scripts/hyprdrive-integration (Integration.hpp's rule: HYPRDRIVE_NO_OMARCHY /
 # HYPRDRIVE_INTEGRATION, else `omarchy` on PATH and its state dir). On plain
 # Hyprland nothing under ~/.config/omarchy is created or touched.
@@ -113,8 +115,39 @@ PLUGIN_DEST=$CONFIG/omarchy/plugins/dragos.hyprdrive
 # copied, and -- the point -- ~/.config/omarchy is never created: an empty
 # omarchy tree in a plain home is exactly the half-signal that makes other
 # tools (and the old detection) think Omarchy is there.
+#
+# OFF OMARCHY THE SETTINGS ARE THE STANDALONE APP instead (settings/): the
+# same Schema.js rows and hdpanel/hdicons back ends in a Quickshell window of
+# its own. Quickshell refuses imports from outside the directory its root QML
+# is in (they resolve to qrc:/qs-blackhole), so the panel's Schema.js, Model.js
+# and mark go INTO that directory -- in the checkout as symlinks, here as
+# copies (install follows the links):
+#   $PREFIX/share/hyprdrive/settings/        shell.qml, SettingsPage.qml,
+#                                            Schema.js, Model.js, the mark
+#   $PREFIX/lib/hyprdrive/                   hdpanel, hdicons, hd-layout-cycle,
+#                                            hyprdrive-power-watch
+#   $PREFIX/bin/hyprdrive-settings           the launcher (one instance, deep links)
+#   $PREFIX/share/applications/hyprdrive-settings.desktop
 if [ "$DESKTOP" != omarchy ]; then
     echo "omarchy plugin: skipped (integration: $DESKTOP)"
+    SHARE=$PREFIX/share/hyprdrive
+    for f in shell.qml SettingsPage.qml Schema.js Model.js hyprdrive-icon.png; do
+        install -Dm644 "$ROOT/settings/$f" "$SHARE/settings/$f"
+    done
+    for f in hdpanel hdicons hd-layout-cycle; do
+        install -Dm755 "$PLUGIN_SRC/bin/$f" "$LIBDIR/$f"
+    done
+    install -Dm755 "$ROOT/settings/hyprdrive-power-watch" "$LIBDIR/hyprdrive-power-watch"
+    subst() { # file mode dest -- @HYPRDRIVE_PREFIX@ -> PREFIX, as for the fragments
+        python3 -c 'import sys; sys.stdout.write(sys.stdin.read().replace("@HYPRDRIVE_PREFIX@", sys.argv[1]))' "$PREFIX" < "$1" > "$3.tmp"
+        chmod "$2" "$3.tmp" && mv -f "$3.tmp" "$3"
+    }
+    mkdir -p "$PREFIX/bin" "$PREFIX/share/applications"
+    subst "$ROOT/settings/hyprdrive-settings" 755 "$PREFIX/bin/hyprdrive-settings"
+    sed "s|^Exec=hyprdrive-settings\$|Exec=$PREFIX/bin/hyprdrive-settings|" "$ROOT/settings/hyprdrive-settings.desktop" \
+        > "$PREFIX/share/applications/hyprdrive-settings.desktop"
+    echo "settings app: $PREFIX/bin/hyprdrive-settings (QML in $SHARE)"
+    command -v qs >/dev/null 2>&1 || echo "settings app: needs Quickshell 0.3 (qs) to run" >&2
     exit 0
 fi
 

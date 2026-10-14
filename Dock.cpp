@@ -39,6 +39,7 @@
 #include "TextInput.hpp"
 #include "BuiltinIcons.hpp"
 #include "IconOverrides.hpp"
+#include "SettingsApp.hpp"
 #include "DockDrop.hpp"
 #include "DockStacks.hpp"
 #include "DockTilt.hpp"
@@ -3823,8 +3824,11 @@ std::vector<SRow> infoRows(const SItem& item) {
     rows.emplace_back(SRow{.kind = ERow::Separator});
     // App Icon (user, 2026-10-13): change it right here rather than hunting
     // for the app in the settings panel. Only an app with a desktop id can
-    // have an override -- that is what the store is keyed on.
-    if (ENTRY && !itemDesktopId(item).empty()) {
+    // have an override -- that is what the store is keyed on. And only where
+    // there is a settings surface to send it to (audit A17): the Omarchy panel,
+    // or the standalone app off Omarchy. Without either the row did nothing --
+    // the overview closed and a dead IPC call went nowhere -- so it is not offered.
+    if (ENTRY && !itemDesktopId(item).empty() && SettingsApp::available()) {
         const bool CUSTOM = IconOverrides::forId(itemDesktopId(item)) != nullptr;
         rows.emplace_back(SRow{.kind = ERow::InfoIcon, .label = "App Icon", .exec = itemDesktopId(item), .glyph = MenuGlyph::IMAGE,
                                .hint = std::string(CUSTOM ? "Custom  " : "Change  ") + "\uf054"});
@@ -3924,16 +3928,17 @@ void activateRow(PHLMONITOR monitor, const SItem& item, const SRow& row) {
         }
 
         case ERow::InfoIcon:
-            // The Omarchy shell's IPC: open the Hyprdrive panel on Icons with
-            // this app chosen (Panel.qml, `icons`). argv, no shell: the id is
-            // one argument whatever it contains.
+            // The settings on Icons with this app chosen: the Omarchy panel over
+            // the shell's IPC (Panel.qml, `icons`), or the standalone app's
+            // `--icons` (SettingsApp.hpp decides which). argv, no shell: the id
+            // is one argument whatever it contains.
             // The overview first: it owns the keyboard and draws over the
             // shell, so the panel would open unseen and close again at once.
             if (row.exec.empty())
                 return;
             if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
                 OVERVIEW->close();
-            Hyprutils::OS::CProcess("/usr/bin/qs", {"-p", "/usr/share/omarchy/shell", "ipc", "call", "dragos.hyprdrive", "icons", row.exec}).runAsync();
+            SettingsApp::open({}, row.exec);
             return;
 
         case ERow::InfoReveal:

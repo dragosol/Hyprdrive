@@ -1,0 +1,91 @@
+#!/bin/sh
+# hyprdrive-settings -- open the Hyprdrive settings (native port B1).
+#
+#   hyprdrive-settings                 open (or bring forward) the settings
+#   hyprdrive-settings --pane ID       ...on a section: overview dock icons
+#                                      animation blur gestures performance mosaic
+#   hyprdrive-settings --icons APPID   ...on Icons, with that dock app chosen
+#                                      (the dock's Get Info -> App Icon)
+#   hyprdrive-settings --toggle        close it if it is open, else open it
+#   hyprdrive-settings --close
+#
+# Also the `settings` dispatcher's target: hl.plugin.hyprdrive.settings() runs
+# this (SettingsApp.cpp), so a bind like
+#   hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
+# opens it.
+#
+# ON OMARCHY the settings are the bar panel (dragos.hyprdrive in the Omarchy
+# shell), and this hands over to it: one settings surface per desktop. The
+# Integration rule decides (scripts/hyprdrive-integration).
+#
+# ONE INSTANCE. A running app is reached through its Quickshell IPC (target
+# hyprdrive-settings, shell.qml); only when nobody answers is a new `qs`
+# started, with the deep link in its environment.
+#
+# Paths are filled in by `make install` (@HYPRDRIVE_PREFIX@); run from a
+# checkout (settings/hyprdrive-settings) it uses that checkout's files.
+set -u
+
+PREFIX='@HYPRDRIVE_PREFIX@'
+HERE=$(cd "$(dirname "$0")" && pwd)
+case $PREFIX in
+    @*) PREFIX= ;;
+esac
+
+if [ -n "$PREFIX" ] && [ -f "$PREFIX/share/hyprdrive/settings/shell.qml" ]; then
+    QML=$PREFIX/share/hyprdrive/settings/shell.qml
+    LIB=$PREFIX/lib/hyprdrive
+    CLI=$PREFIX/bin/hyprdrive-integration
+else
+    # A checkout: settings/ beside omarchy-plugin/ and scripts/.
+    QML=$HERE/shell.qml
+    LIB=$HERE/../omarchy-plugin/bin
+    CLI=$HERE/../scripts/hyprdrive-integration
+fi
+
+usage() { sed -n '2,/^set -u/p' "$0" | sed '$d; s/^# \{0,1\}//'; }
+
+fn=open arg=
+while [ $# -gt 0 ]; do
+    case $1 in
+        --pane) [ $# -ge 2 ] || { usage >&2; exit 2; }; fn=pane arg=$2; shift ;;
+        --icons) [ $# -ge 2 ] || { usage >&2; exit 2; }; fn=icons arg=$2; shift ;;
+        --toggle) fn=toggle ;;
+        --close) fn=close ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "hyprdrive-settings: unknown argument $1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+command -v qs >/dev/null 2>&1 || { echo "hyprdrive-settings: needs Quickshell (qs) 0.3" >&2; exit 1; }
+
+# --- Omarchy: its panel -------------------------------------------------------
+desktop=none
+if [ -x "$CLI" ]; then desktop=$("$CLI" 2>/dev/null | head -1)
+elif command -v hyprdrive-integration >/dev/null 2>&1; then desktop=$(hyprdrive-integration 2>/dev/null | head -1)
+fi
+if [ "$desktop" = omarchy ]; then
+    case $fn in
+        icons) exec qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive icons "$arg" ;;
+        pane) exec qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive open ;;
+        *) exec qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive "$fn" ;;
+    esac
+fi
+
+# --- the running app, if there is one ----------------------------------------
+if [ -n "$arg" ]; then
+    qs -p "$QML" ipc call hyprdrive-settings "$fn" "$arg" >/dev/null 2>&1 && exit 0
+else
+    qs -p "$QML" ipc call hyprdrive-settings "$fn" >/dev/null 2>&1 && exit 0
+fi
+
+# --- otherwise start it ---------------------------------------------------------
+case $fn in
+    close|toggle) [ $fn = close ] && exit 0 ;;
+esac
+export HYPRDRIVE_HDPANEL="$LIB/hdpanel"
+[ $fn = icons ] && export HYPRDRIVE_SETTINGS_ICONS="$arg"
+[ $fn = pane ] && export HYPRDRIVE_SETTINGS_PANE="$arg"
+# -n: if two launches race past the IPC check, the second exits.
+exec qs -n -p "$QML"

@@ -194,6 +194,19 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .luaLegacy       = [](lua_State* L) { return dispatcherFactoryLua(L, "focus"); },
         },
         {
+            // SettingsApp.hpp: open the settings -- the Omarchy panel or the
+            // standalone app, whichever this desktop has. Lua reaches a
+            // dispatcher only through this table, so a bindable "open settings"
+            // has to be here (native port B1): hl.plugin.hyprdrive.settings().
+            .name            = "settings",
+            .argPattern      = std::regex{R"(^(open|toggle|close|pane [a-z_]+|icons [^ \t]+)$)"},
+            .defaultArg      = "open",
+            .typeArgError    = "expected an optional string argument; did you forget quotes around it?",
+            .invalidArgError = "expected open, toggle, close, pane <section> or icons <desktop-id>",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "settings"); },
+            .luaLegacy       = [](lua_State* L) { return dispatcherFactoryLua(L, "settings"); },
+        },
+        {
             .name            = "window",
             .argPattern      = std::regex{"^(select|close|click)$"},
             .typeArgError    = "expected a string argument",
@@ -563,6 +576,19 @@ static void registerConfigValuesFor() {
     // layout of desktops with none of their own.
     addKey(makeShared<CBoolValue>(KEY("mosaic:enabled"), "mosaic: Super+L cycles Dwindle -> Scrolling -> Mosaic (the panel asks before turning it on)", false));
     addKey(makeShared<CBoolValue>(KEY("mosaic:default"), "mosaic: new desktops use the Mosaic layout (needs mosaic:enabled)", false));
+    // The chords Mosaic takes while it is on (audit A20). hdpanel reads these
+    // when it writes 40-panel.lua; the plugin only holds them, so they can be
+    // set from hyprland.lua or the settings like any other key. "auto" is the
+    // old behaviour on Omarchy (Super+L replaces Omarchy's two-way layout
+    // toggle; Super+arrows become mosaic-aware focus) and NOTHING elsewhere: on
+    // plain Hyprland those chords are the user's, and silently unbinding them
+    // was the bug. An explicit chord / modifier takes it on any desktop.
+    addKey(makeShared<CStringValue>(KEY("mosaic:cycle_bind"),
+                                    "mosaic: the chord that cycles Dwindle -> Scrolling -> Mosaic -- auto (SUPER + L on Omarchy, none elsewhere), none, or a chord like SUPER + M",
+                                    Hyprlang::STRING{"auto"}));
+    addKey(makeShared<CStringValue>(KEY("mosaic:focus_binds"),
+                                    "mosaic: modifier for mosaic-aware focus on the arrow keys -- auto (SUPER on Omarchy, none elsewhere), none, or a modifier like SUPER or SUPER + ALT",
+                                    Hyprlang::STRING{"auto"}));
     addKey(makeShared<CBoolValue>(KEY("search:easter_egg"), "overview search: type a letter and backspace five times in four seconds and the pill plays search:easter_egg_video", true));
     addKey(makeShared<CStringValue>(KEY("search:easter_egg_video"), "the video the overview's easter egg plays, with its sound (needs ffmpeg); a missing file turns the egg off",
                                     Hyprlang::STRING{"~/.local/share/hyprdrive/easter-egg.mp4"}));

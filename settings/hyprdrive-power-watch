@@ -1,0 +1,37 @@
+#!/bin/bash
+# hyprdrive-power-watch -- apply the settings' AC / battery profile when the
+# charger comes or goes, on a desktop without the Omarchy shell (native port B1).
+#
+# On Omarchy the bar panel does this (Panel.qml's onBattery watcher). Off it
+# nothing of the settings stays running, so 36-settings-app.lua starts this
+# with the session instead. It listens to UPower's OnBattery on the system bus,
+# waits for the state to hold still for 4 s -- a flaky USB-C source flips it
+# several times a second, and every applied profile rewrites 40-panel.lua --
+# and then runs `hdpanel profile-auto`, which reads the settled state itself and
+# does nothing in a forced mode or with no profile saved.
+#
+# Exits at once on a machine with no battery, without UPower, or when another
+# copy is already watching this session.
+set -u
+HERE=$(dirname "$(readlink -f "$0")")
+HDPANEL=${HYPRDRIVE_HDPANEL:-$HERE/hdpanel}
+[ -x "$HDPANEL" ] || exit 0
+command -v gdbus >/dev/null 2>&1 || exit 0
+
+has_battery=0
+for t in /sys/class/power_supply/*/type; do
+    [ -r "$t" ] && [ "$(cat "$t")" = Battery ] && { has_battery=1; break; }
+done
+[ $has_battery = 1 ] || exit 0
+
+# One watcher per session (a config reload must not stack them).
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hyprdrive-power-watch.${HYPRLAND_INSTANCE_SIGNATURE:-0}.lock"
+flock -n 9 || exit 0
+
+gdbus monitor --system --dest org.freedesktop.UPower --object-path /org/freedesktop/UPower 2>/dev/null |
+while IFS= read -r line; do
+    case $line in *OnBattery*) ;; *) continue ;; esac
+    # Settle: anything else arriving within 4 s restarts the wait.
+    while IFS= read -r -t 4 _; do :; done
+    "$HDPANEL" profile-auto >/dev/null 2>&1
+done
