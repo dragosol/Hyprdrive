@@ -1,0 +1,768 @@
+# hyprdrive-omarchy feature inventory with headless test procedures (source @ 020c4cd)
+
+I read the source only, on the XPS (`~/Projects/hyprdrive-omarchy`, read-only). Nothing was built or run. On fedora I only ran read-only `ls`/`strings`/`command -v` checks. I did not start any Hyprland.
+
+## Findings to look at before porting
+
+- **F1. `plugin:hyprdrive:blur` looks like a no-op.** The key is registered and the panel has a row for it ("Blur the wallpaper"). But `Config::getBlur()` (Config.cpp:1477) has no callers anywhere in the sources.
+- **F2. GNOME SearchProvider2 results are never shown.** `SearchProviders::query` and `warm()` run on every keystroke and every open (main.cpp:836, main.cpp:582). But `overviewSearchRowsLive()` (OverviewInternal.hpp:640-765) never adds `SearchProviders::results()`, so the `SearchProviders::activate` path (OverviewInternal.hpp:900) can't be reached. The README still lists "GNOME search providers". The open still D-Bus-activates every provider, which costs something and shows nothing.
+- **F3. Super plus a left press on a window corner resizes on any layout, even with Mosaic off.** `Mosaic::onButton` (Mosaic.cpp:785-809) is not gated on `mosaic:enabled`. In a corner, it replaces Omarchy's Super+drag move.
+- **F4. One fragment needs Omarchy to parse.** `config/hyprdrive/25-rules.lua` calls Omarchy's `o.window` helper, which does not exist without Omarchy. The other fragments are plain Hyprland Lua.
+- **F5. `debug type` takes one word only.** Its pattern is `type \S+` (Config.cpp:170). A query with spaces has to go through the virtual keyboard.
+- **F6. `hyprdrive:gesture add|remove …` has no Lua binding.** It is not in `findDispatcher` (Config.cpp:93-200), so a Lua config can't call it. Only `hl.plugin.hyprdrive.gesture{}` works. The raw `addDispatcherV2` name only parses under a hyprlang config.
+- **F7. The search always offers a "Search Google" row** (`xdg-open https://www.google.com/search?q=…`) in the AI & Tools column. It is not opt-in like define/tr, although nothing is sent until the row is activated.
+- **F8. Machine-specific defaults.** `gesture_detent_sound` defaults to `~/.local/bin/keystroke-click`, a script on your machine (a missing file means silent). `.build/Glass.o` is a stale object with no `Glass.cpp` (the rolled-back liquid glass). The Makefile globs `*.cpp`, so it is harmless.
+- **F9. `hl.sh` scrubs PATH** to `~/.local/bin:/usr/local/bin:/usr/bin`. `/usr/share/omarchy/bin` (431 Omarchy scripts, present on fedora) is not on it, so Omarchy-menu actions, agents and `hd-layout-cycle` fail unless PATH is extended. `uwsm-app`, `omarchy-launch-tui` and `omarchy-notification-send` were not found on PATH.
+- **F10. `hl.sh`'s session bus has no activatable services.** So Sushi (Quick Look), GNOME search providers, `org.freedesktop.FileManager1`, gvfsd and LauncherEntry senders are all absent unless a service dir is added.
+
+## Harness conventions used in every test below
+
+I verified the following by reading `~/Projects/hyprdrive-native/scripts/headless/hl.sh` (commits acb8451, 89c28e8) and the fedora binaries:
+
+- **No headless-only switch in 0.56.** There is no `HYPRLAND_HEADLESS_ONLY` and no `AQ_` backend switch. libaquamarine only knows `AQ_DRM_DEVICES`, `AQ_NO_ATOMIC`, `AQ_NO_MODIFIERS`, `AQ_MGPU_NO_EXPLICIT`, `AQ_FORCE_LINEAR_BLIT`, `AQ_LIBINPUT_NO_PLUGINS` and `AQ_TRACEUH`.
+- **How hl.sh gets a headless Hyprland.** It runs `mutter --headless --virtual-monitor` as `hyprtest`, nests Hyprland in it through the Wayland backend, then runs `hyprctl output create headless HEADLESS-1` and disables WL-1. It pins `LIBSEAT_BACKEND=logind`, uses its own `XDG_RUNTIME_DIR=/tmp/hyprdrive-hl/rt`, and its own dbus-run-session.
+- **Abbreviations** (all run as dragos on fedora):
+  - `H` = `scripts/headless/hl.sh`
+  - `HD 'x'` = `H h dispatch 'hl.plugin.hyprdrive.x'`. Use `dispatch`, not `eval`: eval discards the debug report, which comes back as `.error` text.
+  - `CFG{...}` = `H eval 'hl.config({plugin={hyprdrive={...}}})'`. `hyprctl keyword` is dead under Lua.
+  - `OPT k` = `H h getoption plugin:hyprdrive:k`
+  - `SHOT f [OUT]` = `H shot f.png HEADLESS-1`
+  - `KB` = `H type|tap|down|up`. This is a long-lived virtual keyboard. Don't use `H key`: wtype makes a new device per call, and the overview reacts to that.
+  - `PTR` = `H ptr move X Y|click [btn]|down|up|scroll DY|drag X1 Y1 X2 Y2`
+  - `W` = `H win <cmd>`. kitty is the fixture.
+- **Overview open/closed.** Run socat as hyprtest on `$RT/hypr/$SIG/.socket2.sock` and expect `hyprdrive>>1` / `hyprdrive>>0` (legacy `scrolloverview>>1`, OverviewManager.cpp:35). Or use `HD 'debug("frames")'`: it prints an overview line per monitor and writes `~hyprtest/.local/state/hyprdrive/frames.txt`. `hyprctl submap` = `hyprdrive` only if the test config defines the fragment-30 submap. `test.lua` is vanilla and does not, so add the 30-keybinds block to test the production click path.
+- **Every test also passes on these.** `H stop` reports "no coredumps", and the instance PID survives the test (compositor alive).
+- **Gestures are blocked.** There is no touchpad in headless, and `wlr-virtual-pointer` cannot emit swipe or pinch. uinput is off-limits: hyprtest is in the `input` group, so a virtual device would also reach dragos's GNOME session. Gesture behaviour therefore needs a test hook such as a proposed `debug swipe <fingers> <dx> <dy> <phase>`, which would drive `g_pTrackpadGestures` as GestureDrive.cpp already does. This is marked **[NEEDS HOOK]** below.
+- **Other hooks proposed.** `debug dock`, which would print dock item boxes from the pure `Dock::layout()`. Relative motion in `vptr.py`, needed for autohide pressure.
+
+## A. Plugin core, identity, dispatchers, IPC
+
+- **A1. Plugin load/unload.** Registers hooks, keys, dispatchers and the Mosaic layout; PLUGIN_EXIT tears everything down.
+  - Code: main.cpp:1959 (PLUGIN_INIT), main.cpp:2480 (PLUGIN_EXIT).
+  - Omarchy: no.
+  - Test: `H start` (it loads `.so`), `H h plugin list`, then `H h plugin unload ~/.local/lib/hyprdrive/hyprdrive.so`, reload, repeat 5 times with the overview open once.
+  - Pass: "hyprdrive" is listed, the PID survives each unload, no cores.
+- **A2. Legacy `scrolloverview` names (one release).** Every key is mirrored under `plugin:scrolloverview:`, with dispatchers, the Lua namespace and the IPC event. One WARN goes to `/tmp/hyprdrive-compat.log`, and the favorites store is adopted.
+  - Code: Compat.cpp/.hpp, Config.cpp:396-438.
+  - Omarchy: no.
+  - Test: `H eval 'hl.config({plugin={scrolloverview={scale=0.5}}})'`, then `OPT scale`. Also `H h dispatch 'hl.plugin.scrolloverview.overview("toggle all")'`.
+  - Pass: scale = 0.5, the overview opens, and the compat log has exactly one WARN line plus N `use` lines.
+- **A3. Dispatcher `overview`** with `toggle|on|open|enable|off|close|disable [monitor|all]`, `select`, `tab`.
+  - Code: main.cpp:509; pattern at Config.cpp:97.
+  - Omarchy: no.
+  - Test: `HD 'overview("open all")'`, `HD 'overview("close HEADLESS-1")'`, `HD 'overview("toggle")'`; `HD 'overview("bogus")'` must fail.
+  - Pass: socket2 events in order, and an error string for the bogus argument.
+- **A4. Dispatcher `navigate left|right|up|down`.** Moves the overview selection.
+  - Code: main.cpp:1295.
+  - Omarchy: no.
+  - Test: 3 kitties, open, then `HD 'navigate("right")'` ×2 and take a shot.
+  - Pass: the highlight ring (`general:col.active_border`) moves to the next tile; compare pixel regions between shots.
+- **A5. Dispatcher `window select|close|click`.** Acts on the window under the cursor.
+  - Code: main.cpp:1307.
+  - Omarchy: no.
+  - Test: open, `PTR move` onto a tile, then `HD 'window("close")'`.
+  - Pass: the client count drops by 1. `select`: the overview closes and that client is focused (`H h activewindow`).
+- **A6. Dispatcher `minimize window|restore`.** Flies into the dock and back out.
+  - Code: main.cpp:1799, FlightController.cpp.
+  - Omarchy: no.
+  - Test: focus a kitty, `HD 'minimize("window")'`, `H h clients -j`.
+  - Pass: workspace.name is `special:minimized`. After `HD 'minimize("restore")'` it is back on its original workspace at its original box (±2 px).
+- **A7. Dispatcher `hotkey overlay|[shift |ctrl ]1..10`.** Activates a dock slot. It does nothing unless `dock:hot_keys`.
+  - Code: main.cpp:1821, Dock.cpp:4519.
+  - Omarchy: partly (the fragment sets `hot_keys=false` to keep Super+digits for Omarchy workspaces).
+  - Test: `CFG{dock={hot_keys=true}}`, `HD 'hotkey("overlay")'`, SHOT, `HD 'hotkey("1")'`.
+  - Pass: slot numbers are drawn on the icons for about 2 s, and slot 1's app is activated or launched.
+- **A8. Dispatcher `stack ...`.** See section H.
+  - Code: main.cpp:1865.
+- **A9. Dispatcher `focus l|r|u|d`.** Mosaic-aware focus by position; elsewhere it falls through to `movefocus`.
+  - Code: Mosaic.cpp:853, Mosaic.cpp:920.
+  - Omarchy: no (the panel binds it to Super+arrows).
+  - Test: see J3.
+- **A10. Dispatcher `debug`.** Topics:
+  - `frames`: why each monitor repaints.
+  - `mem`: GPU estimate.
+  - `motion`: the active curve preset sampled.
+  - `scratchpad`: shows the default scratchpad and closes the overview.
+  - `type [word]`: sets the query.
+  - `press <evdev>`: one key through the search handler.
+  - `activate <class>`: a left click on that app's dock icon.
+  - `ripple [x y]`.
+  - Code: main.cpp:1588, Config.cpp:168.
+  - Omarchy: no.
+  - Test: each topic once.
+  - Pass: `frames` prints a line per monitor (`[desktop] idle` when idle). `motion` prints `house=1`.
+- **A11. `hl.plugin.hyprdrive.gesture{fingers,direction,action,mods,scale,disable_inhibit,arg|dispatcher,data}`** (Lua) and the `hyprdrive-gesture` hyprlang keyword. Registers trackpad gestures, including `click`/`tap` N-finger clicks and `unset`.
+  - Code: Config.cpp:320, main.cpp:1370-1500.
+  - Omarchy: no.
+  - Test: `H eval` with a valid and an invalid table.
+  - Pass: no Lua error for the valid one, the expected error text for the invalid one. Behaviour is **[NEEDS HOOK]**.
+- **A12. `hl.plugin.hyprdrive.configure{...}` and `_dispatch(name,arg)`.** Lua helpers.
+  - Code: Config.cpp:215-310.
+  - Omarchy: no.
+  - Test: `H eval 'hl.plugin.hyprdrive.configure({scale=0.6})'`, then `OPT scale`.
+  - Pass: 0.6.
+- **A13. IPC events.** `hyprdrive>>0|1` on overview open/close; `cursorshape>>NAME` (app-requested cursor shapes); `fullscreen>>` re-emitted around overview transitions.
+  - Code: OverviewManager.cpp:35, CursorShape.cpp:61, scrollOverview.cpp:4827.
+  - Omarchy: no.
+  - Test: socat on socket2 while toggling.
+  - Pass: events in order.
+- **A14. Config fragments plus the loader.** `config/hyprdrive.lua` plus `00-plugin` (load and the `hyprdrive_loaded()` guard), `10-theme`, `20-layout` (scale 0.82, horizontal, `hot_keys=false`), `25-rules`, `30-keybinds` (submap and 3-finger up/down gestures). The panel adds `35-gestures` and `40-panel`.
+  - Code: config/, scripts/install-fragments.sh.
+  - Omarchy: partly (25-rules uses `o.window`, F4; `make install` edits Omarchy's `~/.config/hypr/hyprland.lua`).
+  - Test: put the fragments under hyprtest's `~/.config/hypr/hyprdrive` and point test.lua at the loader.
+  - Pass: `H h configerrors` is empty except the `o` error (F4). `OPT layout` = horizontal.
+- **A15. Failure notification.** A red toast "[hyprdrive] Failure in initialization" when a symbol hook is missing.
+  - Code: main.cpp:1329.
+  - Omarchy: no.
+  - Test: load against a mismatched Hyprland. **[NOT HEADLESS-SAFE / skip]**
+- **A16. uwsm-app launch wrapping.** Apps spawned by the overview or dock run in their own `app-*.scope`.
+  - Code: Launch.hpp.
+  - Omarchy: partly (uwsm, which Omarchy uses; without it, unchanged).
+  - Test: launch from the dock or search. Pass: under hl.sh (no uwsm) the child is a direct child of Hyprland.
+
+## B. Overview: open/close, look, grid
+
+- **B1. Tap Super toggles the overview on every monitor.** Press-release ≤ `tap_super_timeout_ms` (250) with no other key or button in between. Chords never count.
+  - Code: main.cpp:1082-1290 (raw evdev 125/126).
+  - Omarchy: no.
+  - Test: `KB tap Super_L` → open. `KB down Super_L; KB tap w; KB up Super_L` → no toggle. Hold 400 ms → no toggle. `CFG{tap_super=false}` → no toggle.
+  - Pass: socket2 events as expected.
+- **B2. Open/close animation.** `open_speed` 2.6 and `close_speed` 1.9 (tenths of a second), `anim_scale` (0 = snap), reversible mid-close.
+  - Code: scrollOverview.cpp:10433-10460, IOverview reopen.
+  - Omarchy: no.
+  - Test: toggle twice within 100 ms; `CFG{anim_scale=10}` and take shots at 0.5 s and 2 s.
+  - Pass: with the slow scale, the mid shot differs from the end shot. A reversal ends open and closes fully.
+- **B3. Mission-control grid.** Live windows of the focused desktop in a grid; `mission_control_gap`; `mission_control=false` shows scrolling columns instead.
+  - Code: GridLayout.cpp, OverviewInternal.hpp.
+  - Omarchy: no.
+  - Test: 4 kitties, open, SHOT; then `CFG{mission_control=false}`.
+  - Pass: 4 non-overlapping tiles inside the card, and a different arrangement with the grid off.
+- **B4. Overview scale and layout.** `scale` 0.82; `layout` vertical/horizontal; `workspace_gap`.
+  - Code: OverviewGeometry.cpp, Config.cpp:1382.
+  - Omarchy: no.
+  - Test: `CFG{scale=0.5}` and SHOT.
+  - Pass: the card bbox is about half the monitor.
+- **B5. Backdrop.** Dimmed wallpaper behind the cards (`wallpaper` 0..2; mode 1 skips the blur cache) and card shadows (`shadow:*`, which follow `decoration:shadow` at -1). The `blur` key is F1.
+  - Code: scrollOverview.cpp:610, 4850, 10028-10250; OverviewChrome.hpp.
+  - Omarchy: partly (styled after the Omarchy lock screen; no file dependency).
+  - Test: shots with `wallpaper=0/1/2` and `shadow:enabled=true`.
+  - Pass: the shots differ, with a shadow halo around the card.
+- **B6. Theme inheritance.** Highlight = `col.active_border` (or `col_highlight`); rounding = `decoration:rounding`; plate fill = Omarchy `colors.toml` background, else `misc:background_color`; font from fontconfig monospace.
+  - Code: Config.cpp:943-1240.
+  - Omarchy: **yes** for colors.toml and the font, with fallback to Hyprland keys.
+  - Test: set `general:col.active_border` to pure red, open, select a tile.
+  - Pass: the ring pixels are red. Write a fake `~/.local/state/omarchy/current/theme/colors.toml` and the plate colour follows within about 1 s.
+- **B7. Tile hover chrome.** The hovered tile grows, shrinks on press, gets an app icon at the bottom, a title caption, and a close X at top-right (click closes).
+  - Code: TileChrome.cpp.
+  - Omarchy: no.
+  - Test: `PTR move` onto a tile and SHOT; click the X region.
+  - Pass: the tile bbox grows a few %, and the client count drops after clicking the X.
+- **B8. Window pill (V2).** Hold Super: each window (desktop) or the hovered tile (overview) shows minimize/maximize/close buttons straddling its top-right corner. On the desktop, double-clicking a window toggles float/tile.
+  - Code: WindowPill.cpp.
+  - Omarchy: no.
+  - Test: `KB down Super_L`, SHOT, `PTR click` on the close button, `KB up`. Desktop: `PTR click` twice within 400 ms on a kitty.
+  - Pass: the pill is visible in the shot and gone after release; close works; the double-click flips `floating` in `clients -j`.
+- **B9. Super+W in the overview closes the selected or hovered tile.** It is consumed even when nothing is selected.
+  - Code: OverviewInput.cpp:846.
+  - Omarchy: partly (mirrors Omarchy's Super+W).
+  - Test: open, navigate to a tile, `KB tap Super+w`.
+  - Pass: that client is gone and the overview is still open.
+- **B10. Keyboard navigation.** Arrows move within a pane. Tab cycles results → tiles → desktops; with several monitors: search → monitor-1 grid → monitor-2 grid. Enter commits. Esc first clears the query, then closes.
+  - Code: OverviewInput.cpp:803-1040, main.cpp:875, scrollOverview.cpp:3760.
+  - Omarchy: no.
+  - Test: `KB tap Right/Tab/Return/Escape` sequences; `HD 'overview("tab")'`.
+  - Pass: the focused window after Return equals the selected tile; Esc with a query keeps it open, a second Esc closes.
+- **B11. Click a tile** to focus it and close the overview (cursor warped into the window, pointer lock released).
+  - Code: OverviewInput.cpp performPrimaryClickAction, scrollOverview.cpp close path.
+  - Omarchy: no.
+  - Test: `PTR click` on a tile.
+  - Pass: activewindow is that one, `hyprdrive>>0`, and `H h cursorpos` is inside that window.
+- **B12. Mouse wheel.** Steps desktops or columns per `input:scrolling_mode` 0..3, throttled by `scroll_event_delay`. Touchpad scroll uses `touchpad_scroll_factor`.
+  - Code: Config.cpp:1444, OverviewInput.cpp:640.
+  - Omarchy: no.
+  - Test: 2 desktops, open, `PTR scroll 1` ×1.
+  - Pass: the viewed desktop changes by exactly one (the active workspace after Return).
+- **B13. Window drag in the overview.** Left drag a tile (middle in `drag_mode=1`), past `drag_threshold`. The proxy shrinks to `drag_mini_scale` over another desktop. Drop on a strip cell moves the window there (empty cell = new desktop); drop on the dock pill minimizes; drop on the scratchpad cell parks it. Placement on arrival is the layout's (Placement.cpp retileAsNew).
+  - Code: scrollOverview.cpp:1980-2400, DropDecision.hpp, Placement.cpp.
+  - Omarchy: no.
+  - Test: `PTR drag` from a tile to strip cell 2 / to the empty last cell / to the dock.
+  - Pass: `clients -j` workspace changes, a new workspace id is created, or it goes to `special:minimized`.
+- **B14. Middle-button drag pans** a scrolling desktop's tape (swapped by `drag_mode`).
+  - Code: OverviewInput.cpp:185, 515.
+  - Omarchy: no.
+  - Test: scrolling-layout desktop with 4 kitties, `PTR down middle; move; up`.
+  - Pass: the tile x positions shift.
+- **B15. Right-button drag on a tile resizes the window** (drag-resize motion blur site).
+  - Code: OverviewInput.cpp:551.
+  - Omarchy: no.
+  - Test: `PTR down right` on a tile edge, move 100 px, up.
+  - Pass: the window's size in `clients -j` changed.
+- **B16. Hold to swap.** Drag a window over another (grid or strip) and hold `hold_to_swap_ms` (1500): both dim, a "Swap" label with an icon appears, and release swaps them.
+  - Code: scrollOverview.cpp:2419+, BuiltinIcons (swap mark).
+  - Omarchy: no.
+  - Test: 2 kitties A and B, `PTR down` on A, move onto B, wait 1.7 s, SHOT, `PTR up`.
+  - Pass: A and B exchanged positions (`clients -j` at), and the label is visible in the shot. With `drag:hold_to_swap=false` there is no swap.
+- **B17. Fullscreen/streaming windows.** A fullscreen window gets no tile; a streaming tile is kept live; off-screen clients still get frames when needed.
+  - Code: scrollOverview.cpp:9284, 9320, 4222-4300, 8559-8770.
+  - Omarchy: no.
+  - Test: fullscreen a kitty, open the overview.
+  - Pass: no crash, `fullscreen>>` events, a tile is drawn. **[PARTLY UNCLASSIFIED: frame-pacing internals]**
+- **B18. Top/overlay layers keep working over the overview.** Notifications, the OSD and swipe-to-dismiss toasts take their own clicks and scrolls.
+  - Code: scrollOverview.cpp:9360, 10309, OverviewInput.cpp:650.
+  - Omarchy: partly (Omarchy's OSD and toasts).
+  - Test: open and run `notify-send` (needs a notification daemon). **[LOW PRIORITY]**
+- **B19. Scratchpad over the overview.** Toggling a scratchpad while the overview is up draws it over the overview with a dim.
+  - Code: scrollOverview.cpp:8919, 10250.
+  - Omarchy: partly (Omarchy binds Super+grave).
+  - Test: park a kitty on `special:scratchpad`, open, `H h dispatch` togglespecialworkspace.
+  - Pass: the shot shows the kitty over the cards.
+- **B20. Live previews and the frame policy.** Tiles are real compositor-rendered windows; the overview throttles frames for off-screen tiles and keeps dock previews live.
+  - Code: main.cpp:101-310 hooks, scrollOverview.cpp:8192-8770.
+  - Omarchy: no.
+  - Test: kitty running `watch -n0.2 date`, open, two shots 1 s apart.
+  - Pass: the tile content differs, and `debug frames` reports idle after it settles.
+- **B21. Smooth frames.** `smooth_frames` holds `render:new_render_scheduling` on and restores your value on off or unload. A one-time notification hint fires if opens keep dropping frames.
+  - Code: FramePacing.cpp.
+  - Omarchy: partly (the hint points at the panel).
+  - Test: `CFG{smooth_frames=true}`, `H h getoption render:new_render_scheduling`, unload.
+  - Pass: 1 while on, back to the original after unload.
+- **B22. Prefilter and live frost.** `prefilter_below` mipmaps minified tiles; `live_layer_frost` frosts dock/bar against the overview backdrop.
+  - Code: Window.cpp, OverviewInternal.hpp.
+  - Omarchy: no.
+  - Test: `debug mem` before and after an open.
+  - Pass: `prefilter N entries` > 0 when scale < 0.55.
+- **B23. Open profiler.** `touch /tmp/hyprdrive-openprof.on`, and each open writes `/tmp/hyprdrive-openprof.log`.
+  - Code: OpenProf.cpp.
+  - Omarchy: no.
+  - Test: touch the file, open, wait 2 s.
+  - Pass: the log has a block with steps and frames.
+- **B24. Membership.** The window set follows open, close, float, title, class, workspace and fullscreen events. Minimized windows are counted at their home desktop and shown only under a search filter (Y9).
+  - Code: Membership.cpp, GridLayout.hpp.
+  - Omarchy: no.
+  - Test: minimize a kitty, open, type its title (`HD 'debug("type kitty")'`).
+  - Pass: its tile appears only while filtered.
+
+## C. Workspace strip and multi-monitor
+
+- **C1. Desktop strip.** Live thumbnails of every desktop across the top (`strip`, `strip_height` 260, `strip_max_screen_pct` 30, `strip_gap` 5). Cells shrink to fit, top-aligned. Click a cell to switch.
+  - Code: StripLayout.hpp, scrollOverview.cpp ~6400-6730.
+  - Omarchy: no.
+  - Test: 3 desktops with windows, open, SHOT, `PTR click` cell 3, `KB tap Return`.
+  - Pass: 3+1 cells, and the active workspace is 3.
+- **C2. GNOME workspace invariants.** One spare empty desktop after the highest occupied one, and holes filled. Multi-monitor safe (no id stolen from another monitor, workspace rules respected).
+  - Code: WorkspacePlan.hpp, scrollOverview.cpp:820.
+  - Omarchy: no.
+  - Test: windows on desktops 1 and 4 only, open, `H h workspaces -j`.
+  - Pass: 2 and 3 now exist (holes), plus a spare 5. With HEADLESS-2 (`H mon2`), no duplicate ids across monitors (`workspace_plan_test.cpp` also covers this on the host).
+- **C3. Strip cell hover label.** The desktop name plus up to 3 app names (+N) over a non-empty hovered cell.
+  - Code: scrollOverview.cpp:6623.
+  - Omarchy: no.
+  - Test: `PTR move` over cell 1 and SHOT.
+  - Pass: a label pill appears above the strip; none over an empty cell.
+- **C4. Scratchpad cell.** A detached cell at the strip's right end, revealed by an invisible zone right of the last cell. Click shows the default scratchpad and closes the overview; dropping a window parks it there (the scratchpad is created on first use).
+  - Code: scrollOverview.cpp:5551, 5871, Scratchpad.cpp.
+  - Omarchy: partly (`special:scratchpad` is Omarchy's name).
+  - Test: open, `PTR move` right of the last cell, SHOT, drag a tile onto it; `HD 'debug("scratchpad")'`.
+  - Pass: the cell appears, the window lands on `special:scratchpad`, and the debug topic shows it.
+- **C5. Alternate strips.** Other monitors' strips grow out of the left end of the strip when the pointer is in the left reveal zone.
+  - Code: StripLayout.hpp, scrollOverview.cpp.
+  - Omarchy: no.
+  - Test: `H mon2`, open, `PTR move` left of HEADLESS-1's strip, SHOT.
+  - Pass: an extra cell group appears. Your earlier note says a warp alone did not reveal it on the XPS; use virtual-pointer motion.
+- **C6. One overview state across monitors.** Tap, swipe and the hot corner open and close all monitors. The keyboard follows Tab, not the pointer.
+  - Code: main.cpp:360, scrollOverview.cpp:9528.
+  - Omarchy: no.
+  - Test: `H mon2`, `KB tap Super_L`, then `debug frames`.
+  - Pass: both monitors report an overview line.
+- **C7. Monitor removal tears the overview and flights down safely.**
+  - Code: main.cpp:2420 (monitor.removed).
+  - Omarchy: no.
+  - Test: `H mon2`, open on both, `H h output remove HEADLESS-2`.
+  - Pass: the compositor survives, and the overview on HEADLESS-1 can still close.
+- **C8. Workspace detents during the 3-finger drag.** Magnetic `gesture_detent` 0.35; a name pill on the settling card (`gesture_detent_label`); a click sound per boundary crossed (`gesture_detent_sound`).
+  - Code: scrollOverview.cpp:10718, Config.cpp:445-470.
+  - Omarchy: no (sound script is user-specific, F8).
+  - Test: **[NEEDS HOOK]** swipe injection. Sound: point `gesture_detent_sound` at a script that touches a file. Pass: one touch per boundary.
+
+## D. Search (type in the overview)
+
+- **D1. Search pill.** A pill with a badge; the field grows from 210 to 360 px and on to 75% of the monitor with spring physics; long text scrolls with a left fade; letters bounce in and fly out (Serpantinum OutBack). Results push the strip and grid down (an eased band).
+  - Code: SearchSession.hpp, SearchLetters.hpp, OverviewRender.cpp, scrollOverview.cpp:6969+.
+  - Omarchy: no.
+  - Test: open, `KB type hello` (works with the long-lived vkbd); SHOT at 50 ms and 600 ms.
+  - Pass: the text is visible, the pill is wider than at rest, and the strip y moved down.
+- **D2. Window filter.** Strict, any order, case- and accent-insensitive, against title, class and app name, across all desktops; non-matching tiles release and the rest reflow (`mission_control_reflow_ms`).
+  - Code: AppSearch.cpp (window match), GridLayout.cpp.
+  - Omarchy: no.
+  - Test: kitties titled A and B (`kitty --title Alpha`), `HD 'debug("type alpha")'`.
+  - Pass: only Alpha's tile remains after 400 ms.
+- **D3. App results.** From .desktop entries (rescanned live, icon index rebuilt on a worker); running apps first; Enter launches or focuses; `terminal` key for `Terminal=true`. Quickshell panels are told apart by class:title.
+  - Code: AppSearch.cpp, OverviewInternal.hpp:660.
+  - Omarchy: partly (icons from the Omarchy icon theme via `~/.local/state/omarchy/current/theme/icons.theme`, with fallback).
+  - Test: `KB type kitty`, `KB tap Return`.
+  - Pass: a new kitty is mapped (client count +1). Typing the name of a running app focuses it instead.
+- **D4. Shift+Enter or double-tap Shift opens a new instance** of the selected app.
+  - Code: OverviewInput.cpp:990, main.cpp double-tap Shift, scrollOverview.cpp:8007.
+  - Omarchy: no.
+  - Test: with a kitty running, `KB type kitty; KB tap Shift+Return`.
+  - Pass: 2 kitties.
+- **D5. Omarchy menu provider.** Parses `/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc` plus `~/.config/omarchy/extensions/omarchy-menu.jsonc` and evaluates their conditions (`omarchy-pkg-present`, `omarchy-hw-*`, `pgrep`, `systemctl`, flatpak…). Submenus drill down; Back row, Esc and Backspace go up; it browses when empty.
+  - Code: OmarchySearch.cpp:703-1480.
+  - Omarchy: **yes** (with built-in fallbacks Lock/Screenshot/Nightlight/Theme/Shutdown at :1402).
+  - Test: open, `KB type theme`, SHOT; Down, Return on a Menu row.
+  - Pass: the "Omarchy Menu" column has rows; the column title changes to the submenu route; Esc returns. Running actions needs `/usr/share/omarchy/bin` on PATH (F9).
+- **D6. Files & Folders.** Async `fd` search of home with a big exclude list; on an empty query it shows Projects, Downloads, Documents and similar if present. Enter runs `xdg-open`. Rows carry type, size and mtime.
+  - Code: OmarchySearch.cpp:1501-1950.
+  - Omarchy: partly (`.config/omarchy` among the shortcuts).
+  - Test: create `~hyprtest/Documents/hdtest-unique.txt`, `KB type hdtest`, wait 1 s, SHOT.
+  - Pass: a row "hdtest-unique.txt" appears in the Files column.
+- **D7. Quick Look on file results.** Space toggles GNOME Sushi (D-Bus NautilusPreviewer2); arrows update it; Esc or Backspace closes it.
+  - Code: OmarchySearch.cpp:46-130, scrollOverview.cpp:7990, main.cpp Space path.
+  - Omarchy: no (the 25-rules fragment floats it with an Omarchy helper).
+  - Test: needs a session bus with the sushi service (F10). Then D6, Down to the row, `KB tap space`.
+  - Pass: a window of class `org.gnome.NautilusPreviewer` maps; Space again unmaps it.
+- **D8. Calculator.** Arithmetic and functions (sqrt etc.) evaluated as you type; Enter copies the result with `wl-copy`.
+  - Code: OmarchySearch.cpp:133-375.
+  - Omarchy: no.
+  - Test: `KB type 2*(3+4)`, Down to the AI & Tools row, Return, then `WAYLAND_DISPLAY=<inst> wl-paste`.
+  - Pass: "14".
+- **D9. AI agents.** `/grok /agy /gemini /claude /opencode /codex /copilot /crush /pi /agent <prompt>` rows launch `omarchy-launch-tui … "<prompt>"`. Any typed sentence also offers each logged-in agent. An empty query shows help rows. The default agent's rows come first.
+  - Code: OmarchySearch.cpp:378-700.
+  - Omarchy: **yes** (`omarchy-launch-tui`, `omarchy-agent`, `~/.local/state/omarchy/agents/usage`, dragos.agents icons).
+  - Test: `HD 'debug("type /claude")'` and SHOT.
+  - Pass: agent rows appear. Running them needs Omarchy bins (F9): stub `omarchy-launch-tui` in `~hyprtest/.local/bin` to log its argv, then check the log.
+- **D10. Double-tap Ctrl on an agent row** makes it Omarchy's default agent (writes `~/.config/omarchy/defaults/agent`).
+  - Code: scrollOverview.cpp:8031, OmarchySearch.cpp:535-630.
+  - Omarchy: **yes**.
+  - Test: hover or select an agent row, `KB tap Control_L` ×2 within 450 ms.
+  - Pass: the file contains that agent's name.
+- **D11. Dictionary.** `define|def|dict <word>` turns the results pane into Wiktionary senses with examples; Enter copies. Opt-in (`search:dictionary`).
+  - Code: ToolSearch.cpp, ToolSearchParse.hpp, scrollOverview.cpp:7027, 7363.
+  - Omarchy: no.
+  - Test: needs network (no endpoint override). `CFG{search={dictionary=true}}`, `HD 'debug("type define")'`, then `KB type " serendipity"`.
+  - Pass: a "Wiktionary" header and sense rows. Offline: "Could not reach Wiktionary". Off: no Define tool row.
+- **D12. Translate.** `tr <lang> <text>`, `tr en:fr <text>`, `translate <text>` (target: last used, else `translate_target`, else `$LANG`); MyMemory by default or LibreTranslate at `translate_endpoint`. Opt-in.
+  - Code: ToolSearch.cpp.
+  - Omarchy: no.
+  - Test: run a local python HTTP stub that mimics LibreTranslate `/translate`, set `translate_endpoint=http://127.0.0.1:PORT`, `translate=true`, type `tr es hello`.
+  - Pass: the stub logs the request with q=hello and target=es, and the row shows the stub's answer.
+- **D13. Define/Translate/Search Google rows** are offered for any query. The tool rows rewrite the query; Google runs `xdg-open` (F7).
+  - Code: OverviewInternal.hpp:715-760.
+  - Omarchy: no.
+  - Test: type `cat`, Tab to AI & Tools, select Define, Return.
+  - Pass: the query becomes "define cat" and the overview stays open.
+- **D14. Results pane layout.** Three columns (Omarchy Menu & Apps, Files & Folders, AI & Tools), trimmed to fit; the pane eases in and out with motion blur.
+  - Code: OverviewInternal.hpp:767, scrollOverview.cpp:7943.
+  - Omarchy: partly (column naming).
+  - Test: type `a` and SHOT.
+  - Pass: three column cards.
+- **D15. Pointer on results.** Click a row to activate it (X62). Press, hold, drag a result: drop on the dock pill pins it as a favourite, drop on Show Applications unpins, anything else is rejected.
+  - Code: OverviewInput.cpp (G12), Dock.cpp pinAt.
+  - Omarchy: no.
+  - Test: type `kitty`, `PTR down` on the row, wait 400 ms, drag to the pill, up.
+  - Pass: the `~hyprtest/.local/state/hyprdrive/favorites` file gains the desktop id.
+- **D16. Key handling.** Backspace auto-repeat is driven by the plugin; compose/dead keys are handled; Print and XF86 keys pass through to binds; other keys are swallowed while the overview is open.
+  - Code: main.cpp:651-1040.
+  - Omarchy: partly (Omarchy binds Print/XF86).
+  - Test: `KB down BackSpace` for 1 s with a 10-char query.
+  - Pass: the query is emptied (shot shows the placeholder).
+- **D17. Easter egg.** Type a letter then Backspace, 5 times within 4 s: the pill opens into a frame playing `easter_egg_video` with sound through ffmpeg; the strip moves down; the first keys are swallowed and later keys stop it.
+  - Code: KeyboardCat.cpp, main.cpp key path.
+  - Omarchy: no.
+  - Test: put any short mp4 at the path, then `HD 'debug("press 30")'`, `HD 'debug("press 14")'` ×5 within 4 s; SHOT; `pgrep -u hyprtest ffmpeg`.
+  - Pass: ffmpeg is running and the shot shows a video frame under the pill. A missing file or `easter_egg=false` means nothing happens.
+
+## E. Dock: core
+
+- **E1. Dock pill.** Dash-to-Dock-style pill at the bottom (`enabled`, `icon_size` 54, `height_fraction`, `corner_radius` 24), frosted glass following `decoration:blur` (`blur_*` -1 = follow), fill from `background_color`/`background_opacity` (Omarchy default).
+  - Code: Dock.cpp:5769 (plate), 6942.
+  - Omarchy: partly (default colour and opacity).
+  - Test: `CFG{dock={autohide=false}}`, SHOT.
+  - Pass: a non-background pill bbox centred at the bottom whose height matches `icon_size`. `dock:enabled=false` removes it.
+- **E2. `dock:monitor`.** One output only (name or `desc:`), falling back to all if that output is disconnected.
+  - Code: Dock.cpp.
+  - Omarchy: no.
+  - Test: `H mon2`, `CFG{dock={monitor="HEADLESS-2"}}`, shot each output.
+  - Pass: the pill is only on HEADLESS-2.
+- **E3. Item model and order.** apps (favourites first) | Scratchpad | stacks | mounts | Trash | Show Applications. Arrive and leave animations.
+  - Code: Dock.cpp:742, 896, 1678, 7101.
+  - Omarchy: no.
+  - Test: start and close a kitty while taking shots.
+  - Pass: the icon count changes by one with no crash.
+- **E4. Running dot** (`running_indicator`, `indicator_color`, `indicator_size`).
+  - Code: Dock.cpp:231.
+  - Omarchy: no.
+  - Test: SHOT with a kitty running.
+  - Pass: a dot of the accent colour under its icon.
+- **E5. Left click policy.** Not running → launch. Visible on this desktop → minimize the whole app (flight). Hidden → restore. Only on another desktop → focus it there. Super/Alt/Ctrl+click on a non-running app → open on an empty desktop.
+  - Code: Dock.cpp click, 2995, 4633.
+  - Omarchy: no.
+  - Test: `HD 'debug("activate kitty")'` ×2.
+  - Pass: first `special:minimized`, then restored. Modifier click: needs pointer coordinates (`debug dock` hook proposed) with `KB down Super_L` + `PTR click`; pass is a new workspace id holding kitty.
+- **E6. Middle and Shift+middle click** (`middle_click_action` launch|minimize|cycle-windows|quit|skip).
+  - Code: Dock.cpp, DockInput.cpp.
+  - Omarchy: no.
+  - Test: `PTR click middle` on an icon.
+  - Pass: the default makes one more kitty.
+- **E7. Wheel over the dock** (`scroll_action` cycle-windows|switch-workspace|do-nothing). Seat focus leaves the window under the pointer while it is on the dock.
+  - Code: Dock.hpp X33, main.cpp:345.
+  - Omarchy: no.
+  - Test: 2 kitties, `PTR move` onto the icon, `PTR scroll 1`.
+  - Pass: activewindow alternates.
+- **E8. Hover previews (Y1).** Hovering an icon shows a panel of live window previews; click focuses (or restores) that window. Dragging a preview out tears the window off (into an overview drag, or a native desktop move).
+  - Code: Dock.cpp:4293, 6270-6480.
+  - Omarchy: no.
+  - Test: `PTR move` onto the icon, wait 300 ms, SHOT; click a preview.
+  - Pass: preview plates above the pill; the clicked window becomes active.
+- **E9. Tooltips.** App name labels with fade; Show Applications says "Show Overview" or "Exit Overview".
+  - Code: Dock.cpp:7271.
+  - Omarchy: no.
+  - Test: hover and SHOT. Pass: a label pill above the icon.
+- **E10. Context menu (right click).**
+  - Rows for an app: the app's own New Window action or the dock's New Window, Open in Empty Workspace, Open in Scratchpad, the app's `Actions=`, per-window rows with indented "Move to Empty Workspace" / "Move to Scratchpad", Show Windows (opens the overview filtered to the app), Minimize/Show All, Add/Remove Favorites, Get Info, Quit / Quit N Windows, Force Quit (red, SIGKILL).
+  - Code: Dock.cpp:3395-3720, 2697, 3028, 3073.
+  - Omarchy: no.
+  - Test: `PTR click right` on the kitty icon, SHOT, click "Open in Empty Workspace".
+  - Pass: a new kitty on a fresh workspace id. "Move to Scratchpad" puts the window on `special:scratchpad`. Force Quit: the kitty pids are gone.
+- **E11. Get Info view.** .desktop info plus a package lookup on a worker (pacman, dpkg/rpm, Flatpak, Omarchy web app); rows to change the icon (opens the panel over Quickshell IPC) and to reveal the file.
+  - Code: AppInfo.cpp, Dock.cpp:3722, 3923.
+  - Omarchy: partly (`qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive icons`; web-app detection).
+  - Test: open the menu, Get Info, wait 1 s, SHOT.
+  - Pass: a "rpm" (fedora) package row for kitty.
+- **E12. Favourites.** Pin/unpin; drag icons to reorder; seeded store at `~/.local/state/hyprdrive/favorites`; `show_favorites`.
+  - Code: Dock.cpp:593, pinAt, dragRelease.
+  - Omarchy: no.
+  - Test: write a favorites file with 2 ids, restart, SHOT; `PTR drag` icon 1 past icon 2.
+  - Pass: two pinned icons without dots, and the file order swaps after the drag.
+- **E13. Dragging a dock icon off the pill.** Onto a strip card (overview) or the desktop: the app launches there (V3). A release near the press counts as a click.
+  - Code: DropDecision.hpp (resolveIcon), Dock.cpp:5089.
+  - Omarchy: no.
+  - Test: open the overview, `PTR drag` the kitty icon onto strip cell 2.
+  - Pass: a kitty mapped on workspace 2.
+- **E14. Show Applications button.** Toggles the overview (`show_apps_button`, `show_apps_at_top`, `show_apps_always_in_the_edge`, `show_apps_icon`).
+  - Code: Dock.cpp.
+  - Omarchy: no.
+  - Test: click it.
+  - Pass: `hyprdrive>>1`, and `hyprdrive>>0` on a second click.
+- **E15. Dock inside the overview.** Pinned while the overview is open; clicking a running app navigates the overview to it; `isolate_in_overview`.
+  - Code: DockInput.cpp, OverviewInput.cpp:343.
+  - Omarchy: no.
+  - Test: open, `debug activate kitty`.
+  - Pass: the overview is still open and kitty is selected or viewed.
+- **E16. Isolation.** `isolate_workspaces` (only current-desktop windows), `workspace_agnostic_urgent`, `isolate_locations`.
+  - Code: Dock.cpp:2742.
+  - Omarchy: no.
+  - Test: kitty on desktop 2, view 1, `isolate_workspaces=true`, SHOT.
+  - Pass: no kitty icon (unless it is a favourite).
+- **E17. Autohide with a pressure barrier.** `autohide`, `pressure_threshold`, `require_pressure`, `show_delay_ms`, `hide_delay_ms`, `autohide_ms`. Menus, flights and popups hold it out.
+  - Code: Dock.cpp:2078, main.cpp (X30 relative motion).
+  - Omarchy: no.
+  - Test: `PTR move` to y = height-1, wait 500 ms, SHOT, move up, wait.
+  - Pass: the pill shows, then hides. `require_pressure=true` needs relative motion, which vptr.py lacks (**[NEEDS HOOK]**).
+- **E18. Windows make room.** With autohide off, tiled windows overlapping the pill are shortened just enough (`windows_make_room`).
+  - Code: DockRoom.cpp, main.cpp hkTargetPlace.
+  - Omarchy: no.
+  - Test: `autohide=false`, one tiled kitty, `clients -j`.
+  - Pass: the kitty's bottom is at or above the pill top; with the flag off it reaches the monitor bottom gap.
+- **E19. Urgent windows.** `dance_urgent` wiggles the icon; `urgent_notify` hops it up from the edge while the dock is hidden.
+  - Code: Dock.cpp:270.
+  - Omarchy: no.
+  - Test: `printf '\a'` in an unfocused kitty (kitty sets urgency), two shots.
+  - Pass: the icon pixels differ between shots.
+- **E20. Badges and progress (Unity LauncherEntry).** A red count badge (`notification_counter`, `emblems`); download progress on stacks.
+  - Code: LauncherEntry.cpp.
+  - Omarchy: no.
+  - Test: send `com.canonical.Unity.LauncherEntry.Update("application://kitty.desktop", {count: 3, count-visible: true})` with `gdbus emit` on the instance's bus.
+  - Pass: a red "3" badge on the kitty icon.
+- **E21. Hover and press tilt.** 3D perspective lean toward the pointer (`hover_tilt`); press leans in with glare (`press_tilt`); press squish.
+  - Code: DockTilt.cpp, Dock.cpp:4778.
+  - Omarchy: no.
+  - Test: hover the left edge vs right edge of an icon, two shots.
+  - Pass: the icon regions differ. Off: identical.
+- **E22. Hotkey overlay** (`hot_keys`, `hotkeys_overlay`, `hotkeys_show_dock`, `shortcut_timeout`). See A7.
+- **E23. Flight log** (`flight_log`) to `/tmp/ovdbg.log`.
+  - Code: FlightController.cpp.
+  - Omarchy: no.
+  - Test: enable it, minimize. Pass: transition lines in the log.
+
+## F. Minimize/restore flights
+
+- **F-1. Minimize flight.** The window shrinks into its icon (`minimize_ms` 400, 0 = teleport); it is stashed on `special:minimized`; focus is handed off at landing.
+  - Code: FlightController.cpp, Minimize.cpp, Dock.cpp.
+  - Omarchy: no.
+  - Test: `HD 'minimize("window")'`, shots at 100 ms and 600 ms.
+  - Pass: the mid shot has a smaller window near the dock, and the end shot has none.
+- **F-2. Restore flight.** Proxy restore with the overview open; driven (the real window) on the desktop; reversible mid-flight.
+  - Code: FlightController.cpp phases.
+  - Omarchy: no.
+  - Test: restore, then spam `debug activate kitty` ×6 at 50 ms spacing.
+  - Pass: it ends in a consistent state (either stashed or visible), no stranded hidden window, no cores.
+- **F-3. Whole-app minimize and restore.** Each window returns to its own slot (CRestoreSlots); one resize per gesture (ConfigureHold, no SIGWINCH spam).
+  - Code: Minimize.cpp, ConfigureHold.cpp.
+  - Omarchy: no.
+  - Test: 3 kitties in dwindle, record each `at`/`size`, `debug activate kitty` ×2.
+  - Pass: the same address→box mapping as before.
+- **F-4. Re-adopt stashed windows after a plugin reload.**
+  - Code: Minimize.cpp adoptStashedWindows.
+  - Omarchy: no.
+  - Test: minimize, unload, load, `minimize("restore")`.
+  - Pass: the window is restored.
+- **F-5. Bounce on drop.** A window dropped on the dock hops the icon.
+  - Code: Dock.cpp armBounce.
+  - Omarchy: no.
+  - Test: B13 dock drop, shots. Pass: the icon y is offset mid-hop.
+
+## G. Locations: Trash, mounts, icons
+
+- **G1. Trash item.** Built-in glass artwork in 9 variants (`trash_icon` hyprdrive|omarchy|gtk, `trash_style`, `trash_papers`), empty/full state.
+  - Menu: Open/New Window, Open in Empty Workspace, Open in Scratchpad, Empty Trash (dimmed when empty, done through Nautilus), Get Info, Close Window.
+  - Dropping files on it trashes them (DockDrop).
+  - Code: Locations.cpp, BuiltinIcons.cpp, Dock.cpp.
+  - Omarchy: partly (`omarchy` icon option).
+  - Test: `gio trash` a file as hyprtest, wait 1 s, SHOT.
+  - Pass: the full-trash artwork differs from empty.
+- **G2. Mounted volumes** (`show_mounts`, `_network`, `_only_mounted`) from the kernel table plus GVfs (`ListMounts2`). Menu: Mount/Unmount/Eject.
+  - Code: Locations.cpp, GvfsMount.hpp.
+  - Omarchy: no.
+  - Test: hard headless (no udisks/gvfs on the test bus). Host unit test `scripts/gvfs_mount_test.cpp`.
+  - **[PARTLY TESTABLE]**
+- **G3. Drive order** (`mount_sort` mounted|name|smart|fstab).
+  - Code: MountSort.hpp.
+  - Omarchy: no.
+  - Test: host `scripts/mount_sort_test.cpp`. Pass: KleOne < KleTwo < KleThree.
+- **G4. Running dot for locations** via `org.freedesktop.FileManager1`.
+  - Code: Locations.cpp.
+  - Omarchy: no.
+  - Test: needs Nautilus on the bus. **[PARTLY TESTABLE]**
+- **G5. Per-app icon overrides.** `~/.local/state/hyprdrive/icons` (`id<TAB>icon`), re-read within 0.5 s; Trash state keys `trash:empty-dark|full-dark|empty-light|full-light`. The panel tool `hdicons` (list/search/set/reset/config; selfh.st opt-in) copies pictures into `~/.local/share/hyprdrive/icons`.
+  - Code: IconOverrides.cpp, omarchy-plugin/bin/hdicons.
+  - Omarchy: partly (`hdicons` is panel tooling).
+  - Test: write `kitty<TAB>/usr/share/icons/hicolor/48x48/apps/<some>.png`, wait 1 s, SHOT.
+  - Pass: the kitty icon changes; removing the line restores it.
+- **G6. Icon theme follows Omarchy** (`stack_icon_theme` omarchy|gtk; `builtin_icons`).
+  - Code: AppSearch.cpp themeIcons, DockStacks.cpp.
+  - Omarchy: **yes** (default "omarchy").
+  - Test: SHOT with `stack_icon_theme=gtk` vs `omarchy`. Pass: different stack art when an Omarchy theme exists.
+
+## H. Dock stacks (V4/A/B/C)
+
+- **H1. Pin and unpin** with `HD 'stack("pin /path")'`, `unpin`, `toggle`, `clear`. Store at `~/.local/state/hyprdrive/stacks` (v2). Downloads is seeded on first run.
+  - Code: DockStacks.cpp, StackModel.cpp.
+  - Omarchy: no.
+  - Test: `mkdir ~hyprtest/S; HD 'stack("pin /home/hyprtest/S")'`.
+  - Pass: the store has a line with that path, a cell is drawn, and unpin removes it (the folder is untouched).
+- **H2. Pile cell.** The 4 newest files as a pile with real thumbnails (freedesktop cache, else system thumbnailers on a worker into `~/.cache/hyprdrive/thumbnails`).
+  - Code: StackIcon.cpp, Thumbs.cpp.
+  - Omarchy: no.
+  - Test: put 4 PNGs in S, wait 2 s, SHOT.
+  - Pass: a multi-paper cell.
+- **H3. Fan and pane.** Click opens a fan (Auto/Fan/Grid); when the fan does not fit, a searchable grid pane opens; the pane scrolls; "N more in Files"; motion blur (`stack_motion_blur`, `stack_motion` serpantinum|extension).
+  - Code: DockStacks.cpp, StackPane.cpp, StackBlur.cpp.
+  - Omarchy: no.
+  - Test: `HD 'stack("open /home/hyprtest/S")'`, SHOT; `HD 'stack("view grid /home/hyprtest/S")'`, open, `HD 'stack("filter png")'`, `HD 'stack("scroll 2")'`.
+  - Pass: fan papers above the cell; a grid plate with filtered rows. `stack scroll` and `filter` return an error when no fan is open.
+- **H4. Keyboard in the fan or pane.** Arrows, Enter opens, Esc closes, typing filters (pane), Space opens Sushi Quick Look on the hovered item.
+  - Code: DockStacks.cpp handleKey, previewHovered.
+  - Omarchy: no.
+  - Test: open the fan, `KB tap Escape`.
+  - Pass: the popup is gone. Space needs sushi (F10).
+- **H5. Sort, display, view, rename.** Sort name|added|modified|kind; Display as Stack/Folder; View as Auto/Fan/Grid; "Rename in Dock…" (in-menu text field); Open in Files; Show in Files; Move Newest to Trash; Empty Folder… (red); Remove from Dock; recent items with ages.
+  - Code: Dock.cpp:3560-3612.
+  - Omarchy: no.
+  - Test: `HD 'stack("sort name /home/hyprtest/S")'`, then right-click the cell and SHOT.
+  - Pass: the menu shows a check on "Sort by Name" and the store's sort field is "name".
+- **H6. Drop files onto a stack or the Trash** from another app's Wayland drag. The plugin reads the source's uri-list, moves files (copies across filesystems, never overwrites: `name (2).ext`) or trashes them, and cancels the drag. Bounce on success, shake on error.
+  - Code: DockDrop.cpp, DockDropModel.hpp, StackReader.cpp.
+  - Omarchy: no.
+  - Test: needs a DnD source client. A ~40-line pywayland `wl_data_source` offering text/uri-list, driven with `PTR down/move/up`.
+  - Pass: the file moved into S; a same-name file arrives as "x (2).txt". **[NEEDS small client]**
+- **H7. Drop a folder onto the dock to pin it.** The cells part to make room (Moses gap).
+  - Code: DockDrop.cpp, Dock.cpp placeholder.
+  - Omarchy: no.
+  - Test: as H6 with a directory uri. Pass: a new stack at the drop index.
+- **H8. Drag a file out of the fan** as a real Wayland drag into any app; drag onto another stack moves it.
+  - Code: DockStacks.cpp onPointerMove, DockDrop.cpp startFileDrag.
+  - Omarchy: no.
+  - Test: open the fan, `PTR drag` an item onto another stack's cell.
+  - Pass: the file moved between folders.
+- **H9. Reorder stacks by dragging.**
+  - Code: DockStacks.cpp.
+  - Omarchy: no.
+  - Test: two stacks, `PTR drag` one past the other. Pass: the store order swaps.
+- **H10. Download progress and new-arrival bounce.** A bar for `.part`/`.crdownload`, LauncherEntry progress; the stack bounces when something new arrives (the hidden dock peeks the pile up).
+  - Code: StackModel.hpp, Dock.cpp:6816.
+  - Omarchy: no.
+  - Test: `touch S/new.txt`, shots at 0 ms and 200 ms; `touch S/x.part`.
+  - Pass: the cell is lifted in the mid shot; a bar appears.
+- **H11. Stack log.** `touch /tmp/hyprdrive-stacklog.on` writes `/tmp/hyprdrive-stack.log`.
+  - Code: DockStacks.hpp.
+  - Test: touch it, open a stack. Pass: the log has lines.
+- **H12. Nautilus "pin to dock" script.**
+  - Code: scripts/install-nautilus-pin.sh.
+  - Omarchy: no.
+  - Test: run the script and check its output. **[LOW PRIORITY]**
+
+## I. Scratchpad
+
+- **I1. Scratchpad dock item.** Appears while a special workspace (not `special:minimized`) holds a window; click toggles it.
+  - Code: Scratchpad.cpp, Dock.cpp.
+  - Omarchy: partly.
+  - Test: move a kitty to `special:scratchpad`, SHOT, click the item.
+  - Pass: the item exists and `H h monitors -j` `specialWorkspace.name` toggles.
+- **I2. Overview scratchpad cell and drop.** See C4.
+- **I3. Way out of the scratchpad mid-drag.** While a Wayland drag is in flight over a shown scratchpad, a plate at the top of the screen hides the scratchpad when the drag reaches it.
+  - Code: ScratchpadExit.cpp.
+  - Omarchy: partly ("omarchy style" plate).
+  - Test: needs a DnD client (H6) over a shown scratchpad; move to y=10.
+  - Pass: the plate is in the shot, then the special workspace is hidden. **[NEEDS small client]**
+- **I4. Scratchpad gestures** (`scratchpad_show` / `scratchpad_hide`, one-way). **[NEEDS HOOK]**
+- **I5. Scratchpad slide motion blur.** See L.
+
+## J. Mosaic layout (experimental)
+
+- **J1. "mosaic" tiled layout.** Windows keep their natural size, clustered at the centre; newcomers may come in smaller; when they no longer fit it tiles dwindle-style and returns to the mosaic when they fit again; per-app sizes remembered in `~/.local/state/hyprdrive/mosaic-sizes`; floating windows join (dialogs stay floating).
+  - Code: Mosaic.cpp, MosaicPack.hpp.
+  - Omarchy: no (the layout itself).
+  - Test: `H eval 'hl.workspace_rule({workspace="1",layout="mosaic"})'`, 3 kitties (`kitty -o initial_window_width=600`), `clients -j`; then 8 more kitties.
+  - Pass: 3 non-overlapping, roughly centred boxes with their own sizes; with 11 the boxes tile the screen; after closing back to 3 they return to the sizes they had. Close one and check that `mosaic-sizes` has a kitty line.
+- **J2. Corner resize.** On a mosaic desktop, a plain left press on a window's corner resizes it (resize cursor shown). The other windows freeze, growth stops at the computed limit, past it the desktop darkens and release tiles. With Super held this works on any layout (F3).
+  - Code: Mosaic.cpp:691-830.
+  - Omarchy: no.
+  - Test: `PTR drag` from a window's bottom-right corner +200,+200.
+  - Pass: that window grows, the others' boxes are unchanged during the drag. Super+corner on dwindle resizes too (documents F3).
+- **J3. Super+arrows mosaic focus** (`focus` dispatcher), written by the panel when Mosaic is on.
+  - Code: Mosaic.cpp:853, hdpanel mosaic_lua.
+  - Omarchy: partly (rebinds Omarchy's Super+arrows).
+  - Test: 3 kitties on mosaic, `HD 'focus("r")'`.
+  - Pass: activewindow is the one to the right.
+- **J4. Super+L three-way cycle** (`hd-layout-cycle`; persists in Omarchy's `~/.local/state/omarchy/workspace-layouts/<ws>.lua`; Omarchy notification) and `mosaic:default` (`general:layout='mosaic'`).
+  - Code: omarchy-plugin/bin/hd-layout-cycle, hdpanel:523-640.
+  - Omarchy: **yes**.
+  - Test: run the script as hyprtest with HYPRLAND_INSTANCE_SIGNATURE set and a stub `omarchy-notification-send`, 3 times; `H h activeworkspace -j`.
+  - Pass: `tiledLayout` goes dwindle→scrolling→mosaic→dwindle (with `mosaic:enabled=true`; without it only dwindle↔scrolling).
+- **J5. Unload hands mosaic desktops back to the default layout.**
+  - Code: Mosaic.cpp:929.
+  - Omarchy: no.
+  - Test: J1, then unload the plugin.
+  - Pass: no crash, and the workspace reports dwindle.
+
+## K. Trackpad gestures (all [NEEDS HOOK] headless)
+
+All of these are `Omarchy: no`.
+
+- **K1. 3-finger up/down: overview following the fingers**, reversible mid-gesture, on all monitors.
+  - Code: OverviewGesture.cpp:41.
+  - Pass with a hook: progress scales with the injected delta, and release past half opens.
+- **K2. 3-finger horizontal workspace swipe.** Inside the overview the cards follow; on the desktop it is Hyprland's native swipe; `workspace_all` steps through every number including empty ones.
+  - Code: OverviewGesture.hpp.
+  - Pass with a hook: activeworkspace +1.
+- **K3. Scrolling-layout tape.** The swipe scrolls a scrolling desktop's windows first and continues into the next desktop past either end (4 fingers jump directly). The `scroll` action pans columns, and pans the viewed card in the overview.
+  - Code: OverviewGesture.hpp (desktop tape).
+- **K4. One-way actions.** `scratchpad_show/hide`, `fullscreen_on`, `unfullscreen_or_close`; `close` with a longer travel and a way back (commits only on a real release); `fullscreen/maximize`, `float/tile`, `move`, `resize`, `special`, `zoom` (cursor zoom, live/toggle/mult), `dispatcher`, `keys` (sends a chord at the end).
+  - Code: main.cpp:1370-1456, OverviewGesture.cpp:831.
+- **K5. N-finger click/tap gestures** (default 3-click = overview, 4-click = close; deferred 80 ms because 4-finger swipes start as a cancelled hold).
+  - Code: OverviewGesture.cpp:621-830.
+- **K6. keep_swipe.** A swipe keeps going while any finger that started it is down. Reads the touchpad's raw multitouch slots by opening the evdev node a second time, read-only.
+  - Code: FingerSwipe.cpp, FingerSwipeModel.hpp, TouchpadRaw.cpp.
+  - Test: host `scripts/finger_swipe_test.cpp` covers the model. Live: no device in headless.
+- **K7. swipe_while_dragging.** With one finger holding a drag, 3/4 other fingers swipe desktops and a dragged window comes along.
+  - Code: FingerSwipeModel.hpp.
+  - Test: host test only.
+- **K8. Gesture cleanup on unload** (ends an in-flight gesture).
+  - Code: GestureCleanup.cpp.
+  - Test: unload with nothing in flight. Pass: survives.
+
+## L. Motion, animation curves, motion blur
+
+- **L1. One motion language.** `animation:curve` hyprdrive|serpantinum|_glide|_soft|_intro|_pop|swift|springy|linear: three curves (decel/accel/pop) for everything except the stacks; `anim_scale` speed (0 = Off).
+  - Code: Motion.cpp.
+  - Omarchy: no.
+  - Test: `CFG{animation={curve="linear"}}`, `HD 'debug("motion")'`.
+  - Pass: `house=0` and decel(.5)=0.500.
+- **L2. Motion blur sites** (`motion_blur:enabled` plus `<site>:strength|fade` for minimize, layout, flick, swipe, scratchpad, overview, desktop_switch, search_tiles, search_pane, drag, stack_pane). Samples via `layout_motion_blur`, `dock:minimize_motion_blur`, `dock:stack_motion_blur`. Spacing law: at most 2 device px between copies (more samples, or a shorter trail).
+  - Code: FlightBlur.cpp/.hpp, MotionSpacing.hpp.
+  - Omarchy: no.
+  - Test: `debug motion` shows `blur minimize X@.25`; set `strength=0` and it reads 0. Visual: `CFG{anim_scale=8}`, minimize, mid-flight SHOT with blur on vs off.
+  - Pass: the "on" shot has a smeared edge (more distinct grey levels along the motion axis). Host `motion_spacing_test.cpp`.
+- **L3. Layout motion blur.** Dwindle retiles, the scrolling tape and window opens get blurred (never an interactive drag).
+  - Code: FlightBlur.cpp (layout section).
+  - Omarchy: no.
+  - Test: `anim_scale` has no effect on Hyprland's own animations; slow Hyprland's (`animations` speed) and open a second kitty mid-shot.
+  - Pass: the smear is present with `layout_motion_blur>0`.
+
+## M. Hot corner, ripple, spring loading
+
+- **M1. Hot corner.** Resting `delay_ms` (150) in an outer corner (`corner` top-left|top-right|bottom-left|bottom-right) toggles the overview on all monitors. Once per visit; not while a button is held, during a drag, over fullscreen, during a swipe, when locked, or while closing. A corner shared with another monitor does not count.
+  - Code: HotCorner.cpp, HotCornerModel.hpp.
+  - Omarchy: partly (default off because top-left is Omarchy's bar menu button).
+  - Test: `CFG{hot_corner={enabled=true}}`, `PTR move 0 0`, wait 300 ms; move away, back, wait.
+  - Pass: `hyprdrive>>1`, then `hyprdrive>>0`. With `H mon2` and `corner="top-right"` on HEADLESS-1 (shared edge) there is no event. With a button held (`PTR down`), no event.
+- **M2. Ripple.** A refraction wavelet from the corner across the screen with an RGB split, about 1 s (`hot_corner:ripple`).
+  - Code: Ripple.cpp.
+  - Omarchy: no.
+  - Test: `HD 'debug("ripple")'` and `HD 'debug("ripple 960 540")'`; shots at 150 ms and 1.5 s.
+  - Pass: the 150 ms shot differs from a baseline in an annular band; the 1.5 s shot equals the baseline.
+- **M3. Spring-loaded desktop edges.** A file/folder drag, or a window being moved, held at the left/right edge for `spring_delay_ms` switches desktop (a new one past the last); holding keeps going; a dragged window comes along.
+  - Code: Spring.cpp.
+  - Omarchy: no.
+  - Test: window move: kitty floating, `KB down Super_L` + `PTR down` on the window (Super+drag bind needed in test.lua), move to x=1, wait 1.8 s.
+  - Pass: activeworkspace +1 and the kitty is on it.
+- **M4. Spring-loaded dock apps.** A file drag held over a running app's icon or preview flashes it twice and brings it forward.
+  - Code: Dock.cpp:7335.
+  - Omarchy: no.
+  - Test: needs a DnD client (H6). **[NEEDS small client]**
+
+## N. Settings panel (Omarchy shell plugin `dragos.hyprdrive`)
+
+- **N1. Panel UI.** Sections Overview / Dock / Icons / Animation / Motion blur / Gestures / Performance / Mosaic (experimental, confirm dialog), every row as listed in Schema.js; settings search; "Restore defaults" per group; Send feedback link; social links; Alt+1..8 section keys.
+  - Code: omarchy-plugin/Schema.js, HyprdrivePanel.qml, Panel.qml, Model.js.
+  - Omarchy: **yes** (Quickshell shell plugin).
+  - Test: headless needs `qs -p /usr/share/omarchy/shell` running against the instance. **[OUT OF SCOPE for the plugin port; test `hdpanel` instead]**
+- **N2. hdpanel back end** (`dump | set | preview | reset GROUP | gestures-set | profile-save | profile-apply | profile-mode | profile-auto`). Writes `40-panel.lua` and `35-gestures.lua` (the raw-snippet block survives), state in `panel.json`, live-applies through `hyprctl eval`.
+  - Code: omarchy-plugin/bin/hdpanel.
+  - Omarchy: partly (paths are Hyprland's; the UI is Omarchy's).
+  - Test: as hyprtest with `HYPRDRIVE_FRAGMENTS` pointing at a temp dir: `hdpanel set plugin:hyprdrive:scale 0.6`, then `OPT scale` and cat `40-panel.lua`.
+  - Pass: 0.6 both live and in the file. `hdpanel reset overview` restores the default.
+- **N3. Gesture map editor.** Default map: 3↑/↓ overview, 3↔ workspace, 4↓ close, 4↑ fullscreen, 2-finger pinch-out zoom live, 3-click overview, 4-click close. Actions as in hdpanel ACTIONS; native actions go through `hl.gesture`.
+  - Code: hdpanel:175-220, 681.
+  - Omarchy: no.
+  - Test: `hdpanel gestures-set '<json>'`, then `H h reload`.
+  - Pass: no config errors, and the fragment contains the matching `hl.plugin.hyprdrive.gesture` lines.
+- **N4. AC/battery power profiles** (snapshot of keys, applied by power state).
+  - Code: hdpanel:976-1055.
+  - Omarchy: no.
+  - Test: `profile-save battery`, change a key, `profile-apply battery`.
+  - Pass: the key reverts.
+- **N5. Mosaic toggle writes binds.** Unbinds Super+L and binds the cycle; Super+arrows bound to `focus`; reverts workspaces on disable.
+  - Code: hdpanel:523-640.
+  - Omarchy: **yes**.
+  - Test: `hdpanel set plugin:hyprdrive:mosaic:enabled true`, then `H h binds -j`.
+  - Pass: SUPER+L runs hd-layout-cycle.
+
+## O. Keybinds (shipped)
+
+- **O1. Tap Super toggles the overview** (B1). Not a bind; Omarchy's Super+Space and Super+1..0 stay.
+- **O2. Submap `hyprdrive`** while the overview is open: `mouse:272` and `SUPER + mouse:272` → `window("click")` (stops the global Super+drag bind eating clicks).
+  - Code: 30-keybinds.lua.
+  - Omarchy: partly.
+  - Test: add the block to test.lua, open, `H h submap`.
+  - Pass: `hyprdrive`. Clicking a tile with Super held selects it.
+- **O3. Super+W in the overview** (B9). **O4. Super+L and Super+arrows with Mosaic** (J3/J4).
+- **O5. Suggested in the README, not shipped:** Super+Shift+D overview, Super+H minimize.
+
+## P. Sounds and misc
+
+- **P1. Detent click sound** (C8).
+- **P2. Easter egg video audio** through ffmpeg/PulseAudio (D17). The headless test has no audio server; check that the ffmpeg process exists.
+- **P3. Debug and diagnostic files:** `~/.local/state/hyprdrive/frames.txt`, `/tmp/hyprdrive-compat.log`, `/tmp/ovdbg.log`, `/tmp/hyprdrive-openprof.log`, `/tmp/hyprdrive-stack.log`.
+- **P4. Cursor shape IPC** (`cursorshape>>NAME`).
+  - Code: CursorShape.cpp.
+  - Omarchy: no (used by your cursor overlay).
+  - Test: socat, move over a kitty edge. Pass: a `cursorshape>>` event.
+
+## Q. Not classified / needs a decision
+
+- `dock:require_pressure` and pressure behaviour: relative motion is needed for the test.
+- Frame-cadence internals (scrollOverview.cpp:4512, 8559-8770): the "adaptive preview pulse", "idle pulse" and suspended-client wake. These are performance policy rather than user features. Test by checking that `debug frames` says idle 1 s after settling.
+- `hover_gate`, `x*`, `y*`, `z*` and `v*` scripts under `scripts/gates/` (about 50 gates) were written for the old nested rig (`scripts/lib/rig.sh`, the user session, `headless_on`). They are a ready source of pass criteria to port onto hl.sh: x24 minimize, x26 drag, x28 menu, x32 Show Apps, x34 hotkeys, x47 hover preview, x48 results band, v4 stacks, v5 sushi, y8 bounce, z1-z3 previews/positions.
+- Host unit tests (`scripts/*_test.cpp`, `make check` / `host_tests.sh`) cover the pure models: geometry, strip layout, workspace plan, drop table, finger swipe, hot corner, mosaic pack, motion spacing, mount sort, gvfs, stack model/reader, tool search parse, search letters, icon overrides, omarchy search. These should run on fedora as plain builds before any headless session.
