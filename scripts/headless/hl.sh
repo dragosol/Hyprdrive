@@ -46,11 +46,23 @@
 #   hl.sh install [SO]                      copy a built hyprdrive.so into hyprtest's
 #                                           ~/.local/lib/hyprdrive (default: repo build)
 # Needs (hyprtest): pywayland for ptr/vkbd (pip install --user pywayland==0.4.18), wtype, grim, kitty, mutter.
-# Env: HL_STATE (default /tmp/hyprdrive-hl), HL_USER (default hyprtest).
+# Env: HL_STATE (default /tmp/hyprdrive-hl), HL_USER (default hyprtest),
+#      HL_NAME=<suffix> -- a SECOND instance beside the default one: state,
+#      runtime dir, sockets, bus and test.lua all live under
+#      /tmp/hyprdrive-hl-<suffix>, so two agents' runs never share (or stop)
+#      each other's Hyprland. Unset = the old single instance. HL_STATE wins.
+#      Every command of a run needs the same HL_NAME.
+#
+# --so / --config / --env K=<file>: a file hyprtest cannot read (one in a
+# worktree under dragos's home, say) is COPIED into the instance's state dir
+# first and the copy is what Hyprland gets -- so
+#   HL_NAME=theme hl.sh start --so ~/Projects/hn-theme/hyprdrive.so
+# loads that worktree's build without `hl.sh install`, which would overwrite
+# the one copy in hyprtest's ~/.local/lib every other run loads.
 set -euo pipefail
 
 HL_USER=${HL_USER:-hyprtest}
-STATE=${HL_STATE:-/tmp/hyprdrive-hl}
+STATE=${HL_STATE:-/tmp/hyprdrive-hl${HL_NAME:+-$HL_NAME}}
 RT=$STATE/rt
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
@@ -77,12 +89,33 @@ if [ "${1:-}" != __inner ]; then
             rm -rf "$tmp"; exit 0 ;;
         shot)
             out=${1:-}; [ -n "$out" ] || die "usage: shot <file.png> [OUTPUT]"
-            as env -i HOME=/nonexistent PATH=/usr/bin bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
+            as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
             [ -s "$out.tmp" ] || { rm -f "$out.tmp"; die "empty screenshot"; }
             mv "$out.tmp" "$out"; echo "$out"; exit 0 ;;
     esac
     if [ "$cmd" = start ]; then
         as bash -c "mkdir -p '$STATE' && chmod 755 '$STATE'"
+        # Stage what hyprtest cannot read (see the header). The copy keeps the
+        # basename under staged/, so two --env files never collide on a name
+        # unless they share one; the args are rewritten to the copies.
+        stage() {
+            local f=$1
+            as test -r "$f" 2>/dev/null && { printf '%s' "$f"; return; }
+            [ -r "$f" ] || die "start: not readable: $f"
+            as bash -c "mkdir -p '$STATE/staged' && chmod 755 '$STATE/staged'"
+            as bash -c "cat > '$STATE/staged/$(basename "$f")'" < "$f"
+            printf '%s' "$STATE/staged/$(basename "$f")"
+        }
+        args=()
+        while [ $# -gt 0 ]; do case $1 in
+            --so|--config) args+=("$1" "$(stage "$2")"); shift 2 ;;
+            --env) case $2 in
+                       *=/*) k=${2%%=*} v=${2#*=}; [ -f "$v" ] && v=$(stage "$v"); args+=(--env "$k=$v") ;;
+                       *) args+=(--env "$2") ;;
+                   esac; shift 2 ;;
+            *) args+=("$1"); shift ;;
+        esac; done
+        set -- ${args[@]+"${args[@]}"}
     fi
     as test -d "$STATE" || die "not started (no $STATE)"
     # stage the current script + helpers (hyprtest cannot read dragos's home)
@@ -91,7 +124,7 @@ if [ "${1:-}" != __inner ]; then
     done
     since=$(date '+%Y-%m-%d %H:%M:%S')
     rc=0
-    as env -i HOME=/nonexistent PATH=/usr/bin bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
+    as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
     if [ "$cmd" = stop ]; then
         # coredumpctl as dragos does list hyprtest's crashes (metadata only).
         st=$(as cat "$STATE/started-at" 2>/dev/null || echo "$since")

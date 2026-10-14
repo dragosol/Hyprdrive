@@ -25,7 +25,7 @@ struct SSearchItem {
     std::string name;
     std::string description;
     std::string icon;
-    std::string iconFont;     // nerd-font family for menu glyphs; empty = JetBrainsMono Nerd Font
+    std::string iconFont;     // nerd-font family for menu glyphs; empty = the detected icon font (OverviewRender::glyph)
     std::string category;     // "Apps", "Omarchy Menu", "AI Agent", "Calculator", "Files", "Settings"
     std::string actionCommand;// shell command or executable
     std::string filePath;     // absolute path for files

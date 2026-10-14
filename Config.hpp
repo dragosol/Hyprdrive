@@ -167,20 +167,31 @@ float         getGestureDetent();
 bool          getGestureDetentLabel();
 std::string   getGestureDetentSound();
 
-// Appearance is Hyprland's. Plugin keys that are unset (alpha 0 / -1) read the
-// compositor's live values, so a theme that reloads Hyprland retints every
-// surface. This is the one place those reads live; call sites do not parse a
-// second palette.
+// Appearance is Hyprland's. Plugin keys that are unset (alpha 0 / -1 / empty)
+// read the compositor's live values, so a theme that reloads Hyprland retints
+// every surface. This is the one place those reads live; call sites do not parse
+// a second palette.
 //
-//   highlightColor()        accent: col_highlight, else general:col.active_border
+//   highlightColor()        accent ring: col_highlight, else theme:accent, else
+//                           general:col.active_border when the user (or Omarchy)
+//                           set it, else the palette file's accent, else a quiet
+//                           fg/bg mix -- never Hyprland's stock white frame
 //   themeRounding()         decoration:rounding (0 is squared, and is valid)
 //   themeRoundingPower()    decoration:rounding_power
 //   dockIndicatorColor()    dock:indicator_color, else highlightColor()
-//   dockBackgroundColor()   dock:background_color, else Omarchy terminal
-//                           background (colors.toml), else misc:background_color
+//   dockBackgroundColor()   dock:background_color, else theme:background, else
+//                           the palette (theme:palette_file, or colors.toml on
+//                           Omarchy), else misc:background_color
 //                           opacity -1 = unfocused default-opacity (0.85)
-//   themeFontFamily()       misc:font_family if pinned, else Omarchy
-//                           fontconfig monospace (omarchy font set)
+//   theme*()                the six roles: theme:<role> key, else
+//                           theme:palette_file, else Omarchy's colors.toml (on
+//                           Omarchy only), else derived from Hyprland (see the
+//                           theme:* keys' registration in Config.cpp)
+//   themeFontFamily()       plugin:hyprdrive:font, else misc:font_family if
+//                           pinned, else Omarchy's fontconfig monospace (omarchy
+//                           font set) on Omarchy, else FcFontMatch("monospace")
+//   glyphFontSetting()      plugin:hyprdrive:glyph_font (auto|builtin|family),
+//                           for Fonts::iconFamily / OverviewRender::glyph
 //   dockCornerRadius()      dock:corner_radius (default 24; the pill is not a window)
 //   dock blur/shadow -1     follow decoration:blur:* / decoration:shadow:*
 //   search / results / strip  same plate as the dock (dockBackgroundColor,
@@ -194,6 +205,7 @@ CHyprColor    highlightForeground();
 int           themeRounding();
 float         themeRoundingPower();
 const std::string& themeFontFamily();
+const std::string& glyphFontSetting();
 CHyprColor    dockIndicatorColor();
 CHyprColor    dockBackgroundColor();
 int           dockCornerRadius();
@@ -207,8 +219,9 @@ CHyprColor    themeSelectedFill();
 CHyprColor    themeSelectedText();
 CHyprColor    themeUrgent();
 
-// Everything above that reads a FILE -- the Omarchy palette (colors.toml) and
-// the fontconfig monospace alias -- is cached behind a 500ms re-stat, because
+// Everything above that reads a FILE or asks fontconfig -- the palette
+// (theme:palette_file / Omarchy's colors.toml), the fontconfig monospace, the
+// set-by-user state of the Hyprland keys the derivation reads -- is cached behind a 500ms re-stat, because
 // those sit under per-card colour reads and a stat() per colour per card per
 // frame is thousands of syscalls a second. The poll alone would show a theme
 // change up to half a second late; it never does, because `omarchy theme set`

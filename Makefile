@@ -11,12 +11,15 @@ MAKEFLAGS += -j$(shell nproc)
 # debugging sessions where optimized frames confuse the picture.
 OPT ?= -O2
 
-PKGS := pixman-1 libdrm hyprland pangocairo libinput libudev wayland-server \
+PKGS := pixman-1 libdrm hyprland pangocairo fontconfig libinput libudev wayland-server \
         xkbcommon libsystemd gio-2.0 gio-unix-2.0 $(LUA_PC)
 
 CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build \
             $(shell pkg-config --cflags $(PKGS))
-LDLIBS   := $(shell pkg-config --libs libsystemd gio-2.0 gio-unix-2.0)
+# fontconfig: Fonts.cpp asks it which family "monospace" is and whether an icon
+# font covers the UI glyphs. Hyprland's pango already loads it; linking it
+# names the dependency instead of leaning on the host's.
+LDLIBS   := $(shell pkg-config --libs libsystemd gio-2.0 gio-unix-2.0 fontconfig)
 
 ifeq ($(CXX),g++)
     CXXFLAGS += -fno-gnu-unique

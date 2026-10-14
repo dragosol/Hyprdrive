@@ -75,7 +75,7 @@ inline constexpr float OVERVIEW_PILL_GAPL     = 12.F;  // badge -> text field
 inline constexpr float OVERVIEW_PILL_TAILL    = 20.F;  // text field -> trailing edge
 inline constexpr float OVERVIEW_PILL_FIELDL   = 210.F; // the field at rest
 inline constexpr float OVERVIEW_PILL_FIELDQL  = 360.F; // ...and once a query is typed
-inline constexpr float OVERVIEW_PILL_GLYPHPX  = 22.F;  // FA magnifying glass (Nerd Font U+F002)
+inline constexpr float OVERVIEW_PILL_GLYPHPX  = 22.F;  // FA magnifying glass (Nerd Font U+F002, or Glyphs.cpp's)
 inline constexpr float OVERVIEW_PILL_TEXTPX   = 15.F;  // the query / placeholder
 
 // THE LIVE FIELD (user, 2026-09-12): the field grows with the query the way the

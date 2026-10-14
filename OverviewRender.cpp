@@ -17,6 +17,8 @@
 #include <hyprgraphics/image/Image.hpp>
 #include "AppSearch.hpp"
 #include "BuiltinIcons.hpp"
+#include "Fonts.hpp"
+#include "Glyphs.hpp"
 #include "Config.hpp"
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/render/pass/ClearPassElement.hpp>
@@ -737,7 +739,7 @@ static int naturalTextWidth(const std::string& str, const std::string& family, i
     return W;
 }
 
-SP<Render::ITexture> text(const std::string& str, const CHyprColor& color, int fontSize, bool italic, const std::string& fontFamily, int maxWidth, int weight) {
+static SP<Render::ITexture> textImpl(const std::string& str, const CHyprColor& color, int fontSize, bool italic, const std::string& fontFamily, int maxWidth, int weight) {
     if (str.empty())
         return nullptr;
 
@@ -797,6 +799,117 @@ SP<Render::ITexture> text(const std::string& str, const CHyprColor& color, int f
     return texture;
 }
 
+// ---- UI GLYPHS WITHOUT TOFU (Glyphs.hpp, Fonts.hpp; native port A15) -------
+//
+// Whether the icon font chosen for plugin:hyprdrive:glyph_font has `cp`. Every
+// Private Use Area codepoint in a label goes through this before pango sees it.
+static bool glyphFontCovers(char32_t cp) {
+    return ScrollOverview::Fonts::iconCovers(ScrollOverview::Config::glyphFontSetting(), cp);
+}
+
+// A family the caller named for a glyph ("JetBrainsMono Nerd Font" from an
+// Omarchy menu entry), checked once: FcFontList per family, then remembered.
+static bool familyInstalled(const std::string& family) {
+    static std::unordered_map<std::string, bool> known;
+    if (const auto IT = known.find(family); IT != known.end())
+        return IT->second;
+    if (known.size() > 64)
+        known.clear();
+    return known.emplace(family, ScrollOverview::Fonts::installed(family)).first->second;
+}
+
+// Text with a PUA codepoint in it is drawn one of two ways, and never as a box:
+//   * every such codepoint is covered by the icon font -> the label as is, with
+//     the icon family appended to the font list ("Noto Sans Mono,Iosevka Nerd
+//     Font"), so pango takes the icon from THAT font rather than from whatever
+//     fallback answers first -- which for U+F001/U+F002 is a ligature table
+//     ("fl"), see Glyphs.hpp;
+//   * otherwise -> Glyphs::substitute: the WGL4 stand-in ("›", "↑", "↕") or
+//     nothing.
+// Labels without one (nearly all of them) pay one byte scan.
+SP<Render::ITexture> text(const std::string& str, const CHyprColor& color, int fontSize, bool italic, const std::string& fontFamily, int maxWidth, int weight) {
+    if (!ScrollOverview::Glyphs::mayContainPrivateUse(str))
+        return textImpl(str, color, fontSize, italic, fontFamily, maxWidth, weight);
+
+    const auto SAFE = ScrollOverview::Glyphs::substitute(str, glyphFontCovers);
+    if (SAFE != str)
+        return SAFE.empty() ? nullptr : textImpl(SAFE, color, fontSize, italic, fontFamily, maxWidth, weight);
+    if (!ScrollOverview::Glyphs::containsPrivateUse(str))
+        return textImpl(str, color, fontSize, italic, fontFamily, maxWidth, weight);
+
+    const auto& ICONFAMILY = ScrollOverview::Fonts::iconFamily(ScrollOverview::Config::glyphFontSetting());
+    const auto& FAMILY     = fontFamily.empty() ? ScrollOverview::Config::themeFontFamily() : fontFamily;
+    if (ICONFAMILY.empty() || FAMILY == ICONFAMILY)
+        return textImpl(str, color, fontSize, italic, fontFamily, maxWidth, weight);
+    return textImpl(str, color, fontSize, italic, FAMILY + "," + ICONFAMILY, maxWidth, weight);
+}
+
+// hyprdrive's own drawing of a glyph (Glyphs::svg), rasterised at px x px in
+// `color` -- the colour's alpha is baked in the way renderText bakes it, so a
+// caller swaps text() for glyph() and nothing else about the draw changes.
+static std::unordered_map<std::string, SP<Render::ITexture>> g_glyphSvgs;
+
+static SP<Render::ITexture> glyphSvg(char32_t cp, const CHyprColor& color, int px) {
+    if (px < 1 || px > 512)
+        return nullptr;
+    const auto HEX = std::format("#{:02x}{:02x}{:02x}", sc<int>(std::clamp(color.r, 0.0, 1.0) * 255.0), sc<int>(std::clamp(color.g, 0.0, 1.0) * 255.0),
+                                 sc<int>(std::clamp(color.b, 0.0, 1.0) * 255.0));
+    const auto KEY = std::format("{:x}\x01{}\x01{}\x01{:.3f}", sc<uint32_t>(cp), px, HEX, color.a);
+    if (const auto IT = g_glyphSvgs.find(KEY); IT != g_glyphSvgs.end())
+        return IT->second;
+    if (g_glyphSvgs.size() > 256)
+        g_glyphSvgs.clear();
+
+    SP<Render::ITexture> texture;
+    const auto           SVG = ScrollOverview::Glyphs::svg(cp, HEX, sc<float>(color.a));
+    if (!SVG.empty()) {
+        Hyprgraphics::CImage image(std::span<const uint8_t>{reinterpret_cast<const uint8_t*>(SVG.data()), SVG.size()}, Hyprgraphics::IMAGE_FORMAT_SVG,
+                                   {sc<double>(px), sc<double>(px)});
+        if (image.success()) {
+            if (const auto SURFACE = image.cairoSurface(); SURFACE && SURFACE->cairo()) {
+                auto* const CAIRO = SURFACE->cairo();
+                cairo_surface_flush(CAIRO);
+                auto* const    DATA   = cairo_image_surface_get_data(CAIRO);
+                const int      W      = cairo_image_surface_get_width(CAIRO);
+                const int      H      = cairo_image_surface_get_height(CAIRO);
+                const int      STRIDE = cairo_image_surface_get_stride(CAIRO);
+                const uint32_t FORMAT = cairo_image_surface_get_format(CAIRO) == CAIRO_FORMAT_RGB24 ? DRM_FORMAT_XRGB8888 : DRM_FORMAT_ARGB8888;
+                if (DATA && W > 0 && H > 0)
+                    texture = makeShared<Render::GL::CGLTexture>(FORMAT, DATA, sc<uint32_t>(STRIDE), Vector2D{sc<double>(W), sc<double>(H)});
+            }
+        }
+    }
+    // A texture that did not come out is remembered as nullptr too: callers
+    // already skip a null/!ok() glyph, and a failed decode must not retry
+    // every frame.
+    g_glyphSvgs[KEY] = texture && texture->ok() ? texture : nullptr;
+    return g_glyphSvgs[KEY];
+}
+
+SP<Render::ITexture> glyph(const std::string& str, const CHyprColor& color, int px, int weight, const std::string& family) {
+    if (str.empty() || px < 1)
+        return nullptr;
+    // Not an icon codepoint at all (an emoji or a letter in a menu file): text.
+    if (!ScrollOverview::Glyphs::containsPrivateUse(str))
+        return text(str, color, px, false, family, 0, weight);
+
+    bool covered = true;
+    for (size_t at = 0; at < str.size() && covered;) {
+        const char32_t CP = ScrollOverview::Glyphs::decode(str, at);
+        if (ScrollOverview::Glyphs::isPrivateUse(CP) && !glyphFontCovers(CP))
+            covered = false;
+    }
+    if (covered) {
+        const auto& ICONFAMILY = ScrollOverview::Fonts::iconFamily(ScrollOverview::Config::glyphFontSetting());
+        const auto& FAMILY     = !family.empty() && familyInstalled(family) ? family : ICONFAMILY;
+        return textImpl(str, color, px, false, FAMILY, 0, weight);
+    }
+
+    if (const char32_t CP = ScrollOverview::Glyphs::single(str); CP && ScrollOverview::Glyphs::hasSvg(CP))
+        return glyphSvg(CP, color, px);
+    return nullptr; // a codepoint nobody can draw: no icon, never a box
+}
+
 // A REAL WRAP (user, 2026-09-24: "dictionary could use better wrapping on
 // definitions - we're leaving space on the table"). This used to hand off to
 // text(), i.e. Hyprland's renderText, which sets a width AND
@@ -812,6 +925,11 @@ namespace {
 SP<Render::ITexture> textWrapped(const std::string& str, const CHyprColor& color, int fontSize, int maxW, int maxH, bool italic, const std::string& fontFamily, int weight) {
     if (str.empty() || maxW < 8 || maxH < 8 || fontSize < 1)
         return nullptr;
+    // Same rule as text(): no PUA codepoint reaches pango without a font for it.
+    if (ScrollOverview::Glyphs::mayContainPrivateUse(str)) {
+        if (const auto SAFE = ScrollOverview::Glyphs::substitute(str, glyphFontCovers); SAFE != str)
+            return textWrapped(SAFE, color, fontSize, maxW, maxH, italic, fontFamily, weight);
+    }
 
     const std::string& FAMILY = fontFamily.empty() ? ScrollOverview::Config::themeFontFamily() : fontFamily;
     const std::string  KEY    = std::format("{}\x1f{}\x1f{:x}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}", str, FAMILY, color.getAsHex(), fontSize, maxW, maxH, weight, italic ? 1 : 0);
@@ -871,6 +989,7 @@ void clearTextCache() {
     g_wrapCache.clear();
     g_imageFiles.clear();
     g_builtinIcons.clear();
+    g_glyphSvgs.clear();
     g_roundedRects.clear();
 }
 
