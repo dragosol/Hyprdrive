@@ -18,6 +18,13 @@
 #
 # Usage (as dragos on fedora; every process runs as hyprtest via sudo -n -u):
 #   hl.sh start [--no-plugin] [--so PATH]   start; loads the plugin via hyprctl
+#         [--config FILE | --user-config]   Hyprland -c FILE (hyprtest-readable), or
+#                                           hyprtest's own ~/.config/hypr/hyprland.lua
+#                                           (default: the generated vanilla test.lua)
+#         [--no-bus]                        NO session bus for Hyprland (the no-D-Bus
+#                                           crash test; the outer mutter keeps its own)
+#         [--env K=V]...                    extra environment for Hyprland only, e.g.
+#                                           --env HYPRDRIVE_NO_OMARCHY=1
 #   hl.sh stop                              exit Hyprland, kill everything, report cores
 #   hl.sh status                            pids, monitors, plugin list
 #   hl.sh h <hyprctl args...>               hyprctl against the instance
@@ -33,6 +40,8 @@
 #             | scroll DY | drag X1 Y1 X2 Y2 [steps]   pointer via wlr-virtual-pointer
 #   hl.sh warp X Y                          hl.dsp.cursor.move (compositor warp, no device)
 #   hl.sh sig                               instance signature
+#   hl.sh errors                            configerrors captured at startup + live
+#                                           (any `eval` CLEARS the live list in 0.56)
 #   hl.sh log [n]                           tail of the instance's hyprland.log
 #   hl.sh install [SO]                      copy a built hyprdrive.so into hyprtest's
 #                                           ~/.local/lib/hyprdrive (default: repo build)
@@ -180,12 +189,17 @@ LUA
 case ${1:-} in
 start)
     shift
-    plugin=1; so=$SO_DEFAULT
+    plugin=1; so=$SO_DEFAULT; cfg=$STATE/test.lua; bus=1; envs=()
     while [ $# -gt 0 ]; do case $1 in
         --no-plugin) plugin=0 ;;
         --so) so=$2; shift ;;
+        --config) cfg=$2; shift ;;
+        --user-config) cfg=$HOME/.config/hypr/hyprland.lua ;;
+        --no-bus) bus=0 ;;
+        --env) case $2 in *=*) envs+=("$2") ;; *) die "start: --env wants K=V" ;; esac; shift ;;
         *) die "start: unknown arg $1" ;;
     esac; shift; done
+    [ -r "$cfg" ] || die "start: config not readable as $(id -un): $cfg"
     running && die "already running (hl.sh stop first)"
     [ -z "$(ours)" ] || die "leftover processes on $RT: $(ours | tr '\n' ' ') -- run hl.sh stop"
     rm -rf "$RT" "$STATE"/{sig,wl,*.pid,outer.log,hypr.out,py,nclients,client.*.log,vkbd.log,vkbd.fifo,vkbd.fifo.ack}
@@ -200,14 +214,18 @@ start)
     echo $! > "$STATE/outer.pid"
     for _ in $(seq 50); do [ -S "$RT/outer-0" ] && break; sleep 0.2; done
     [ -S "$RT/outer-0" ] || { tail "$STATE/outer.log"; die "outer mutter did not come up"; }
-    # 2. Hyprland nested in it, with its own session bus like a real login
-    #    (hyprdrive's search worker needs sd_bus_open_user; without a bus it
-    #    exits and the next overview open hits std::terminate -- see report).
+    # 2. Hyprland nested in it, with its own session bus like a real login.
     #    hypr.pid is the dbus-run-session wrapper; it lives exactly as long
-    #    as Hyprland does.
-    WAYLAND_DISPLAY=outer-0 HYPRLAND_NO_SD_NOTIFY=1 HYPRLAND_NO_SD_VARS=1 \
-        setsid dbus-run-session --config-file="$STATE/bus.conf" -- Hyprland -c "$STATE/test.lua" > "$STATE/hypr.out" 2>&1 < /dev/null &
+    #    as Hyprland does. --no-bus runs Hyprland bare instead: no
+    #    DBUS_SESSION_BUS_ADDRESS and no $XDG_RUNTIME_DIR/bus, so every
+    #    sd_bus_open_user in the plugin fails -- the case that used to reach
+    #    std::terminate through SearchProviders' unjoined worker.
+    launcher=(dbus-run-session --config-file="$STATE/bus.conf" --)
+    [ $bus = 1 ] || launcher=()
+    env ${envs[@]+"${envs[@]}"} WAYLAND_DISPLAY=outer-0 HYPRLAND_NO_SD_NOTIFY=1 HYPRLAND_NO_SD_VARS=1 \
+        setsid ${launcher[@]+"${launcher[@]}"} Hyprland -c "$cfg" > "$STATE/hypr.out" 2>&1 < /dev/null &
     echo $! > "$STATE/hypr.pid"
+    echo "hl: config $cfg, session bus $([ $bus = 1 ] && echo yes || echo NO)${envs[*]+, env ${envs[*]}}"
     for _ in $(seq 75); do
         s=$(ls -t "$RT/hypr" 2>/dev/null | head -1 || true)
         [ -n "$s" ] && [ -S "$RT/hypr/$s/.socket.sock" ] && HYPRLAND_INSTANCE_SIGNATURE=$s hyprctl -j monitors >/dev/null 2>&1 && break
@@ -216,6 +234,14 @@ start)
     done
     [ -n "${s:-}" ] || { tail -20 "$STATE/hypr.out"; die "no instance socket after 15 s"; }
     echo "$s" > "$STATE/sig"
+    # Config errors NOW, before this script's own `hyprctl eval` below: an eval
+    # starts with m_errors.clear() (0.56 CConfigManager::eval), so a startup
+    # error -- a Lua runtime error inside a require()d fragment included --
+    # reads as "no errors" from the first eval on. `hl.sh errors` prints this.
+    # (A plugin loaded from the config reloads it once it has registered its
+    # keys; let that settle first.)
+    sleep 1
+    hc configerrors > "$STATE/configerrors.start" 2>&1 || true
     hc -j instances | python3 -c 'import json,sys; [print(i["wl_socket"]) for i in json.load(sys.stdin) if i["instance"]==sys.argv[1]]' "$s" > "$STATE/wl"
     # 3. the real test output, then retire the nested window
     hc output create headless HEADLESS-1 >/dev/null
@@ -232,6 +258,9 @@ start)
     echo $! > "$STATE/vkbd.pid"
     echo "hl: Hyprland up, sig $s wayland $(wlsock)"
     hc monitors | grep '^Monitor'
+    if grep -q '[^[:space:]]' "$STATE/configerrors.start"; then
+        echo "hl: CONFIG ERRORS at startup:"; sed 's/^/    /' "$STATE/configerrors.start"
+    else echo "hl: configerrors at startup: none"; fi
     if [ $plugin = 1 ]; then
         [ -f "$so" ] || die "plugin not found: $so (hl.sh install, or --no-plugin)"
         r=$(hc plugin load "$so" 2>&1) || true
@@ -273,6 +302,11 @@ overview)
     shift; a=${1:-toggle all}
     hc eval "hl.dispatch(hl.plugin.hyprdrive.overview(\"$a\"))" ;;
 sig)  sig ;;
+errors)
+    # configerrors as captured at startup (see start: an eval clears them),
+    # then live -- live is only meaningful before any eval or after a reload
+    echo "-- at startup:"; cat "$STATE/configerrors.start" 2>/dev/null || true
+    echo "-- live:"; hc configerrors ;;
 log)  s=$(sig); tail -n "${2:-40}" "$RT/hypr/$s/hyprland.log" ;;
 shot)
     # PNG on stdout; the outer side writes the file
