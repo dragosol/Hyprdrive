@@ -10,6 +10,8 @@
 #                     clamps and box predicates.
 #   search_letters_test  SearchLetters -- Serpantinum Input.qml bounce eases,
 #                     UTF-8 split, prefix/suffix diff, animator state.
+#   search_providers_nobus_test  the GNOME search worker with no session bus
+#                     (the std::terminate that took the compositor down).
 #
 # Anything that needs a running Hyprland is a GATE (scripts/gates/), not a host
 # test, and lives in scripts/suite.sh instead.
@@ -60,5 +62,7 @@ run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-con
 # shellcheck disable=SC2046
 run stack_reader_test scripts/stack_reader_test.cpp StackReader.cpp StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
 run omarchy_search_test scripts/omarchy_search_test.cpp OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
+# shellcheck disable=SC2046
+run search_providers_nobus_test scripts/search_providers_nobus_test.cpp SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
 
 exit $fail
