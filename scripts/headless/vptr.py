@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Synthesized pointer for the headless harness (wlr-virtual-pointer-v1).
 
-Usage: vptr.py XEXT YEXT move X Y | click [left|right|middle]
+Usage: vptr.py XEXT YEXT move X Y | click [left|right|middle] | tap X Y [btn]
                          | down [btn] | up [btn] | scroll DY | drag X1 Y1 X2 Y2 [steps]
 
 X/Y are layout coordinates; XEXT/YEXT the layout bounding box (hl.sh passes
-it). Events go through Hyprland's real pointer path (keybinds, plugin input
+it). Every call is a NEW virtual pointer device, which a toolkit client (Qt
+under Quickshell) treats as a fresh seat pointer: a bare `click` after a
+separate `move` reaches it with no enter/motion and is dropped. `tap X Y` moves
+and clicks on one device -- use it for clicks on client windows. Events go through Hyprland's real pointer path (keybinds, plugin input
 hooks), unlike hl.dsp.cursor.move, which only warps. Needs the bindings that
 hl.sh generates with pywayland.scanner into $PYTHONPATH/hlproto.
 """
@@ -63,6 +66,18 @@ def main(argv):
         d.roundtrip()
         time.sleep(0.05)
         button(b, False)
+    elif cmd == "tap":
+        move(args[0], args[1])
+        d.roundtrip()
+        time.sleep(0.08)
+        move(float(args[0]) + 1, args[1])  # a second motion: the client's hover
+        d.roundtrip()
+        time.sleep(0.05)
+        b = args[2] if len(args) > 2 else "left"
+        button(b, True)
+        d.roundtrip()
+        time.sleep(0.05)
+        button(b, False)
     elif cmd in ("down", "up"):
         button(args[0] if args else "left", cmd == "down")
     elif cmd == "scroll":
@@ -75,6 +90,15 @@ def main(argv):
         steps = int(args[4]) if len(args) > 4 else 30
         move(x1, y1)
         d.roundtrip()
+        if os.environ.get("VPTR_HOVER", "1") == "1":
+            # A client window (Qt) only takes a press after a motion it saw on
+            # this device (see tap); a 1 px nudge and back, before the press.
+            time.sleep(0.05)
+            move(x1 + 1, y1)
+            d.roundtrip()
+            move(x1, y1)
+            d.roundtrip()
+            time.sleep(0.05)
         button("left", True)
         for i in range(1, steps + 1):
             time.sleep(1 / 120)
