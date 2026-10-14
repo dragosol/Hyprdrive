@@ -1,4 +1,5 @@
 #include "Config.hpp"
+#include "FlightBlur.hpp"
 
 #include "Compat.hpp"
 
@@ -13,10 +14,22 @@
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/config/values/types/GradientValue.hpp>
+#include <hyprland/src/macros.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
+#include <fstream>
+#include <initializer_list>
+#include <array>
+#include <optional>
 #include <regex>
+#include <span>
+#include <string>
+#include <sys/stat.h>
+#include <vector>
 
 extern "C" {
 #include <lauxlib.h>
@@ -39,6 +52,12 @@ std::vector<SP<::Config::Values::IValue>> g_modernValues, g_legacyValues;
 const char* KEY(const std::string_view tail) {
     const auto* PREFIX = g_legacyPass ? ScrollOverview::Compat::LEGACY_KEY_PREFIX : ScrollOverview::Compat::KEY_PREFIX;
     return g_keyNames.emplace_back(std::string{PREFIX} + std::string{tail}).c_str();
+}
+
+// A formatted description, kept alive the way KEY keeps names: values keep
+// the const char* they are given.
+const char* stableText(std::string text) {
+    return g_keyNames.emplace_back(std::move(text)).c_str();
 }
 
 void addKey(SP<::Config::Values::IValue> value) {
@@ -76,10 +95,10 @@ SDispatcher* findDispatcher(const std::string_view name) {
     static SDispatcher registrations[] = {
         {
             .name            = "overview",
-            .argPattern      = std::regex{R"(^(select|(toggle|on|open|enable|off|close|disable)([ \t]+(all|[^ \t"\\]+))?)$)"},
+            .argPattern      = std::regex{R"(^(select|tab|(toggle|on|open|enable|off|close|disable)([ \t]+(all|[^ \t"\\]+))?)$)"},
             .defaultArg      = "toggle",
             .typeArgError    = "expected an optional string argument; did you forget quotes around it?",
-            .invalidArgError = "expected select or toggle/open/close [monitor|all] (aliases: on, enable, off, disable)",
+            .invalidArgError = "expected select, tab or toggle/open/close [monitor|all] (aliases: on, enable, off, disable)",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "overview"); },
             .luaLegacy       = [](lua_State* L) {
                 ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.overview");
@@ -132,14 +151,39 @@ SDispatcher* findDispatcher(const std::string_view name) {
             // the path is checked by the filesystem, which is the only thing
             // that can actually answer.
             .name            = "stack",
-            .argPattern      = std::regex{"^(clear|(pin|unpin|toggle) .+|view (fan|grid) .+|sort (name|mtime) .+)$"},
+            .argPattern      = std::regex{"^(clear|(pin|unpin|toggle|open) .+|view (fan|grid|auto) .+|sort (name|mtime|added|modified|kind) .+|scroll -?[0-9]+|filter( .*)?)$"},
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: pin <path> | unpin <path> | toggle <path> | view fan|grid <path> | sort name|mtime <path> | clear",
+            .invalidArgError = "expected: pin <path> | unpin <path> | toggle <path> | open <path> | view auto|fan|grid <path> | sort name|added|modified|kind <path> | scroll <rows> | filter [text] | clear",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "stack"); },
             .luaLegacy       = [](lua_State* L) {
                 ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.stack");
                 return dispatcherFactoryLua(L, "stack");
             },
+        },
+        {
+            // A diagnostic, and in the table for the same reason the rest are:
+            // a Lua config reaches dispatchers ONLY through these bindings, so
+            // one that is not here cannot be called at all (user, 2026-09-19:
+            // "attempt to call a nil value (field 'debug')").
+            .name            = "debug",
+            .argPattern      = std::regex{"^(frames|mem|motion|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+)$"},
+            .defaultArg      = "frames",
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected: frames | mem | motion | scratchpad | type [text] | activate <class> | press <keycode> | ripple [x y]",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "debug"); },
+            .luaLegacy       = [](lua_State* L) {
+                ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.debug");
+                return dispatcherFactoryLua(L, "debug");
+            },
+        },
+        {
+            // Mosaic.cpp: focus by direction, mosaic-aware (Super+arrows).
+            .name            = "focus",
+            .argPattern      = std::regex{"^(l|r|u|d|left|right|up|down)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected one of: l, r, u, d",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "focus"); },
+            .luaLegacy       = [](lua_State* L) { return dispatcherFactoryLua(L, "focus"); },
         },
         {
             .name            = "window",
@@ -314,7 +358,21 @@ int gestureLua(lua_State* L) {
     const bool DISABLE_INHIBIT = lua_toboolean(L, -1);
     lua_pop(L, 1);
 
-    const auto result = g_gestureRegistrar(FINGERS, DIRECTION, ACTION, MODS, SCALE, DISABLE_INHIBIT);
+    lua_getfield(L, 1, "arg");
+    std::string ARG = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+    lua_pop(L, 1);
+    if (ARG.empty()) {
+        lua_getfield(L, 1, "dispatcher");
+        const std::string DISPATCHER = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "data");
+        const std::string DATA = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+        lua_pop(L, 1);
+        if (!DISPATCHER.empty())
+            ARG = DATA.empty() ? DISPATCHER : DISPATCHER + "," + DATA;
+    }
+
+    const auto result = g_gestureRegistrar(FINGERS, DIRECTION, ACTION, MODS, SCALE, DISABLE_INHIBIT, ARG);
     if (!result.success)
         return luaL_error(L, "gesture: %s", result.error.c_str());
 
@@ -383,6 +441,33 @@ static void registerConfigValuesFor() {
     using namespace ::Config::Values;
 
     addKey(makeShared<CIntValue>(KEY("gesture_distance"), "gesture distance in pixels", 200, SIntValueOptions{.min = 1}));
+    // MAGNETIC DETENT on the 3-finger workspace drag. The accumulator stays
+    // linear in finger travel; only the value handed to viewOffset is warped,
+    // by g(u) = u - (K/2pi)*sin(2pi*u) across each card-to-card interval.
+    // g(0) = 0 and g(1) = 1 EXACTLY, so a boundary still costs exactly one
+    // interval of pad travel -- the curve redistributes motion inside a cell
+    // and never adds any. That property is the whole point rather than a nicety:
+    // a detent that charged extra travel per workspace would put the far
+    // workspaces off the end of a 110mm pad.
+    // g'(u) = 1 - K*cos(2pi*u), so at K = 0.35 a card centre moves at 0.65x (it
+    // clings) and the midpoint at 1.35x (it releases). Monotonic for |K| < 1,
+    // which is why max is 0.9: at K = 1 the derivative touches zero and the
+    // cards stall dead under a moving finger.
+    addKey(makeShared<CFloatValue>(KEY("gesture_detent"), "magnetic detent strength on the 3-finger workspace drag; 0 = linear", 0.35F,
+                                   SFloatValueOptions{.min = 0.F, .max = 0.9F}));
+    addKey(makeShared<CIntValue>(KEY("gesture_detent_label"), "show the workspace name pill on the card the workspace drag is settling on", 1,
+                                 SIntValueOptions{.min = 0, .max = 1}));
+    // Fired once per boundary crossed, through CProcess::runAsync -- never a
+    // fork on the compositor thread.
+    //
+    // The default names Omarchy's keystroke click, so a machine that has one
+    // gets the detent tick with no config at all and reuses the sound its
+    // capacitive top row already plays rather than introducing a second one.
+    // The path is only spawned if it exists and is executable, so this is
+    // silent rather than noisy-on-stderr everywhere else. Set empty to disable.
+    addKey(makeShared<CStringValue>(KEY("gesture_detent_sound"),
+                                    "executable run once per workspace boundary crossed during the drag; empty = silent, missing file = silent",
+                                    Hyprlang::STRING{"~/.local/bin/keystroke-click"}));
     // Default alpha 0 = unset; highlightColor() then falls back to the theme's
     // border accent, which is what every build before this one used.
     addKey(makeShared<CGradientValue>(KEY("col_highlight"),
@@ -393,8 +478,8 @@ static void registerConfigValuesFor() {
     // reaches EVERYTHING through animElapsedMs: the overview's open/close, the
     // dock's hover panel, the minimize flight, tooltips, the bounce, the launch
     // zoom. For watching a frame at a time, and for the stress rig.
-    addKey(makeShared<CFloatValue>(KEY("anim_scale"), "global animation slowdown; 1 = normal, 10 = ten times slower", 1.F,
-                                   SFloatValueOptions{.min = 0.05F, .max = 100.F}));
+    addKey(makeShared<CFloatValue>(KEY("anim_scale"), "global animation slowdown; 1 = normal, 10 = ten times slower, 0 = snap", 1.F,
+                                   SFloatValueOptions{.min = 0.F, .max = 100.F}));
 
     // The overview used to borrow `windowsMove` for its own open and close,
     // which meant one curve for both directions and no way to shape either
@@ -409,6 +494,23 @@ static void registerConfigValuesFor() {
                                    SFloatValueOptions{.min = 0.1F, .max = 20.F}));
     addKey(makeShared<CIntValue>(KEY("workspace_gap"), "gap between overview workspaces", 40, SIntValueOptions{.min = 0}));
     addKey(makeShared<CStringValue>(KEY("layout"), "overview layout", Hyprlang::STRING{"vertical"}));
+    // The overview search's dictionary and translator (user, 2026-09-22). OFF by
+    // default: they send what is typed to a third-party service, and a
+    // compositor plugin must not start doing that on its own.
+    addKey(makeShared<CBoolValue>(KEY("search:dictionary"), "`define <word>` in the overview search looks the word up on Wiktionary (sends the word to en.wiktionary.org)", false));
+    // MOSAIC (Mosaic.hpp). The layout itself is always registered; these two are
+    // the panel's: enabled puts it on Super+L's cycle, default makes it the
+    // layout of desktops with none of their own.
+    addKey(makeShared<CBoolValue>(KEY("mosaic:enabled"), "mosaic: Super+L cycles Dwindle -> Scrolling -> Mosaic (the panel asks before turning it on)", false));
+    addKey(makeShared<CBoolValue>(KEY("mosaic:default"), "mosaic: new desktops use the Mosaic layout (needs mosaic:enabled)", false));
+    addKey(makeShared<CBoolValue>(KEY("search:easter_egg"), "overview search: type a letter and backspace five times in four seconds and the pill plays search:easter_egg_video", true));
+    addKey(makeShared<CStringValue>(KEY("search:easter_egg_video"), "the video the overview's easter egg plays, with its sound (needs ffmpeg); a missing file turns the egg off",
+                                    Hyprlang::STRING{"~/.local/share/hyprdrive/easter-egg.mp4"}));
+    addKey(makeShared<CBoolValue>(KEY("search:translate"), "`tr <lang> <text>` in the overview search translates it (sends the text to the translate endpoint)", false));
+    addKey(makeShared<CStringValue>(KEY("search:translate_endpoint"), "LibreTranslate-compatible base URL for `tr`; empty uses the free MyMemory API",
+                                    Hyprlang::STRING{""}));
+    addKey(makeShared<CStringValue>(KEY("search:translate_target"), "language `translate <text>` translates into when none is given; empty uses $LANG",
+                                    Hyprlang::STRING{""}));
     addKey(makeShared<CStringValue>(KEY("terminal"), "terminal used to launch Terminal=true desktop entries; empty falls back to $TERMINAL",
                                     Hyprlang::STRING{""}));
     addKey(makeShared<CIntValue>(KEY("input:scroll_event_delay"), "minimum delay (ms) between discrete scroll steps (wheel workspace nav and trackpad focus stepping)", 200, SIntValueOptions{.min = 0}));
@@ -489,16 +591,21 @@ static void registerConfigValuesFor() {
     // `running-indicator-style` DEFAULT, which draws no dot of its own and leaves
     // the shell's own showing -- `.app-grid-running-dot`, 5px, #fafafb.
     addKey(makeShared<CBoolValue>(KEY("dock:running_indicator"), "hyprgnomedock: dot under a running app's icon (D2D show-running)", true));
-    addKey(makeShared<CColorValue>(KEY("dock:indicator_color"), "hyprgnomedock: running-dot colour (shell .app-grid-running-dot)",
-                                   (Hyprlang::INT)0xFFFAFAFB));
+    addKey(makeShared<CColorValue>(KEY("dock:indicator_color"),
+                                   "hyprgnomedock: running-dot colour (alpha 0 = follow general:col.active_border)",
+                                   (Hyprlang::INT)0));
     addKey(makeShared<CIntValue>(KEY("dock:indicator_size"), "hyprgnomedock: running-dot diameter in px", 5,
                                  SIntValueOptions{.min = 1, .max = 64}));
     addKey(makeShared<CBoolValue>(KEY("dock:notification_counter"),
                                   "hyprgnomedock: red count badge on the icon (D2D show-icons-notifications-counter)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:emblems"), "hyprgnomedock: draw Unity LauncherEntry emblems at all (D2D show-icons-emblems)", true));
+    // DockTilt (user, 2026-09-14): the card lean from dragos.shastasia.com, in
+    // two halves the panel switches separately. Both off leaves the flat squish.
+    addKey(makeShared<CBoolValue>(KEY("dock:hover_tilt"), "dock icons lean toward the pointer in 3D while hovered, and spring flat on leave", true));
+    addKey(makeShared<CBoolValue>(KEY("dock:press_tilt"), "a pressed dock icon leans further in toward the press point, with a glare where it is pressed", true));
     addKey(makeShared<CBoolValue>(KEY("dock:dance_urgent"), "hyprgnomedock: wiggle an urgent app's icon (D2D dance-urgent-applications)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:urgent_notify"),
-                                  "hyprgnomedock: reveal the dock when an app goes urgent (D2D show-dock-urgent-notify)", true));
+                                  "an urgent app's icon hops up from the screen edge while the dock is hidden (it no longer reveals the dock)", true));
     // X32. `show-favorites`, `show-show-apps-button`, `show-apps-at-top` and
     // `show-apps-always-in-the-edge`, at the reference's values. The last two are
     // a pair: false/true is what puts the button at the right-hand end of a
@@ -537,6 +644,43 @@ static void registerConfigValuesFor() {
                                     "hyprgnomedock: shift+middle click on an icon (D2D shift-middle-click-action)", Hyprlang::STRING{"launch"}));
     addKey(makeShared<CBoolValue>(KEY("dock:isolate_workspaces"),
                                   "hyprgnomedock: the dock lists only windows on the current workspace (D2D isolate-workspaces)", false));
+    // Asked for by a user (2026-10-07): the same scoping, but only while the
+    // overview is open -- the desktop's dock stays workspace-agnostic.
+    addKey(makeShared<CBoolValue>(KEY("dock:isolate_in_overview"),
+                                  "while the overview is open, the dock lists only windows on the current workspace (isolate_workspaces does it everywhere)", false));
+    addKey(makeShared<CStringValue>(KEY("dock:monitor"),
+                                    "draw the dock on one monitor only: its name (DP-1) or desc:<description prefix>; empty = every monitor. "
+                                    "A monitor that is not connected falls back to every monitor",
+                                    Hyprlang::STRING{""}));
+    // Spring loading and the finger-aware swipe (user, 2026-10-07). Spring.cpp,
+    // FingerSwipe.cpp.
+    addKey(makeShared<CBoolValue>(KEY("drag:spring_dock"),
+                                  "a file drag held over a running app's dock icon or preview for spring_delay_ms flashes it twice and switches to it", true));
+    addKey(makeShared<CBoolValue>(KEY("drag:spring_edges"),
+                                  "a file/folder/window drag held at the left/right screen edge switches desktop that way every spring_delay_ms (a new one past the last)",
+                                  true));
+    addKey(makeShared<CIntValue>(KEY("drag:spring_delay_ms"), "how long a drag is held over a dock app or a screen edge before it springs", 1500,
+                                 SIntValueOptions{.min = 200, .max = 10000}));
+    // Hold to swap and the hot corner (user, 2026-10-13, asked for on r/omarchy).
+    // scrollOverview.cpp (updateSwapHold), HotCorner.cpp.
+    addKey(makeShared<CBoolValue>(KEY("drag:hold_to_swap"),
+                                  "in the overview, a window dragged and held over another window (in the grid or the desktop strip) for hold_to_swap_ms swaps "
+                                  "places with it when let go there",
+                                  true));
+    addKey(makeShared<CIntValue>(KEY("drag:hold_to_swap_ms"), "how long a dragged window is held over another before letting go swaps them", 1500,
+                                 SIntValueOptions{.min = 300, .max = 5000}));
+    addKey(makeShared<CBoolValue>(KEY("hot_corner:enabled"), "resting the pointer in a screen corner opens the overview, and closes it again, like GNOME's Activities corner", false));
+    addKey(makeShared<CStringValue>(KEY("hot_corner:corner"),
+                                    "the hot corner: top-left, top-right, bottom-left or bottom-right (an outer corner only; between two monitors the pointer crosses)",
+                                    Hyprlang::STRING{"top-left"}));
+    addKey(makeShared<CIntValue>(KEY("hot_corner:delay_ms"), "how long the pointer rests in the hot corner before the overview opens", 150,
+                                 SIntValueOptions{.min = 0, .max = 2000}));
+    addKey(makeShared<CBoolValue>(KEY("hot_corner:ripple"), "the hot corner sends a ripple across the screen from the corner, bending what is under it", true));
+    addKey(makeShared<CBoolValue>(KEY("gestures:keep_swipe"),
+                                  "a 3/4-finger swipe keeps going after fingers lift, as long as one finger that started it is down (reads the touchpad's own touches)",
+                                  true));
+    addKey(makeShared<CBoolValue>(KEY("gestures:swipe_while_dragging"),
+                                  "with one finger holding a drag (button down), 3/4 other fingers swipe as a normal gesture instead of flinging the drag", true));
     addKey(makeShared<CBoolValue>(KEY("dock:workspace_agnostic_urgent"),
                                   "hyprgnomedock: an urgent window stays listed even when isolate_workspaces hides its workspace "
                                   "(D2D workspace-agnostic-urgent-windows)",
@@ -544,7 +688,7 @@ static void registerConfigValuesFor() {
 
     // X34. The accelerators are NOT keys -- Hyprland's own `bind` lines are the
     // store GNOME uses gsettings for. These four are the behaviour around them.
-    addKey(makeShared<CBoolValue>(KEY("dock:hot_keys"), "hyprgnomedock: Super+number activates dock apps (D2D hot-keys)", true));
+    addKey(makeShared<CBoolValue>(KEY("dock:hot_keys"), "hyprgnomedock: Super+number activates dock apps (D2D hot-keys)", false));
     addKey(makeShared<CBoolValue>(KEY("dock:hotkeys_overlay"),
                                   "hyprgnomedock: a hotkey press draws the slot numbers on the icons (D2D hotkeys-overlay)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:hotkeys_show_dock"),
@@ -563,13 +707,65 @@ static void registerConfigValuesFor() {
                                   "hyprgnomedock: include network shares among the mounts (D2D show-mounts-network)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:show_mounts_only_mounted"),
                                   "hyprgnomedock: only volumes that are mounted, not every one present (D2D show-mounts-only-mounted)", true));
+    addKey(makeShared<CStringValue>(KEY("dock:mount_sort"),
+                                    "dock: the mounted drives' order -- mounted (as they were mounted), name (alphabetical, numbers as numbers), smart (name, reading "
+                                    "spelled-out and Roman numbers too: KleOne, KleTwo, KleThree) or fstab (their order in /etc/fstab; unlisted drives after)",
+                                    Hyprlang::STRING{"mounted"}));
     addKey(makeShared<CBoolValue>(KEY("dock:isolate_locations"),
                                   "hyprgnomedock: a location's running state is its own, not the file manager's (D2D isolate-locations)", true));
+    addKey(makeShared<CIntValue>(KEY("dock:stack_motion_blur"),
+                                 "dock stacks: motion blur samples while the fan moves (0 = off); each frame averages this many instants", 8,
+                                 SIntValueOptions{.min = 0, .max = 32}));
+    addKey(makeShared<CIntValue>(KEY("layout_motion_blur"),
+                                 "motion blur samples while the layout moves or resizes a window -- a dwindle retile, the scrolling tape, a window opening (0 = off); never an interactive drag", 16,
+                                 SIntValueOptions{.min = 0, .max = 32}));
+    addKey(makeShared<CBoolValue>(KEY("dock:windows_make_room"),
+                                  "dock: with autohide off, tiled windows that would sit under the dock are shortened to clear it (only those in the way)", true));
+    addKey(makeShared<CIntValue>(KEY("dock:minimize_motion_blur"),
+                                 "dock: motion blur samples while a window flies into / out of its icon (0 = off), desktop and overview alike", 16,
+                                 SIntValueOptions{.min = 0, .max = 32}));
+    // Motion.hpp. The dock stacks keep dock:stack_motion.
+    addKey(makeShared<CStringValue>(KEY("animation:curve"),
+                                    "the curve family for everything hyprdrive animates except the dock stacks: hyprdrive (the house curves), serpantinum (its window curve), serpantinum_glide, serpantinum_soft, serpantinum_intro, serpantinum_pop, swift, springy, linear",
+                                    Hyprlang::STRING{"hyprdrive"}));
+    // MOTION BLUR, PER ANIMATION (user, 2026-09-30). Each site smears a share
+    // of its frame-to-frame motion (strength, 0..1; 0 = that site off) shaped
+    // over the animation by `fade`: early (full at the start, gone by the
+    // halfway point -- the house default), full (fades over the whole
+    // animation), late (holds, then fades over the second half), linear, or
+    // constant (no fade; the continuous motions -- swipes, keyboard pans --
+    // have no progress to fade over). The defaults are the values these sites
+    // shipped with. Sample counts stay in layout_motion_blur,
+    // dock:minimize_motion_blur and dock:stack_motion_blur.
+    addKey(makeShared<CBoolValue>(KEY("motion_blur:enabled"), "motion blur on hyprdrive's animations (false = every site off; samples keys untouched)", true));
+    for (const auto& SITE : FlightBlur::SITES) {
+        addKey(makeShared<CFloatValue>(KEY(std::format("motion_blur:{}:strength", SITE.name)), stableText(std::format("motion blur: {} -- share of the motion smeared (0 = off)", SITE.label)),
+                                       SITE.strength, SFloatValueOptions{.min = 0.F, .max = 1.F}));
+        addKey(makeShared<CStringValue>(KEY(std::format("motion_blur:{}:fade", SITE.name)), stableText(std::format("motion blur: {} -- early, full, late, linear or constant", SITE.label)),
+                                        Hyprlang::STRING{SITE.fade}));
+    }
+    addKey(makeShared<CStringValue>(KEY("dock:stack_motion"),
+                                    "dock stacks: the fan's motion -- serpantinum (OutQuint travel, OutBack pop, 40 ms stagger) or extension (dock-stacks' 140 ms ease-out-quad)",
+                                    Hyprlang::STRING{"serpantinum"}));
+    addKey(makeShared<CBoolValue>(KEY("dock:builtin_icons"),
+                                  "dock stacks: hyprdrive's own empty-stack artwork (false = the folder icon)", true));
+    addKey(makeShared<CStringValue>(KEY("dock:stack_icon_theme"),
+                                    "dock stacks: icon theme for stacks and their files -- omarchy (the current Omarchy theme's icons) or gtk",
+                                    Hyprlang::STRING{"omarchy"}));
+    addKey(makeShared<CStringValue>(KEY("dock:trash_icon"), "dock: the Trash's icon -- hyprdrive (its own artwork), omarchy or gtk", Hyprlang::STRING{"hyprdrive"}));
+    addKey(makeShared<CStringValue>(KEY("dock:trash_style"), "dock: hyprdrive Trash glass -- auto (follows the theme), light, dark or clear",
+                                    Hyprlang::STRING{"auto"}));
+    addKey(makeShared<CStringValue>(KEY("dock:trash_papers"), "dock: what fills hyprdrive's full Trash -- white or color", Hyprlang::STRING{"white"}));
 
-    addKey(makeShared<CColorValue>(KEY("dock:background_color"), "hyprgnomedock: pill hue (alpha comes from background_opacity)",
-                                   (Hyprlang::INT)0xFFC0BFBC));
-    addKey(makeShared<CFloatValue>(KEY("dock:background_opacity"), "hyprgnomedock: pill alpha (D2D background-opacity)", 0.19F,
-                                   SFloatValueOptions{.min = 0.F, .max = 1.F}));
+    addKey(makeShared<CColorValue>(KEY("dock:background_color"),
+                                   "hyprgnomedock: pill hue (alpha 0 = Omarchy terminal background, else misc:background_color; opacity is background_opacity)",
+                                   (Hyprlang::INT)0));
+    // -1 follows unfocused default-opacity (0.85), the same glass as idle windows.
+    // A pin of 0.19 was Dash-to-Dock glass; without window blur that left
+    // the pill almost invisible.
+    addKey(makeShared<CFloatValue>(KEY("dock:background_opacity"),
+                                   "hyprgnomedock: pill alpha (-1 = Omarchy default-opacity)", -1.F,
+                                   SFloatValueOptions{.min = -1.F, .max = 1.F}));
     // X29. The dock's frost is blur-my-shell's `[dash-to-dock]`, not the desktop's
     // window blur: sigma 30, brightness 0.60, live (static-blur false), and no
     // grain. Hyprland's dual-kawase has no sigma at all, so size/passes are not
@@ -608,6 +804,8 @@ static void registerConfigValuesFor() {
                                    SFloatValueOptions{.min = -1.F, .max = 1.F}));
     addKey(makeShared<CBoolValue>(KEY("live_layer_frost"),
                                   "evaluate dock/bar frost against the overview backdrop instead of the stale optimized blur FB", true));
+    addKey(makeShared<CBoolValue>(KEY("smooth_frames"),
+                                  "render ahead when the GPU runs late: holds render:new_render_scheduling on for the session and restores yours when off; a late frame then costs one refresh, not half the frame rate", false));
     addKey(makeShared<CFloatValue>(KEY("prefilter_below"),
                                    "mipmap-prefilter a tile's texture when it is minified below this fraction (0 = never)", 0.55F,
                                    SFloatValueOptions{.min = 0.F, .max = 1.F}));
@@ -617,6 +815,8 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CBoolValue>(KEY("strip"), "workspace thumbnail strip across the top of the overview", true));
     addKey(makeShared<CIntValue>(KEY("strip_height"), "logical px the strip band reserves at the top of the workspace", 260,
                                  SIntValueOptions{.min = 0}));
+    addKey(makeShared<CIntValue>(KEY("strip_max_screen_pct"), "ceiling on the strip band as a percent of screen height, so a strip cell never dwarfs a window preview", 30,
+                                 SIntValueOptions{.min = 1, .max = 100}));
     addKey(makeShared<CIntValue>(KEY("strip_gap"), "gap between strip cells", 5, SIntValueOptions{.min = 0}));
     addKey(makeShared<CBoolValue>(KEY("tap_super"), "tapping SUPER alone toggles the overview", true));
     addKey(makeShared<CIntValue>(KEY("tap_super_timeout_ms"), "longest press-to-release still counted as a SUPER tap (0 = no limit)",
@@ -644,20 +844,352 @@ static void registerConfigValues() {
 void registerConfig() {
     registerLuaFunctions();
     registerConfigValues();
+    g_pluginKeysRegistered = true;
     HyprlandAPI::reloadConfig();
 }
 
 int getGestureDistance() {
-    return std::max<int>(1, getValue<int>("plugin:hyprdrive:gesture_distance"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:gesture_distance");
+    return std::max<int>(1, sc<int>(*VAL));
+}
+
+float getGestureDetent() {
+    // Clamped again here rather than trusted from the key: |K| >= 1 makes the
+    // warp non-monotonic, and a non-monotonic warp means the cards run backwards
+    // mid-drag. Cheap insurance against a hand-edited hyprland.conf.
+    static auto& VAL = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:gesture_detent");
+    return std::clamp(sc<float>(*VAL), 0.F, 0.9F);
+}
+
+bool getGestureDetentLabel() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:gesture_detent_label");
+    return *VAL != 0;
+}
+
+std::string getGestureDetentSound() {
+    auto path = getValue<std::string>("plugin:hyprdrive:gesture_detent_sound");
+
+    // Expanded here rather than at the call site: CProcess exec's the path
+    // directly, so there is no shell downstream to expand a ~ later, and the
+    // default has to be able to name a file in the user's home without the
+    // plugin carrying an absolute path for one machine.
+    if (path.starts_with("~/")) {
+        if (const auto* HOME = std::getenv("HOME"); HOME && *HOME)
+            path = std::string{HOME} + path.substr(1);
+        else
+            return {};
+    }
+
+    return path;
+}
+
+static CHyprColor colorFromArgb(uint32_t argb, float alphaOverride = -1.F) {
+    const float a = alphaOverride >= 0.F ? alphaOverride : sc<float>((argb >> 24) & 0xFF) / 255.F;
+    return CHyprColor{sc<float>((argb >> 16) & 0xFF) / 255.F, sc<float>((argb >> 8) & 0xFF) / 255.F, sc<float>(argb & 0xFF) / 255.F, a};
+}
+
+struct SOmarchyThemeColors {
+    bool     valid           = false;
+    bool     isLight         = false;
+    uint32_t background      = 0xFF0c0b0c;
+    uint32_t foreground      = 0xFFFAFCFB;
+    uint32_t muted           = 0xFF584e51;
+    uint32_t accent          = 0xFFb59790;
+    uint32_t selection       = 0xFF584e51;
+    uint32_t darkForeground  = 0;
+    uint32_t lightForeground = 0;
+    uint32_t urgent          = 0xFFa55555;
+    bool     hasDarkFg       = false;
+    bool     hasLightFg      = false;
+    bool     hasUrgent       = false;
+};
+
+static float relLuma(const CHyprColor& c) {
+    return (0.2126F * c.r) + (0.7152F * c.g) + (0.0722F * c.b);
+}
+
+static float lumaDelta(const CHyprColor& a, const CHyprColor& b) {
+    return std::abs(relLuma(a) - relLuma(b));
+}
+
+static CHyprColor readableOn(const CHyprColor& bg, std::initializer_list<CHyprColor> prefs) {
+    CHyprColor best{};
+    float      bestD = -1.F;
+    for (const auto& p : prefs) {
+        const float d = lumaDelta(p, bg);
+        if (d > bestD) {
+            bestD = d;
+            best  = p;
+        }
+    }
+    if (bestD >= 0.28F)
+        return best;
+    return relLuma(bg) <= 0.55F ? CHyprColor{1.F, 1.F, 1.F, 1.F} : CHyprColor{0.12F, 0.12F, 0.12F, 1.F};
+}
+
+// How often the theme file is looked at, at most. omarchyTheme() sits behind
+// six colour accessors and every one of those is read per card per frame, so
+// the mtime check ran -- getenv, a path concatenation and a stat() -- thousands
+// of times a second to notice a file the user changes by hand. Same number and
+// the same reasoning as the dock's FAVORITES_POLL_MS.
+static constexpr float THEME_POLL_MS = 500.F;
+
+// Bumped by invalidateThemeCache(); every cache below re-checks when the number
+// it last saw is stale. A counter rather than a flag because there is more than
+// one cache and each has to see the invalidation exactly once.
+static uint64_t g_themeGeneration = 1;
+
+void invalidateThemeCache() {
+    ++g_themeGeneration;
+}
+
+// Omarchy writes the active palette into colors.toml on `omarchy theme set`
+// and reloads Hyprland. Cached on mtime so a frame does not reopen the file,
+// and the mtime itself behind THEME_POLL_MS so a frame does not stat it either.
+//
+// `last` is what the previous FULL check resolved to, and the throttled path
+// returns exactly that -- handing back `cachedTheme` would resurrect a palette
+// whose file has since gone away.
+static const SOmarchyThemeColors& omarchyTheme() {
+    static const SOmarchyThemeColors  NONE{};
+    static SOmarchyThemeColors        cachedTheme;
+    static const SOmarchyThemeColors* last = &NONE;
+    static std::string                cachedPath;
+    static time_t                     cachedMtime = 0;
+    static Time::steady_tp            checkedAt{};
+    static uint64_t                   seenGeneration = 0;
+
+    const auto NOW = Time::steadyNow();
+    if (seenGeneration == g_themeGeneration && std::chrono::duration<float, std::milli>(NOW - checkedAt).count() < THEME_POLL_MS)
+        return *last;
+
+    checkedAt      = NOW;
+    seenGeneration = g_themeGeneration;
+    last           = &NONE;
+
+    const char* const STATE = std::getenv("XDG_STATE_HOME");
+    const char* const HOME  = std::getenv("HOME");
+    const std::string PATH  = (STATE && *STATE) ? std::string{STATE} + "/omarchy/current/theme/colors.toml" :
+                              (HOME && *HOME)   ? std::string{HOME} + "/.local/state/omarchy/current/theme/colors.toml" :
+                                                  std::string{};
+    if (PATH.empty())
+        return NONE;
+
+    struct stat st {};
+    if (stat(PATH.c_str(), &st) != 0)
+        return NONE;
+
+    last = &cachedTheme;
+
+    if (cachedTheme.valid && cachedPath == PATH && cachedMtime == st.st_mtime)
+        return cachedTheme;
+
+    cachedTheme = {};
+    cachedPath  = PATH;
+    cachedMtime = st.st_mtime;
+
+    std::ifstream in{PATH};
+    if (!in)
+        return cachedTheme;
+
+    static const std::regex RE_KEYVAL{R"(^\s*([a-zA-Z0-9_]+)\s*=\s*[\"']?([^\"'\r\n]+)[\"']?)"};
+    static const std::regex RE_HEX{R"(^#?([0-9A-Fa-f]{6}))"};
+
+    std::string line;
+    bool hasBg = false, hasFg = false, hasMuted = false, hasAccent = false, hasSel = false;
+    bool explicitMode = false;
+
+    while (std::getline(in, line)) {
+        std::smatch match;
+        if (!std::regex_search(line, match, RE_KEYVAL))
+            continue;
+
+        const auto KEY = match[1].str();
+        const auto VAL = match[2].str();
+
+        if (KEY == "mode") {
+            cachedTheme.isLight = (VAL.find("light") != std::string::npos);
+            explicitMode = true;
+            continue;
+        }
+
+        std::smatch hexMatch;
+        if (std::regex_search(VAL, hexMatch, RE_HEX)) {
+            const uint32_t RGB = 0xFF000000u | sc<uint32_t>(std::strtoul(hexMatch[1].str().c_str(), nullptr, 16));
+            if (KEY == "background") {
+                cachedTheme.background = RGB;
+                hasBg = true;
+            } else if (KEY == "foreground") {
+                cachedTheme.foreground = RGB;
+                hasFg = true;
+            } else if (KEY == "muted") {
+                cachedTheme.muted = RGB;
+                hasMuted = true;
+            } else if (KEY == "accent") {
+                cachedTheme.accent = RGB;
+                hasAccent = true;
+            } else if (KEY == "selection") {
+                cachedTheme.selection = RGB;
+                hasSel = true;
+            } else if (KEY == "dark_foreground") {
+                cachedTheme.darkForeground = RGB;
+                cachedTheme.hasDarkFg      = true;
+            } else if (KEY == "light_foreground") {
+                cachedTheme.lightForeground = RGB;
+                cachedTheme.hasLightFg      = true;
+            } else if (KEY == "red") {
+                cachedTheme.urgent    = RGB;
+                cachedTheme.hasUrgent = true;
+            }
+        }
+    }
+
+    if (!explicitMode && hasBg) {
+        const float r = sc<float>((cachedTheme.background >> 16) & 0xFF) / 255.F;
+        const float g = sc<float>((cachedTheme.background >> 8) & 0xFF) / 255.F;
+        const float b = sc<float>(cachedTheme.background & 0xFF) / 255.F;
+        const float LUMA = (0.2126F * r) + (0.7152F * g) + (0.0722F * b);
+        cachedTheme.isLight = (LUMA > 0.55F);
+    }
+
+    if (!hasFg)
+        cachedTheme.foreground = cachedTheme.isLight ? 0xFF141414u : 0xFFFAFCFBu;
+    if (!hasMuted)
+        cachedTheme.muted = cachedTheme.isLight ? 0xFF606060u : 0xFF8A8588u;
+
+    cachedTheme.valid = true;
+    return cachedTheme;
+}
+
+static std::optional<uint32_t> omarchyThemeBackgroundRgb() {
+    const auto& T = omarchyTheme();
+    return T.valid ? std::optional<uint32_t>(T.background) : std::nullopt;
+}
+
+bool isLightTheme() {
+    const auto& T = omarchyTheme();
+    if (T.valid)
+        return T.isLight;
+    const auto BG = dockBackgroundColor();
+    const float LUMA = (0.2126F * BG.r) + (0.7152F * BG.g) + (0.0722F * BG.b);
+    return LUMA > 0.55F;
+}
+
+CHyprColor themeForeground() {
+    const auto& T = omarchyTheme();
+    if (T.valid)
+        return colorFromArgb(T.foreground, 1.F);
+    return isLightTheme() ? CHyprColor{0.08F, 0.08F, 0.08F, 1.F} : CHyprColor{1.F, 1.F, 1.F, 1.F};
+}
+
+CHyprColor themeMutedText() {
+    const auto& T = omarchyTheme();
+    const auto BG = T.valid ? colorFromArgb(T.background, 1.F) : dockBackgroundColor();
+    const auto FG = themeForeground();
+
+    // `muted` in colors.toml is often a surface/overlay, not body text. Prefer
+    // light_foreground (Omarchy subtext) then dark_foreground, then muted —
+    // whichever still contrasts with the plate.
+    //
+    // A fixed array, not a vector: three candidates at most, and this is read
+    // once per label per frame -- the vector was a heap allocation to hold
+    // 48 bytes of colour.
+    std::array<CHyprColor, 3> cands{};
+    size_t                    nCands = 0;
+    if (T.valid && T.hasLightFg)
+        cands[nCands++] = colorFromArgb(T.lightForeground, 1.F);
+    if (T.valid && T.hasDarkFg)
+        cands[nCands++] = colorFromArgb(T.darkForeground, 1.F);
+    if (T.valid)
+        cands[nCands++] = colorFromArgb(T.muted, 1.F);
+
+    CHyprColor best = FG;
+    float      bestD = -1.F;
+    for (const auto& c : std::span{cands.data(), nCands}) {
+        const float vsBg = lumaDelta(c, BG);
+        if (vsBg < 0.22F)
+            continue;
+        if (vsBg > bestD) {
+            bestD = vsBg;
+            best  = c;
+        }
+    }
+    if (bestD >= 0.22F)
+        return best;
+
+    const CHyprColor MIX{FG.r * 0.72F + BG.r * 0.28F, FG.g * 0.72F + BG.g * 0.28F, FG.b * 0.72F + BG.b * 0.28F, 1.F};
+    if (lumaDelta(MIX, BG) >= 0.22F)
+        return MIX;
+    return FG;
+}
+
+CHyprColor themeAccent() {
+    const auto& T = omarchyTheme();
+    if (T.valid)
+        return colorFromArgb(T.accent, 1.F);
+    return highlightColor();
+}
+
+CHyprColor themeHeading() {
+    const auto& T = omarchyTheme();
+    const auto BG = T.valid ? colorFromArgb(T.background, 1.F) : dockBackgroundColor();
+    return readableOn(BG, {themeAccent(), themeForeground()});
+}
+
+CHyprColor themeSelection() {
+    const auto& T = omarchyTheme();
+    if (T.valid)
+        return colorFromArgb(T.selection, 1.F);
+    return highlightColor().modifyA(0.35F);
+}
+
+CHyprColor themeSelectedFill() {
+    const auto& T = omarchyTheme();
+    const auto BG = T.valid ? colorFromArgb(T.background, 1.F) : dockBackgroundColor();
+    const auto SEL = themeSelection();
+    if (lumaDelta(SEL, BG) >= 0.10F)
+        return SEL.modifyA(0.92F);
+    const auto FG = themeForeground();
+    return CHyprColor{FG.r, FG.g, FG.b, 0.18F};
+}
+
+CHyprColor themeSelectedText() {
+    const auto FILL = themeSelectedFill();
+    // Approximate the blended plate: opaque-ish fill vs translucent fg wash.
+    const CHyprColor BG = FILL.a >= 0.6F ? FILL : CHyprColor{
+        FILL.r * FILL.a, FILL.g * FILL.a, FILL.b * FILL.a, 1.F
+    };
+    return readableOn(BG, {themeForeground(), themeAccent()});
+}
+
+CHyprColor themeUrgent() {
+    const auto& T = omarchyTheme();
+    if (T.valid && T.hasUrgent)
+        return colorFromArgb(T.urgent, 1.F);
+    return CHyprColor{0.95F, 0.35F, 0.35F, 1.F};
 }
 
 CHyprColor highlightColor() {
-    if (const auto HIGHLIGHT = getValue<::Config::CGradientValueData>("plugin:hyprdrive:col_highlight");
-        !HIGHLIGHT.m_colors.empty() && HIGHLIGHT.m_colors[0].a > 0.001F)
-        return HIGHLIGHT.m_colors[0];
+    // The accent is read a dozen times a frame per monitor -- every tile ring,
+    // every strip cell, every selected row. Through getValue<CGradientValueData>
+    // each of those was two full copies of a vector-owning gradient; the handles
+    // are resolved once and only the ONE colour that is wanted is copied out.
+    static auto& HIGHLIGHT = valueRef<::Config::IComplexConfigValue>("plugin:hyprdrive:col_highlight");
+    if (const auto* G = gradientPtr(HIGHLIGHT); G && !G->m_colors.empty() && G->m_colors[0].a > 0.001F)
+        return G->m_colors[0];
 
-    const auto ACCENT = getValue<::Config::CGradientValueData>("general:col.active_border");
-    return ACCENT.m_colors.empty() ? CHyprColor{1.F, 1.F, 1.F, 1.F} : ACCENT.m_colors[0];
+    static auto& ACCENT = valueRef<::Config::IComplexConfigValue>("general:col.active_border");
+    const auto*  G      = gradientPtr(ACCENT);
+    return (!G || G->m_colors.empty()) ? CHyprColor{1.F, 1.F, 1.F, 1.F} : G->m_colors[0];
+}
+
+// The ring a grid tile wears when nothing is on it (the window's own inactive
+// border), for the chrome that should sit as quietly as the tiles until the
+// pointer or the keyboard is on it (user, 2026-09-27).
+CHyprColor restingBorderColor() {
+    static auto& INACTIVE = valueRef<::Config::IComplexConfigValue>("general:col.inactive_border");
+    const auto*  G        = gradientPtr(INACTIVE);
+    return (!G || G->m_colors.empty()) ? highlightColor() : G->m_colors[0];
 }
 
 CHyprColor highlightForeground() {
@@ -674,20 +1206,173 @@ CHyprColor highlightForeground() {
     return CHyprColor{BG.r * 0.18F, BG.g * 0.18F, BG.b * 0.18F, 1.F};
 }
 
+int themeRounding() {
+    static auto& VAL = valueRef<Hyprlang::INT>("decoration:rounding");
+    return std::max<int>(0, sc<int>(*VAL));
+}
+
+float themeRoundingPower() {
+    static auto& VAL   = valueRef<Hyprlang::FLOAT>("decoration:rounding_power");
+    const auto   POWER = sc<float>(*VAL);
+    return std::clamp(POWER > 0.F ? POWER : 2.F, 1.F, 10.F);
+}
+
+// Omarchy's `omarchy font set` writes ~/.config/fontconfig/fonts.conf so the
+// "monospace" alias resolves to the chosen family. Hyprland's unset default is
+// Sans; that is not Omarchy's font. A user-set misc:font_family still wins.
+//
+// Behind THEME_POLL_MS, and by reference. This runs inside OverviewRender::text()
+// for every caller that does not pin a family -- which is most of them -- so it
+// was a getenv, a stat() and two std::string copies per glyph-cache PROBE. The
+// misc:font_family read is inside the gate with everything else: it only moves
+// on a reload, and a reload invalidates this.
+const std::string& themeFontFamily() {
+    static std::string     resolved{"monospace"};   // what the last full check answered
+    static std::string     parsed;                  // last successful fonts.conf parse
+    static std::string     parsedPath;
+    static time_t          parsedMtime = 0;
+    static Time::steady_tp checkedAt{};
+    static uint64_t        seenGeneration = 0;
+
+    const auto NOW = Time::steadyNow();
+    if (seenGeneration == g_themeGeneration && std::chrono::duration<float, std::milli>(NOW - checkedAt).count() < THEME_POLL_MS)
+        return resolved;
+
+    checkedAt      = NOW;
+    seenGeneration = g_themeGeneration;
+
+    const auto PIN = getValue<std::string>("misc:font_family");
+    if (!PIN.empty() && PIN != STRVAL_EMPTY && PIN != "Sans") {
+        resolved = PIN;
+        return resolved;
+    }
+
+    resolved = "monospace";
+
+    const char* const CFG  = std::getenv("XDG_CONFIG_HOME");
+    const char* const HOME = std::getenv("HOME");
+    const std::string PATH = (CFG && *CFG)  ? std::string{CFG} + "/fontconfig/fonts.conf" :
+                             (HOME && *HOME) ? std::string{HOME} + "/.config/fontconfig/fonts.conf" :
+                                               std::string{};
+    if (PATH.empty())
+        return resolved;
+
+    struct stat st {};
+    if (stat(PATH.c_str(), &st) != 0)
+        return resolved;
+
+    if (parsedPath == PATH && parsedMtime == st.st_mtime && !parsed.empty()) {
+        resolved = parsed;
+        return resolved;
+    }
+
+    parsedPath  = PATH;
+    parsedMtime = st.st_mtime;
+    parsed      = "monospace";
+
+    std::ifstream in{PATH};
+    if (!in) {
+        resolved = parsed;
+        return resolved;
+    }
+
+    static const std::regex RE{R"(<string>([^<]+)</string>)"};
+    std::string             line;
+    while (std::getline(in, line)) {
+        std::smatch match;
+        if (!std::regex_search(line, match, RE))
+            continue;
+        const auto NAME = match[1].str();
+        if (NAME.empty() || NAME == "monospace")
+            continue;
+        parsed = NAME;
+        break;
+    }
+
+    resolved = parsed;
+    return resolved;
+}
+
+CHyprColor dockIndicatorColor() {
+    static auto&   VAL  = valueRef<Hyprlang::INT>("plugin:hyprdrive:dock:indicator_color");
+    const uint32_t ARGB = sc<uint32_t>(*VAL);
+    if ((ARGB >> 24) == 0)
+        return highlightColor();
+    return colorFromArgb(ARGB);
+}
+
+// Overview chrome (dock, search, strip, results) follows unfocused window
+// opacity from ~/.config/hypr/windows.lua (`0.985 override 0.85 override`).
+static float omarchyWindowOpacity() {
+    static constexpr float STOCK = 0.85F;
+    static auto& VAL      = valueRef<Hyprlang::FLOAT>("decoration:inactive_opacity");
+    const float  INACTIVE = std::clamp(sc<float>(*VAL), 0.F, 1.F);
+    return std::clamp(STOCK * INACTIVE, 0.F, 1.F);
+}
+
+CHyprColor dockBackgroundColor() {
+    static auto& OPACITYVAL = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:dock:background_opacity");
+    static auto& COLORVAL   = valueRef<Hyprlang::INT>("plugin:hyprdrive:dock:background_color");
+    static auto& FALLBACK   = valueRef<Hyprlang::INT>("misc:background_color");
+
+    float OPACITY = sc<float>(*OPACITYVAL);
+    if (OPACITY < 0.F)
+        OPACITY = omarchyWindowOpacity();
+    else
+        OPACITY = std::clamp(OPACITY, 0.F, 1.F);
+
+    const uint32_t ARGB = sc<uint32_t>(*COLORVAL);
+    uint32_t       RGB  = ARGB;
+    if ((ARGB >> 24) == 0) {
+        if (const auto THEME = omarchyThemeBackgroundRgb())
+            RGB = *THEME;
+        else
+            RGB = sc<uint32_t>(*FALLBACK);
+    }
+    return colorFromArgb(RGB).modifyA(OPACITY);
+}
+
+int dockCornerRadius() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:dock:corner_radius");
+    return std::max<int>(0, sc<int>(*VAL));
+}
+
 float getScale() {
-    return std::clamp(getValue<float>("plugin:hyprdrive:scale"), 0.1F, 0.9F);
+    static auto& VAL = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:scale");
+    return std::clamp(sc<float>(*VAL), 0.1F, 0.9F);
 }
 
 float getOpenSpeed() {
-    return std::max(0.1F, getValue<float>("plugin:hyprdrive:open_speed"));
+    static auto& VAL = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:open_speed");
+    return std::max(0.1F, sc<float>(*VAL));
 }
 
 float getCloseSpeed() {
-    return std::max(0.1F, getValue<float>("plugin:hyprdrive:close_speed"));
+    static auto& VAL = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:close_speed");
+    return std::max(0.1F, sc<float>(*VAL));
 }
 
 int getWorkspaceGap() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:workspace_gap"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:workspace_gap");
+    return std::max<int>(0, sc<int>(*VAL));
+}
+
+bool getSearchDictionary() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:search:dictionary");
+    return *VAL != 0;
+}
+
+bool getSearchTranslate() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:search:translate");
+    return *VAL != 0;
+}
+
+std::string getSearchTranslateEndpoint() {
+    return getValue<std::string>("plugin:hyprdrive:search:translate_endpoint");
+}
+
+std::string getSearchTranslateTarget() {
+    return getValue<std::string>("plugin:hyprdrive:search:translate_target");
 }
 
 std::string getTerminal() {
@@ -695,42 +1380,64 @@ std::string getTerminal() {
 }
 
 ELayout getLayout() {
-    const auto LAYOUT = getValue<std::string>("plugin:hyprdrive:layout");
+    static auto& VAL    = valueRef<std::string>("plugin:hyprdrive:layout");
+    const auto   LAYOUT = *VAL;
     return LAYOUT == "horizontal" ? ELayout::HORIZONTAL : ELayout::VERTICAL;
 }
 
 bool getLeftHanded() {
-    const auto LEFT_HANDED = getValue<int>("plugin:hyprdrive:input:left_handed");
+    static auto& VAL         = valueRef<Hyprlang::INT>("plugin:hyprdrive:input:left_handed");
+    const auto   LEFT_HANDED = sc<int>(*VAL);
     if (LEFT_HANDED <= 1)
         return LEFT_HANDED != 0;
 
-    return getValue<bool>("input:left_handed");
+    static auto& HOST = valueRef<Hyprlang::INT>("input:left_handed");
+    return *HOST != 0;
 }
 
 int getDragMode() {
-    return std::clamp(getValue<int>("plugin:hyprdrive:input:drag_mode"), 0, 1);
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:input:drag_mode");
+    return std::clamp<int>(sc<int>(*VAL), 0, 1);
 }
 
 int getDragThreshold() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:input:drag_threshold"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:input:drag_threshold");
+    return std::max<int>(0, sc<int>(*VAL));
 }
 
+// The single hottest read in the plugin: animElapsedMs() divides by this, and
+// every eased thing on screen samples that at least once a frame.
 float animScale() {
-    return std::max(0.05F, getValue<float>("plugin:hyprdrive:anim_scale"));
+    static auto& VAL = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:anim_scale");
+    return std::max(0.F, sc<float>(*VAL));
+}
+
+bool motionEnabled() {
+    return animScale() > 0.F;
+}
+
+float realElapsedMs(const Time::steady_tp& since) {
+    return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count());
 }
 
 // The ONE place the plugin's clock is read. Dividing here is what makes a single
 // slider stretch every animation at once while every duration constant keeps its
-// real value -- see the note in Config.hpp.
+// real value -- see the note in Config.hpp. Scale 0 is the motion toggle: every
+// ease is already finished, without touching input timers that use realElapsedMs.
 float animElapsedMs(const Time::steady_tp& since) {
-    return sc<float>(std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count()) / animScale();
+    const float SCALE = animScale();
+    if (SCALE <= 0.F)
+        return 1e9F;
+    return realElapsedMs(since) / SCALE;
 }
 
 float getTouchpadScrollFactor() {
     static constexpr float OVERVIEWTOUCHPADSCROLLFACTOR = 1.5F;
 
-    return OVERVIEWTOUCHPADSCROLLFACTOR * std::max<float>(0.F, getValue<float>("input:touchpad:scroll_factor")) *
-        std::max<float>(0.F, getValue<float>("plugin:hyprdrive:input:touchpad_scroll_factor"));
+    static auto& HOST = valueRef<Hyprlang::FLOAT>("input:touchpad:scroll_factor");
+    static auto& OURS = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:input:touchpad_scroll_factor");
+
+    return OVERVIEWTOUCHPADSCROLLFACTOR * std::max<float>(0.F, sc<float>(*HOST)) * std::max<float>(0.F, sc<float>(*OURS));
 }
 
 static EScrollAction defaultVerticalScrollAction(ELayout layout) {
@@ -738,7 +1445,8 @@ static EScrollAction defaultVerticalScrollAction(ELayout layout) {
 }
 
 EScrollAction getVerticalScrollAction(ELayout layout) {
-    const auto MODE = std::clamp(getValue<int>("plugin:hyprdrive:input:scrolling_mode"), 0, 3);
+    static auto& VAL  = valueRef<Hyprlang::INT>("plugin:hyprdrive:input:scrolling_mode");
+    const auto   MODE = std::clamp<int>(sc<int>(*VAL), 0, 3);
 
     switch (MODE) {
         case 1: return defaultVerticalScrollAction(layout) == EScrollAction::WORKSPACE ? EScrollAction::COLUMN : EScrollAction::WORKSPACE;
@@ -757,59 +1465,120 @@ EScrollAction getHorizontalScrollAction(ELayout layout) {
 }
 
 int getScrollEventDelay() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:input:scroll_event_delay"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:input:scroll_event_delay");
+    return std::max<int>(0, sc<int>(*VAL));
 }
 
 int getWallpaperMode() {
-    return std::clamp<int>(getValue<int>("plugin:hyprdrive:wallpaper"), 0, 2);
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:wallpaper");
+    return std::clamp<int>(sc<int>(*VAL), 0, 2);
 }
 
 bool getBlur() {
-    return getValue<bool>("plugin:hyprdrive:blur");
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:blur");
+    return *VAL != 0;
 }
 
 bool getMissionControl() {
-    return getValue<bool>("plugin:hyprdrive:mission_control");
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:mission_control");
+    return *VAL != 0;
 }
 
 int getMissionControlGap() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:mission_control_gap"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:mission_control_gap");
+    return std::max<int>(0, sc<int>(*VAL));
 }
 
 int getMissionControlReflowMs() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:mission_control_reflow_ms"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:mission_control_reflow_ms");
+    return std::max<int>(0, sc<int>(*VAL));
 }
 
 bool getStrip() {
-    return getValue<bool>("plugin:hyprdrive:strip");
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:strip");
+    return *VAL != 0;
 }
 
 int getStripHeight() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:strip_height"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:strip_height");
+    return std::max<int>(0, sc<int>(*VAL));
+}
+
+int getStripMaxScreenPct() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:strip_max_screen_pct");
+    return std::clamp<int>(sc<int>(*VAL), 1, 100);
 }
 
 int getStripGap() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:strip_gap"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:strip_gap");
+    return std::max<int>(0, sc<int>(*VAL));
 }
 
 float getDragMiniScale() {
-    return std::clamp(getValue<float>("plugin:hyprdrive:drag_mini_scale"), 0.05F, 1.F);
+    static auto& VAL = valueRef<Hyprlang::FLOAT>("plugin:hyprdrive:drag_mini_scale");
+    return std::clamp(sc<float>(*VAL), 0.05F, 1.F);
 }
 
 int getDragMiniMs() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:drag_mini_ms"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:drag_mini_ms");
+    return std::max<int>(0, sc<int>(*VAL));
 }
 
 int getDragRecentreMs() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:drag_recentre_ms"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:drag_recentre_ms");
+    return std::max<int>(0, sc<int>(*VAL));
 }
 
 bool getTapSuper() {
-    return getValue<bool>("plugin:hyprdrive:tap_super");
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:tap_super");
+    return *VAL != 0;
 }
 
 int getTapSuperTimeoutMs() {
-    return std::max<int>(0, getValue<int>("plugin:hyprdrive:tap_super_timeout_ms"));
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:tap_super_timeout_ms");
+    return std::max<int>(0, sc<int>(*VAL));
+}
+
+// See the note in Config.hpp. Values are read through the registration objects
+// rather than through valueRef, so this needs no second spelling of any key --
+// and therefore cannot drift from what is actually registered.
+uint64_t dockKeyFingerprint() {
+    static uint64_t unknownCounter = 0;
+
+    uint64_t   h      = 14695981039346656037ULL;   // FNV-1a
+    const auto mix    = [&h](const uint64_t v) { h = (h ^ v) * 1099511628211ULL; };
+    const auto mixStr = [&mix](const std::string_view s) { mix(std::hash<std::string_view>{}(s)); };
+
+    const std::string PREFIX = std::string{Compat::KEY_PREFIX} + "dock:";
+
+    for (const auto& VALUE : g_modernValues) {
+        if (!VALUE)
+            continue;
+
+        const std::string_view NAME{VALUE->name()};
+        if (!NAME.starts_with(PREFIX))
+            continue;
+
+        mixStr(NAME);
+
+        if (const auto* V = dynamic_cast<::Config::Values::CBoolValue*>(VALUE.get()))
+            mix(V->value() ? 1U : 0U);
+        else if (const auto* V = dynamic_cast<::Config::Values::CIntValue*>(VALUE.get()))
+            mix(sc<uint64_t>(V->value()));
+        else if (const auto* V = dynamic_cast<::Config::Values::CColorValue*>(VALUE.get()))
+            mix(sc<uint64_t>(V->value()));
+        else if (const auto* V = dynamic_cast<::Config::Values::CFloatValue*>(VALUE.get())) {
+            const float F    = V->value();
+            uint32_t    bits = 0;
+            std::memcpy(&bits, &F, sizeof(bits));
+            mix(bits);
+        } else if (const auto* V = dynamic_cast<::Config::Values::CStringValue*>(VALUE.get()))
+            mixStr(V->value());
+        else
+            mix(++unknownCounter);
+    }
+
+    return h;
 }
 
 ::Config::CCssGapData getCssGapData(const std::string& name) {
@@ -825,24 +1594,31 @@ int getTapSuperTimeoutMs() {
 }
 
 int getShadowEnabled() {
-    return getValue<bool>("plugin:hyprdrive:shadow:enabled") ? 1 : 0;
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:shadow:enabled");
+    return *VAL != 0 ? 1 : 0;
 }
 
 int getShadowRange() {
-    return getValue<int>("plugin:hyprdrive:shadow:range");
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:shadow:range");
+    return sc<int>(*VAL);
 }
 
 int getShadowRenderPower() {
-    return getValue<int>("plugin:hyprdrive:shadow:render_power");
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:shadow:render_power");
+    return sc<int>(*VAL);
 }
 
-std::optional<::Config::CGradientValueData> getShadowColor() {
+// By pointer, not by optional-of-copy: the card shadow asks for this once per
+// card and once per strip cell, and a CGradientValueData copy is a heap
+// allocation. nullptr means "not pinned" exactly as std::nullopt did.
+const ::Config::CGradientValueData* getShadowColor() {
     constexpr auto NAME = "plugin:hyprdrive:shadow:color";
 
     if (!::Config::mgr()->getConfigValue(NAME).setByUser)
-        return std::nullopt;
+        return nullptr;
 
-    return getValue<::Config::CGradientValueData>(NAME);
+    static auto& VAL = valueRef<::Config::IComplexConfigValue>(NAME);
+    return gradientPtr(VAL);
 }
 
 }

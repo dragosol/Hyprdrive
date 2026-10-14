@@ -1,684 +1,343 @@
-# Hyprdrive
+# Hyprdrive for Omarchy
 
-A mission-control overview and a full dock for [Hyprland](https://hyprland.org) — one C++ plugin.
+A mission-control overview, a full dock with stacks, and Mosaic, a hybrid
+layout, for [Hyprland](https://hyprland.org) on [Omarchy](https://omarchy.org/).
+Everything is set from a settings panel in Omarchy's own bar, and it follows
+your Omarchy theme instead of shipping one of its own.
 
-> **Status: private development.** Built and validated against Hyprland **0.56.1**
-> inside a dedicated VM. Not ready for general use yet.
+![Tap Super: every window on every desktop, in one overview](https://hyprdrive.shastasia.com/readme/overview.gif)
+
+[Website](https://hyprdrive.shastasia.com) ·
+[Demo film on YouTube](https://www.youtube.com/watch?v=RRkIViQvAOY) ·
+[Releases](https://github.com/dragosol/hyprdrive-omarchy/releases)
+
+> Built against Hyprland **0.56.2** (Omarchy 4).
 
 ## What it does
 
 **Overview** (tap Super):
 
-- Mission-control grid of **real compositor-rendered windows** — live frost/blur on
-  every tile, static, while animating, while dragging, while scrolling.
-- Type-to-search with GNOME parity: installed apps, open windows, and
-  `org.gnome.Shell.SearchProvider2` D-Bus providers, refined on every keystroke.
-- Workspace strip with dynamic (trailing-empty) workspaces. Dragging a tile over a
-  strip cell shrinks it to mini scale; release **teleports the real window
-  instantly** — no fly-in, no double image.
-- Scroll-wheel workspace stepping, 1:1 trackpad follow with snap, keyboard
-  navigation across tiles, results, and desktops.
+- Mission-control grid of real compositor-rendered windows.
+- Type-to-search: installed apps, open windows, and GNOME search providers.
+
+  ![Just start typing: apps, windows and files in one search](https://hyprdrive.shastasia.com/readme/search.gif)
+
+- Workspace strip. Drag a tile onto a strip cell and the window teleports there,
+  including an empty desktop, to give it one of its own.
+
+  ![Drag a window to a new desktop](https://hyprdrive.shastasia.com/readme/new-desktop.gif)
+
+- Scroll-wheel workspace stepping, trackpad follow, keyboard navigation.
+- Several monitors act as one: the overview opens and closes on all of them,
+  and Tab walks search -> each monitor's grid (or strip -> grid on each
+  monitor when no results are up). Picking a window moves the cursor into it
+  and releases a game's pointer lock.
+- On a scrolling-layout desktop, the 3-finger swipe scrolls its windows first
+  and carries on into the next/previous desktop past either end (4 fingers
+  still jump desktops directly).
+- Super/Alt/Ctrl+click a dock app that is not running (or "Open in Empty
+  Workspace" in its menu) opens it on an empty desktop.
+- **Smooth frames** (Hyprdrive panel -> Textures, `smooth_frames`): lets
+  Hyprland render ahead when the GPU runs late, so animations drop a refresh
+  instead of halving the frame rate. hyprdrive suggests it once if the overview
+  keeps dropping frames.
 
 **Dock**:
 
-- GNOME Dash-to-Dock behavior by window count, counted over the **desktop you
-  are on**: launch, focus, cycle, whole-app minimize/restore — plus favorites,
-  running dots, notification badges, urgency wiggle, autohide with pressure
-  reveal, and app hotkeys. The running dots stay global (is this app up at
-  all); the click acts here.
-- Minimize/restore with the GNOME 400 ms shrink-into-the-icon flight; minimized
-  windows stay live for previews.
-- Hover an icon for a frosted panel of that app's **live** windows — including
-  minimized windows and windows on other workspaces.
-- Trash and mounted locations, GNOME-style right-click menus, drag-to-pin,
-  drag-a-window-to-the-dock to minimize.
-- **Drag an icon off the dock to launch it somewhere.** On the desktop it
-  starts the app here; onto a workspace card in the overview strip it starts it
-  on THAT desktop, silently, without taking the session there. A drop that hits
-  neither sends the icon flying back to its cell.
-- **Stacks**: pin a folder to the dock and click it open as a fan or a grid of
-  its contents. Hover an item and press **space** for a GNOME-style quick look
-  — the same previewer, and the same spacebar, that Files uses.
+- Dash-to-Dock behaviour counted over the desktop you are on: launch, focus,
+  cycle, whole-app minimize/restore, favorites, running dots, badges, autohide.
+- Minimize/restore flies into the icon, motion-blurred (`dock:minimize_motion_blur`). Hover an icon for live window previews.
+- Windows the layout moves or resizes (retiles, the scrolling tape, opening, the scratchpad) are motion-blurred too (`layout_motion_blur`).
+- With autohide off, tiled windows under the dock shorten to clear it (`dock:windows_make_room`).
+- Stacks, macOS style: a pinned folder shows its 4 newest files as a pile;
+  click it and they fan out, or it opens as a searchable pane when the fan
+  would not fit. Space previews the hovered item (GNOME Sushi), arrows and
+  Enter work, and the right-click menu has recent items, sort, Display as
+  Stack/Folder, View as Grid, Rename in Dock, Trash actions and Remove from
+  Dock. Downloads is pinned on first run; drag stacks to reorder them. Drop
+  files from any file manager onto a stack to move them in (copied across
+  drives, never overwriting) or onto Trash to trash them; drag a folder onto
+  the dock and it parts to make room -- let go to pin it there. Trash and
+  empty stacks use hyprdrive's own artwork (`dock:builtin_icons = false` for
+  the icon theme's). Files drag out of a fan into any app as a real drag;
+  images, videos and PDFs show real previews; a download in progress shows a
+  bar, and a stack bounces when something new arrives (a hidden dock peeks the
+  pile up from the edge). The
+  store is `~/.local/state/hyprdrive/stacks`; removing a stack never touches
+  the folder.
 
-## New in v1.1
+  ![A Downloads stack fanning out, with a Space preview](https://hyprdrive.shastasia.com/readme/stacks.gif)
 
-Six things, each of them asked for by name.
+**Mosaic** (experimental): a third layout beside Dwindle and Scrolling, after
+GNOME's planned Mosaic. Windows keep their own size and gather in a cluster in
+the middle of the screen, every window leaning toward the centre. Opening a
+window never resizes the others: only the newcomer may come in smaller. When
+the windows no longer fit, the desktop tiles them dwindle-style (a new window
+splits the focused one), and it goes back to the mosaic -- every window at the
+size it had -- once they fit again, by closing windows or shrinking one.
+Turn it on in the panel's Mosaic section, then Super+L cycles Dwindle ->
+Scrolling -> Mosaic, and Super+arrows move the focus between mosaic windows.
+Drag a window's corner to resize it: the others hold still while you drag,
+and the window grows only as far as an arrangement can fit everyone at their
+size -- push past that and the desktop darkens; let go there to tile. A window
+that opens floating joins the mosaic (dialogs stay afloat), and an app closed
+at a size you like reopens at that size. Best on large displays.
 
-**Tile icons grow as they arrive.** The app icon under an overview tile used to
-fade in at full size. It now starts at nothing and reaches its resting size
-exactly as the overview finishes opening — it rides the overview's own progress
-rather than a clock of its own, so it cannot overshoot, cannot finish late, and
-an open you interrupt carries the icon back with it frame for frame.
+**Hot corner** (off by default; panel -> Overview): rest the pointer in a screen
+corner to open the overview, and again to close it, with an optional ripple.
+**Hold to swap** (panel -> Overview): in the overview, drag a window over another
+and hold it there; let go and the two trade places.
 
-**Hold Super and every window grows a pill.** Three buttons — minimize, maximize,
-close — on a frosted capsule straddling the window's top-right corner: not
-entirely over the window, and not entirely outside it either. Let Super go and it
-leaves. While it is out, Hyprland's own `SUPER + drag` still moves windows, because
-the pill claims its three buttons and nothing else; **double-click** a window's
-body and it flips between floating and tiled. In the overview the same capsule
-takes the hovered tile's close-X's place for as long as Super is down, and
-double-click there does nothing at all.
+**Dock icons** (settings panel -> Icons): give any app on the dock a different
+icon. Pick an app, then search your icon theme, folders of your own (a
+downloaded icon pack, say) or, if you switch it on, the
+[selfh.st](https://selfh.st/icons) collection of about 3,000 app logos. The
+picture is copied into `~/.local/share/hyprdrive/icons`, so tidying the folder
+later does not take the dock's icon with it. Reset, or Restore defaults for
+every app, puts the app's own icon back. The Trash has its own group with one
+icon per state -- empty or full, on a dark dock or a light one -- and the dock
+shows whichever matches. The choices are kept in
+`~/.local/state/hyprdrive/icons`, one `desktop-id<TAB>icon` per line.
 
-**Drag an icon off the dock to start an app somewhere.** Drop it on the desktop
-and the app starts here. Drop it on a workspace card in the overview strip and it
-starts on *that* desktop, silently — the strip is how you watch it happen, so
-nothing drags the session over there. A drop that lands on neither sends the icon
-flying back to its cell; nothing is unpinned by a slipped gesture.
+**Settings panel** (`dragos.hyprdrive`, in Omarchy's bar): every option in one
+place -- one animation curve and speed for everything, per-animation motion
+blur, a trackpad gesture editor, dock and overview options, Mosaic, and
+performance and AC/battery profiles. "Send feedback" at the bottom opens a short
+GitHub form with your version filled in. The same keys are plain Lua fragments
+in `~/.config/hypr/hyprdrive/` if you would rather edit files.
 
-**Stacks: a folder can live on the dock.** Pin a file or a folder and it takes a
-cell of its own beside the apps. Click a pinned folder and it opens as a **fan**
-of its contents or a **grid** of them; right-click it for that stack's own
-settings — fan or grid, sort by name or by date, open in Files, unpin. There is no
-preferences window: the menu is the settings. Drag a file out of one open stack
-onto another stack's cell and the file is **moved** there through gio, and the
-destination cell hops once to say so — after the move has reported success, never
-before. A move that is refused shakes the cell instead, and the file has not
-moved.
+**Search tools** (opt-in, see below):
 
-Pinning is a dispatcher, and a Nautilus script that wraps it:
+- `define <word>` turns the results panel into a dictionary (Wiktionary).
+- `tr <lang> <text>` / `tr en:fr <text>` / `translate <text>` turns it into a
+  translator (MyMemory, or your own LibreTranslate). Enter copies a result.
+
+`SUPER+SPACE` stays the Omarchy menu. `SUPER+1..0` stay workspace focus. A Super
+*tap* (press and release, no other key) toggles the overview.
+
+## Theming
+
+![Change the Omarchy theme and Hyprdrive follows](https://hyprdrive.shastasia.com/readme/themes.gif)
+
+Appearance is Hyprland's. The plugin does not ship colours, rounding, or blur of
+its own. Unset plugin keys (alpha 0 / `-1`) read the compositor's live values,
+and every surface goes through the accessors in `Config.hpp`:
+
+| what you see | Hyprland key | accessor |
+| --- | --- | --- |
+| selection, hover, running dots | `general:col.active_border` | `highlightColor()` |
+| overview cards | `decoration:rounding` | `themeRounding()` |
+| dock pill and dock highlights | `plugin:hyprdrive:dock:corner_radius` (24) | `dockCornerRadius()` |
+| dock / overview frost | `decoration:blur:*` | `-1` follow |
+| workspace-card shadows | `decoration:shadow:*` | `-1` follow |
+| dock / search / strip / results fill | Omarchy terminal background (`colors.toml`), else `misc:background_color` | `dockBackgroundColor()` |
+
+Omarchy already writes the border colour from the theme accent and reloads
+Hyprland on `omarchy theme set`. Squared windows (`decoration:rounding = 0`)
+stay squared in the overview; the dock keeps its original Dash-to-Dock pill
+radius of 24, including hover and selection highlights. Blur off means frost
+off — that is inheritance, not a missing feature.
+
+Do not pin `plugin:hyprdrive:col_highlight` (or dock colours) in a fragment
+unless you want that value frozen across theme changes.
+
+## Install
+
+Install the **latest release**, not the tip of the branch: the branch can be
+ahead of the last release with work that has not been released yet. Each release
+is a `vX.Y.Z` tag ([Releases](https://github.com/dragosol/hyprdrive-omarchy/releases)),
+and the commands below check out the newest one.
+
+The plugin is compiled against the Hyprland on your machine (the headers come
+with the `hyprland` package), so it is built locally rather than downloaded.
+
+**Needs:** Omarchy on Hyprland 0.56, and the build tools (`base-devel`, `pkgconf`;
+everything else it links against ships with Omarchy). Optional: `ffmpeg` for the
+search easter egg, GNOME Sushi for Space-to-preview in dock stacks.
+
+### From the Omarchy plugin marketplace
+
+The marketplace installs the settings panel; the compositor plugin is then built
+from that same checkout -- this is the manual step.
 
 ```bash
-scripts/install-nautilus-pin.sh   # then: right-click → Scripts → Pin to Dock
-hyprctl dispatch 'hl.plugin.hyprdrive.stack([[toggle /home/you/Downloads]])'
+omarchy plugin add https://github.com/dragosol/hyprdrive-omarchy
+cd ~/.config/omarchy/plugins/dragos.hyprdrive
+make all
+make install
+hyprctl plugin load ~/.local/lib/hyprdrive/hyprdrive.so
+hyprctl reload
 ```
 
-It is not drag-a-folder-onto-the-dock, and that is a platform limit rather than a
-shortcut: in Hyprland 0.56 the drop target of an XDG drag is always a
-`wl_surface`, and this dock is not one — it draws straight into the monitor's
-render pass. The finding is written out in `DockStacks.hpp`.
+Enable the panel with `omarchy plugin enable dragos.hyprdrive` (or answer yes when
+`plugin add` asks). To update: `omarchy plugin update dragos.hyprdrive`, then run
+`make all && make install` in that folder again and log out and back in.
 
-**Space is quick look.** Hover an item in an open stack and press space to preview
-it, the same previewer and the same key Files uses. See
-[Quick look (space)](#quick-look-space) for the optional dependency and the window
-rules it ships with.
+### From source
 
-**A dock click means the desktop you are on.** In the user's words: "if I have
-multiple windows of the same app e.g. nautilus open and i click its icon, it
-should only minimizes/maximizes the window in the current workspace." The
-launch/focus/cycle/minimize ladder is unchanged; what changed is the set it counts
-over. None of the app here launches here, even when it has windows elsewhere; one
-here toggles that one; several here cycle those. A window minimized into the dock
-counts toward the desktop it will come back to, so the click that put it away is
-the click that brings it out. The running **dots** stay global on purpose — they
-answer "is this app up at all", which is what makes it worth walking to another
-desktop for. `dock:isolate_workspaces` is the key that scopes those too.
+```bash
+git clone https://github.com/dragosol/hyprdrive-omarchy.git ~/Projects/hyprdrive-omarchy
+cd ~/Projects/hyprdrive-omarchy
+git checkout "$(git tag --list 'v*' --sort=-v:refname | head -1)"   # the latest release
+make all
+make install
+hyprctl plugin load ~/.local/lib/hyprdrive/hyprdrive.so
+hyprctl reload
+hyprctl configerrors
+```
 
-### Known behaviors
+### Update to the latest release
 
-Five things behave the way they do by design. They are written down so that
-meeting one is recognition and not a bug report.
+```bash
+cd ~/Projects/hyprdrive-omarchy
+git fetch --tags
+git checkout "$(git tag --list 'v*' --sort=-v:refname | head -1)"
+rm -f hyprdrive.so ~/.local/lib/hyprdrive/hyprdrive.so
+make all && make install
+omarchy restart shell
+```
 
-- **Tapping Super flashes the pills.** A tap is a press and a release, and the
-  pill answers the press: its acceptance criterion is that it is out within 150 ms
-  of Super going down, which leaves no room for a hold threshold in front of it.
-  So a tap on the way to the overview shows a frame or two of pill. A debounce
-  would make every deliberate hold late in order to hide something nobody is
-  looking at.
+Then log out and back in to load the new plugin (or, with your hands off the
+trackpad, `hyprctl plugin unload ~/.local/lib/hyprdrive/hyprdrive.so && hyprctl
+plugin load ~/.local/lib/hyprdrive/hyprdrive.so`). `omarchy restart shell` makes
+the Hyprdrive settings panel pick up rows a release added; the shell's own plugin
+reload keeps the old ones.
 
-- **A maximized window's pill can end up under your top bar.** The capsule
-  straddles the window's top-right corner, and a window the layout has maximized
-  has its top edge a few pixels below the top of the output — so the capsule
-  clamps onto the output instead of hanging off it, which is exactly where a top
-  bar lives. It is still there and still takes the press. If your bar is a layer
-  surface, an exclusive zone or a top gap around 44 px is the fix, and it is a
-  question about your bar rather than about the plugin.
+After a Hyprland update the plugin may refuse to load with `[he] Version mismatch`.
+Rebuild from scratch: `make clean && make all && make install`.
 
-- **Clicking an app on an empty desktop, fast, can start more than one of it.**
-  The launch-spam guard only ever covered an app's *first* instance, and the click
-  is now counted over the desktop you are on: with the app running elsewhere,
-  every click here is a first instance for here. That is `isolate-workspaces`
-  behaving as it does in the reference, and it is the same reason a drag onto two
-  different workspace cards gives you two windows rather than one.
+## Removal
 
-- **A quick-look window gets a dock cell with no icon on it.** Anything that maps
-  a toplevel gets a running cell, and the GNOME previewer is an ordinary toplevel
-  that ships no desktop entry — there is nothing for the icon lookup to resolve.
-  The cell goes when the preview does. Filtering it out would mean a rule about
-  which windows are furniture, and this dock deliberately does not have one.
+From the checkout you installed from (for a marketplace install,
+`~/.config/omarchy/plugins/dragos.hyprdrive`):
 
-- **On more than one monitor, the drag ghost and the insertion caret draw on every
-  dock.** Each monitor draws its own whole dock, and both of those are part of what
-  a dock draws. The gesture still resolves on the monitor the pointer is on: it is
-  the drawing that is repeated, never the drop.
+```bash
+make uninstall
+omarchy plugin remove dragos.hyprdrive   # marketplace installs only
+```
 
-## Building
+`make uninstall` removes the plugin (`~/.local/lib/hyprdrive`), the loader and the
+`require("hypr.hyprdrive")` line it added to `~/.config/hypr/hyprland.lua` (a backup
+is kept beside it), and a settings panel `make install` copied. The fragments in
+`~/.config/hypr/hyprdrive/` are moved aside rather than deleted, because they hold
+your own raw-snippet edits. Your saved state (`~/.local/state/hyprdrive`: favourites,
+stacks, Mosaic sizes) is kept; delete it by hand to start fresh. Log out and back in
+to unload the running plugin.
+
+## The marketplace card
+
+`preview.png` is built with the marketplace publishing skill's generator, from
+the overview frame of the Hyprdrive film (`C00-v3t1` at 6.5 s, full 2880×1800) and the panel icon:
+
+```bash
+make_preview.py --shot overview.png --icon omarchy-plugin/hyprdrive-icon.png \
+  --name Hypr --name2 drive --accent '#7aa2f7' \
+  --tagline 'Mission control,|a real dock and|Mosaic for Omarchy.' \
+  --features 'overview · dock|stacks · mosaic' --shot-width 980 --out preview.png
+```
+
+## Building from a checkout
+
+For development, on whatever is checked out:
 
 ```bash
 make all
+make install
 ```
 
-`all` is the build **and** `make check`, which is five things in order:
-`scripts/symcheck.sh`, `scripts/keycheck.sh`, both doc generators in `--check`
-mode (`gen_keys_table.sh`, `gen_schema.py`) and `scripts/host_tests.sh`. A
-successful run therefore ends on the host tests, not on the symcheck line:
+`make install` copies `hyprdrive.so` to `~/.local/lib/hyprdrive/`, lays fragments
+in `~/.config/hypr/hyprdrive/`, and adds `require("hypr.hyprdrive")` to
+`~/.config/hypr/hyprland.lua` if it is not already there.
 
-```
-symcheck: OK -- every undefined symbol has a provider (563 checked)
-keycheck: OK -- every config key is read under the current prefix
-docs/CONFIG.md is current
-docs/schema.json is current (446 entries: 80 plugin, 353 hyprland, 13 curated)
-host_tests: drop_table_test OK -- DROP_TABLE OK (0)
-host_tests: geometry_test OK -- geometry_test: 94 checks, 0 failed
-```
+`hl.plugin.load` is parse-time only and a no-op on `hyprctl reload`, so the first
+session needs the explicit `hyprctl plugin load` (or a compositor restart). After
+that the fragment keeps it loaded across reboots.
 
-The symbol count moves with the build; what matters is the word `OK`.
-
-An undefined symbol in a plugin is not a link error: `-shared` never complains,
-`dlopen` binds lazily, and the compositor dies at the first call that reaches
-the missing symbol — minutes later, with no backtrace. Never ship a build whose
-symcheck failed. See [CONTRIBUTING.md](CONTRIBUTING.md) for the rest of the
-build rules, including the one about deleting `hyprdrive.so` before
-rebuilding while the compositor has it mapped.
-
-Load it:
+If the compositor has `hyprdrive.so` mapped, delete it before rebuilding:
 
 ```bash
-hyprctl plugin load /path/to/hyprdrive.so
+rm -f hyprdrive.so ~/.local/lib/hyprdrive/hyprdrive.so
+make all && make install
 ```
 
-Or via `hyprpm` pointing at this repository.
+An undefined symbol is not a link error (`-shared` never complains). `make all`
+runs `scripts/symcheck.sh` for that reason. Never ship a build whose symcheck
+failed.
 
-### Coming from `scrolloverview`
+## Network use
 
-This fork shipped as `scrolloverview` and was renamed to **Hyprdrive**. An
-existing config keeps working for **one release** and needs no edits today:
+Hyprdrive makes **no network requests by default.** Three features go online,
+and each is off until you turn it on. The two search tools send what you type to
+a third party:
 
-| old | new |
-| --- | --- |
-| `scrolloverview.so` | `hyprdrive.so` |
-| `plugin:scrolloverview:<key>` | `plugin:hyprdrive:<key>` |
-| `scrolloverview:<dispatcher>` | `hyprdrive:<dispatcher>` |
-| `hl.plugin.scrolloverview.*` | `hl.plugin.hyprdrive.*` |
-| `scrolloverview-gesture` | `hyprdrive-gesture` |
-| `submap = scrolloverview` | `submap = hyprdrive` |
-| IPC event `scrolloverview` | IPC event `hyprdrive` (both are emitted) |
-| `~/.local/state/scrolloverview/favorites` | `~/.local/state/hyprdrive/favorites` (adopted once, automatically) |
-| `$SCROLLOVERVIEW_PROFILE` | `$HYPRDRIVE_PROFILE` |
+| key | sends | to |
+| --- | --- | --- |
+| `search:dictionary = true` | the word after `define` | `en.wiktionary.org` |
+| `search:translate = true` | the text after `tr` | `api.mymemory.translated.net`, or `search:translate_endpoint` |
 
-Every old config key is still registered, and a value set on one is copied onto
-its new twin at config reload — the new name wins if both are set. The first old
-name a session uses prints one deprecation warning naming it, to stderr and to
-`/tmp/hyprdrive-compat.log`; once per session, not once per use. Everything in
-this table is removed one release after the rename, so migrate when convenient
-rather than when forced.
+Set `search:translate_endpoint` to a self-hosted
+[LibreTranslate](https://github.com/LibreTranslate/LibreTranslate) URL to keep
+translations on your own machine. Requests run off the compositor thread via
+`curl` and `jq`, with your text passed as an argument, never through a shell.
 
-### Unload / fallback
-
-```bash
-hyprctl plugin unload /path/to/hyprdrive.so
+```lua
+hl.config({ plugin = { hyprdrive = { search = { dictionary = true, translate = true } } } })
 ```
 
-If a build misbehaves at login, comment out the `exec-once`/`hyprpm enable` line
-in your Hyprland config and log in again — the plugin never patches the
-compositor on disk.
+**selfh.st icons** (settings panel -> Icons, off by default) searches the
+[selfh.st/icons](https://selfh.st/icons) collection for a dock app's new icon.
+While it is on, the panel downloads the collection's index from
+`cdn.jsdelivr.net` once a day and searches it on your machine, so your search
+text is never sent. Previews of the matching logos load from the same CDN,
+which can therefore see which logos were shown. Picking one downloads that one
+SVG or PNG, refused if it is not a picture or an SVG points outside itself.
+Nothing about your apps is sent. The collection is CC BY 4.0.
 
 ## Configuration
 
-All 80 keys, with their types, defaults and ranges, are in
-**[docs/CONFIG.md](docs/CONFIG.md)** — generated from `Config.cpp` by
-`scripts/gen_keys_table.sh`, so it cannot drift from the code.
+All keys: **[docs/CONFIG.md](docs/CONFIG.md)** (generated from `Config.cpp`).
 
-For a config you intend to edit rather than read, prefer the **fragment layer**
-below: it is the surface the settings app writes through, and it is designed so
-that hand edits and generated ones can live in the same file. Everything lives
-under `plugin:hyprdrive:`, with `input:`, `dock:` and `shadow:`
-subsections.
-
-Two defaults differ from the table this fork inherited, and the code was right
-both times: `scale` is **0.82** (not 0.5) and `workspace_gap` is **40** (not 0).
-
-### Hyprlang
-
-```ini
-# .config/hypr/hyprland.conf
-plugin {
-    hyprdrive {
-        scale = 0.82
-        workspace_gap = 40
-        layout = vertical      # vertical or horizontal
-        wallpaper = 0          # 0 global only, 1 per-workspace only, 2 both
-
-        dock {
-            autohide = true
-            icon_size = 54
-        }
-
-        shadow {
-            enabled = false
-        }
-    }
-}
-```
-
-### Lua
-
-```lua
--- .config/hypr/hyprland.lua
-hl.config({
-    plugin = {
-        hyprdrive = {
-            scale = 0.82,
-            workspace_gap = 40,
-            layout = "vertical",
-            wallpaper = 0,
-            dock = { autohide = true, icon_size = 54 },
-            shadow = { enabled = false },
-        },
-    },
-})
-```
-
-In Lua, colour keys must be an integer colour value or a gradient (Hyprland's
-own format). The Hyprlang-only `rgba(...)` syntax is not accepted there.
-
-### Config fragments
-
-Everything above can also live in `~/.config/hypr/hyprdrive/*.lua`, sourced by
-`hyprland.lua` in **filename order** — the numeric prefix is the load order, so
-theme values land before the binds that reference them:
+Fragments in `~/.config/hypr/hyprdrive/` load in filename order. Each has a
+machine-owned half and a raw-snippet block; hand edits go below `BEGIN
+raw-snippet` so they survive reinstall.
 
 ```
 ~/.config/hypr/hyprdrive/
-    00-plugin.lua         loads hyprdrive.so, defines hyprdrive_loaded()
-    05-theme-derived.lua  GENERATED from the wallpaper palette (see below)
-    10-theme.lua          colours, frost, shadow
-    20-layout.lua         scale, layout, workspace gap
-    30-keybinds.lua       the hyprdrive submap and the dock hotkeys
-    35-settings-app.lua   window rules the settings app needs to obey the
-                          motion law it edits
+    00-plugin.lua     loads hyprdrive.so, defines hyprdrive_loaded()
+    10-theme.lua      documents inheritance; pins nothing
+    20-layout.lua     scale, layout, workspace gap; dock.hot_keys = false
+    25-rules.lua      float+center the Nautilus previewer
+    30-keybinds.lua   overview click submap; 3-finger swipe up
 ```
 
-The numbering leaves room on purpose: 00-35 are shipped and hand-editable,
-40-45 are written by the settings app.
+Lua's last assignment wins, so a line in the raw block overrides the generated
+one above it.
 
-Each fragment has two regions, split by two marker lines:
+### Dispatchers
 
-```lua
-hl.config({ plugin = { hyprdrive = { scale = 0.82 } } })   -- machine-owned
-
--- BEGIN raw-snippet (hand edits below survive regeneration)
-hl.config({ plugin = { hyprdrive = { scale = 0.9 } } })    -- yours
--- END raw-snippet
-```
-
-Everything **above** the BEGIN line is regenerated wholesale. Everything
-**between** the markers is yours and is carried across verbatim, every time.
-The raw block is last on purpose: Lua's last assignment wins, so a line you put
-there overrides the generated one above it — which is the only arrangement in
-which "your edits survive" also means "your edits take effect".
-
-Install or refresh the shipped set with `scripts/install-fragments.sh`; it
-preserves every raw block already on disk. `scripts/fragment.py` is the whole
-mechanism (`write`, `raw`, `check`) and it is what the settings app calls.
-
-`.conf` fragments are reserved for the legacy (hyprlang) parser and are skipped
-by the Lua loader, which cannot source them.
-
-### Quick look (space)
-
-Hover an item in an open stack and press **space**: the file is previewed by
-[GNOME Sushi](https://gitlab.gnome.org/GNOME/sushi), driven over the same D-Bus
-interface Files itself calls (`org.gnome.NautilusPreviewer2.ShowFile`, with
-`closeIfAlreadyShown` — so space again puts it away and space over a different
-item swaps the preview, which is the previewer's own behaviour rather than
-anything reimplemented here). Space is claimed **only** while a stack is open
-with an item under the pointer; everywhere else it reaches the focused
-application untouched.
-
-Sushi is an **optional runtime dependency** and is not bundled. Without it
-nothing breaks and nothing appears — the key still falls through to whatever has
-the focus. Mind the package name: it is the upstream project's name on some
-distributions and the GNOME-prefixed one on others, and Fedora is the trap,
-because `gnome-sushi` resolves to nothing there — no package, and no `Provides`
-either (measured: the package that owns `/usr/libexec/org.gnome.NautilusPreviewer`
-on the validation guest is `sushi-50.0-1.fc44`).
-
-```bash
-sudo dnf install sushi        # Fedora
-sudo apt install gnome-sushi  # Debian / Ubuntu
-```
-
-The preview window is dressed by the shipped `25-rules.lua` fragment — float,
-centred, blurred, and translucent enough for the blur to show, because an
-opaque window has nothing behind it to frost.
-
-### Theme adoption
-
-Change your wallpaper and the dock and the overview follow it — no restart, and
-nothing to run afterwards.
-
-```
-matugen writes the palette     ~/.local/state/quickshell/user/generated/colors.json
-  -> hyprdrive-theme-sync.path a systemd --user path unit notices (~170ms)
-  -> scripts/theme-sync.py     re-derives 05-theme-derived.lua
-  -> hyprctl reload            the dock pill and the strip ring repaint in place
-```
-
-`scripts/install-fragments.sh` installs and enables the watch. What is derived,
-and from what:
-
-| key | from the palette | what it paints |
+| dispatcher | argument | what it does |
 | --- | --- | --- |
-| `col_highlight` | `primary` | overview: strip selection ring, tile and search selection; dock hover |
-| `dock:indicator_color` | `primary` | the running dot under a dock icon |
-| `dock:background_color` | `primary_container` | the dock pill's hue |
-| `dock:background_opacity` | dark or light | the dock pill's alpha |
-
-Dark or light is decided by the luminance of the palette's `surface`, with the
-compositor's live `misc:background_color` as a corroborating vote (logged when
-the two disagree) and `general:col.active_border` as the fallback accent when
-the palette file is missing or unreadable.
-
-#### Inherit or pin, per key
-
-```
-pin  >  derived  >  plugin default
-```
-
-`05-theme-derived.lua` sorts before every other fragment, so keeping your own
-value for something is just writing it — in `10-theme.lua`, in that file's
-raw-snippet block, or in a fragment of your own numbered above `05`. Lua's last
-assignment wins and your fragment loads later, so the pin holds while everything
-you did not pin keeps adopting around it:
+| `overview` | `toggle`/`on`/`off`/`select` | Open, close, or commit the overview |
+| `navigate` | `left`, `right`, `up`, `down` | Move the selection |
+| `window` | `select`, `close`, `click` | Act on the window under the cursor |
+| `minimize` | `window`, `restore` | Minimize into the dock, or restore |
+| `hotkey` | `overlay`, or `1`–`10` | Dock slot (unbound here; Super+digit is workspaces) |
+| `stack` | `pin`/`unpin`/`toggle`/`open` `<path>`, `view auto\|fan\|grid <path>`, `sort name\|added\|modified\|kind <path>`, `clear` | Pin and configure dock stacks |
 
 ```lua
--- 10-theme.lua, raw-snippet block. The dock keeps GNOME's grey; the overview
--- accent still follows the wallpaper.
-if hyprdrive_loaded() then
-    hl.config({ plugin = { hyprdrive = { dock = {
-        background_color = 0xFFC0BFBC,
-    } } } })
-end
+hl.bind("SUPER + SHIFT + D", hl.plugin.hyprdrive.overview("toggle"))
+hl.bind("SUPER + H", hl.plugin.hyprdrive.minimize("window"))
 ```
 
-`theme-sync.py` reports which keys it saw pinned, in the generated header and in
-`~/.local/state/hyprdrive/theme-sync.log`. That report is documentation only:
-the load order decides the outcome whether the scan notices or not.
+Tap Super is not a bind (`tap_super`, default true). Three-finger swipe up on
+the trackpad is the same overview, registered as `hl.plugin.hyprdrive.gesture`
+so it follows the fingers; three-finger left/right stay workspace switching.
 
-#### No blur key is derived
+## What this fork dropped
 
-`dock:blur_*` already default to `-1` = follow `decoration:blur:*`, so the dock's
-frost inherits Hyprland's own blur, live. A derived number there would replace
-that inheritance with a snapshot. The one frost value that is derived — the
-pill's alpha — is clamped, so no palette can push the pill opaque and lose the
-blur behind it.
+- Upstream's own Quickshell settings app (and its schema, slideshow, and monitor
+  countdown). Settings live in the Omarchy panel above instead.
+- The matugen / illogical-impulse theme-sync path unit
+- Super+1..0 dock hotkeys, which collided with Omarchy workspaces
 
-#### Why the fragment is regenerated rather than written once
-
-Hyprland reloads itself when a config file it has already sourced changes, so
-matugen rewriting `hypr/hyprland/colors.lua` re-applies `col_highlight` on its
-own. Any fragment sorting after that file wins those reloads — so a derived
-fragment that nothing regenerates does not merely fail to help, it freezes the
-accent. Measured on the guest, all three ways:
-
-| `05-theme-derived.lua` | after a matugen run |
-| --- | --- |
-| absent | the overview accent follows the wallpaper; the dock does not |
-| stale | the overview accent is frozen at the fragment's value |
-| regenerated by theme-sync | both follow, minus whatever you pinned |
-
-`scripts/gates/z10_theme_adopt` is that behaviour asserted in pixels, including
-both failure modes above.
-
-## Dispatchers
-
-Six, all under `hyprdrive:`. `overview`, `navigate`, `window` and `stack`
-validate their argument and print the accepted set on a mistake; `minimize`
-treats anything that is not `restore` as a minimize, and `hotkey` wants a
-number. On the **Lua** path every one of the six is additionally checked against
-the argument pattern registered with it (`Config.cpp`), which is the stricter
-route.
-
-| dispatcher | argument | default | what it does |
-| --- | --- | --- | --- |
-| `overview` | `toggle`/`on`/`open`/`enable`/`off`/`close`/`disable`, each optionally followed by a monitor name or `all`; or `select` | `toggle` | Open, close or toggle the overview. `select` commits the selection under the cursor and closes. |
-| `navigate` | `left`, `right`, `up`, `down` | — | Move the selection through everything drawn: strip cells, search results, window tiles. |
-| `window` | `select`, `close`, `click` | — | Act on the window under the cursor. |
-| `minimize` | `window`, `restore` | `window` | Minimize the focused window into the dock, or restore the most recently minimized one. Both go through the dock, so both FLY from and into the icon; nothing teleports. |
-| `hotkey` | `overlay`, or `1`–`10` optionally prefixed with `shift ` or `ctrl ` | — | Activate a dock slot the way Dash-to-Dock's `<Super>N` does — `10` is the tenth slot, i.e. `<Super>0`. `ctrl ` launches (a new window of a running app, a start for a stopped one); `shift ` takes `shift_middle_click_action`'s branch; plain activates. `overlay` just draws the slot numbers on the icons. |
-| `stack` | `pin <path>`, `unpin <path>`, `toggle <path>`, `view fan\|grid <path>`, `sort name\|mtime <path>`, `clear` | — | Pin a file or folder to the dock as a stack, or set that stack's view and sort order. The path is taken raw to the end of the argument, so it needs no quoting — a path with spaces in it is the case this exists for. `clear` unpins every stack. Per-stack state lives in `~/.local/state/hyprdrive/stacks`, beside the favourites, because it is runtime state and not configuration. |
-
-Slot numbers are the reference's, not the digits on the keys, and the
-accelerators themselves are Hyprland `bind` lines — this plugin does not own a
-keybinding store.
-
-### Hyprlang
-
-```bash
-# hyprland.conf
-bind = SUPER, g, hyprdrive:overview, toggle
-bind = SUPER, h, hyprdrive:minimize, window
-bind = SUPER, 1, hyprdrive:hotkey, 1
-bind = SUPER SHIFT, 1, hyprdrive:hotkey, shift 1
-```
-
-### Lua
-
-```lua
--- hyprland.lua
-hl.bind("SUPER + g", function() hl.plugin.hyprdrive.overview("toggle all") end)
-hl.bind("SUPER + h", function() hl.plugin.hyprdrive.minimize("window") end)
-for i = 1, 10 do
-    hl.bind("SUPER + " .. (i % 10), hl.plugin.hyprdrive.hotkey(tostring(i)))
-end
-```
-
-Called from inside a Lua keybind callback these dispatch immediately; called
-anywhere else they return a dispatcher function that `hl.dispatch()` and binds
-accept. A bad argument is a Lua error, not a silent no-op.
-
-Tapping Super alone toggles the overview by default (`tap_super`, with
-`tap_super_timeout_ms` as the longest press still counted as a tap). It is not a
-bind — the plugin watches the modifier itself, so a rig that holds Super for a
-second is correctly ignored.
-
-### Submap
-
-Defining a `hyprdrive` submap replaces the built-in keyboard navigation.
-While the submap is active, ordinary Hyprland binds outside it are not handled
-unless they carry `submap_universal`. This is how a click can be given a
-compound action.
-
-```ini
-# hyprland.conf
-submap = hyprdrive
-    bind = , left,   hyprdrive:navigate, left
-    bind = , right,  hyprdrive:navigate, right
-    bind = , up,     hyprdrive:navigate, up
-    bind = , down,   hyprdrive:navigate, down
-    bind = , return, hyprdrive:overview, select
-    bind = , escape, hyprdrive:overview, off
-    bind = , mouse:272, hyprdrive:overview, select
-    bind = , mouse:274, hyprdrive:window, close
-submap = reset
-```
-
-```lua
--- hyprland.lua
-hl.define_submap("hyprdrive", function()
-    hl.bind("left",   hl.plugin.hyprdrive.navigate("left"))
-    hl.bind("right",  hl.plugin.hyprdrive.navigate("right"))
-    hl.bind("up",     hl.plugin.hyprdrive.navigate("up"))
-    hl.bind("down",   hl.plugin.hyprdrive.navigate("down"))
-    hl.bind("return", hl.plugin.hyprdrive.overview("select"))
-    hl.bind("escape", hl.plugin.hyprdrive.overview("off"))
-    hl.bind("mouse:272", function()
-        hl.plugin.hyprdrive.overview("select")
-        hl.plugin.hyprdrive.window("select")
-        hl.plugin.hyprdrive.overview("off")
-    end, { mouse = true })
-    hl.bind("mouse:274", hl.plugin.hyprdrive.window("close"), { mouse = true })
-end)
-```
-
-A submap that binds no keys leaves the keyboard to the plugin: the overview
-only steps aside for a submap that actually claims keys, so a submap defined
-purely for the mouse does not kill the arrow keys.
-
-### Trackpad gesture
-
-```ini
-# hyprland.conf
-hyprdrive-gesture = 3, up, overview               # 3-finger up swipe
-hyprdrive-gesture = 4, up, overview, mod:SUPER, scale:1.5
-hyprdrive-gesture = 4, up, overview, disable_inhibit
-hyprdrive-gesture = 3, up, unset                  # remove one
-```
-
-```lua
--- hyprland.lua
-hl.plugin.hyprdrive.gesture({ fingers = 3, direction = "vertical" })
-hl.plugin.hyprdrive.gesture({ fingers = 4, direction = "vertical", mod = "SUPER", scale = 1.5 })
-hl.plugin.hyprdrive.gesture({ fingers = 3, direction = "vertical", action = "unset" })
-```
-
-`gesture_distance` is how far the swipe has to travel to count as a full one.
-
-## The settings app
-
-`hyprdrive-settings` is one window for the overview, the dock, the compositor,
-the blur and the shell. It is QML hosted by quickshell, installed alongside
-illogical-impulse's own settings window and built from its widgets -- never
-inside the plugin, so a settings crash cannot take the session with it.
-
-```sh
-scripts/install-fragments.sh      # fragments, theme-sync units, and the app
-hyprdrive-settings                # or the desktop entry
-```
-
-It renders from **`docs/schema.json`**, which is generated:
-
-| source | what it contributes | generated by |
-| --- | --- | --- |
-| `Config.cpp` | the 80 `plugin:hyprdrive:*` keys | `scripts/lib/configkeys.py` (the same parser as `docs/CONFIG.md`) |
-| `config/schema/hyprland-descriptions.json` | 353 compositor options with types, ranges and enums | `gen_schema.py --refresh-hyprland` off a live `hyprctl descriptions -j` |
-| `config/schema/curated.json` | panes, routes, per-key overrides, ii knobs, wallpaper entries | hand-written |
-
-So **adding an option is a row, never a QML file**. `make all` fails if the
-schema drifts from `Config.cpp`.
-
-### How a value is applied
-
-- **Preview** -- dragging a slider writes live and nothing else. It is not
-  durable on purpose: a live write is discarded by the next `hyprctl reload`,
-  and it lands after the config parse, so it would beat a pin.
-- **Commit** -- letting go writes the pane's fragment through `scripts/fragment.py`
-  (temp file + rename) and reloads. That is the only durable path, and
-  `scripts/hdctl.py` is the only thing that walks it.
-- **qs-restart** -- the Quickshell pane writes ii's `config.json`; quickshell
-  reloads itself.
-
-Each pane owns one fragment (`40-hyprland`, `41-blur`, `42-dock`, `43-overview`,
-`45-monitors`). They all sort **after** `05-theme-derived.lua`, which is what
-makes setting a theme-derived key a **pin**: the app writes the key, the fragment
-loads later, and Lua's last assignment wins. Unsetting the row removes it and the
-value goes back to following the wallpaper. There is no second mechanism, and the
-app never touches `05-theme-derived.lua`.
-
-### Raw snippets
-
-Every fragment-backed pane has a text area over exactly that fragment's raw
-block. Lines there survive every regeneration and, because the block sits last,
-they win over the generated values above them. On the Blur pane that fans out
-without naming anything: all six `dock:blur_*` keys default to `-1` = follow
-`decoration:blur:*`, so one line reaches the dock pill, the strip cells and the
-overview panels.
-
-Turning blur **off** is only available there. The switch is deliberately absent:
-frost is on everywhere, and the raw block is where a deliberate exception goes.
-
-### Monitors
-
-Mode, refresh, scale and position per output, and every change is on a
-fifteen-second leash. The previous fragment is fsynced to disk *before* the new
-one is applied, and two independent things can put it back: a `setsid` watcher
-that outlives the app, and `hdmon check`, which the launcher runs before the
-window is drawn. Kill the app, kill the watcher, pull the plug -- the next time
-anything opens the settings, an unconfirmed monitor change is undone.
-
-### Profiles
-
-Every file the settings app can write is under a git repository at
-`~/.local/state/hyprdrive/profiles`: the fragments, what the app owns
-(`settings.json`), and illogical-impulse's `config.json` -- which is in because
-the app writes it and because the **wallpaper** lives there, so a restored
-profile brings back the picture the accents were derived from. The matugen
-palette is deliberately out: it is derived from the wallpaper, and snapshotting a
-derivation next to its input is how the two get to disagree.
-
-```sh
-scripts/hdprof.py status          # what has changed since the last snapshot
-scripts/hdprof.py revert          # put it back, reload, restart the shell if ii moved
-scripts/hdprof.py save nord       # a profile is a git tag on a snapshot
-scripts/hdprof.py apply nord
-```
-
-Snapshots are taken **before**, never after -- automatically by a theme import,
-by `hdctl bulk`, and by a monitor change, all through one function. So `HEAD` is
-always the surface as it was before the last risky thing, the difference between
-`HEAD` and the files on disk is what you might want to undo, and `revert` needs
-no argument. There are no remotes and nothing to push.
-
-An apply that dies halfway leaves a pending record, and `hdprof check` -- which
-the launcher runs before the window is drawn, next to `hdmon check` -- puts it
-back. Same shape as the monitor countdown, for the same reason: the process that
-was supposed to clean up is the one that died.
-
-### Importing a theme
-
-```sh
-scripts/hdimport.py preview ~/themes/nord.conf     # every key, old -> new
-scripts/hdimport.py apply   ~/themes/nord.conf     # behind a snapshot, always
-```
-
-A hyprland.conf-style file is parsed with four rules (`name {`, `}`,
-`key = value`, `$var = value`) and every assignment is looked up in the schema,
-which knows all 446 legal keys -- including the plugin's, so a
-`plugin { hyprdrive { dock { ... } } }` block lands on the Dock pane. A `locked`
-row stays locked against a file: `decoration:blur:enabled = false` is refused
-with its reason printed, because the frost rule does not become negotiable by
-arriving in a theme.
-
-Everything else -- binds, `exec-once`, window rules, keys from another Hyprland
-version -- is kept **verbatim** in the Hyprland pane's raw snippet, inside a Lua
-long-bracket string whose bracket level is computed from the payload so a theme
-containing `]]` cannot close it early. Those lines are **inert**: this session's
-config is Lua, the fragments are Lua, and 0.56 has no `hl.keyword` and no
-`hl.source` to hand a hyprlang line to. Nothing is translated and nothing is
-dropped; turning one into `hl.bind(...)` is a person's decision.
-
-### Wallpapers
-
-A repository is a directory, and a remote one is a directory git put there.
-
-```sh
-scripts/hdwall.py repo-add nord https://github.com/somebody/wallpapers
-scripts/hdwall.py repo-pull nord          # clone and pull only -- never pushes
-scripts/hdwall.py set nord/aurora.jpg     # the palette follows
-```
-
-Mode, interval, the active repository and "the theme follows the wallpaper" are
-schema rows on the Wallpaper pane. The slideshow timer fires once a minute and
-reads them on every tick, so changing the interval restarts nothing. An `.mp4` is
-a wallpaper like any other: mpvpaper draws it, ii's config still records one
-wallpaper path, and the palette comes from a frame `ffmpeg` pulls a second in.
-
-It is all `scripts/hyprwall-rotate.sh` underneath -- extended, not replaced. Its
-default stays palette-neutral (an unattended rotation must not re-theme the
-desktop) and `THEME=1` is the opt-in; the pane's own swaps take the `THEME` path,
-because a swap somebody just asked for is exactly when the accents should follow.
-
-### Adding a setting
-
-**[docs/EXTENDING.md](docs/EXTENDING.md)** -- what a schema row's fields mean,
-what each pane does with one, what every apply-strategy does, and a worked
-example of a row added end to end (`wallpaper.interval`, commit `de174db`: one
-row, one `gen_schema.py`, no QML).
-
-## Credit
-
-Hyprdrive started as a fork of
-[yayuuu/hyprland-scroll-overview](https://github.com/yayuuu/hyprland-scroll-overview)
-and keeps its BSD-3-Clause license. The render model and the overview's ownership
-of the workspace render pass come from that excellent codebase; the
-mission-control UX, search, dock, and flight animations are this fork's.
+Upstream Hyprdrive remains at `dragosol/Hyprdrive`.

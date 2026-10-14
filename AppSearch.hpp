@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,12 +31,33 @@ namespace AppSearch {
     struct SAction {
         std::string name; // Name=
         std::string exec; // raw Exec=, field codes not yet stripped
+        std::string id;   // the `[Desktop Action <id>]` group: language-independent, unlike Name
     };
 
     // Scans lazily on first call. ~19 visible apps in the test VM, so this is a
     // plain in-memory vector: no index, no cache, no invalidation story.
     const std::vector<SEntry>& inventory();
     void                       refresh();
+
+    // NEW APPS AND NEW ICONS, WITHOUT A RELOAD (user, 2026-09-19: "some icons
+    // including ghostty do not have a dock icon"). The inventory and the icon
+    // index were each built exactly once per plugin load, so anything installed
+    // afterwards -- Ghostty that very afternoon -- had no entry and no icon until
+    // the next login. Call once per frame: it looks at the application and
+    // icon-theme directories at most every couple of seconds (a handful of
+    // stat()s), rescans the desktop entries when one of them changed, and
+    // rebuilds the icon index OFF the render thread when a theme did.
+    void                       pollForChanges();
+
+    // Moves whenever the icon index is rebuilt. Anything caching what an icon
+    // NAME resolved to -- textures above all -- keys on this.
+    uint64_t                   iconIndexGeneration();
+
+    // Moves every time the inventory is (re)scanned. Anything that caches a
+    // result built out of `inventory()` -- the search rows, which hold raw
+    // SEntry pointers into it -- keys on this, so a refresh cannot leave a
+    // dangling pointer behind in a memo.
+    uint64_t                   inventoryGeneration();
 
     // Ranked best-first. Empty query yields nothing -- an unfiltered overview
     // shows windows, not a list of every installed app.
@@ -52,11 +75,33 @@ namespace AppSearch {
     void warmIconIndexAsync();
     void shutdownIconIndex();
 
+    // QUICKSHELL PANELS SHARE ONE APP ID (user, 2026-09-19: omamail "isn't
+    // picked up by my dock as an actual app"). Quickshell runs every panel
+    // plugin inside a SINGLE process, so each panel toplevel carries the same
+    // Wayland app_id -- org.quickshell -- and a per-window app_id is not
+    // something a plugin can set. The only thing telling Omamail apart from
+    // the pager, the speed test or the Wi-Fi QR panel is its TITLE.
+    //
+    // So identity for those windows is class+title, "org.quickshell:Omamail",
+    // and entryIndexForClass resolves that against Name= the way it already
+    // resolves a bare class. Every other window is returned unchanged, which is
+    // what makes this safe to put on the identity path wholesale.
+    std::string identityClass(const std::string& wmClass, const std::string& title);
+
     // Absolute path to the best icon file for an Icon= value, or "" if none.
     // Pure filesystem: decode and texture upload belong to the render layer.
     // Falls back to a generic application icon when the named one is missing
     // from the theme chain -- an entry with no icon at all still gets a tile.
+    bool        iconExists(const std::string& iconName);
+    std::optional<bool> iconExistsNow(const std::string& iconName); // nullopt: the index is busy/unbuilt, ask again
     std::string resolveIconPath(const std::string& iconName);
+    // The same, in another icon theme (its own index, built on a worker the
+    // first time; answers from the main theme until then).
+    std::string resolveIconPathInTheme(const std::string& iconName, const std::string& theme);
+    // The icon theme the current Omarchy theme names
+    // (~/.local/state/omarchy/current/theme/icons.theme), re-read at most every
+    // 2 s so a theme switch is picked up; "" when there is none.
+    std::string omarchyIconTheme();
 
     // Detached, so the app outlives the overview closing.
     // terminalCmd is used only for Terminal=true entries; empty falls back to
@@ -113,6 +158,9 @@ namespace AppSearch {
     // the .desktop file: this is asked once per right-click, not per frame, so
     // the inventory stays the small thing the search path wants.
     std::vector<SAction> actionsForClass(const std::string& wmClass);
+    // The same for a desktop id: a pinned app that is not running has no window
+    // class to go through, and its menu used to come up empty (user, 2026-09-24).
+    std::vector<SAction> actionsForId(const std::string& id);
 
     // X28. Detached spawn of a raw Exec= string, field codes stripped. The
     // action half of launch(); a desktop action is never Terminal=.

@@ -1,4 +1,5 @@
 #include "IOverview.hpp"
+#include "scrollOverview.hpp"
 #include "globals.hpp"
 
 #include <algorithm>
@@ -68,7 +69,24 @@ SP<IOverview> scrollOverviewAt(const Vector2D& point) {
     return IT == g_scrollOverviews.end() ? SP<IOverview>{} : *IT;
 }
 
+// Tab's keyboard owner, and where the pointer was when Tab chose it: the
+// pointer moving is the user reaching for another monitor, and then the pointer
+// rules again, exactly as before.
+static WP<IOverview> g_keyOwner;
+static Vector2D      g_keyOwnerMouse;
+
+void setKeyboardOverview(const SP<IOverview>& overview) {
+    g_keyOwner      = overview;
+    g_keyOwnerMouse = g_pInputManager ? g_pInputManager->getMouseCoordsInternal() : Vector2D{};
+}
+
 SP<IOverview> activeScrollOverview() {
+    if (const auto OWNER = g_keyOwner.lock()) {
+        if (g_pInputManager && g_pInputManager->getMouseCoordsInternal().distanceSq(g_keyOwnerMouse) < 1.0 &&
+            std::ranges::find(g_scrollOverviews, OWNER) != g_scrollOverviews.end())
+            return OWNER;
+        g_keyOwner.reset();
+    }
     if (g_pInputManager) {
         if (const auto overview = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()))
             return overview;
@@ -107,6 +125,8 @@ void registerScrollOverview(const SP<IOverview>& overview) {
 // happened to reproduce. Same doLater the dock already uses.
 static std::vector<SP<IOverview>> g_dyingOverviews;
 
+static uint64_t g_dyingOverviewsSeq = 0;
+
 void unregisterScrollOverview(IOverview* overview) {
     if (!overview)
         return;
@@ -119,8 +139,17 @@ void unregisterScrollOverview(IOverview* overview) {
     g_lastRegistered = activeScrollOverview();
     emitOverviewState();
 
-    if (!g_dyingOverviews.empty() && g_pEventLoopManager)
-        g_pEventLoopManager->doLater([] { g_dyingOverviews.clear(); });
+    if (!g_dyingOverviews.empty() && g_pEventLoopManager) {
+        if (g_dyingOverviewsSeq)
+            g_pEventLoopManager->removeDoLater(g_dyingOverviewsSeq);
+        g_dyingOverviewsSeq = g_pEventLoopManager->doLater([] {
+            g_dyingOverviewsSeq = 0;
+            g_dyingOverviews.clear();
+            // The destructors restored the submap; if none of them owned it
+            // and it is still the overview's, nothing else ever will.
+            healStuckOverviewSubmap();
+        });
+    }
 }
 
 // P0. See the declaration in IOverview.hpp for the defect. The teardown goes
@@ -161,6 +190,11 @@ void dropScrollOverviewsForMonitor(PHLMONITOR monitor) {
 }
 
 void clearScrollOverviews() {
+    if (g_dyingOverviewsSeq && g_pEventLoopManager) {
+        g_pEventLoopManager->removeDoLater(g_dyingOverviewsSeq);
+        g_dyingOverviewsSeq = 0;
+    }
+    g_dyingOverviews.clear();
     auto overviews = std::move(g_scrollOverviews);
     g_scrollOverviews.clear();
     g_lastRegistered.reset();

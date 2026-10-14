@@ -11,7 +11,10 @@
 namespace ScrollOverview::TileChrome {
 
 // The cursor moved. Pass nullptr when it is over no tile.
-void setHovered(const PHLWINDOW& window);
+// `lingerOnLeave` is the post-hover hold that keeps the close button
+// reachable in empty space. False when the pointer has gone to the dock:
+// that hold would keep the title over the pill.
+void setHovered(const PHLWINDOW& window, bool lingerOnLeave = true);
 
 // The primary button went down on / came up from the hovered tile. Drives X7's
 // "shrink just a little bit as pressed feedback".
@@ -29,6 +32,13 @@ PHLWINDOW hovered();
 
 // An ease is still running, so the caller owes another frame.
 bool animating();
+
+// ...and the same question for ONE output. The state map is session-wide
+// because there is one cursor, but the frames it buys are not: with two
+// overviews up, a tile easing on one monitor was asking both of them to
+// repaint. Each state records the output its tile was on when the ease was
+// armed, which is the output that has to draw it.
+bool animatingOn(PHLMONITOR monitor);
 
 // The grid slot, grown by the hover ease and shrunk by the press ease, about its
 // own centre. Render AND the close-button hit-test both go through this: a
@@ -53,11 +63,17 @@ CBox closeButtonBox(const PHLWINDOW& window, const CBox& tileBox, float monitorS
 CBox closeButtonHitBox(const PHLWINDOW& window, const CBox& tileBox, float monitorScale);
 
 // App icon (X8) + close button, drawn over an already-rendered tile.
+// Hover captions are queued here and flushed by renderCaptions() AFTER the
+// dock, so a title sitting under a bottom-of-card window is not buried.
 //
 // `alpha` is the OVERVIEW's own open/close progress. The chrome is not part of
 // the tile texture, so nothing else fades it: without this the icons hold full
 // opacity for the whole transition and pop out at the end of it, which is very
 // visible when the overview is toggled quickly.
 void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float monitorScale, float alpha = 1.F);
+
+// Window-title pills queued during render(), drawn last so they sit above the
+// dock. Safe to call with nothing queued.
+void renderCaptions(PHLMONITOR monitor);
 
 }

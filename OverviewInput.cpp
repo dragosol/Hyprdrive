@@ -1,6 +1,14 @@
 #include "OverviewInternal.hpp"
 #include "DockInput.hpp"
+#include "DockStacks.hpp"
 using namespace OvInternal; // opted in here rather than leaked from the header
+
+// For main.cpp's click dispatcher, which does not include OverviewInternal.hpp.
+namespace OvInternal {
+    bool pointerOnTopLayer(PHLMONITOR monitor) {
+        return isPointerOnTopLayer(monitor);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Event handlers. These were inline [this] lambdas inside the constructor,
@@ -31,6 +39,32 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
 
         updateTileHover();
 
+        // Search hover is motion-only: results appearing under a parked cursor
+        // must not steal SPACE from the query. Moving onto the pill puts SPACE
+        // back to typing even if a file is still highlighted for Enter.
+        if (!drag.activeWindow && !resize.activeWindow && !(g_search.pointer.drag && g_search.pointer.drag->live)) {
+            if (searchLayoutHere().pill.containsPoint(lastMousePosLocal)) {
+                if (g_search.nav.hoverIndex != -1 || g_search.nav.intent == ESearchIntent::Hovering) {
+                    g_search.nav.hoverIndex = -1;
+                    g_search.nav.intent     = ESearchIntent::Typing;
+                    damage();
+                }
+            } else if (const auto* ROW = searchRowAt(searchMonitorId(), lastMousePosLocal); ROW) {
+                if (g_search.nav.hoverIndex != ROW->index) {
+                    g_search.nav.hoverIndex = ROW->index;
+                    g_search.nav.selection  = ROW->index;
+                    g_search.nav.zone       = EOverviewNavZone::Result;
+                    g_search.nav.intent     = ESearchIntent::Hovering;
+                    damage();
+                }
+            } else if (g_search.nav.hoverIndex != -1) {
+                g_search.nav.hoverIndex = -1;
+                if (g_search.nav.intent == ESearchIntent::Hovering)
+                    g_search.nav.intent = g_search.nav.explicitSelection ? ESearchIntent::Browsing : ESearchIntent::Typing;
+                damage();
+            }
+        }
+
         // The dock's hover highlight is the only thing on screen that changes on
         // a bare pointer move over an otherwise idle overview: no tile hover
         // changes there, so nothing else asks for a frame and the highlight would
@@ -53,7 +87,7 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
         // G12. The hold has to pass BEFORE the distance is even looked at.
         if (g_search.pointer.drag && !g_search.pointer.drag->desktopId.empty()) {
             if (!g_search.pointer.drag->live) {
-                const float HELDMS = ScrollOverview::Config::animElapsedMs(g_search.pointer.drag->startedAt);
+                const float HELDMS = ScrollOverview::Config::realElapsedMs(g_search.pointer.drag->startedAt);
                 if (HELDMS >= G12_HOLD_MS && g_search.pointer.drag->start.distanceSq(lastMousePosLocal) > DRAGTHRESHOLDSQ)
                     g_search.pointer.drag->live = true;
             }
@@ -87,14 +121,34 @@ void CScrollOverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
         // Without it here, any pointer transit over a top layer (the bar -- and
         // ydotool absolute moves slam through the corner every step) silently
         // cleared the pending press and no submap drag could ever start.
-        if (!drag.pendingPrimary && !submapMouseClickPending && !resize.pointerDown && !pan.pointerDown && !drag.activeWindow && !resize.activeWindow && isPointerOnTopLayer(pMonitor.lock())) {
+        if (layerPointerGrab || (!drag.pendingPrimary && !submapMouseClickPending && !resize.pointerDown && !pan.pointerDown && !drag.activeWindow && !resize.activeWindow &&
+                                 isPointerOnTopLayer(pMonitor.lock()))) {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
+            // Hyprland restores keyboard focus to a window whenever it is
+            // null and the pointer moves. Steal it back so the bar taking
+            // pointer hover cannot keep the keys.
+            stealOverviewKeyboard();
+            yieldOverviewCursor(true);
             return;
         }
 
         info.cancelled = true;
-        requestInputFrame();
+        stealOverviewKeyboard();
+        yieldOverviewCursor(false);
+
+        // ONLY WHEN SOMETHING WOULD LOOK DIFFERENT. This used to be an
+        // unconditional requestInputFrame(), and AQ_SCHEDULE_CURSOR_MOVE is the
+        // one schedule hkScheduleFrame does not throttle -- so sliding the
+        // cursor across empty overview space repainted the whole overview at
+        // the output's refresh rate on both monitors. Everything that follows
+        // the pointer CONTINUOUSLY is a held gesture and is listed here in its
+        // own right; everything else is discrete and is in the hover signature.
+        // Evaluated first so the signature is updated whichever way this goes.
+        const bool HOVERMOVED = hoverSignatureChanged();
+        if (HOVERMOVED || drag.pendingPrimary || drag.activeWindow || resize.pointerDown || resize.activeWindow || pan.pointerDown || submapMouseClickPending ||
+            (g_search.pointer.drag && g_search.pointer.drag->live))
+            requestInputFrame();
 
         // D6: a drag that STARTS on a strip mini picks up that window, not
         // whatever main tile the band happens to float over. Same ordering as
@@ -187,9 +241,10 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 g_pointerGrabOverview = nullptr;
         });
 
-        if (!drag.pendingPrimary && !resize.pointerDown && !pan.pointerDown && !drag.activeWindow && !resize.activeWindow && isPointerOnTopLayer(pMonitor.lock())) {
+        if (layerPointerGrab || (!drag.pendingPrimary && !resize.pointerDown && !pan.pointerDown && !drag.activeWindow && !resize.activeWindow && isPointerOnTopLayer(pMonitor.lock()))) {
             submapMouseClickPending = false;
             submapMouseClickButton  = 0;
+            layerPointerGrab        = event.state == WL_POINTER_BUTTON_STATE_PRESSED;
             return;
         }
 
@@ -348,8 +403,13 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 // on that selection would; released anywhere else it is the
                 // user changing their mind, which is a no-op. G12's hold stays
                 // the drag gate -- a click is simply what happens without it.
-                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW && ROW->index == DRAG.index && activateSearchResult(ROW->index))
+                if (const auto* ROW = searchRowAt(searchMonitorId(), lastMousePosLocal); ROW && ROW->index == DRAG.index && activateSearchResult(ROW->index)) {
+                    if (const auto W = g_search.nav.pendingFocus.lock()) {
+                        closeOnWindow = W;
+                        g_search.nav.pendingFocus.reset();
+                    }
                     close();
+                }
 
                 return;
             }
@@ -374,9 +434,22 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             // hold makes it a drag, and a plain click over a row is still the
             // panel's to define.
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                if (const auto* ROW = searchRowAt(lastMousePosLocal); ROW) {
+                if (const auto* ROW = searchRowAt(searchMonitorId(), lastMousePosLocal); ROW) {
+                    g_search.nav.selection         = ROW->index;
+                    g_search.nav.zone              = EOverviewNavZone::Result;
+                    g_search.nav.intent            = ESearchIntent::Hovering;
                     g_search.pointer.drag =
                         SResultDrag{.desktopId = ROW->desktopId, .icon = ROW->icon, .start = lastMousePosLocal, .startedAt = Time::steadyNow(), .index = ROW->index};
+                    return;
+                }
+                if (searchLayoutHere().pill.containsPoint(lastMousePosLocal)) {
+                    g_search.query.active = true;
+                    g_search.nav.zone = EOverviewNavZone::Search;
+                    g_search.nav.selection = -1;
+                    damage();
+                    return;
+                }
+                if (searchLayoutHere().containerBox.width > 1.F && searchLayoutHere().containerBox.containsPoint(lastMousePosLocal)) {
                     return;
                 }
             }
@@ -573,7 +646,22 @@ void CScrollOverview::onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& 
         if (closing || scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()).get() != this)
             return;
 
+        // Over a TOP/OVERLAY layer the scroll is that layer's, exactly as a
+        // click is: a two-finger swipe on a notification toast dismisses it (and
+        // the finger-lift stop event must reach it too, or its drag never ends).
+        if (isPointerOnTopLayer(pMonitor.lock()))
+            return;
+
         info.cancelled = true;
+
+        // A dock stack's grid pane scrolls under the wheel here too (user,
+        // 2026-09-30): the desktop's dock scroll hook skips overview monitors,
+        // so the pane never saw a tick while the overview was up.
+        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
+            ScrollOverview::Stacks::noteAxis(e.delta, e.source == WL_POINTER_AXIS_SOURCE_WHEEL);
+        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && e.delta != 0.0 &&
+            ScrollOverview::Stacks::scroll(pMonitor.lock(), getOverviewMousePosLocal(pMonitor.lock()), e.delta < 0.0))
+            return;
 
         const auto ACTION = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL ? ScrollOverview::Config::getHorizontalScrollAction(layout) :
                                                                           ScrollOverview::Config::getVerticalScrollAction(layout);
@@ -606,17 +694,40 @@ void CScrollOverview::onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& 
             trackpadSwipeLayout(images[viewportCurrentWorkspace]->pWorkspace, e.delta);
 }
 
-void CScrollOverview::onWindowOpen(PHLWINDOW) {
+void CScrollOverview::onWindowOpen(PHLWINDOW window) {
         if (closing)
             return;
+
+        if (isScreensaverWindow(window)) {
+            dropScrollOverviewsForMonitor(pMonitor.lock());
+            return;
+        }
 
         rebuildPending = true;
         damage();
 }
 
-void CScrollOverview::onWindowClose(PHLWINDOW) {
+void CScrollOverview::onWindowClose(PHLWINDOW window) {
         if (closing)
             return;
+
+        // Remember the tile BEFORE the grid reflows it away. The snapshot itself
+        // cannot happen here -- there is no render context outside the pass --
+        // so this only records where the tile was and when it started; the next
+        // frame captures it while the window is still mapped.
+        // Keyed on the LAST DRAWN box, not on shouldShowOverviewWindow/tileBox:
+        // if this event lands after the unmap, both of those already say the
+        // tile does not exist.
+        if (window) {
+            const auto IT      = lastTileBoxes.find(window.get());
+            const bool ALREADY = std::ranges::any_of(closingTiles, [&](const auto& t) { return t.window.lock() == window; });
+            if (IT != lastTileBoxes.end() && !ALREADY && IT->second.box.width > 1.F && IT->second.box.height > 1.F) {
+                const CBox REAL = window->m_realPosition && window->m_realSize ? CBox{window->m_realPosition->value(), window->m_realSize->value()} : CBox{};
+                closingTiles.push_back(
+                    {.window = window, .fb = {}, .box = IT->second.box, .start = Time::steadyNow(), .captured = false, .realBox = REAL, .cardIdx = IT->second.cardIdx});
+            }
+            lastTileBoxes.erase(window.get());
+        }
 
         rebuildPending = true;
         damage();
@@ -633,6 +744,11 @@ void CScrollOverview::onWindowMove(PHLWINDOW, PHLWORKSPACE) {
 void CScrollOverview::onWindowActive(PHLWINDOW window, Desktop::eFocusReason) {
         if (closing)
             return;
+
+        if (isScreensaverWindow(window)) {
+            dropScrollOverviewsForMonitor(pMonitor.lock());
+            return;
+        }
 
         g_pInputManager->unconstrainMouse();
 
@@ -658,11 +774,17 @@ void CScrollOverview::onWindowActive(PHLWINDOW window, Desktop::eFocusReason) {
         }
 
         damage();
+        stealOverviewKeyboard();
 }
 
 void CScrollOverview::onWindowFullscreen(PHLWINDOW window) {
         if (closing || emittingFullscreenVisibilityState)
             return;
+
+        if (isScreensaverWindow(window)) {
+            dropScrollOverviewsForMonitor(pMonitor.lock());
+            return;
+        }
 
         window = getOverviewWindowToShow(window);
         if (!window || window->m_monitor != pMonitor || !Fullscreen::controller()->isFullscreen(window))
@@ -683,16 +805,62 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
         if (closing || event.state != WL_KEYBOARD_KEY_STATE_PRESSED || activeScrollOverview().get() != this)
             return;
 
+        // ONE PRESS, ONE OVERVIEW. Every overview listens to the same key event,
+        // and Tab hands the keyboard to the next monitor's overview MID-EVENT --
+        // whose listener then ran next, saw itself active and took the same Tab
+        // again, skipping monitor 2's grid straight back to search (2026-09-27).
+        static std::pair<uint32_t, uint32_t> s_lastPress{UINT32_MAX, UINT32_MAX};
+        if (s_lastPress == std::pair{event.timeMs, event.keycode})
+            return;
+        s_lastPress = {event.timeMs, event.keycode};
+
         if (isTopLayerFocused(pMonitor.lock()))
             return;
 
         const auto KEYSYM = getOverviewKeysym(event);
         const auto MODS   = g_pInputManager->getModsFromAllKBs() & ~(HL_MODIFIER_CAPS | HL_MODIFIER_MOD2);
+        const bool SHIFT_PRESSED = (MODS & HL_MODIFIER_SHIFT) != 0;
+        const auto BASE_MODS     = MODS & ~HL_MODIFIER_SHIFT;
 
-        if ((KEYSYM == XKB_KEY_Return || KEYSYM == XKB_KEY_KP_Enter || KEYSYM == XKB_KEY_Left || KEYSYM == XKB_KEY_KP_Left || KEYSYM == XKB_KEY_Right ||
+        if ((KEYSYM == XKB_KEY_Left || KEYSYM == XKB_KEY_KP_Left || KEYSYM == XKB_KEY_Right ||
              KEYSYM == XKB_KEY_KP_Right || KEYSYM == XKB_KEY_Up || KEYSYM == XKB_KEY_KP_Up || KEYSYM == XKB_KEY_Down || KEYSYM == XKB_KEY_KP_Down) &&
             MODS != 0)
             return;
+
+        if ((KEYSYM == XKB_KEY_Return || KEYSYM == XKB_KEY_KP_Enter) && BASE_MODS != 0)
+            return;
+
+        // SUPER+W CLOSES THE HIGHLIGHTED TILE (user, 2026-09-23).
+        //
+        // Not an override of Omarchy's own SUPER+W: that is a global bind with
+        // no submap, so it does not fire while the overview holds one. It is the
+        // same key meaning the same thing, aimed at the window the OVERVIEW is
+        // showing as selected rather than the one the compositor last focused.
+        //
+        // "Selected" is whichever device last moved the ring: arrows set
+        // keyboardTile, and any pointer motion clears it (updateTileHover). So
+        // after the arrows it is the keyboard's tile; after the mouse it is the
+        // tile under the pointer; and over empty space it is nothing at all --
+        // closing whatever closeOnWindow still pointed at would be a window
+        // vanishing that the user was not looking at.
+        if ((KEYSYM == XKB_KEY_w || KEYSYM == XKB_KEY_W) && MODS == HL_MODIFIER_META) {
+            PHLWINDOW target;
+            if (g_search.nav.keyboardTile && g_search.nav.zone == EOverviewNavZone::Tile)
+                target = getOverviewWindowToShow(closeOnWindow.lock());
+            else {
+                lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+                target            = windowAtOverviewCursor();
+            }
+
+            if (target && shouldShowOverviewWindow(target)) {
+                target->sendClose();
+                damage();
+            }
+            // Consumed either way: a SUPER+W that found nothing to close must
+            // not fall through to anything else while the overview is up.
+            info.cancelled = true;
+            return;
+        }
 
         switch (KEYSYM) {
             case XKB_KEY_Left:
@@ -709,49 +877,157 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
                 break;
             case XKB_KEY_Down:
             case XKB_KEY_KP_Down:
+                // ...from the SEARCH FIELD only. Down used to drop into the
+                // results from anywhere, including mid-grid, which is the same
+                // "an arrow left the pane" the Tile walk above no longer does.
+                if (g_search.nav.zone != EOverviewNavZone::Result && g_search.nav.zone != EOverviewNavZone::Tile && g_search.nav.zone != EOverviewNavZone::Desktop &&
+                    (!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack())) {
+                    if (!searchLayoutHere().hits.empty()) {
+                        g_search.nav.zone              = EOverviewNavZone::Result;
+                        g_search.nav.selection         = searchLayoutHere().hits[0].index;
+                        g_search.nav.explicitSelection = true;
+                        g_search.nav.intent            = ESearchIntent::Browsing;
+                        damage();
+                        break;
+                    } else {
+                        const auto RESULTS = overviewSearchRows();
+                        if (!RESULTS.empty()) {
+                            g_search.nav.zone              = EOverviewNavZone::Result;
+                            g_search.nav.selection         = 0;
+                            g_search.nav.explicitSelection = true;
+                            g_search.nav.intent            = ESearchIntent::Browsing;
+                            damage();
+                            break;
+                        }
+                    }
+                }
                 moveSelection("down");
                 break;
             case XKB_KEY_Tab:
             case XKB_KEY_ISO_Left_Tab: {
-                const auto RESULTS = overviewSearchRows();
-                if (RESULTS.empty())
-                    return;
+                // MORE THAN ONE MONITOR (user, 2026-09-27): "search -> window grid
+                // on monitor 1 -> window grid on monitor 2 -> search". Monitors
+                // left to right; the keyboard moves with the grid it is in
+                // (setKeyboardOverview), not with the pointer.
+                if (tabAcrossMonitors()) {
+                    damage();
+                    break;
+                }
 
-                // -1 is the grid. Tab walks down the results and back out to it,
-                // so the grid is never unreachable by keyboard.
-                const int COUNT = sc<int>(RESULTS.size());
-                if (KEYSYM == XKB_KEY_ISO_Left_Tab)
-                    g_search.nav.selection = g_search.nav.selection <= -1 ? COUNT - 1 : g_search.nav.selection - 1;
-                else
-                    g_search.nav.selection = g_search.nav.selection >= COUNT - 1 ? -1 : g_search.nav.selection + 1;
+                // TAB IS THE WAY BETWEEN THE PANES: results -> windows -> desktops
+                // -> results (user, 2026-09-23). Arrows stay inside whichever pane
+                // Tab left them in, so this cycle is the only way across and every
+                // pane has to be ON it -- the old two-way toggle could not reach
+                // the strip at all.
+                //
+                // A pane that is not there is skipped rather than being a dead
+                // stop: with no query there are no results, so the cycle is the
+                // two remaining panes.
+                if (g_search.nav.zone == EOverviewNavZone::Tile) {
+                    g_search.nav.zone              = EOverviewNavZone::Desktop;
+                    g_search.nav.selection         = -1;
+                    g_search.nav.keyboardTile      = false;
+                    g_search.nav.explicitSelection = true;
+                    TileChrome::setHovered(PHLWINDOW{}, false);
+                    damage();
+                    break;
+                }
+
+                if (g_search.nav.zone == EOverviewNavZone::Desktop) {
+                    const auto RESULTS = overviewSearchRows();
+                    if ((!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) && !RESULTS.empty()) {
+                        g_search.nav.zone              = EOverviewNavZone::Result;
+                        g_search.nav.explicitSelection = true;
+                        g_search.nav.intent            = ESearchIntent::Browsing;
+                        g_search.nav.keyboardTile      = false;
+                        if (g_search.nav.selection < 0 || g_search.nav.selection >= sc<int>(RESULTS.size()))
+                            g_search.nav.selection = 0;
+                        TileChrome::setHovered(PHLWINDOW{}, false);
+                    } else {
+                        g_search.nav.zone         = EOverviewNavZone::Tile;
+                        g_search.nav.selection    = -1;
+                        g_search.nav.keyboardTile = true;
+                        if (!isNavTile(closeOnWindow.lock())) {
+                            if (const auto FIRST = firstNavTile())
+                                closeOnWindow = FIRST;
+                        }
+                        TileChrome::setHovered(closeOnWindow.lock(), false);
+                    }
+                    damage();
+                    break;
+                }
+
+                if (g_search.nav.zone == EOverviewNavZone::Result) {
+                    g_search.nav.zone         = EOverviewNavZone::Tile;
+                    g_search.nav.keyboardTile = true;
+                    // The window the overview opened on is still `closeOnWindow`,
+                    // and a query usually hides it -- kept, it made the walk
+                    // start from a tile nobody can see. Keep it only if it is
+                    // on screen; otherwise the first tile in reading order,
+                    // not the first in window-list order (mid-grid).
+                    if (!isNavTile(closeOnWindow.lock())) {
+                        if (const auto FIRST = firstNavTile())
+                            closeOnWindow = FIRST;
+                    }
+                    TileChrome::setHovered(closeOnWindow.lock(), false);
+                } else if (!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) {
+                    const auto RESULTS = overviewSearchRows();
+                    if (!RESULTS.empty()) {
+                        g_search.nav.zone              = EOverviewNavZone::Result;
+                        g_search.nav.explicitSelection = true;
+                        g_search.nav.intent            = ESearchIntent::Browsing;
+                        g_search.nav.keyboardTile      = false;
+                        if (g_search.nav.selection < 0 || g_search.nav.selection >= sc<int>(RESULTS.size()))
+                            g_search.nav.selection = 0;
+                        TileChrome::setHovered(PHLWINDOW{}, false);
+                    }
+                }
 
                 damage();
                 break;
             }
             case XKB_KEY_Return:
             case XKB_KEY_KP_Enter: {
-                const auto RESULTS = overviewSearchRows();
+                if ((!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) && g_search.nav.zone != EOverviewNavZone::Tile &&
+                    g_search.nav.zone != EOverviewNavZone::Desktop) {
+                    const auto RESULTS = overviewSearchRows();
 
-                // X61. Return means "activate what is selected", and WHAT that is
-                // depends on the zone. A desktop needs nothing done to it:
-                // arrowing onto a strip cell already switched the viewport, so
-                // closing simply lands there. A tile needs nothing either --
-                // closeOnWindow is exactly what close() focuses. Only a result
-                // has to be run, which is why this is the only branch here.
-                //
-                // The fallback is unchanged: with no explicit selection and no
-                // window matching the query, Return takes the top result. It is
-                // suppressed in the Desktop zone, where the user has said where
-                // they want to go and launching an app instead would be a
-                // surprise.
-                int launchIdx = -1;
-                if (g_search.nav.zone == EOverviewNavZone::Result && g_search.nav.selection >= 0 && g_search.nav.selection < sc<int>(RESULTS.size()))
-                    launchIdx = g_search.nav.selection;
-                else if (g_search.nav.zone != EOverviewNavZone::Desktop && !RESULTS.empty() && matchingWindowCount() == 0)
-                    launchIdx = 0;
+                    int launchIdx = -1;
+                    if (g_search.nav.zone == EOverviewNavZone::Result && g_search.nav.selection >= 0 && g_search.nav.selection < sc<int>(RESULTS.size()))
+                        launchIdx = g_search.nav.selection;
+                    else if (!RESULTS.empty() && (matchingWindowCount() == 0 || g_search.nav.zone == EOverviewNavZone::Search || OmarchySearch::canNavigateMenuBack()))
+                        launchIdx = 0;
 
-                activateSearchResult(launchIdx);
-                close();
+                    const std::string QUERY_BEFORE = g_search.query.text;
+                    if (launchIdx >= 0 && activateSearchResult(launchIdx, SHIFT_PRESSED)) {
+                        if (const auto W = g_search.nav.pendingFocus.lock()) {
+                            closeOnWindow = W;
+                            g_search.nav.pendingFocus.reset();
+                        }
+                        for (const auto& overview : scrollOverviews()) {
+                            if (overview && overview.get() != this)
+                                overview->close();
+                        }
+                        close();
+                        break;
+                    }
+                    // A tool row (Define / Translate) rewrote the query: the
+                    // panel turns into the dictionary, so the overview stays.
+                    if (g_search.nav.zone == EOverviewNavZone::Result || g_search.query.text != QUERY_BEFORE) {
+                        damage();
+                        break;
+                    }
+                }
+
+                if (const auto TARGET = closeOnWindow.lock()) {
+                    selectAndClose(TARGET);
+                } else {
+                    for (const auto& overview : scrollOverviews()) {
+                        if (overview && overview.get() != this)
+                            overview->close();
+                    }
+                    close();
+                }
                 break;
             }
             default: return;
@@ -760,4 +1036,7 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
         info.cancelled = true;
 }
 
-
+bool overviewSearchHides(const PHLWINDOW& window) {
+    const auto SHOWN = getOverviewWindowToShow(window);
+    return SHOWN && !shouldShowOverviewWindow(SHOWN);
+}

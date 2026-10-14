@@ -11,11 +11,15 @@
 // unqualified Config:: resolve to ScrollOverview::Config. Split into real .cpp files
 // when compile time starts to hurt.
 
+#include "FramePacing.hpp"
 #include "scrollOverview.hpp"
 
+#include <cctype>
 #include <cstdio>
 
 #include "AppSearch.hpp"
+#include "OmarchySearch.hpp"
+#include "ToolSearch.hpp"
 #include "SearchSession.hpp"
 #include "TileChrome.hpp"
 #include "WindowPill.hpp"
@@ -133,9 +137,104 @@ static_assert(sc<int>(Layout::CORNER_TOPRIGHT) == sc<int>(OvGeom::CORNER_TOPRIGH
 static_assert(sc<int>(Layout::CORNER_BOTTOMLEFT) == sc<int>(OvGeom::CORNER_BOTTOMLEFT));
 static_assert(sc<int>(Layout::CORNER_BOTTOMRIGHT) == sc<int>(OvGeom::CORNER_BOTTOMRIGHT));
 
+inline float overviewTopChromeBottomL(PHLMONITOR monitor);
+inline uint64_t overviewFrameOn(const PHLMONITOR& monitor);
+
+// Sit the scaled card in the band between the Omarchy top bar and the dock
+// so the padding above the card equals the padding below it. The shift fades
+// with open progress: at scale 1 the desktop still fills the monitor.
+inline Vector2D overviewCardOriginOffsetLive(PHLMONITOR monitor, float overviewScale) {
+    if (!monitor)
+        return {};
+
+    const float MS    = std::max(monitor->m_scale, 0.01F);
+    const float H     = sc<float>(monitor->m_size.y) * MS;
+    const float MONCY = H * 0.5F;
+
+    const float TOP = std::max(0.F, (overviewTopChromeBottomL(monitor) - sc<float>(monitor->m_position.y)) * MS);
+
+    float bottom = H;
+    if (ScrollOverview::Dock::onMonitor(monitor)) {
+        const float ICON = sc<float>(std::clamp(ScrollOverview::Config::getValue<int>("plugin:hyprdrive:dock:icon_size"), 8, 512));
+        // Dock.cpp: ICON_PAD 14 on top and bottom, EDGE_MARGIN 4 under the pill.
+        const float DOCKH = ICON + 14.F + 14.F + 4.F;
+        bottom            = std::max(TOP + 1.F, H - DOCKH * MS);
+    }
+
+    if (bottom <= TOP + 1.F)
+        return {};
+
+    const float OPEN  = ScrollOverview::Config::getScale();
+    const float RANGE = std::max(0.01F, 1.F - OPEN);
+    const float T     = std::clamp((1.F - overviewScale) / RANGE, 0.F, 1.F);
+    return {0.F, ((TOP + bottom) * 0.5F - MONCY) * T};
+}
+
+// MEMOISED PER DRAWN FRAME, because viewportOf below runs it for EVERY box the
+// overview transforms -- and it walks both top layer lists and makes three
+// config lookups to do it. Measured shape: ~150 layer walks and ~450 lookups
+// per output per frame, for an answer that is the same on all of them.
+//
+// The key is the output, its geometry, the open scale, and THE OUTPUT'S OWN
+// FRAME COUNTER, so within one frame every call agrees by construction. Between
+// frames the answer is held: a hit test then measures against the chrome as it
+// was last DRAWN, which is the chrome the user is pointing at. A layer opening,
+// closing or resizing damages the monitor, so the held value never outlives the
+// frame that would have shown the change.
+//
+// Several scales are live in one frame (the card's, and the much smaller one a
+// strip mini is drawn at), hence a small table rather than one slot.
+inline Vector2D overviewCardOriginOffset(PHLMONITOR monitor, float overviewScale) {
+    if (!monitor)
+        return {};
+
+    struct SOriginMemo {
+        MONITORID id    = MONITOR_INVALID;
+        uint64_t  frame = 0;
+        float     scale = 0.F;
+        Vector2D  pos;
+        Vector2D  size;
+        float     monScale = 0.F;
+        Vector2D  value;
+        bool      filled   = false;
+    };
+
+    static std::array<SOriginMemo, 8> MEMOS;
+    static size_t                     next = 0;
+
+    const uint64_t FRAME = overviewFrameOn(monitor);
+
+    for (const auto& MEMO : MEMOS) {
+        if (!MEMO.filled || MEMO.id != monitor->m_id || MEMO.frame != FRAME || MEMO.scale != overviewScale)
+            continue;
+        if (MEMO.pos != monitor->m_position || MEMO.size != monitor->m_size || MEMO.monScale != monitor->m_scale)
+            continue;
+
+        return MEMO.value;
+    }
+
+    const Vector2D VALUE = overviewCardOriginOffsetLive(monitor, overviewScale);
+
+    auto& slot    = MEMOS[next];
+    next          = (next + 1) % MEMOS.size();
+    slot.id       = monitor->m_id;
+    slot.frame    = FRAME;
+    slot.scale    = overviewScale;
+    slot.pos      = monitor->m_position;
+    slot.size     = monitor->m_size;
+    slot.monScale = monitor->m_scale;
+    slot.value    = VALUE;
+    slot.filled   = true;
+
+    return VALUE;
+}
+
 // Everything the pure transforms need from an output, read once at the boundary.
-inline OvGeom::SViewport viewportOf(PHLMONITOR monitor) {
-    return OvGeom::SViewport{monitor->m_position, monitor->m_size, monitor->m_scale};
+inline OvGeom::SViewport viewportOf(PHLMONITOR monitor, float overviewScale = 1.F) {
+    OvGeom::SViewport vp{monitor->m_position, monitor->m_size, monitor->m_scale};
+    if (monitor && overviewScale < 0.999F)
+        vp.originOffset = overviewCardOriginOffset(monitor, overviewScale);
+    return vp;
 }
 
 inline OvGeom::EAxis axisOf(ScrollOverview::Config::ELayout layout) {
@@ -164,8 +263,14 @@ inline CScrollOverview*      g_pointerGrabOverview = nullptr;
 inline void removeOverview(CScrollOverview* overview) {
     const auto PMONITOR = overview ? overview->pMonitor.lock() : PHLMONITOR{};
     unregisterScrollOverview(overview);
-    if (scrollOverviews().empty())
+    if (scrollOverviews().empty()) {
+        ScrollOverview::FramePacing::endSession();
         disableScrollOverviewHooks();
+        // Click-to-close and swipe-down never went through the dispatcher, so
+        // the query lived until the next Super-tap. A fully gone overview
+        // always starts the next one empty.
+        resetSearchSession();
+    }
 
     if (PMONITOR) {
         PMONITOR->recheckSolitary();
@@ -204,6 +309,55 @@ inline bool hasOverviewSubmapKeyBinds() {
 
 inline bool isOverviewSubmapActive() {
     return g_pKeybindManager && isOverviewSubmapName(g_pKeybindManager->getCurrentSubmap().name);
+}
+
+// The overview is not a Wayland client. Clear seat keyboard focus so keys
+// cannot reach the window (or a layer-shell bar) underneath; the raw-key
+// hook builds the search query from the same stream.
+// scrollOverview.cpp. A pointer lock (a game, Moonlight) belongs to the window
+// that took it, and the overview is not that window: released while the
+// overview is up, handed back only if the overview closes onto its owner.
+void releasePointerLocks();
+void cancelPointerHandoff(); // unload
+void traceHandback(const char* who, const PHLWINDOW& asked, const PHLWINDOW& target, const PHLWINDOW& before);
+extern PHLWINDOWREF g_focusAtOpen; // the focused window when the session opened
+void handPointerTo(const PHLWINDOW& window, const SP<CWLSurfaceResource>& surface);
+
+inline void stealOverviewKeyboard() {
+    if (g_pSeatManager)
+        g_pSeatManager->setKeyboardFocus(nullptr);
+    releasePointerLocks();
+}
+
+// Give the keyboard back to the window overview stole it from. Seat focus is
+// a different thing from "which window is active": stealOverviewKeyboard
+// nulls the seat without changing Desktop::focusState, so close() used to
+// skip fullWindowFocus when the same terminal was still "the" window -- and
+// Hyprland never sent wl_keyboard.enter. Typing stayed dead until a workspace
+// switch forced a real refocus. Passing the surface, then forcing the seat,
+// is the click-path that actually delivers enter.
+inline void restoreOverviewKeyboard(const PHLWINDOW& window, const char* who = "?") {
+    for (const auto& overview : scrollOverviews()) {
+        if (overview && !overview->isClosing())
+            return;
+    }
+
+    PHLWINDOW target = window;
+    if (!Desktop::View::validMapped(target))
+        target = Desktop::focusState()->window();
+    if (!Desktop::View::validMapped(target))
+        return;
+
+    SP<CWLSurfaceResource> surf;
+    if (target->wlSurface())
+        surf = target->wlSurface()->resource();
+
+    const auto BEFORE = Desktop::focusState()->window();
+    Desktop::focusState()->fullWindowFocus(target, Desktop::FOCUS_REASON_SWITCH_TO_WINDOW_HARD, surf);
+    if (g_pSeatManager && surf)
+        g_pSeatManager->setKeyboardFocus(surf);
+    traceHandback(who, window, target, BEFORE);
+    handPointerTo(target, surf);
 }
 
 inline bool isTopLayerFocused(PHLMONITOR monitor) {
@@ -260,6 +414,22 @@ inline constexpr const char* OVERVIEW_CLOSE_BEZIER = HOUSE_ACCEL_BEZIER;
 // scripts/symcheck.sh now diffs against the host's exports instead of grepping
 // for a namespace, precisely so the next global-scope symbol cannot hide.
 
+// The overview's arrow is a SPECIAL_ACTION override, which beats any shape a
+// client asks for -- so over a layer the overview lets the pointer through to,
+// that layer's own cursor never showed: slurp's crosshair stayed an arrow when
+// Print was pressed in the overview (user, 2026-10-07). Yield it there, take it
+// back when the pointer returns to the overview.
+inline bool g_overviewCursorYielded = false;
+inline void yieldOverviewCursor(bool yield) {
+    if (yield == g_overviewCursorYielded || !Pointer::Cursor::overrideController)
+        return;
+    g_overviewCursorYielded = yield;
+    if (yield)
+        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
+    else
+        Pointer::Cursor::overrideController->setOverride("left_ptr", Pointer::Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
+}
+
 inline bool isPointerOnTopLayer(PHLMONITOR monitor) {
     if (!monitor)
         return false;
@@ -267,6 +437,16 @@ inline bool isPointerOnTopLayer(PHLMONITOR monitor) {
     const auto MOUSECOORDS = g_pInputManager->getMouseCoordsInternal();
     Vector2D   surfaceCoords;
     PHLLS      layerSurface;
+
+    // A layer's POPUPS first, as Hyprland's own focus walk does: Quickshell
+    // notification toasts (Omapager, Omarchy's notifications) are popups of a
+    // layer whose own input region does not cover them, so the plain surface
+    // test missed them and the overview ate every hover, click and swipe.
+    const auto& HIT = Desktop::viewState()->hitTest();
+    for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, ZWLR_LAYER_SHELL_V1_LAYER_TOP}) {
+        if (HIT.layerPopupSurfaceAt(MOUSECOORDS, &monitor->m_layerSurfaceLayers[LAYER], &surfaceCoords, &layerSurface))
+            return true;
+    }
 
     if (Desktop::viewState()->hitTest().layerSurfaceAt(MOUSECOORDS, &monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &layerSurface))
         return true;
@@ -289,132 +469,437 @@ inline PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
 // caps at 5 ROWS EACH, not 5 shared. A shared cap is what made X49's section
 // cards invisible: a query matching 5 apps starved every provider, so there was
 // only ever one card to categorise.
+// The tool pane's metrics (logical px): a header with the headword and its
+// source, then one entry per sense -- two lines, the text and an example.
+inline constexpr float OVERVIEW_TOOL_PADL = 16.F, OVERVIEW_TOOL_HEADL = 52.F, OVERVIEW_TOOL_ROWHL = 48.F, OVERVIEW_TOOL_GAPL = 4.F;
+
+inline constexpr size_t OVERVIEW_RESULT_ROWS_CROWDED = 6, OVERVIEW_RESULT_ROWS_NORMAL = 8, OVERVIEW_RESULT_ROWS_ALONE = 20;
+inline constexpr size_t OVERVIEW_RESULT_TILES_CROWDED = 4;
+inline constexpr float  OVERVIEW_RESULT_ROWHL_FULL = 36.F, OVERVIEW_RESULT_CARD_CHROMEL = 56.F;
+
 inline constexpr size_t OVERVIEW_APP_RESULT_LIMIT      = 6;
-inline constexpr size_t OVERVIEW_PROVIDER_ROW_LIMIT    = 5;
 
 // X19: the panel shows ONE ordered list. Local app entries first -- they are an
 // in-memory scan and always instant -- then whatever the SearchProvider2
 // providers have answered with so far. Providers arrive asynchronously, so this
 // is deliberately a snapshot: the list grows across frames as replies land, and
 // a provider that never answers simply never appears.
+// An Action whose actionCommand starts with this is not run: the rest becomes
+// the query (the AI & Tools "Define" / "Translate" rows).
+inline constexpr std::string_view OVERVIEW_QUERY_REWRITE = "hyprdrive:query:";
+
 struct SSearchRow {
-    std::string              name;
-    // G6/X66: kept apart from the name rather than glued on with spaces. GNOME
-    // draws these as two columns -- a bright name, then a dimmer description --
-    // and one concatenated string cannot be coloured two ways.
-    std::string              description;
-    std::string              icon;
-    const AppSearch::SEntry* app = nullptr;
-    SearchProviders::SResult provider;
+    std::string                  name;
+    std::string                  description;
+    std::string                  icon;
+    std::string                  iconFont;
+    const AppSearch::SEntry*     app = nullptr;
+    SearchProviders::SResult     provider;
+    std::optional<OmarchySearch::SSearchItem> omarchy;
+    int                          column = 0; // 0 = Left (Apps, Actions, Calc, Agents), 1 = Right (Files, Settings)
+
+    // THE TOOL PANE (ToolSearch.hpp). Non-zero on every row of a `define` /
+    // `tr` query, which then owns the whole results container: 1 = dictionary,
+    // 2 = translator. name = the sense or translation, description = its tag.
+    uint8_t                      tool = 0;
+    std::string                  toolExample;  // a usage example, dimmer, under the text
+    std::string                  toolTitle;    // row 0 only: the headword / source text
+    std::string                  toolSubtitle; // row 0 only: "Wiktionary" / "en → es · MyMemory"
+    bool                         toolStatus = false; // a "Looking up…" / "Nothing found" row, not a result
 };
 
+inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry);
+
+inline std::vector<SSearchRow> overviewSearchRowsLive();
+
+// MEMOISED GLOBALLY, not per overview: both outputs show the SAME query, so a
+// two-monitor session was building this twice per frame -- and once is already
+// a scored sort of the whole app inventory, a walk of every window per app hit,
+// two stat()s for the menu, a stat() plus two fs::exists per agent, and a copy
+// of the file results out from under a mutex.
+//
+// Nothing about the SELECTION is in here. The rows are what the query and the
+// system are; which one is highlighted is navigation state and lives in
+// g_search.nav, which is exactly why it can be left out of the key.
+//
+// The empty-query browse path is deliberately NOT memoised: it is the only
+// caller of recentFiles(), which walks the user's directories and has no
+// generation to key on, and it is never on the per-frame path (renderSearch
+// asks for rows only once something is typed or a menu is open).
 inline std::vector<SSearchRow> overviewSearchRows() {
+    if (g_search.query.windowsOnly)
+        return {};
+
+    const std::string& Q           = g_search.query.text;
+    const bool         MENU_BROWSE = OmarchySearch::canNavigateMenuBack();
+
+    if (Q.empty() && !MENU_BROWSE)
+        return overviewSearchRowsLive();
+
+    struct SRowMemo {
+        std::string query;
+        std::string route;
+        bool        browse  = false;
+        uint64_t    inputs  = 0;
+        uint64_t    members = 0;
+        uint64_t    apps    = 0;
+        bool        filled  = false;
+
+        std::vector<SSearchRow> rows;
+    };
+
+    static SRowMemo MEMO;
+
+    const auto     ROUTE   = OmarchySearch::menuCurrentRoute();
+    const uint64_t INPUTS  = OmarchySearch::searchInputsGeneration();
+    const uint64_t MEMBERS = Membership::generation();
+    const uint64_t APPS    = AppSearch::inventoryGeneration();
+
+    if (MEMO.filled && MEMO.query == Q && MEMO.browse == MENU_BROWSE && MEMO.route == ROUTE && MEMO.inputs == INPUTS && MEMO.members == MEMBERS && MEMO.apps == APPS)
+        return MEMO.rows;
+
+    MEMO.query   = Q;
+    MEMO.route   = ROUTE;
+    MEMO.browse  = MENU_BROWSE;
+    MEMO.inputs  = INPUTS;
+    MEMO.members = MEMBERS;
+    MEMO.apps    = APPS;
+    MEMO.rows    = overviewSearchRowsLive();
+    MEMO.filled  = true;
+
+    return MEMO.rows;
+}
+
+// A `define` / `tr` query's rows: the senses (or the translation and its
+// alternatives), each copyable with Enter -- or one status row while the lookup
+// is in flight, empty or unreachable.
+inline std::vector<SSearchRow> overviewToolRows(const ToolSearch::SQuery& TQ) {
     std::vector<SSearchRow> rows;
-    if (g_search.query.text.empty())
+    const uint8_t           KIND = TQ.kind == ToolSearch::EKind::Define ? 1 : 2;
+
+    const auto statusRow = [&](const std::string& text, const std::string& title, const std::string& subtitle) {
+        SSearchRow r;
+        r.name         = text;
+        r.column       = 0;
+        r.tool         = KIND;
+        r.toolStatus   = true;
+        r.toolTitle    = title;
+        r.toolSubtitle = subtitle;
+        rows.push_back(std::move(r));
+    };
+
+    if (TQ.term.empty()) {
+        statusRow(KIND == 1 ? "Type a word to look up" : "Type something to translate  ·  tr es hello  ·  tr en:fr good morning", KIND == 1 ? "Dictionary" : "Translate", "");
         return rows;
-
-    Prof::Timer PROF{Prof::rowsNs, Prof::rowsCalls};
-
-    for (const auto* E : AppSearch::search(g_search.query.text, OVERVIEW_APP_RESULT_LIMIT))
-        rows.push_back({E->name, "", E->icon, E, {}});
-
-    // G5: each provider gets its OWN five rows. Providers arrive in whatever
-    // order they answer, so the count is kept per id rather than by assuming
-    // results() is grouped.
-    std::unordered_map<std::string, size_t> perProvider;
-    for (const auto& R : SearchProviders::results()) {
-        if (perProvider[R.providerDesktopId]++ >= OVERVIEW_PROVIDER_ROW_LIMIT)
-            continue;
-        // X66. There used to be a skip here for "the provider for an app we
-        // already list is the same row twice". It threw away EVERY result from
-        // a provider whose own app happened to match the query -- so searching
-        // "e" put Characters and Files in the apps grid and silently deleted
-        // both of their categories, which is the "only icons, no other results"
-        // the user reported. GNOME does not do this: its apps grid and its
-        // provider sections are independent, and its Calculator section lists
-        // "Open in Calculator" whether or not Calculator is also an app match.
-        rows.push_back({R.name, R.description, R.icon, nullptr, R});
     }
 
-    // G6 needs to know how many a provider ACTUALLY had, so the header can say
-    // how many are not being shown. perProvider counted every result, including
-    // the ones the cap skipped, so it is that total already.
-    g_search.query.providerTotals = std::move(perProvider);
+    const auto RES = ToolSearch::lookup(TQ);
+    using EState   = ToolSearch::SResult::EState;
+    switch (RES.state) {
+        case EState::Loading: statusRow(KIND == 1 ? "Looking up…" : "Translating…", RES.title, RES.subtitle); return rows;
+        case EState::Empty: statusRow(KIND == 1 ? "No definitions found" : "No translation came back", RES.title, RES.subtitle); return rows;
+        case EState::Error:
+            statusRow(!RES.message.empty() ? RES.message : (KIND == 1 ? "Could not reach Wiktionary -- check the connection" : "Could not reach the translation service"),
+                      RES.title, RES.subtitle);
+            return rows;
+        case EState::Ready: break;
+    }
+
+    for (size_t i = 0; i < RES.senses.size(); ++i) {
+        const auto& S = RES.senses[i];
+        SSearchRow  r;
+        r.name        = S.text;
+        r.description = S.tag;
+        r.column      = 0;
+        r.tool        = KIND;
+        r.toolExample = S.example;
+        if (i == 0) {
+            r.toolTitle    = RES.title;
+            r.toolSubtitle = RES.subtitle;
+        }
+
+        // Enter copies it: the Calculator row's activation, which is wl-copy of
+        // actionCommand with no shell in between.
+        OmarchySearch::SSearchItem item;
+        item.kind          = OmarchySearch::EItemKind::Calculator;
+        item.id            = "tool:" + std::to_string(i);
+        item.name          = S.text;
+        item.description   = S.tag;
+        item.actionCommand = S.text;
+        item.category      = KIND == 1 ? "Dictionary" : "Translate";
+        r.omarchy          = item;
+        rows.push_back(std::move(r));
+    }
     return rows;
 }
 
-// X49. One card per provider. The grouping happens once, here, because the band
-// maths and the render pass have to agree on how many cards there are and how
-// many rows each one holds -- deriving that twice is how a panel ends up taller
-// than the band it was allocated.
+inline std::vector<SSearchRow> overviewSearchRowsLive() {
+    std::vector<SSearchRow> rows;
+    Prof::Timer PROF{Prof::rowsNs, Prof::rowsCalls};
+
+    const std::string& Q           = g_search.query.text;
+    const bool         MENU_BROWSE = OmarchySearch::canNavigateMenuBack();
+
+    // A `define` / `tr` query owns the whole panel (user, 2026-09-22: "turns the
+    // results box into dictionary definitions").
+    if (!MENU_BROWSE) {
+        if (const auto TQ = ToolSearch::parse(Q); TQ.kind != ToolSearch::EKind::None && ToolSearch::enabled(TQ.kind))
+            return overviewToolRows(TQ);
+    }
+
+    // ------------------------------------------------------------------------
+    // COLUMN 0: OMARCHY MENU & APPS (Super+Space launcher)
+    // APPS ALWAYS LEAD. Running ones first, so Enter switches to an open window
+    // even when an Omarchy menu row also matches; then apps that are not open
+    // yet; then the menu.
+    //
+    // User: typing "zen" with Zen closed used to put "Zen setup -> Defaults ->
+    // Browser" on top, because menu rows were spliced BETWEEN running and
+    // unopened apps. Searching an app's name is a request for the app, not for
+    // a setting that mentions it -- the setting is still there, one row down.
+    // ------------------------------------------------------------------------
+    std::vector<SSearchRow> runningApps, menuRows, otherApps;
+
+    if (!Q.empty() && !MENU_BROWSE) {
+        for (const auto* E : AppSearch::search(Q, 6)) {
+            SSearchRow row{E->name, "", E->icon, "", E, {}, std::nullopt, 0};
+            if (overviewWindowForApp(*E))
+                runningApps.push_back(std::move(row));
+            else
+                otherApps.push_back(std::move(row));
+        }
+    }
+
+    // The BUILDER's cap is deliberately generous: overviewTrimSectionsToFit is
+    // the single place that decides how many rows survive, and it sizes that
+    // against the room the panel actually has. A second, smaller cap here just
+    // made the trim's ceiling unreachable -- the flat 8 below was why a panel
+    // with space for fourteen rows still never showed more than eight
+    // (user, 2026-09-23).
+    const size_t MENU_LIMIT = (Q.empty() || MENU_BROWSE) ? 24 : OVERVIEW_RESULT_ROWS_ALONE;
+    for (const auto& item : OmarchySearch::searchMenu(Q, MENU_LIMIT))
+        menuRows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 0});
+
+    rows.insert(rows.end(), std::make_move_iterator(runningApps.begin()), std::make_move_iterator(runningApps.end()));
+    rows.insert(rows.end(), std::make_move_iterator(otherApps.begin()), std::make_move_iterator(otherApps.end()));
+    rows.insert(rows.end(), std::make_move_iterator(menuRows.begin()), std::make_move_iterator(menuRows.end()));
+
+    // ------------------------------------------------------------------------
+    // COLUMN 1: FILES & FOLDERS (Omarchy Find Index)
+    // ------------------------------------------------------------------------
+    if (!MENU_BROWSE) {
+        if (Q.empty()) {
+            for (const auto& f : OmarchySearch::recentFiles()) {
+                rows.push_back({f.name, f.description, f.icon, "", nullptr, {}, f, 1});
+            }
+        } else {
+            for (const auto& f : OmarchySearch::fileResults()) {
+                rows.push_back({f.name, f.description, f.icon, "", nullptr, {}, f, 1});
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // COLUMN 2: AI AGENTS & TOOLS
+    // ------------------------------------------------------------------------
+    if (!Q.empty()) {
+        if (const auto calc = OmarchySearch::evaluateCalculator(Q); calc) {
+            rows.push_back({calc->name, calc->description, calc->icon, "", nullptr, {}, *calc, 2});
+        }
+    }
+
+    if (OmarchySearch::isAgentQuery(Q)) {
+        for (const auto& item : OmarchySearch::searchAgents(Q))
+            rows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 2});
+    } else if (!Q.empty() && !MENU_BROWSE) {
+        for (const auto& item : OmarchySearch::promptAllAgents(Q))
+            rows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 2});
+
+        // The tools, offered for whatever is typed. Activating one rewrites the
+        // query into the tool's own syntax, so the panel turns into it.
+        const auto toolRow = [&](const std::string& id, const std::string& name, const std::string& icon, const std::string& rewrite) {
+            OmarchySearch::SSearchItem t;
+            t.kind          = OmarchySearch::EItemKind::Action;
+            t.id            = id;
+            t.name          = name;
+            t.description   = Q;
+            t.icon          = icon;
+            t.category      = "Tools";
+            t.actionCommand = std::string(OVERVIEW_QUERY_REWRITE) + rewrite;
+            rows.push_back({t.name, t.description, t.icon, "", nullptr, {}, t, 2});
+        };
+        if (ToolSearch::enabled(ToolSearch::EKind::Define) && std::ranges::count(Q, ' ') <= 3)
+            toolRow("tool:define", "Define", "accessories-dictionary", "define " + Q);
+        if (ToolSearch::enabled(ToolSearch::EKind::Translate))
+            toolRow("tool:translate", "Translate", "preferences-desktop-locale", "translate " + Q);
+
+        OmarchySearch::SSearchItem webItem;
+        webItem.kind          = OmarchySearch::EItemKind::Action;
+        webItem.id            = "web:google";
+        webItem.name          = "Search Google";
+        webItem.description   = Q;
+        webItem.icon          = "web-browser";
+        webItem.category      = "Web";
+        std::string qenc;
+        for (unsigned char c : Q) {
+            if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+                qenc += static_cast<char>(c);
+            else if (c == ' ')
+                qenc += '+';
+            else {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "%%%02X", c);
+                qenc += buf;
+            }
+        }
+        webItem.actionCommand = "xdg-open 'https://www.google.com/search?q=" + qenc + "'";
+        rows.push_back({webItem.name, webItem.description, webItem.icon, "", nullptr, {}, webItem, 2});
+    } else if (!MENU_BROWSE) {
+        for (const auto& item : OmarchySearch::agentHelpItems())
+            rows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 2});
+    }
+
+    return rows;
+}
+
+// X49. One card per column: Omarchy Menu (0), Files & Folders (1), AI & Tools (2).
 struct SSearchSection {
     std::string         title;
     std::string         icon;
     std::vector<size_t> rows;  // indices into the overviewSearchRows() vector
-    size_t              total = 0; // G6: how many the provider had, cap included
-    // G5: which of the two layouts this section draws in. Apps are the GRID of
-    // icons; every other provider is a LIST of rows under a G6 header.
+    size_t              total = 0;
     bool                grid = false;
+    int                 column = 0; // 0, 1, or 2
 };
 
 inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSearchRow>& rows) {
     std::vector<SSearchSection> out;
-    std::vector<std::string>    keys;
+    std::string menuTitle = OmarchySearch::menuCurrentRouteTitle();
+    out.push_back({menuTitle.empty() ? "Omarchy Menu" : menuTitle, "system-run", {}, 0, false, 0});
+    out.push_back({"Files & Folders", "folder", {}, 0, false, 1});
+    out.push_back({"AI & Tools", "utilities-terminal", {}, 0, false, 2});
 
     for (size_t i = 0; i < rows.size(); ++i) {
-        // Apps share one key: they are the section the reference puts above the
-        // provider cards, and they have no provider of their own to name.
-        const std::string KEY = rows[i].app ? "" : rows[i].provider.providerDesktopId;
+        int col = std::clamp(rows[i].column, 0, 2);
+        out[sc<size_t>(col)].rows.push_back(i);
+    }
 
-        if (const auto IT = std::ranges::find(keys, KEY); IT != keys.end()) {
-            out[sc<size_t>(IT - keys.begin())].rows.push_back(i);
-            continue;
-        }
-
-        keys.push_back(KEY);
-        const auto TOTALIT = g_search.query.providerTotals.find(KEY);
-
-        // G6: the header carries the PROVIDER APPLICATION's icon and name,
-        // which is a different app from the one the row itself points at.
-        // entryForId is the only way to reach it, and a provider whose .desktop
-        // is missing keeps its bare id rather than drawing a headerless card.
-        SSearchSection section{.title = "Applications",
-                               .icon  = "applications-other",
-                               .rows  = {i},
-                               .total = TOTALIT == g_search.query.providerTotals.end() ? 0 : TOTALIT->second,
-                               .grid  = KEY.empty()};
-        if (!KEY.empty()) {
-            section.title = KEY;
-            section.icon  = KEY;
-            if (const auto* ENTRY = AppSearch::entryForId(KEY); ENTRY) {
-                section.title = ENTRY->name;
-                section.icon  = ENTRY->icon;
-            }
-        }
-        out.push_back(std::move(section));
+    for (auto& sec : out) {
+        sec.total = sec.rows.size();
     }
 
     return out;
 }
 
+// Mapped window of this desktop entry, if any. Prefer urgent, then a
+// non-minimized instance, so Enter switches instead of spawning a duplicate.
+inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry) {
+    PHLWINDOW best;
+    for (const auto& WINDOW : Desktop::windowState()->windows()) {
+        if (!WINDOW || !WINDOW->m_isMapped)
+            continue;
+        if (WINDOW->isHidden())
+            continue;
+        if (OmarchySearch::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
+            continue;
 
-// X62. Activating a result is ONE act however it was chosen -- Return on the
-// keyboard selection, or a plain click on the row. Sharing the helper is the
-// point: G12 built the drag and left the click undefined, and a second copy of
-// "launch or activate" is how the mouse and the keyboard end up disagreeing
-// about what the selected row does.
-inline bool activateSearchResult(int index) {
+        const auto CLASS = AppSearch::identityClass(WINDOW->m_class, WINDOW->m_title);
+
+        bool match = false;
+        if (!entry.wmClass.empty() && CLASS == entry.wmClass)
+            match = true;
+        else if (AppSearch::idForClass(CLASS) == entry.id)
+            match = true;
+        else if (CLASS == entry.id)
+            match = true;
+        if (!match)
+            continue;
+
+        if (WINDOW->m_isUrgent)
+            return WINDOW;
+        if (!best)
+            best = WINDOW;
+        else if (ScrollOverview::Minimize::isMinimized(best) && !ScrollOverview::Minimize::isMinimized(WINDOW))
+            best = WINDOW;
+    }
+    return best;
+}
+
+// Activating a result runs the corresponding app, Omarchy action, agent prompt,
+// calculator copy, or file open. Submenu navigation returns false so the overview
+// stays open while drilling down into the hierarchy. For an already-open app,
+// Enter focuses that window unless newInstance is set (double-tap Shift).
+void overviewQueryEdited(); // main.cpp
+
+inline bool activateSearchResult(int index, bool newInstance = false) {
     const auto RESULTS = overviewSearchRows();
     if (index < 0 || index >= sc<int>(RESULTS.size()))
         return false;
 
     const auto& ROW = RESULTS[index];
-    if (ROW.app)
-        AppSearch::launch(*ROW.app, ScrollOverview::Config::getTerminal());
-    else
-        SearchProviders::activate(ROW.provider, g_search.query.text);
 
-    return true;
+    // A tool row that rewrites the query (AI & Tools "Define" / "Translate"):
+    // the panel turns into the tool, and the overview stays up to show it.
+    if (ROW.omarchy && ROW.omarchy->kind == OmarchySearch::EItemKind::Action && ROW.omarchy->actionCommand.starts_with(OVERVIEW_QUERY_REWRITE)) {
+        g_search.query.text             = ROW.omarchy->actionCommand.substr(OVERVIEW_QUERY_REWRITE.size());
+        g_search.query.active           = true;
+        g_search.nav.zone               = EOverviewNavZone::Search;
+        g_search.nav.selection          = -1;
+        g_search.nav.explicitSelection  = false;
+        g_search.nav.selectFirstPending = false;
+        g_search.nav.intent             = ESearchIntent::Typing;
+        g_search.nav.hoverIndex         = -1;
+        // The rewritten query owes the same trailing work as a typed one --
+        // without it no provider (and no lookup) ever saw `define <word>`.
+        overviewQueryEdited();
+        return false;
+    }
+
+    // A status row ("Looking up...") is not a result.
+    if (ROW.toolStatus)
+        return false;
+
+    if (ROW.omarchy) {
+        if (ROW.omarchy->kind == OmarchySearch::EItemKind::Menu || ROW.omarchy->kind == OmarchySearch::EItemKind::Back) {
+            const bool DRILL = ROW.omarchy->kind == OmarchySearch::EItemKind::Menu;
+            OmarchySearch::activate(*ROW.omarchy);
+            if (DRILL) {
+                g_search.query.text.clear();
+                g_search.query.active          = false;
+                g_search.nav.zone              = EOverviewNavZone::Result;
+                g_search.nav.explicitSelection = true;
+                g_search.nav.selectFirstPending = false;
+                g_search.nav.intent            = ESearchIntent::Browsing;
+                g_search.nav.hoverIndex        = -1;
+            }
+            // Skip the ‹ Back row so a second Enter launches the first child.
+            const auto NEXT = overviewSearchRows();
+            int        sel  = 0;
+            for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
+                if (NEXT[sc<size_t>(i)].column != 0)
+                    continue;
+                if (NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == OmarchySearch::EItemKind::Back)
+                    continue;
+                sel = i;
+                break;
+            }
+            g_search.nav.selection = sel;
+            return false;
+        }
+        return OmarchySearch::activate(*ROW.omarchy);
+    } else if (ROW.app) {
+        if (!newInstance) {
+            if (const auto W = overviewWindowForApp(*ROW.app)) {
+                g_search.nav.pendingFocus = W;
+                return true;
+            }
+        }
+        AppSearch::launch(*ROW.app, ScrollOverview::Config::getTerminal());
+        return true;
+    } else {
+        SearchProviders::activate(ROW.provider, g_search.query.text);
+        return true;
+    }
 }
 
 // OVERVIEW_CPP_SPEC §5 F2, and §13.7 X18's open-window half.
@@ -434,10 +919,121 @@ inline bool activateSearchResult(int index) {
 // Counts RENDERED frames, which is the only clock this code actually advances
 // on: an idle overview renders nothing, so a wall-clock "last touched" measures
 // how long the user sat still rather than whether the tile was drawn.
-// ponytail: one counter for all monitors, so a second output would advance it
-// twice per frame and every tile would read as skipped; make it per-monitor if
-// this ever runs on more than one.
-inline uint64_t g_overviewFrame = 0;
+//
+// g_overviewFrame counts every overview's frames and is only good as a "same
+// frame?" key (the search memo below). Anything that asks "was this drawn LAST
+// frame" must count the frames of the monitor that draws it: with two monitors
+// the shared counter advanced once per output, so a tile on the monitor that
+// repainted less often read as skipped, was reseeded off its own desktop and
+// flew back in -- over and over, every reflow, whenever the OTHER monitor was
+// busier (user, 2026-09-14: the search grid flickering on the external monitor
+// while a terminal title spun on the laptop).
+inline uint64_t                                  g_overviewFrame = 0;
+inline std::unordered_map<MONITORID, uint64_t> g_overviewFramesByMonitor;
+
+inline uint64_t overviewFrameOn(const PHLMONITOR& monitor) {
+    if (!monitor)
+        return g_overviewFrame;
+    const auto IT = g_overviewFramesByMonitor.find(monitor->m_id);
+    return IT == g_overviewFramesByMonitor.end() ? 0 : IT->second;
+}
+
+// THE FOUR CONFIG READS THAT ARE ON THE BOX PATH, read once per drawn frame.
+//
+// ScrollOverview::Config::getValue builds a std::string from its key, hashes it
+// and probes an unordered_map, every single call -- and these keys are 30-40
+// characters, so the temporary allocates. getOverviewWindowBox reaches all of
+// them (mission control on/off, the grid gap, the reflow duration, and the
+// strip band the tiles lay out under), and a frame asks for a tile's box 4-6
+// times per tile per output while a pointer motion asks for every tile's.
+// Measured shape: several hundred of these per frame per output, and ~200k a
+// second while the cursor is moving.
+//
+// Keyed on the overview frame counter, which only moves inside render(). A
+// `hyprctl reload` therefore lands on the NEXT frame -- which is the frame the
+// reload damages anyway, so nothing is drawn with a stale value.
+inline bool overviewMissionControlOn() {
+    static uint64_t frame  = 0;
+    static bool     value  = false;
+    static bool     filled = false;
+
+    if (!filled || frame != g_overviewFrame) {
+        frame  = g_overviewFrame;
+        value  = ScrollOverview::Config::getMissionControl();
+        filled = true;
+    }
+
+    return value;
+}
+
+inline int overviewMissionControlGap() {
+    static uint64_t frame  = 0;
+    static int      value  = 0;
+    static bool     filled = false;
+
+    if (!filled || frame != g_overviewFrame) {
+        frame  = g_overviewFrame;
+        value  = ScrollOverview::Config::getMissionControlGap();
+        filled = true;
+    }
+
+    return value;
+}
+
+inline int overviewMissionControlReflowMs() {
+    static uint64_t frame  = 0;
+    static int      value  = 0;
+    static bool     filled = false;
+
+    if (!filled || frame != g_overviewFrame) {
+        frame  = g_overviewFrame;
+        value  = ScrollOverview::Config::getMissionControlReflowMs();
+        filled = true;
+    }
+
+    return value;
+}
+
+// ...and the two clocks. animElapsedMs divides by the anim_scale slider, which
+// is another string-keyed probe, and the grid's reflow and release both read it
+// several times per box. getScale is the open-progress denominator and is read
+// once per box as well.
+inline float overviewAnimScale() {
+    static uint64_t frame  = 0;
+    static float    value  = 1.F;
+    static bool     filled = false;
+
+    if (!filled || frame != g_overviewFrame) {
+        frame  = g_overviewFrame;
+        value  = ScrollOverview::Config::animScale();
+        filled = true;
+    }
+
+    return value;
+}
+
+// Byte-for-byte Config::animElapsedMs, reading the memoised slider.
+inline float overviewAnimElapsedMs(const Time::steady_tp& since) {
+    const float SCALE = overviewAnimScale();
+    if (SCALE <= 0.F)
+        return 1e9F;
+
+    return ScrollOverview::Config::realElapsedMs(since) / SCALE;
+}
+
+inline float overviewOpenScale() {
+    static uint64_t frame  = 0;
+    static float    value  = 0.F;
+    static bool     filled = false;
+
+    if (!filled || frame != g_overviewFrame) {
+        frame  = g_overviewFrame;
+        value  = ScrollOverview::Config::getScale();
+        filled = true;
+    }
+
+    return value;
+}
 
 inline bool overviewSearchMatches(const PHLWINDOW& window) {
     if (g_search.query.text.empty())
@@ -476,7 +1072,7 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
     std::string haystack = window->m_workspace ? std::format("{}: ", window->m_workspace->m_id) : "";
     haystack += window->m_title + " " + window->m_class;
 
-    if (const auto APPNAME = AppSearch::appNameForClass(window->m_class); !APPNAME.empty())
+    if (const auto APPNAME = AppSearch::appNameForClass(AppSearch::identityClass(window->m_class, window->m_title)); !APPNAME.empty())
         haystack += " " + APPNAME;
 
     const bool MATCHED       = AppSearch::strictMatch(CACHE.text, haystack);
@@ -548,6 +1144,16 @@ inline bool overviewMembershipMatches(const PHLWINDOW& WINDOW) {
 // cannot disagree about which windows exist. Dropping a window from the gate
 // removes it from the grid too, and the survivors re-lay-out through the U4
 // reflow animation at no extra cost.
+// Omarchy's screensaver is a real fullscreen terminal (class
+// org.omarchy.screensaver). The overview owns the monitor's render pass, so
+// that window cannot cover the output while an overview is up. Drop the
+// overview immediately; do not wait for the close animation.
+inline bool isScreensaverWindow(const PHLWINDOW& window) {
+    if (!window)
+        return false;
+    return window->m_class == "org.omarchy.screensaver" || window->m_initialClass == "org.omarchy.screensaver";
+}
+
 inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     // Z9r5: a window hidden for a dock flight is the proxy's alone -- drawing
     // its tile too would be the double image the spec forbids.
@@ -555,6 +1161,12 @@ inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
         return false;
 
     const auto WINDOW = getOverviewWindowToShow(window);
+
+    if (!WINDOW)
+        return false;
+
+    if (OmarchySearch::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
+        return false;
 
     if (!validMapped(WINDOW))
         return false;
@@ -677,12 +1289,146 @@ inline bool layerHasOverviewAnimation(const PHLLS& layer) {
 // nothing on screen to aim a drag at, and nowhere for D'4's post-drop preview
 // to appear. Minis are real windows rendered small; spec §6 exempts them from
 // frost, so this does not reopen section C.
-inline float overviewStripLogicalHeight(PHLMONITOR monitor) {
-    if (!ScrollOverview::Config::getStrip() || !monitor)
+// Memoised per output per drawn frame for the reason the mission-control
+// getters above are: overviewStripStackL asks for this THREE times, the grid
+// asks for that stack on every box it places, and each ask is two string-keyed
+// config probes. Same one-frame ceiling on a `hyprctl reload`.
+// The two ceilings above (see the clamp below). The share of the LEFTOVER the
+// band may take once the search chrome has been paid for -- 0.40 keeps the grid
+// on the long side of the split, which is what makes a preview beat a strip cell
+// on the panel this was reported on. The slack is what the stack costs beyond
+// the band itself: panelPad - panelPad + dock pad, i.e. the `+8` in
+// overviewStripStackL once the algebra is done.
+inline constexpr float OVERVIEW_STRIP_MAX_AVAIL_FRAC = 0.40F;
+inline constexpr float OVERVIEW_STRIP_STACK_SLACKL   = 8.F;
+
+// The band's ceiling with the LEFTOVER term left out, which is what breaks the
+// cycle the two ceilings would otherwise make: the full height below shrinks the
+// strip by how much room the results band took, so a results budget that then
+// sized itself against the LIVE strip would feed its own growth -- band up,
+// strip down, leftover up, band up again. overviewResultsBandTarget asks this
+// one instead, and it depends on nothing the band can move.
+inline float overviewStripBandCeilingL(PHLMONITOR monitor) {
+    if (!monitor || !ScrollOverview::Config::getStrip())
         return 0.F;
 
     const float H = sc<float>(ScrollOverview::Config::getStripHeight());
-    return H > 1.F && H < sc<float>(monitor->m_size.y) / 2.F ? H : 0.F;
+    if (H <= 1.F)
+        return 0.F;
+
+    return std::min(H, sc<float>(monitor->m_size.y) * sc<float>(ScrollOverview::Config::getStripMaxScreenPct()) / 100.F);
+}
+
+inline float overviewStripLogicalHeight(PHLMONITOR monitor) {
+    if (!monitor)
+        return 0.F;
+
+    struct SBandMemo {
+        MONITORID id     = MONITOR_INVALID;
+        uint64_t  frame  = 0;
+        double    monH   = 0.0;
+        float     chrome = 0.F; // search row + results band: the band shrinks under them
+        float     value  = 0.F;
+        bool      filled = false;
+    };
+
+    static std::array<SBandMemo, 4> MEMOS;
+    static size_t                   next = 0;
+
+    // The search chrome above the strip, read straight off the publish rather
+    // than through overviewSearchLogicalHeight/overviewResultsLogicalHeight --
+    // both are declared below this point, and this is the same two fields.
+    const auto& PUB    = g_search.layoutOn(monitor->m_id);
+    const float CHROME = std::max(0.F, PUB.rowL) + std::max(0.F, PUB.bandH);
+
+    const uint64_t FRAME = overviewFrameOn(monitor);
+    for (const auto& MEMO : MEMOS) {
+        if (MEMO.filled && MEMO.id == monitor->m_id && MEMO.frame == FRAME && MEMO.monH == monitor->m_size.y && MEMO.chrome == CHROME)
+            return MEMO.value;
+    }
+
+    float value = 0.F;
+    if (ScrollOverview::Config::getStrip()) {
+        const float H    = sc<float>(ScrollOverview::Config::getStripHeight());
+        const float MONH = sc<float>(monitor->m_size.y);
+        value            = H > 1.F ? H : 0.F;
+
+        // A CEILING, not a cliff. This used to read `H < monH/2 ? H : 0`, which
+        // answered a strip configured too tall by switching the strip OFF -- the
+        // one outcome nobody asks for. Clamp instead.
+        //
+        // The ceiling itself is the user's (2026-09-22): a strip cell must never
+        // be bigger than the window previews underneath it, and on a 900px panel
+        // the stock 260 made one strip cell (166px) taller than the grid's whole
+        // remaining height (146px). It is a share of the screen, so it means the
+        // same thing on every panel.
+        if (value > 1.F) {
+            value = overviewStripBandCeilingL(monitor);
+
+            // ...and a second ceiling for when the results panel is up, which is
+            // exactly when the grid is starved: the band may take only a share of
+            // what is left after the search chrome. Rides the results band's own
+            // ease, so the strip gives its room up in step with the panel that
+            // took it rather than snapping a frame later.
+            // ...and only while there ARE previews. With nothing matched the
+            // grid is empty, the panel has taken the room on purpose, and
+            // clamping the strip here would shrink it to protect tiles that do
+            // not exist.
+            const float AVAIL = MONH - CHROME - sc<float>(overviewMissionControlGap()) - OVERVIEW_STRIP_STACK_SLACKL;
+            if (PUB.gridTiles > 0 && AVAIL > 1.F)
+                value = std::min(value, AVAIL * OVERVIEW_STRIP_MAX_AVAIL_FRAC);
+
+            value = std::max(0.F, value);
+        }
+    }
+
+    auto& slot  = MEMOS[next];
+    next        = (next + 1) % MEMOS.size();
+    slot.id     = monitor->m_id;
+    slot.frame  = FRAME;
+    slot.monH   = monitor->m_size.y;
+    slot.chrome = CHROME;
+    slot.value  = value;
+    slot.filled = true;
+
+    return value;
+}
+
+// Strip cells sit in the reserved band with this pad on every side. The panel
+// around them is a fixed 10px (same as the reference). The empty space between
+// the search pill and that panel is the chrome gap the grid must match below
+// the strip -- otherwise the leftover band + mission-control gap reads as a
+// hole between the strip and the windows.
+inline constexpr float OVERVIEW_STRIP_BAND_PAD_FRAC = 0.18F;
+inline constexpr float OVERVIEW_STRIP_PANELPADL     = 10.F;
+
+inline float overviewStripPadL(PHLMONITOR monitor) {
+    return overviewStripLogicalHeight(monitor) * OVERVIEW_STRIP_BAND_PAD_FRAC;
+}
+
+inline float overviewChromeGapL(PHLMONITOR monitor) {
+    const float PAD = overviewStripPadL(monitor);
+    return std::max(0.F, PAD - OVERVIEW_STRIP_PANELPADL + OVERVIEW_SEARCH_DOCKPADL);
+}
+
+// Search/results, then the drawn strip panel, then one chrome gap. The grid
+// starts immediately after this; it must not also add mission_control_gap.
+inline float overviewStripStackL(PHLMONITOR monitor) {
+    const float BAND = overviewStripLogicalHeight(monitor);
+    if (BAND <= 0.F)
+        return 0.F;
+
+    // The plate as the strip step measured it, when there is one. The band is a
+    // reservation and the plate is usually shorter; stacking on the band leaves
+    // the difference as a hole the user reads as "the windows sit too low".
+    if (monitor) {
+        if (const float PLATE = g_search.layoutOn(monitor->m_id).stripPlateL; PLATE > 0.F)
+            return PLATE + overviewChromeGapL(monitor);
+    }
+
+    const float PAD   = overviewStripPadL(monitor);
+    const float CELLH = std::max(0.F, BAND - 2.F * PAD);
+    return PAD + CELLH + OVERVIEW_STRIP_PANELPADL + overviewChromeGapL(monitor);
 }
 
 // X10 + the pill row's published height. OVERVIEW_SEARCH_ROWHL and the value
@@ -690,7 +1436,7 @@ inline float overviewStripLogicalHeight(PHLMONITOR monitor) {
 // from the pill's ACTUAL landed foot, so it is part of the published layout and
 // not a free-standing global.
 inline float overviewSearchLogicalHeight(PHLMONITOR monitor) {
-    return monitor ? g_search.layout.rowL : 0.F;
+    return monitor ? g_search.layoutOn(monitor->m_id).rowL : 0.F;
 }
 
 // X50: how far down the monitor the top chrome reaches, in logical global px.
@@ -752,9 +1498,7 @@ inline constexpr float OVERVIEW_RESULT_CELLWL = 132.F, OVERVIEW_RESULT_CELLHL = 
 // -text gap and the name-to-description gap were all the literal 10, and reading
 // them as one number is how "nudge the description over" quietly moves the G6
 // header too.
-inline constexpr float OVERVIEW_CARD_ROUNDL       = 16.F; // the card's corner radius
 inline constexpr float OVERVIEW_CARD_PADL         = 12.F; // inner pad: card edge -> icon, row edge -> icon
-inline constexpr float OVERVIEW_CARD_SELROUNDL    = 10.F; // the selected row's / cell's fill
 inline constexpr float OVERVIEW_CARD_HEADICONL    = 32.F; // G6 provider icon on the leading edge
 inline constexpr float OVERVIEW_CARD_HEADGAPL     = 10.F; // that icon -> the provider name
 inline constexpr float OVERVIEW_CARD_HEADPX       = 14.F; // the provider name
@@ -770,7 +1514,7 @@ inline constexpr float OVERVIEW_CARD_CELLGAPL     = 4.F;  // that cell's icon ->
 inline constexpr float OVERVIEW_CARD_CELLPX       = 13.F; // that label
 
 inline float overviewResultsLogicalHeight(PHLMONITOR monitor) {
-    return monitor ? std::max(0.F, g_search.layout.bandH) : 0.F;
+    return monitor ? std::max(0.F, g_search.layoutOn(monitor->m_id).bandH) : 0.F;
 }
 
 // The width the result cards span: the monitor inset by the mission-control
@@ -780,13 +1524,99 @@ inline float overviewResultsSpanW(PHLMONITOR monitor) {
     if (!monitor)
         return 1.F;
 
-    // X65 (user, 2026-08-05): "results blur should not take up 80% of the
-    // screen width, maybe something like 50%". A result is an icon, a name and
-    // a description -- it never needed the tile grid's full span, and at 86%
-    // the frosted card was the largest thing on screen. Clamped so a narrow
-    // monitor still leaves room for the G6 header column plus a usable row.
     const float GAPL = sc<float>(ScrollOverview::Config::getMissionControlGap());
-    return std::clamp(sc<float>(monitor->m_size.x) * 0.5F, 1.F, std::max(1.F, sc<float>(monitor->m_size.x) - (GAPL * 2.F)));
+    return std::clamp(sc<float>(monitor->m_size.x) * 0.84F, 880.F, std::max(1.F, sc<float>(monitor->m_size.x) - (GAPL * 2.F)));
+}
+
+// A DICTIONARY/TRANSLATOR ROW IS AS TALL AS ITS TEXT (user, 2026-09-24:
+// "better wrapping on definitions - we're leaving space on the table"). The
+// rows were a fixed OVERVIEW_TOOL_ROWHL, so a long definition was cut at two
+// lines and a short one sat in a gap. Measured at LOGICAL scale with the same
+// fonts and columns the drawing uses (scrollOverview.cpp's tool pane), so the
+// layout and the pixels agree; OVERVIEW_TOOL_ROWHL stays the floor.
+inline constexpr float OVERVIEW_TOOL_ROWPADL = 10.F, OVERVIEW_TOOL_TEXTPX = 14.F, OVERVIEW_TOOL_EXPX = 11.F, OVERVIEW_TOOL_VPADL = 5.F;
+inline constexpr float OVERVIEW_TOOL_MAXLINES = 6.F;
+inline float overviewToolTagWL(uint8_t kind) {
+    return kind == 1 ? 92.F : 52.F;
+}
+inline float overviewToolTextWL(uint8_t kind, float containerWL) {
+    return std::max(16.F, containerWL - (2.F * OVERVIEW_TOOL_PADL) - (2.F * OVERVIEW_TOOL_ROWPADL) - overviewToolTagWL(kind));
+}
+inline float overviewToolRowHL(const SSearchRow& row, float containerWL) {
+    if (row.toolStatus || row.name.empty())
+        return OVERVIEW_TOOL_ROWHL;
+    const int   W    = std::max(16, ((sc<int>(overviewToolTextWL(row.tool, containerWL)) + 15) / 16) * 16);
+    const auto  TX   = OverviewRender::textWrapped(row.name, CHyprColor{1.F, 1.F, 1.F, 1.F}, sc<int>(OVERVIEW_TOOL_TEXTPX), W,
+                                                   sc<int>(OVERVIEW_TOOL_TEXTPX * 1.35F * OVERVIEW_TOOL_MAXLINES), false, "", 400);
+    const float TXH  = TX && TX->ok() ? sc<float>(TX->m_size.y) : OVERVIEW_TOOL_TEXTPX * 1.35F;
+    const float EXH  = row.toolExample.empty() ? 0.F : OVERVIEW_TOOL_EXPX * 1.5F;
+    return std::max(OVERVIEW_TOOL_ROWHL, TXH + EXH + (2.F * OVERVIEW_TOOL_VPADL) + 8.F);
+}
+
+// Unified search panel: visible columns + inspector fill the container.
+// Empty columns ease to width 0; leftover is split by flex (files take more
+// when present so paths fit).
+inline constexpr float SEARCH_PAD_L        = 14.F;
+inline constexpr float SEARCH_DIV_GAPL     = 14.F;
+inline constexpr float SEARCH_INSP_WL      = 280.F;
+inline constexpr float SEARCH_INSP_MID_WL  = 340.F; // 2 result columns
+inline constexpr float SEARCH_INSP_WIDE_WL = 400.F; // 1 result column
+inline constexpr float SEARCH_COL_FLEX[3]  = {1.F, 1.45F, 1.F};
+inline constexpr float SEARCH_COL_HIDE_WL  = 8.F;
+
+struct SSearchColWidths {
+    float col[3]    = {};
+    float inspector = SEARCH_INSP_WL;
+    float container = 0.F;
+    int   visible   = 0;
+};
+
+inline uint8_t overviewSearchColMask(const std::vector<SSearchSection>& sections) {
+    uint8_t mask = 0;
+    for (const auto& sec : sections) {
+        if (!sec.rows.empty() && sec.column >= 0 && sec.column < 3)
+            mask |= static_cast<uint8_t>(1u << sec.column);
+    }
+    return mask;
+}
+
+inline SSearchColWidths overviewSearchColWidths(float containerWL, uint8_t mask) {
+    SSearchColWidths w;
+    w.container = containerWL;
+    int   n    = 0;
+    float flex = 0.F;
+    for (int i = 0; i < 3; ++i) {
+        if (mask & (1u << i)) {
+            ++n;
+            flex += SEARCH_COL_FLEX[i];
+        }
+    }
+    w.visible = n;
+    if (n == 0 || containerWL < SEARCH_COL_HIDE_WL)
+        return w;
+
+    const float CHROME = (SEARCH_PAD_L * 2.F) + (SEARCH_DIV_GAPL * sc<float>(n));
+    float       insp   = SEARCH_INSP_WL;
+    if (n == 1)
+        insp = SEARCH_INSP_WIDE_WL;
+    else if (n == 2)
+        insp = SEARCH_INSP_MID_WL;
+    const float MIN_COLS = 160.F * sc<float>(n);
+    insp                 = std::min(insp, std::max(200.F, containerWL - CHROME - MIN_COLS));
+    float inner          = containerWL - CHROME - insp;
+    if (inner < 120.F) {
+        insp  = std::clamp(containerWL * 0.28F, 160.F, insp);
+        inner = containerWL - CHROME - insp;
+    }
+    inner         = std::max(0.F, inner);
+    w.inspector   = insp;
+    if (flex <= 0.F)
+        return w;
+    for (int i = 0; i < 3; ++i) {
+        if (mask & (1u << i))
+            w.col[i] = inner * (SEARCH_COL_FLEX[i] / flex);
+    }
+    return w;
 }
 
 // G5: the grid "caps at 6 and at whatever fits the width". The 6 is applied
@@ -827,51 +1657,132 @@ inline float overviewResultsSectionHeight(const SSearchSection& section, float s
 // So the stack is made to FIT before anything measures it: rows are given up
 // from the tallest section first, and no section is ever taken below one row.
 // Every category survives; the rows given up are what G6's "%d more" reports.
-// Dropping a whole category to fit a box is never the answer -- the categories
-// ARE the feature.
-inline void overviewTrimSectionsToFit(std::vector<SSearchSection>& sections, PHLMONITOR monitor) {
+// HOW TALL THE PANEL MAY GET, and HOW MANY ROWS THAT BUYS. Both the trim and
+// the band ask these, so the two can never disagree about the answer -- which
+// is exactly how the flat 8 above outlived the ratio ceiling that replaced it.
+//
+// The panel and the window previews share a single column of screen, and the
+// old flat "8 rows, 360px" answered a one-letter query by spending 40% of the
+// monitor on menu rows nobody asked for while the windows actually being
+// filtered were squeezed into what was left (user, 2026-09-23). So the ceiling
+// asks what the grid below is doing:
+//
+//   crowded  -- more than 4 previews are up, and they are the small ones. 6.
+//   normal   -- a few previews. 8, the old number.
+//   alone    -- NOTHING matched, so there are no previews to protect and the
+//               grid's height goes to zero: the leftover is the panel's.
+//
+// The alone cap is a ceiling on the WORK, not on the space -- each row
+// rasterises text and uploads a texture -- so the geometry below almost always
+// binds first and the 20 only matters on a very tall panel.
+inline float overviewResultsBudgetL(PHLMONITOR monitor, size_t gridTiles) {
+    if (!monitor)
+        return 0.F;
+
+    float budget = std::min(360.F, sc<float>(monitor->m_size.y) * 0.42F);
+
+    // With no previews the grid's own height goes to ZERO, so everything under
+    // the strip is the panel's (user, 2026-09-23). What stays behind is one
+    // mission-control gap, so the strip never sits flush against the desktop
+    // card's bottom edge when a long list pushes the whole stack down.
+    //
+    // The strip term is the stack AS DRAWN rather than its ceiling, which is
+    // safe only on this branch and is why the branch exists: overviewStripStackL
+    // -> overviewStripLogicalHeight reads the published band to size its
+    // leftover ceiling, but that ceiling is gated on gridTiles > 0, so with no
+    // tiles the stack depends on nothing this budget can move.
+    if (gridTiles == 0) {
+        const float SPARE = sc<float>(monitor->m_size.y) - OVERVIEW_SEARCH_ROWHL - overviewStripStackL(monitor) - sc<float>(overviewMissionControlGap());
+        budget            = std::max(budget, SPARE);
+    }
+
+    return budget;
+}
+
+inline size_t overviewResultsRowCap(PHLMONITOR monitor, size_t gridTiles) {
+    const size_t RATIO = gridTiles == 0                         ? OVERVIEW_RESULT_ROWS_ALONE :
+        gridTiles > OVERVIEW_RESULT_TILES_CROWDED               ? OVERVIEW_RESULT_ROWS_CROWDED :
+                                                                  OVERVIEW_RESULT_ROWS_NORMAL;
+
+    // The ratio is the intent; the room is the hard limit. Trimming to more
+    // rows than the budget can draw would spill the card past its container.
+    const float  ROOM = overviewResultsBudgetL(monitor, gridTiles) - OVERVIEW_RESULT_CARD_CHROMEL - (OVERVIEW_RESULT_PANELGAPL * 2.F);
+    const size_t FITS = ROOM >= OVERVIEW_RESULT_ROWHL_FULL ? sc<size_t>(ROOM / OVERVIEW_RESULT_ROWHL_FULL) : 1;
+
+    return std::max<size_t>(1, std::min(RATIO, FITS));
+}
+
+inline void overviewTrimSectionsToFit(std::vector<SSearchSection>& sections, PHLMONITOR monitor, size_t gridTiles) {
     if (sections.empty() || !monitor)
         return;
 
-    const float SPANWL = overviewResultsSpanW(monitor);
-    // The same ceiling the band target uses, less the gaps it adds back, so the
-    // two cannot disagree about what "fits" means.
-    const float BUDGET = std::max(0.F, (sc<float>(monitor->m_size.y) / 2.F) - overviewSearchLogicalHeight(monitor) - (OVERVIEW_RESULT_PANELGAPL * 2.F));
-
-    const auto stackHeight = [&] {
-        float h = sc<float>(sections.size() - 1) * OVERVIEW_RESULT_SECTIONGAPL;
-        for (const auto& SECTION : sections)
-            h += overviewResultsSectionHeight(SECTION, SPANWL);
-        return h;
-    };
-
-    while (stackHeight() > BUDGET) {
-        const auto TALLEST = std::ranges::max_element(sections, {}, [&](const SSearchSection& SECTION) { return overviewResultsSectionHeight(SECTION, SPANWL); });
-        if (TALLEST == sections.end() || TALLEST->rows.size() <= 1)
-            break; // every category keeps a row, even if the stack still overflows
-
-        TALLEST->rows.pop_back();
+    // THE CAP COMES FROM THE SAME PLACE THE BAND'S DOES. This used to be a flat
+    // `MAX_ROWS = 8` and it runs BEFORE the band is sized, so it silently
+    // decided the answer: the band measured an already-truncated list and no
+    // ceiling above 8 could ever be reached, however much room there was
+    // (user, 2026-09-23: "I never saw more than 8 rows in the results pane").
+    const size_t MAX_ROWS = overviewResultsRowCap(monitor, gridTiles);
+    for (auto& sec : sections) {
+        if (sec.rows.size() > MAX_ROWS)
+            sec.rows.resize(MAX_ROWS);
     }
 }
 
-inline float overviewResultsBandTarget(PHLMONITOR monitor, const std::vector<SSearchSection>& sections) {
+inline float overviewResultsWidthTarget(PHLMONITOR monitor, const std::vector<SSearchSection>& sections) {
+    if (!monitor)
+        return 0.F;
+
+    // Always the full span once any column exists: hiding empty columns and
+    // growing the box as files arrived was the janky expand. Files take the
+    // leftover inside a stable outer width.
+    bool any = false;
+    for (const auto& s : sections) {
+        if (!s.rows.empty()) {
+            any = true;
+            break;
+        }
+    }
+    if (!any)
+        return 0.F;
+
+    return overviewResultsSpanW(monitor);
+}
+
+inline float overviewResultsBandTarget(PHLMONITOR monitor, const std::vector<SSearchSection>& sections, size_t gridTiles, bool toolPane = false, float toolRowsHL = -1.F) {
     if (sections.empty() || !monitor)
         return 0.F;
 
-    const float SPANWL = overviewResultsSpanW(monitor);
+    size_t maxRows = 0;
+    for (const auto& sec : sections)
+        maxRows = std::max(maxRows, sec.rows.size());
+    if (maxRows == 0)
+        maxRows = 1;
 
-    float panelH = sc<float>(sections.size() - 1) * OVERVIEW_RESULT_SECTIONGAPL;
-    for (const auto& SECTION : sections)
-        panelH += overviewResultsSectionHeight(SECTION, SPANWL);
+    // ...and never more rows than there ARE results: a six-row budget spent on
+    // three answers is the same hole seen from the other side. The sections
+    // arrive already trimmed to overviewResultsRowCap, so this only has to
+    // honour what actually survived.
+    const float CARD_H = toolPane ?
+        (2.F * OVERVIEW_TOOL_PADL) + OVERVIEW_TOOL_HEADL + (toolRowsHL >= 0.F ? toolRowsHL : sc<float>(maxRows) * (OVERVIEW_TOOL_ROWHL + OVERVIEW_TOOL_GAPL)) +
+            (OVERVIEW_RESULT_PANELGAPL * 2.F) :
+        OVERVIEW_RESULT_CARD_CHROMEL + (sc<float>(maxRows) * OVERVIEW_RESULT_ROWHL_FULL) + (OVERVIEW_RESULT_PANELGAPL * 2.F);
 
-    // X60: the band now sits UNDER the search row and above the strip, so the
-    // ceiling is what is left of the top half once the search row has taken its
-    // share -- not the bottom half above the dock. X48's constraint is the one
-    // that survives and it is the reason this cap exists at all: however many
-    // results match, the strip and the tiles stay on screen.
-    const float BUDGET = std::max(0.F, sc<float>(monitor->m_size.y) / 2.F - overviewSearchLogicalHeight(monitor));
+    return std::min(CARD_H, overviewResultsBudgetL(monitor, gridTiles));
+}
 
-    return std::min(panelH + (OVERVIEW_RESULT_PANELGAPL * 2.F), BUDGET);
+inline int overviewFirstAppIndex(const std::vector<SSearchRow>& rows) {
+    int firstCol0 = -1;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].column != 0)
+            continue;
+        if (firstCol0 < 0)
+            firstCol0 = sc<int>(i);
+        if (rows[i].app && overviewWindowForApp(*rows[i].app))
+            return sc<int>(i);
+    }
+    if (firstCol0 >= 0)
+        return firstCol0;
+    return rows.empty() ? -1 : 0;
 }
 
 // The axis helpers. They used to be defined at the bottom of this file with a
@@ -895,12 +1806,12 @@ inline float axisSize(const Vector2D& size, ScrollOverview::Config::ELayout layo
 // lookup, so no call site had to learn a new vocabulary.
 inline CBox getOverviewBox(CBox box, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
                            bool round = true) {
-    return OvGeom::overviewBox(box, viewportOf(monitor), scale, viewOffset, offset, axisOf(layout), round);
+    return OvGeom::overviewBox(box, viewportOf(monitor, scale), scale, viewOffset, offset, axisOf(layout), round);
 }
 
 inline CBox getOverviewGlobalBox(CBox globalBox, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
                                  bool round = true) {
-    return OvGeom::overviewGlobalBox(globalBox, viewportOf(monitor), scale, viewOffset, offset, axisOf(layout), round);
+    return OvGeom::overviewGlobalBox(globalBox, viewportOf(monitor, scale), scale, viewOffset, offset, axisOf(layout), round);
 }
 
 // X22: the top chrome -- search pill, results panel, workspace strip -- is
@@ -909,6 +1820,52 @@ inline CBox getOverviewGlobalBox(CBox globalBox, PHLMONITOR monitor, float scale
 // inset from the monitor's top edge that keeps it clear of the layer-shell bar
 // -- X10's occlusion finding stands) while refusing to pan with the desktops.
 inline const Vector2D OVERVIEW_CHROME_NO_PAN = {};
+
+// The pair overviewGridSlot answers with. A single if-init-statement can only
+// declare one thing, and both halves are needed inside the branch.
+struct SGridSlot {
+    CBox slot;
+    bool promoted = false;
+};
+
+inline float getWorkspaceRenderedPitch(PHLMONITOR monitor, float scale, ScrollOverview::Config::ELayout layout);
+
+// A CARD'S GRID, PUSHED TOWARD THE CENTRE CARD (user, 2026-09-30): only the
+// inner edge of a neighbouring card is on screen, so its grid is aligned to that
+// edge (a gap in) instead of centred, and its windows are in reach. The push is
+// scaled by how far the card is off centre RIGHT NOW -- its offset minus the
+// animated pan, over the card pitch -- so a card sliding in eases from pushed to
+// centred and nothing jumps at a keypress. `slot` is the card's own grid slot.
+inline CBox overviewCardGridPush(CBox slot, const PHLWORKSPACE& workspace, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset,
+                                 ScrollOverview::Config::ELayout layout) {
+    const bool   HORIZ = layout == ScrollOverview::Config::ELayout::HORIZONTAL;
+    const double MS    = std::max(monitor->m_scale, 0.01F);
+    const double PITCH = getWorkspaceRenderedPitch(monitor, scale, layout);
+    const double D     = offset - (HORIZ ? viewOffset.x : viewOffset.y) * scale * MS;
+    const double T     = PITCH > 1.0 ? std::clamp(std::abs(D) / PITCH, 0.0, 1.0) : 0.0;
+    if (T < 0.001)
+        return slot;
+
+    double lo = 1e18, hi = -1e18;
+    for (const auto& W : overviewMainGridWindows(workspace, monitor)) {
+        if (CBox b; overviewGridLayout(workspace, monitor, W, b)) {
+            lo = std::min(lo, HORIZ ? b.x : b.y);
+            hi = std::max(hi, HORIZ ? b.x + b.w : b.y + b.h);
+        }
+    }
+    if (!(lo < hi))
+        return slot;
+
+    constexpr double EDGE  = 24.0; // logical px in from the card's edge
+    const double     START = HORIZ ? monitor->m_position.x : monitor->m_position.y;
+    const double     END   = START + (HORIZ ? monitor->m_size.x : monitor->m_size.y);
+    const double     SHIFT = (D > 0.0 ? (START + EDGE) - lo : (END - EDGE) - hi) * T;
+    if (HORIZ)
+        slot.x += SHIFT;
+    else
+        slot.y += SHIFT;
+    return slot;
+}
 
 inline CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
                                  bool round = true, const CBox* geometryOverride = nullptr) {
@@ -938,10 +1895,14 @@ inline CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
         if (const float UNIT = scale * std::max(monitor->m_scale, 0.01F); UNIT > 0.01F && std::abs(offset) > 0.01F)
             home.translate(axisOffsetVector(offset / UNIT, layout));
 
-        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, home, nullptr, false, true), overviewGridProgress(scale));
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(monitor, window, home, nullptr, false, true), overviewGridProgress(scale));
         offset   = 0.F;
-    } else if (CBox slot; overviewGridSlot(window, monitor, slot)) {
-        const bool PROMOTED = overviewGridPromoted(window, monitor);
+    } else if (SGridSlot hit; overviewGridSlot(window, monitor, hit.slot, &hit.promoted)) {
+        // The B2 answer comes back OUT of the slot lookup. It used to be asked
+        // for again here, which re-walked the promotable test and re-armed the
+        // release map for a value the line above had already settled.
+        const CBox& slot     = hit.slot;
+        const bool  PROMOTED = hit.promoted;
 
         // F3-b-i: a promoted tile enters from the place it occupies on its own
         // desktop -- which is exactly the per-workspace offset suppressed below,
@@ -957,12 +1918,31 @@ inline CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
             }
         }
 
-        geometry = overviewGridLerpBox(geometry, gridReflowBox(window, slot, enterPtr, PROMOTED), overviewGridProgress(scale));
+        // The card that just became active is still sliding in: keep its grid
+        // pushed by how far off centre it still is (overviewCardGridPush), or
+        // its windows would jump to the centre at the keypress.
+        CBox placed = slot;
+        if (!PROMOTED && g_search.query.text.empty() && window->m_workspace)
+            placed = overviewCardGridPush(slot, window->m_workspace, monitor, scale, viewOffset, offset, layout);
+        geometry = overviewGridLerpBox(geometry, gridReflowBox(monitor, window, placed, enterPtr, PROMOTED), overviewGridProgress(scale));
 
         // The active card sits at offset 0. A promoted tile must ignore the
         // caller's per-workspace offset or it lands off-screen beside it.
         if (PROMOTED)
             offset = 0.F;
+    } else if (const auto HOME = window->m_workspace; overviewMissionControlOn() && g_search.query.text.empty() && HOME && !HOME->m_isSpecialWorkspace &&
+               monitor->m_activeWorkspace && HOME != monitor->m_activeWorkspace && HOME->m_monitor == monitor) {
+        // THE NEIGHBOURING CARDS WEAR THE SAME GRID (user, 2026-09-30). Only the
+        // active card's windows were laid out as a grid under the strip; the
+        // cards beside it showed their desktops' raw layout, so stepping to one
+        // with the keyboard reshaped every window as the grid moved onto it --
+        // a shrink the motion blur then smeared across the pan. Each card now
+        // solves its own grid, the same way and under the same chrome, and just
+        // rides its card offset: a desktop switch only slides.
+        if (CBox slot; overviewGridLayout(HOME, monitor, window, slot)) {
+            slot = overviewCardGridPush(slot, HOME, monitor, scale, viewOffset, offset, layout);
+            geometry = overviewGridLerpBox(geometry, slot, overviewGridProgress(scale));
+        }
     }
 
     return getOverviewGlobalBox(geometry, monitor, scale, viewOffset, offset, layout, round);
@@ -997,7 +1977,7 @@ inline bool isOverviewPointerOnMonitor(PHLMONITOR monitor) {
 }
 
 inline CBox getOverviewWorkspaceBox(PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout) {
-    return OvGeom::overviewWorkspaceBox(viewportOf(monitor), scale, viewOffset, offset, axisOf(layout));
+    return OvGeom::overviewWorkspaceBox(viewportOf(monitor, scale), scale, viewOffset, offset, axisOf(layout));
 }
 
 inline CBox getWorkspaceGlobalBox(PHLWORKSPACE workspace, PHLMONITOR fallbackMonitor) {
@@ -1125,6 +2105,56 @@ inline std::chrono::milliseconds getOverviewIdleFrameInterval() {
 
 inline constexpr std::chrono::milliseconds OVERVIEW_WINDOW_FRAME_INTERVAL = std::chrono::milliseconds(33);
 
+// ADAPTIVE PREVIEWS (user, 2026-09-19: previews should "update each window frame
+// in the strip once every 2 seconds, and if it does detect a movement ... keep
+// streaming the live window continuously").
+//
+// THE CHANGE DETECTOR IS THE CLIENT, NOT A PIXEL COMPARE. A Wayland client only
+// paints when it is handed a frame callback, and when it does paint it commits
+// damage -- which arrives at shouldHandleSurfaceDamage. So "poll it and see if
+// it changed" is "hand it ONE callback and see whether damage comes back", and
+// costs nothing: no readback, no texture copy, no comparison. Diffing the
+// rendered frames would mean pulling every preview off the GPU twice a second
+// to find out what the client already told us for free.
+//
+// A tile therefore sits in one of two states. POLLING: one frame callback every
+// POLL_INTERVAL, which is the whole cost of a window nobody is watching change.
+// STREAMING: frames at the usual OVERVIEW_WINDOW_FRAME_INTERVAL, entered the
+// moment damage comes back.
+//
+// STREAMING IS HELD FOR QUIET_TIMEOUT FROM THE LAST DAMAGE, NOT FROM THE FIRST
+// (user, 2026-09-19: "if there's any damage on a window it should continue
+// streaming it live for 10 more seconds, during which if there's more damage it
+// should continue extending its streaming time"). Every commit rewrites the
+// window's lastChange, so the hold is a SLIDING ten seconds: a window that keeps
+// painting -- a video, a build log, a spinner -- never falls out of streaming,
+// and one that paints once is carried for ten seconds afterwards in case it was
+// the first frame of something rather than the only one. Ten seconds of 33ms
+// frames is the deliberate price of never showing a still of a window that is
+// actually moving; the poll interval is what keeps the other tiles free.
+inline constexpr std::chrono::milliseconds OVERVIEW_PREVIEW_POLL_INTERVAL = std::chrono::milliseconds(2000);
+inline constexpr std::chrono::milliseconds OVERVIEW_PREVIEW_QUIET_TIMEOUT = std::chrono::milliseconds(10000);
+// EVERY WINDOW IS LIVE FOR THE FIRST FEW SECONDS, whatever the poll says. Two
+// cases, one rule: a window that just arrived on a desktop has to redraw at its
+// new size, and a window this overview is seeing for the FIRST time is one the
+// user has just opened the overview to look at -- a two-second wait would show
+// them the old buffer inside the new frame. CScrollOverview is constructed fresh
+// per open (main.cpp), so previewPulses starts empty and first sight is every
+// window, every time the overview comes up. Longer than the dock's RETILED_MS,
+// which covers only the retile itself and not a client that reflows a beat later.
+inline constexpr std::chrono::milliseconds OVERVIEW_PREVIEW_MOVE_GRACE   = std::chrono::milliseconds(3000);
+
+// How many clients may be woken in one frame once the open animation has landed.
+// Two is a ramp of a few frames for a busy desktop and is invisible; waking all
+// of them in one frame is the stutter this exists to avoid.
+inline constexpr size_t OVERVIEW_WAKES_PER_FRAME = 2;
+
+// How rarely a completely idle overview will still repaint itself outright.
+// See realtimePreviewTimerCallback: the idle pulse sends frame callbacks
+// without damaging, and this is the floor that keeps the few POLLED things on
+// screen (the dock's favourites file, the trash icon's name) arriving.
+inline constexpr std::chrono::milliseconds OVERVIEW_IDLE_REPAINT_FLOOR = std::chrono::milliseconds(1000);
+
 // Card shadow + corner-rounding helpers moved to OverviewChrome.hpp
 // (included at the top of this file) so the dock can use them without
 // pulling this whole header. They stay in namespace OvInternal.
@@ -1209,6 +2239,45 @@ inline double clampOverviewScrollingOffset(Layout::Tiled::CScrollingAlgorithm* a
 
     const double MAXOFFSET = std::max(0.0, algo->m_scrollingData->maxWidth() - algo->primaryViewportSize());
     return std::clamp(offset, 0.0, MAXOFFSET);
+}
+
+// A SCROLLING DESKTOP WHOSE COLUMNS FIT THE SCREEN HAS EXACTLY ONE RIGHT CAMERA:
+// centred. Hyprland re-centres only when the content is STRICTLY narrower than
+// the viewport (ScrollTapeController::calculateCameraOffset, `maxExtent <
+// usablePrimary`), and a lone column under scrolling:fullscreen_on_one_column
+// is exactly as wide as the viewport -- so whatever offset that desktop had
+// when it became a single column is kept forever, and the window sits pushed
+// part-way off the screen (user, 2026-09-16: "the tiling kicks part of the
+// window off screen ... as if the monitor boundary was partly offscreen";
+// measured: a lone 1416px foot at x=374 on a 1440px output). Several paths
+// leave such an offset behind -- a tape pan or swipe on a desktop with nothing
+// to scroll, a column taken out directly by the overview's drop code, a desktop
+// laid out on a wider output -- so this does not chase them: it restores the
+// one invariant they all break, and only where nothing can legitimately scroll.
+// Returns whether it moved the camera.
+inline bool normalizeFittingScrollingOffset(const PHLWORKSPACE& workspace) {
+    const auto ALGO = overviewScrollingAlgorithmForWorkspace(workspace);
+    if (!ALGO || !ALGO->m_scrollingData || !ALGO->m_scrollingData->controller)
+        return false;
+
+    auto& controller = *ALGO->m_scrollingData->controller;
+    // A drag or an inhibitor owns the camera on purpose; leave it to them.
+    if (controller.stripCount() == 0 || controller.isBeingDragged() || controller.getScrollInhibitor().isInhibited)
+        return false;
+
+    const auto   USABLE    = ALGO->usableArea();
+    const double PRIMARY   = controller.getPrimary(USABLE.size());
+    const double MAXEXTENT = controller.calculateMaxExtent(USABLE, ScrollOverview::Config::getValue<bool>("scrolling:fullscreen_on_one_column"));
+    if (PRIMARY <= 0.0 || MAXEXTENT > PRIMARY + 0.5)
+        return false; // something to scroll: every offset in range is a real position
+
+    const double CENTRED = std::round((MAXEXTENT - PRIMARY) / 2.0);
+    if (std::abs(controller.getOffset() - CENTRED) < 0.5)
+        return false;
+
+    controller.setOffset(CENTRED);
+    ALGO->m_scrollingData->recalculate(true);
+    return true;
 }
 
 inline bool moveOverviewScrollingTargetToWorkspaceEdge(const SP<Layout::ITarget>& target, int side) {
@@ -1448,6 +2517,30 @@ inline float hyprlerp(const float& from, const float& to, const float perc) {
 
 inline Vector2D hyprlerp(const Vector2D& from, const Vector2D& to, const float perc) {
     return OvGeom::hyprlerp(from, to, perc);
+}
+
+// THE FULLSCREEN PATH: a fullscreen window on a non-scrolling desktop drawn,
+// hit-tested, navigated and framed ON ITS OWN, its tiled neighbours skipped.
+// That is exactly how such a desktop looks, so it is right when the overview
+// draws a desktop as a scaled picture of itself.
+//
+// It is WRONG in mission control, where every window owns a grid slot --
+// overviewGridWindows has no fullscreen rule, so the neighbours still got their
+// slots and the skip left them as empty holes: "fullscreen apps make the other
+// windows invisible" (user, 2026-09-12). Eight sites each carried their own copy
+// of the test, so the mode was never asked at any of them; this is now the only
+// place it is decided.
+//
+// The fullscreen window when that path applies; null when every window gets its
+// own tile.
+inline PHLWINDOW overviewFullscreenPathWindow(const PHLWORKSPACE& workspace) {
+    // The memoised read, so every overview decision in one frame answers the
+    // same thing about mission control -- the grid below asks it too.
+    if (!workspace || isWorkspaceScrolling(workspace) || overviewMissionControlOn())
+        return nullptr;
+
+    const auto FULLSCREENWINDOW = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(workspace));
+    return shouldShowOverviewWindow(FULLSCREENWINDOW) && FULLSCREENWINDOW->m_workspace == workspace ? FULLSCREENWINDOW : nullptr;
 }
 
 } // namespace OvInternal

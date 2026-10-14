@@ -29,6 +29,9 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -47,7 +50,10 @@ enum class EOverviewNavZone : uint8_t {
     Tile = 0,
     Result,
     Desktop,
+    Search,
 };
+
+#include "SearchIntent.hpp"
 
 // X10: the search row above the strip. ponytail: constant 64 logical px
 // (48px pill + 8px margins); make it a config knob if anyone ever asks.
@@ -69,8 +75,16 @@ inline constexpr float OVERVIEW_PILL_GAPL     = 12.F;  // badge -> text field
 inline constexpr float OVERVIEW_PILL_TAILL    = 20.F;  // text field -> trailing edge
 inline constexpr float OVERVIEW_PILL_FIELDL   = 210.F; // the field at rest
 inline constexpr float OVERVIEW_PILL_FIELDQL  = 360.F; // ...and once a query is typed
-inline constexpr float OVERVIEW_PILL_GLYPHPX  = 22.F;  // the Material Symbols glyph in the badge
+inline constexpr float OVERVIEW_PILL_GLYPHPX  = 22.F;  // FA magnifying glass (Nerd Font U+F002)
 inline constexpr float OVERVIEW_PILL_TEXTPX   = 15.F;  // the query / placeholder
+
+// THE LIVE FIELD (user, 2026-09-12): the field grows with the query the way the
+// PondFluid lock screen's password pill does, until the WHOLE pill reaches
+// MAXFRAC of the monitor; past that the text scrolls so the end stays in view,
+// and the left edge fades it out.
+inline constexpr float OVERVIEW_PILL_MAXFRAC  = 0.75F; // the pill's cap, as a share of monitor width
+inline constexpr float OVERVIEW_PILL_ENDROOML = 16.F;  // breathing room kept after the last glyph
+inline constexpr float OVERVIEW_PILL_FADEL    = 56.F;  // how far in from the left edge scrolled text fades
 
 // The full width the pill lays out to. Named because BOTH the layout and the
 // scale it measures back out of the landed box divide by it, and a mismatch
@@ -78,6 +92,111 @@ inline constexpr float OVERVIEW_PILL_TEXTPX   = 15.F;  // the query / placeholde
 inline constexpr float OVERVIEW_PILL_WL(float fieldWL) {
     return OVERVIEW_PILL_PADL + OVERVIEW_PILL_BADGEL + OVERVIEW_PILL_GAPL + fieldWL + OVERVIEW_PILL_TAILL;
 }
+
+inline float overviewPillTargetWL(bool queried) {
+    return OVERVIEW_PILL_PADL + OVERVIEW_PILL_BADGEL + OVERVIEW_PILL_GAPL + (queried ? OVERVIEW_PILL_FIELDQL : OVERVIEW_PILL_FIELDL) + OVERVIEW_PILL_TAILL;
+}
+
+// Qt's SpringAnimation, ported rather than approximated, so the field moves
+// exactly like the PondFluid pill it copies: fixed 16ms steps, velocity grows by
+// (spring * distance - damping * velocity) / mass, and the value snaps home once
+// both speed and distance are under epsilon. Returns whether it is still moving.
+// `dtMs` is the time this frame actually covers. Qt's own step is written for a
+// fixed 16ms tick -- velocity gains (spring * distance - damping * velocity) /
+// mass per tick and the value advances by velocity * 0.016 -- so both halves are
+// scaled by how many ticks this frame is worth. At exactly 16ms the arithmetic
+// is unchanged; at 16.67ms (60Hz), 10ms (100Hz) or a late frame it is the same
+// curve sampled where the frame is, which is what "adapt to the monitor's
+// refresh rate" means for a spring (user, 2026-09-19).
+inline bool qtSpringStep(float& value, float& velocity, float target, float spring, float damping, float mass, float epsilon, float dtMs) {
+    // FRAME-RATE INDEPENDENCE (user, 2026-09-19: the search animations are
+    // "still choppy"). This was ONE explicit Euler step whose size WAS the
+    // frame time -- clamp(dt,1,64)/16 -- so a 16ms frame stepped 1.0, a 120Hz
+    // frame 0.5, and a late 64ms frame took a SINGLE step of 4.0. Explicit
+    // Euler error grows with the square of the step, so the one frame that was
+    // already late is also the frame the spring overshot and snapped back:
+    // a hitch got amplified into a visible lurch instead of being absorbed.
+    //
+    // Substepping at a fixed 4ms makes the motion identical at any frame rate
+    // and through a stall. The per-substep formula is unchanged, so the tuned
+    // PondFluid constants keep their meaning at the 16ms frame they were
+    // tuned on.
+    constexpr float STEPMS = 4.F;
+
+    for (float remaining = std::clamp(dtMs, 0.F, 64.F); remaining > 0.F;) {
+        const float H     = std::min(STEPMS, remaining);
+        const float TICKS = H / 16.F;
+        remaining -= H;
+
+        velocity += ((spring * (target - value) - damping * velocity) / mass) * TICKS;
+        value += velocity * 0.016F * TICKS;
+    }
+
+    if (std::abs(velocity) < epsilon && std::abs(target - value) < epsilon) {
+        value    = target;
+        velocity = 0.F;
+        return false;
+    }
+
+    return true;
+}
+
+// The field's animated width and scroll. Lives on the SESSION, not on the
+// layout: layoutSearch() builds a fresh layout every frame, so state kept there
+// would be wiped before it could spring anywhere.
+struct SSearchFieldMotion {
+    // PondFluid.qml: widthSpring / widthDamping, mass 1.1, epsilon 0.4 -- and
+    // slideSpring / slideDamping for the text sliding under the cap.
+    static constexpr float WIDTH_SPRING = 4.0F, WIDTH_DAMPING = 0.44F, WIDTH_MASS = 1.1F, WIDTH_EPSILON = 0.4F;
+    static constexpr float SLIDE_SPRING = 4.6F, SLIDE_DAMPING = 0.30F, SLIDE_MASS = 1.0F, SLIDE_EPSILON = 0.4F;
+
+    float widthL   = OVERVIEW_PILL_FIELDL; // the field, logical px
+    float widthV   = 0.F;
+    float scrollL  = 0.F;                  // how far the text is scrolled left, logical px
+    float scrollV  = 0.F;
+    float contentL = 0.F;                  // the text's width as last DRAWN, logical px
+
+    // What this frame draws. Kept as its own pair so every reader takes the
+    // same sample, and so the raw spring state stays the simulation's business.
+    float                          drawWidthL = OVERVIEW_PILL_FIELDL, drawScrollL = 0.F;
+
+    std::optional<Time::steady_tp> last;
+    // What the last stepTo answered, for the overview's idle gate: these two
+    // springs are wall-clock, so nothing the compositor animates reports them.
+    bool                           moving = false;
+
+    // Returns whether either spring is still moving, so the caller keeps frames
+    // coming until both have settled.
+    bool stepTo(float wantWidthL, float wantScrollL, const Time::steady_tp& now) {
+        // The first frame of an overview lands at rest rather than springing in
+        // from wherever the struct's defaults happen to be.
+        if (!last) {
+            last        = now;
+            widthL      = wantWidthL;
+            scrollL     = wantScrollL;
+            drawWidthL  = widthL;
+            drawScrollL = scrollL;
+            moving      = false;
+            return false;
+        }
+
+        const float DTMS = std::chrono::duration<float, std::milli>(now - *last).count();
+        last             = now;
+
+        qtSpringStep(widthL, widthV, wantWidthL, WIDTH_SPRING, WIDTH_DAMPING, WIDTH_MASS, WIDTH_EPSILON, DTMS);
+        qtSpringStep(scrollL, scrollV, wantScrollL, SLIDE_SPRING, SLIDE_DAMPING, SLIDE_MASS, SLIDE_EPSILON, DTMS);
+
+        drawWidthL  = widthL;
+        drawScrollL = scrollL;
+
+        moving = widthV != 0.F || scrollV != 0.F || widthL != wantWidthL || scrollL != wantScrollL;
+        return moving;
+    }
+
+    bool busy() const {
+        return moving;
+    }
+};
 
 // OVERVIEW_CPP_SPEC §13.4 G12. A result row as it was last DRAWN. Same contract
 // as the dock's own menu rows: a row's box is only known inside the render pass,
@@ -90,7 +209,9 @@ struct SSearchRowHit {
     // X62. Which result this box belongs to. The hit-test existed only to
     // reject drops before; answering the mouse means the hit has to say WHICH
     // result was hit, in the same index space the keyboard selection uses.
-    int         index = -1;
+    int         index    = -1;
+    int         column   = 0;
+    int         rowInCol = 0;
 };
 
 // G12. A result drag: press, HOLD, then move. The hold is the gate and the
@@ -138,6 +259,39 @@ struct SSearchLayout {
     // two overlap.
     float rowL = OVERVIEW_SEARCH_ROWHL;
 
+    // THE STRIP PLATE'S FOOT, measured from the top of its reserved band.
+    //
+    // The band is a RESERVATION (strip_height); the plate drawn in it is only
+    // as tall as the cells came out, and StripLayout centres those cells in the
+    // band whenever the row had to shrink to fit the monitor's width. Read the
+    // band instead and the grid is placed against a floor the strip never
+    // reached -- leftover reservation that renders as a hole between the strip
+    // and the windows, growing with the desktop count (5 desktops on a 1440px
+    // monitor shrink by 0.4%, 8 shrink by 38%).
+    //
+    // Published as a HEIGHT, not an absolute y, on purpose: an absolute would
+    // have to be read against the same frame's search row and results band, and
+    // the publish contract above hands those over one frame late. A height only
+    // moves when the cells do.
+    float stripPlateL = 0.F;
+
+    // How many window previews the grid was showing when this was published.
+    // The strip's leftover ceiling and the results row budget are both RATIOS
+    // against this: with no previews on screen there is nothing to protect and
+    // both are free to take the room.
+    size_t gridTiles = 0;
+
+    // LOGICAL px the grid is pushed down by so a desktop label drawn UNDER the
+    // strip (results panel open) has the same gap to the windows as to the
+    // plate (user, 2026-09-23). Written by the strip label each frame, read by
+    // overviewStripStackL; the grid's own reflow animation does the easing.
+    float gridNudgeL = 0.F;
+    // ...and how far the grid is actually moved this frame: gridNudgeL eased.
+    // The grid is TRANSLATED by it, not re-laid-out around it (user, 2026-09-24:
+    // "instead of squeezing down ... just gently move the entire set down out of
+    // the way, just like the search bar moves out of the way").
+    float gridShiftL = 0.F;
+
     // G12/X62: the rows and grid cells as drawn, in draw order.
     std::vector<SSearchRowHit> hits;
 
@@ -152,14 +306,35 @@ struct SSearchLayout {
     // the two heights above still valid (they carry from the last frame that
     // did get this far), which is what the culled-pill path has always done.
     bool  drawable = false;
+    // Whose frame this layout is. The live field's springs are per monitor, and
+    // the draw that measures the text has to hand the width back to the right one.
+    MONITORID monitorId = MONITOR_INVALID;
 
     float fade  = 0.F; // the overview's open progress; every element rides it
     float scale = 1.F; // pill.width / its logical width: the card transform, MEASURED
+    // decoration:rounding / rounding_power, same source as workspace cards.
+    int   rounding      = 0;
+    float roundingPower = 2.F;
     bool  queried = false, emptyResult = false;
 
     CBox  pill, badge;
+    // The pill BEFORE the strip label's nudge, and how far it may be lifted
+    // (to just under the bar). The label sizes its gaps off these, never off
+    // `pill`: `pill` already carries the lift, and measuring the lift against
+    // itself is a loop -- once the ceiling capped it, the wanted lift grew by a
+    // frame's worth every frame (measured: 331 -> 347 -> 365 px and climbing).
+    CBox  pillRest;
+    float pillMaxUp = 0.F;
     float fieldW = 0.F; // the text field, rendered px
     float gap    = 0.F; // badge -> field, rendered px
+    // The field's left edge with NO pixel snapping, in the same rendered px.
+    // The pill is centred, so every pixel the field grows moves this edge half a
+    // pixel -- and the snapped edge therefore flipped a whole pixel every other
+    // frame while the field expanded, carrying the entire glyph run with it.
+    // The chrome still snaps (a blurry pill edge is worse than a still one);
+    // the TYPE is positioned from here and each glyph snaps on its own, so the
+    // run flows instead of shivering as one block (user, 2026-09-19).
+    float fieldXExact = 0.F;
 
     // What the field says: the placeholder, the query, or X20's "no matches"
     // suffix. Decided with the rest of the layout so the draw pass has no
@@ -175,7 +350,7 @@ struct SSearchLayout {
     // which boxes the card put them at.
     struct SItem {
         size_t      hit = 0; // index into hits: this item's box, in draw order
-        std::string name, description, icon;
+        std::string name, description, icon, iconFont;
         bool        selected = false;
     };
 
@@ -189,8 +364,46 @@ struct SSearchLayout {
         bool               grid  = false; // G5: apps are a GRID of cells, providers a LIST of rows
         std::string        title, icon;   // G6's header; empty on a grid card
         size_t             more  = 0;     // G6's "%d more"
+        std::string        emptyHint;     // shown when items is empty ("Searching…", "No files")
         std::vector<SItem> items;
     };
+    struct SInspector {
+        CBox        box;
+        float       alpha = 1.F;
+        bool        visible = false;
+        std::string title;
+        std::string subtitle;
+        std::string icon;
+        std::string category;
+        std::string detail1;
+        std::string detail2;
+        std::string detail3;
+        std::string shortcutHint;
+        std::string shortcutHint2;
+        std::string status;
+        bool        canQuickLook   = false;
+        bool        running        = false;
+        bool        canNewInstance = false;
+    } inspector;
+
+    // THE TOOL PANE: a `define` / `tr` query draws this across the whole
+    // container instead of cards and an inspector.
+    struct SToolPane {
+        bool        active = false;
+        uint8_t     kind   = 0; // 1 dictionary, 2 translator
+        CBox        header;
+        std::string title, subtitle;
+        struct SEntry {
+            size_t      hit = 0; // into hits
+            std::string tag, text, example;
+            bool        status   = false;
+            bool        selected = false;
+        };
+        std::vector<SEntry> entries;
+    } tool;
+
+    CBox              containerBox;
+    std::vector<CBox> dividers;
     std::vector<SCard> cards;
 };
 
@@ -208,6 +421,12 @@ struct SSearchSession {
         // Compose alone types nothing. Every "is a search running" test reads
         // this, not text.empty(), which cannot represent that state.
         bool        active = false;
+
+        // The dock's Show Windows (user, 2026-09-24): the query was put there
+        // for the user, not typed -- it filters the windows and shows no results
+        // panel. Any edit clears it; the first typed key REPLACES the query, the
+        // way typing over a selected field does, and Backspace drops it whole.
+        bool        windowsOnly = false;
 
         // G6. How many results each provider offered, INCLUDING the ones the cap
         // and the trim never showed. Filled by overviewSearchRows(); read by the
@@ -242,6 +461,12 @@ struct SSearchSession {
         // step spends it once there is a result to select. Cleared by the spend,
         // so a deliberate Tab back to the grid (-1) is never overridden.
         bool             selectFirstPending = false;
+        bool             explicitSelection  = false;
+        ESearchIntent    intent             = ESearchIntent::Typing;
+        // Result index the pointer last MOVED onto. -1 when it is not over a
+        // row. Updated only from motion, never from layout: results appearing
+        // under a parked cursor must not steal SPACE from the query.
+        int              hoverIndex         = -1;
 
         EOverviewNavZone zone = EOverviewNavZone::Tile;
 
@@ -254,6 +479,9 @@ struct SSearchSession {
         // cleared by the overview opening and by ANY pointer motion -- whichever
         // device moved last owns the ring.
         bool             keyboardTile = false;
+        // Set by activateSearchResult when Enter should switch to a live window
+        // rather than spawn. close() reads it the same way a tile click does.
+        PHLWINDOWREF     pendingFocus;
     } nav;
 
     // ---- what the pointer is in the middle of ---------------------------
@@ -262,7 +490,15 @@ struct SSearchSession {
     } pointer;
 
     // ---- what the last drawn frame published ----------------------------
-    SSearchLayout layout;
+    // PER MONITOR. Every monitor's overview lays the search out in its own pixels
+    // and publishes it every frame; with one shared copy the pointer's hit tests
+    // on one monitor read whichever monitor had drawn last -- the other screen's
+    // rows and pill -- and next frame's layout carried the other monitor's band.
+    std::unordered_map<MONITORID, SSearchLayout> layouts;
+
+    SSearchLayout& layoutOn(MONITORID monitor) {
+        return layouts[monitor];
+    }
 
     // A NEW SEARCH SESSION. Everything a previous session could leak, cleared in
     // one call -- this is the whole point of the file. Deliberately NOT the
@@ -279,21 +515,38 @@ struct SSearchSession {
     // at may survive into the next open as a phantom drop.
     void endInteraction() {
         pointer = {};
-        layout.hits.clear();
+        for (auto& [_, L] : layouts)
+            L.hits.clear();
     }
 
     // A brand-new overview starts with an unpushed band and a pill at rest: a
     // previous overview's last published layout must not open the next one
     // already docked.
-    void resetLayout() { layout = {}; }
+    void resetLayout(MONITORID monitor) {
+        layouts.erase(monitor);
+        fields.erase(monitor);
+    }
+
+    // The live field's springs -- see SSearchFieldMotion -- ONE PER MONITOR
+    // (user, 2026-09-14: "glitching in the search results when I type longer
+    // sentences"). Every monitor's overview draws its own pill, and they shared
+    // one set: each frame the laptop aimed the springs at ITS cap (75% of 1440)
+    // and ITS measurement of the text, the external at its own, so the field on
+    // the external never grew and the scroll flipped between two targets -- the
+    // text shivering sideways a few pixels a frame.
+    std::unordered_map<MONITORID, SSearchFieldMotion> fields;
+
+    SSearchFieldMotion& fieldOn(MONITORID monitor) {
+        return fields[monitor];
+    }
 };
 
 inline SSearchSession g_search;
 
 // G12/X62. The result row under a point, or nullptr. The pointer's half of "one
 // hit list, two devices"; moveSelection() walks the same vector.
-inline const SSearchRowHit* searchRowAt(const Vector2D& point) {
-    for (const auto& ROW : g_search.layout.hits) {
+inline const SSearchRowHit* searchRowAt(MONITORID monitor, const Vector2D& point) {
+    for (const auto& ROW : g_search.layoutOn(monitor).hits) {
         if (ROW.box.containsPoint(point))
             return &ROW;
     }

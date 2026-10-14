@@ -1,4 +1,6 @@
 #include "Minimize.hpp"
+#include "ConfigureHold.hpp"
+#include <optional>
 
 #include <algorithm>
 #include <sstream>
@@ -10,6 +12,7 @@
 #include <hyprland/src/desktop/state/GlobalWindowController.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
@@ -78,6 +81,32 @@ void dropDeadEntries() {
 
 }
 
+bool isStash(const PHLWORKSPACE& workspace) {
+    return workspace && workspace->m_name == STASH_NAME;
+}
+
+void adoptStashedWindows() {
+    dropDeadEntries();
+
+    for (const auto& WINDOW : Desktop::windowState()->windows()) {
+        if (!WINDOW || !WINDOW->m_isMapped || !isStash(WINDOW->m_workspace) || entryFor(WINDOW) != g_entries.end())
+            continue;
+
+        // What it was minimized FROM died with the old ledger, so there is no
+        // honest answer -- the desktop its monitor is showing is the sane home,
+        // and TILED the sane state: the window comes back into the layout rather
+        // than floating over it. Its current box is kept for the floating case,
+        // where restore reads it.
+        const auto MONITOR = WINDOW->m_monitor.lock();
+        const auto HOME    = MONITOR ? MONITOR->m_activeWorkspace : nullptr;
+        if (!HOME || HOME->m_isSpecialWorkspace)
+            continue;
+
+        const auto TARGET = WINDOW->layoutTarget();
+        g_entries.emplace_back(SEntry{WINDOW, HOME->m_id, HOME->m_name, MONITOR->m_id, TARGET ? TARGET->position() : CBox{}, false});
+    }
+}
+
 bool isMinimized(PHLWINDOW window) {
     return window && entryFor(window) != g_entries.end();
 }
@@ -100,7 +129,99 @@ std::vector<PHLWINDOW> minimized() {
     return out;
 }
 
+namespace {
+    // CGestureBoxes: window -> its box before the gesture (global logical).
+    std::vector<std::pair<PHLWINDOWREF, CBox>> g_gestureBoxes;
+    int                                        g_gestureDepth = 0;
+
+    std::optional<CBox> gestureBoxFor(const PHLWINDOW& window) {
+        for (const auto& [w, box] : g_gestureBoxes)
+            if (w.lock() == window)
+                return box;
+        return std::nullopt;
+    }
+}
+
+CRestoreSlots::CRestoreSlots(const std::vector<PHLWINDOW>& windows) {
+    for (const auto& window : windows) {
+        const auto IT = entryFor(window);
+        if (IT != g_entries.end() && !IT->floating && !IT->box.empty())
+            m_slots.emplace_back(window, IT->box);
+    }
+}
+
+CRestoreSlots::~CRestoreSlots() {
+    if (m_slots.size() < 2 || !g_layoutManager)
+        return;
+
+    const auto goalBox = [](const PHLWINDOW& w) {
+        return CBox{w->position(Desktop::View::IGeometric::GEOMETRIC_GOAL), w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL)};
+    };
+
+    // Greedy, and bounded: each pass puts at least one window where it was.
+    for (size_t pass = 0; pass < m_slots.size(); ++pass) {
+        bool swapped = false;
+        for (const auto& [ref, slot] : m_slots) {
+            const auto W = ref.lock();
+            if (!W || isMinimized(W) || !W->layoutTarget() || W->m_isFloating)
+                continue;
+            const auto WANT = slot.middle();
+            if (goalBox(W).middle().distance(WANT) < 24.0)
+                continue;
+
+            // Whichever of the restored windows now sits nearest this slot.
+            PHLWINDOW holder;
+            double    best = 1e18;
+            for (const auto& [otherRef, otherSlot] : m_slots) {
+                (void)otherSlot;
+                const auto X = otherRef.lock();
+                if (!X || X == W || isMinimized(X) || !X->layoutTarget() || X->m_isFloating || X->m_workspace != W->m_workspace)
+                    continue;
+                const double D = goalBox(X).middle().distance(WANT);
+                if (D < best) {
+                    best   = D;
+                    holder = X;
+                }
+            }
+            if (!holder || best > goalBox(W).middle().distance(WANT))
+                continue;
+            g_layoutManager->switchTargets(W->layoutTarget(), holder->layoutTarget(), true);
+            swapped = true;
+        }
+        if (!swapped)
+            break;
+    }
+}
+
+CGestureBoxes::CGestureBoxes(const std::vector<PHLWINDOW>& windows) {
+    ++g_gestureDepth;
+    for (const auto& window : windows) {
+        if (!window || gestureBoxFor(window))
+            continue;
+        const auto TARGET = window->layoutTarget();
+        // The layout's box for it right now, before anything in this gesture
+        // moved: its tile (or its float). A window mid-flight is drawn somewhere
+        // else, which is why this is not the drawn box.
+        // For a TILE, the window's own goal box: the layout's box for it wraps
+        // the border too, and pinning the float at that grew it by two columns
+        // every cycle (measured). A float's target box is its box.
+        if (TARGET && !isMinimized(window))
+            g_gestureBoxes.emplace_back(window,
+                                        window->m_isFloating ? TARGET->position() :
+                                                               CBox{window->position(Desktop::View::IGeometric::GEOMETRIC_GOAL), window->size(Desktop::View::IGeometric::GEOMETRIC_GOAL)});
+    }
+}
+
+CGestureBoxes::~CGestureBoxes() {
+    if (--g_gestureDepth <= 0) {
+        g_gestureDepth = 0;
+        g_gestureBoxes.clear();
+    }
+}
+
 bool minimize(PHLWINDOW window, bool handoffFocus) {
+    // Through the stash's tiling and back out to a float: one resize, not two.
+    ConfigureHold::CHold oneResize;
     dropDeadEntries();
     Membership::bump("minimize");
 
@@ -116,12 +237,70 @@ bool minimize(PHLWINDOW window, bool handoffFocus) {
     if (!STASHWS)
         return false;
 
+    // THE BOX IT IS SEEN AT. A floating window's target box is that; a TILED
+    // one's is the layout's latest word, and when a whole app is minimized in
+    // one click its later windows have already been re-tiled into the gaps the
+    // earlier ones left -- the last one out read the whole monitor, was pinned
+    // there on the stash and told so (measured: 67x308 for a 32x150 terminal).
+    // Nothing has animated inside one click, so the drawn box is still the one
+    // the window had, and the one its client was last told.
+    const auto GESTUREBOX = gestureBoxFor(window);
+    const CBox SEEN       = GESTUREBOX       ? *GESTUREBOX :
+              window->m_isFloating ? TARGET->position() :
+                                     CBox{window->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT), window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+
     // X41/X42: a workspace move is exactly where geometry gets destroyed
     // silently, so capture the real box first and put it back on restore.
-    g_entries.emplace_back(SEntry{window, WORKSPACE->m_id, WORKSPACE->m_name, WORKSPACE->m_monitor ? WORKSPACE->m_monitor->m_id : MONITOR_INVALID,
-                                  TARGET->position(), window->m_isFloating});
+    g_entries.emplace_back(SEntry{window, WORKSPACE->m_id, WORKSPACE->m_name, WORKSPACE->m_monitor ? WORKSPACE->m_monitor->m_id : MONITOR_INVALID, SEEN,
+                                  window->m_isFloating});
+
+    const CBox STASHBOX = SEEN;
+
+    // FLOAT IT BEFORE IT GOES, at the box it has. Moved in tiled, the stash
+    // tiled it -- the first arrival is handed the whole monitor -- and the float
+    // below never told the client otherwise, so every minimize resized the
+    // window to full screen and every restore resized it back: two SIGWINCHes a
+    // cycle, and a spam of dock clicks walked each shell prompt down the
+    // terminal (user, 2026-09-30; measured 67x308 <-> 32x150 per click in the
+    // nested rig). Floated first, it enters the stash's floating algorithm at
+    // its own size and the client is never told anything (ConfigureHold drops
+    // the unchanged size). The ledger above still says it was tiled.
+    if (!TARGET->floating() && TARGET->space() && !STASHBOX.empty()) {
+        TARGET->rememberFloatingSize(STASHBOX.size());
+        g_layoutManager->changeFloatingMode(TARGET);
+        TARGET->setPositionGlobal(STASHBOX);
+    }
 
     Desktop::globalWindowController()->moveWindowToWorkspace(window, STASHWS);
+
+    // THE STASH IS A TILED WORKSPACE, and that is visible to the user: every new
+    // minimize retiles everything already stashed, so each window there shrinks
+    // as more are added -- and the dock preview, which renders the REAL window,
+    // shrinks with it. A preview that changes size because of something that
+    // happened to an unrelated window is indefensible.
+    //
+    // So a stashed window floats and is pinned to the box it had the instant
+    // before it was minimized. Floating takes it out of the stash's layout
+    // entirely, which is what stops the geometry depending on how many
+    // neighbours it has; the pinned box is what makes a TILED window keep the
+    // size it was tiled at rather than collapsing to some floating default.
+    //
+    // The ledger entry above still records what it REALLY was, so restore puts
+    // the tiled ones back as tiled -- this float is confined to the stash.
+    if (const auto STASHTARGET = window->layoutTarget()) {
+        STASHTARGET->setFloating(true);
+        if (!STASHBOX.empty()) {
+            // rememberFloatingSize BEFORE the position write, and not instead of
+            // it: the target carries a remembered floating size from whenever it
+            // last floated, and a later layout pass will happily reassert that
+            // over a box we merely set once. Measured: a stashed window pinned
+            // at 1420x854 was found at 710x427 a few actions later -- exactly
+            // half, i.e. the remembered size winning. Setting both means the
+            // pin and the memory agree and there is nothing left to drift to.
+            STASHTARGET->rememberFloatingSize(STASHBOX.size());
+            STASHTARGET->setPositionGlobal(STASHBOX);
+        }
+    }
 
     // A stashed window must not keep the keyboard. Measured 2026-08-03 by X33's
     // rig: minimize left focus on the window it had just taken off screen, so
@@ -194,6 +373,8 @@ bool showOriginalWorkspace(PHLWINDOW window) {
 }
 
 bool restore(PHLWINDOW window) {
+    // Floated in, then tiled: the client only needs the tile.
+    ConfigureHold::CHold oneResize;
     dropDeadEntries();
     Membership::bump("restore");
 
@@ -222,8 +403,30 @@ bool restore(PHLWINDOW window) {
     // ponytail: only floating windows own their box. A tiled window's geometry
     // belongs to the layout, and writing it back would fight the retile.
     if (const auto TARGET = window->layoutTarget(); TARGET) {
+        // Undo the stash's float -- through the LAYOUT MANAGER, not the target.
+        //
+        // ITarget::setFloating is a bare flag write (CWindowTarget::setFloating
+        // in v0.56.2 sets m_isFloating, clears layout flags, unpins, and nothing
+        // else); it never tells the workspace's layout space. The window arrived
+        // here still floating -- the stash floats everything -- so the move above
+        // filed it in this workspace's FLOATING algorithm, and flipping the flag
+        // afterwards left dwindle never knowing it existed: zen came back at full
+        // size on top of or behind foot instead of the tiling opening a slot
+        // (user, 2026-09-12). Target.cpp's own swap has to follow setFloating
+        // with onUpdateSpace() for exactly this reason.
+        //
+        // changeFloatingMode -> CSpace::toggleTargetFloating does the real work:
+        // the algorithm re-files the target, then recalculate() retiles. It is a
+        // TOGGLE, hence the comparison -- a floating restore is already floating
+        // and must not be flipped. An earlier attempt here called
+        // workspace->updateWindows(), which is only the side step inside that
+        // toggle and retiles nothing.
+        if (TARGET->floating() != ENTRY.floating && TARGET->space())
+            g_layoutManager->changeFloatingMode(TARGET);
+
         if (ENTRY.floating && !ENTRY.box.empty())
             TARGET->setPositionGlobal(ENTRY.box);
+
         // Z4: warp for TILED restores too. The re-entered window otherwise
         // draws its first frames easing from a transient pre-retile box
         // (measured: 30k of 427k px) -- but the flight already animated the

@@ -13,9 +13,29 @@
 
 namespace OvInternal {
 
+    namespace {
+        // The two reads overviewGridPromotable used to make per window.
+        struct SPromoteCtx {
+            bool         enabled = false; // B2 is live: a query is typed AND mission control is on
+            PHLWORKSPACE active;
+        };
+    }
+
     SGridAnimator& grid() {
         static SGridAnimator ANIMATOR;
         return ANIMATOR;
+    }
+
+    void gridSetReflowActive(const PHLMONITOR& monitor) {
+        if (monitor)
+            grid().reflowActive.insert(monitor->m_id);
+    }
+
+    bool gridTakeReflowActive(const PHLMONITOR& monitor) {
+        if (!monitor)
+            return false;
+
+        return grid().reflowActive.erase(monitor->m_id) > 0;
     }
 
     // Y9 taught overviewGridWindows and addOverviewWindow that a stashed window
@@ -40,10 +60,12 @@ namespace OvInternal {
         return window->m_workspace ? window->m_workspace->m_id : WORKSPACE_INVALID;
     }
 
-    std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace) {
-        std::vector<PHLWINDOW> windows;
+    // The home-workspace membership rule, into a buffer the caller owns so the
+    // per-frame layout memo can rebuild its key without allocating.
+    static void overviewGridWindowsInto(const PHLWORKSPACE& workspace, std::vector<PHLWINDOW>& out) {
+        out.clear();
         if (!workspace)
-            return windows;
+            return;
 
         for (const auto& window : Desktop::windowState()->windows()) {
             if (getOverviewWindowToShow(window) != window || !shouldShowOverviewWindow(window))
@@ -66,9 +88,13 @@ namespace OvInternal {
             } else if (window->m_workspace != workspace)
                 continue;
 
-            windows.emplace_back(window);
+            out.emplace_back(window);
         }
+    }
 
+    std::vector<PHLWINDOW> overviewGridWindows(const PHLWORKSPACE& workspace) {
+        std::vector<PHLWINDOW> windows;
+        overviewGridWindowsInto(workspace, windows);
         return windows;
     }
 
@@ -79,20 +105,40 @@ namespace OvInternal {
     // at the active card's offset. Done here rather than by shuffling windows
     // between the per-workspace loops so the B1 invariant holds: render, hit-test
     // and drag all still read the same getOverviewWindowBox and cannot disagree.
-    bool overviewGridPromotable(const PHLWINDOW& window, PHLMONITOR monitor) {
-        if (g_search.query.text.empty() || !ScrollOverview::Config::getMissionControl() || !window || !monitor)
+    // The two answers that are the SAME for every window in one query -- is B2
+    // live at all, and which workspace is the active one -- read once and
+    // carried. overviewMainGridWindows asked them per window, so a
+    // getMissionControl() config lookup (a string-keyed map probe, with the key
+    // built fresh each time) ran W times per grid query and the grid is queried
+    // 4-6 times per tile per frame.
+    static SPromoteCtx overviewGridPromoteCtx(PHLMONITOR monitor) {
+        SPromoteCtx ctx;
+        if (!monitor)
+            return ctx;
+
+        ctx.active  = monitor->m_activeWorkspace;
+        ctx.enabled = !g_search.query.text.empty() && overviewMissionControlOn() && !!ctx.active;
+        return ctx;
+    }
+
+    // Identical to the published predicate below, minus the two hoisted reads.
+    static bool overviewGridPromotableIn(const SPromoteCtx& ctx, const PHLWINDOW& window, PHLMONITOR monitor) {
+        if (!ctx.enabled || !window || !monitor)
             return false;
 
         if (window->m_monitor != monitor)
             return false;
 
-        const auto ACTIVE = monitor->m_activeWorkspace;
-        const auto HOME   = overviewGridHomeWorkspace(window);
-        return ACTIVE && HOME != WORKSPACE_INVALID && HOME != ACTIVE->m_id && shouldShowOverviewWindow(window);
+        const auto HOME = overviewGridHomeWorkspace(window);
+        return HOME != WORKSPACE_INVALID && HOME != ctx.active->m_id && shouldShowOverviewWindow(window);
+    }
+
+    bool overviewGridPromotable(const PHLWINDOW& window, PHLMONITOR monitor) {
+        return overviewGridPromotableIn(overviewGridPromoteCtx(monitor), window, monitor);
     }
 
     int gridReleaseMs() {
-        return sc<int>(sc<float>(ScrollOverview::Config::getMissionControlReflowMs()) * GRID_RELEASE_SPEEDUP);
+        return sc<int>(sc<float>(overviewMissionControlReflowMs()) * GRID_RELEASE_SPEEDUP);
     }
 
     // OVERVIEW_CPP_SPEC 13.2 F3-b, the symmetric half: "released back OUT to its
@@ -133,7 +179,7 @@ namespace OvInternal {
             IT->second.start   = NOW; // the match died on THIS frame, whenever it is
         }
 
-        if (ScrollOverview::Config::animElapsedMs(IT->second.start) > sc<float>(DURATION) + GRID_RELEASE_GRACE_MS) {
+        if (overviewAnimElapsedMs(IT->second.start) > sc<float>(DURATION) + GRID_RELEASE_GRACE_MS) {
             G.releases.erase(IT);
             return false;
         }
@@ -148,19 +194,28 @@ namespace OvInternal {
     // Membership of the MAIN grid. Identical to overviewGridWindows for an empty
     // query. The strip deliberately keeps the workspace-scoped list: its minis and
     // its "no matches" count both need the per-cell answer.
-    std::vector<PHLWINDOW> overviewMainGridWindows(const PHLWORKSPACE& workspace, PHLMONITOR monitor) {
-        auto windows = overviewGridWindows(workspace);
-        if (g_search.query.text.empty() || !monitor)
-            return windows;
+    // The membership walk, into a buffer the caller owns, so the per-frame memo
+    // below can rebuild its key without allocating. `out` is cleared, never
+    // shrunk: the same two buffers are reused every call.
+    static void overviewMainGridWindowsInto(const PHLWORKSPACE& workspace, PHLMONITOR monitor, std::vector<PHLWINDOW>& out) {
+        overviewGridWindowsInto(workspace, out);
+
+        const auto CTX = overviewGridPromoteCtx(monitor);
+        if (!CTX.enabled)
+            return;
 
         for (const auto& window : Desktop::windowState()->windows()) {
             // Promotable, not promoted: a RELEASING tile must leave the grid
             // immediately so the survivors close up WHILE it travels (F3-b-iii,
             // outbound). It keeps being drawn -- it just no longer owns a slot.
-            if (getOverviewWindowToShow(window) == window && overviewGridPromotable(window, monitor))
-                windows.emplace_back(window);
+            if (getOverviewWindowToShow(window) == window && overviewGridPromotableIn(CTX, window, monitor))
+                out.emplace_back(window);
         }
+    }
 
+    std::vector<PHLWINDOW> overviewMainGridWindows(const PHLWORKSPACE& workspace, PHLMONITOR monitor) {
+        std::vector<PHLWINDOW> windows;
+        overviewMainGridWindowsInto(workspace, monitor, windows);
         return windows;
     }
 
@@ -168,15 +223,194 @@ namespace OvInternal {
         return window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT).size();
     }
 
-    // ponytail: recomputed per window per frame, O(windows^2) on the focused
-    // workspace. Fine at desktop counts; memoise per frame if it ever shows up.
+    // THE SOLVER, and it is now solved ONCE for the whole grid instead of once
+    // per tile. Everything below the membership walk -- the row-count search,
+    // the per-row heights, the centring -- used to run in full for EVERY box
+    // query, and a frame asks for a tile's box 4-6 times per tile per monitor
+    // (render, the blur gate, the frame pacer, the damage gate, the surface
+    // gate) plus once per pointer motion and once per client commit. At n tiles
+    // that is O(n * (W + n^2)) per frame per output for an answer that cannot
+    // change inside a frame.
+    //
+    // The arithmetic is TRANSCRIBED, not rewritten: the same accumulations in
+    // the same order, so every slot lands on the same float it did before. What
+    // changed is that the row walk now assigns every cell as it goes instead of
+    // stopping at the target.
+    namespace {
+        void solveGrid(const std::vector<PHLWINDOW>& windows, const std::vector<Vector2D>& sizes, const CBox& usable, float gap, std::vector<CBox>& out) {
+            out.clear();
+
+            const size_t COUNT = windows.size();
+            const float  GAP   = gap;
+
+            // SCORED WITH THE ROWS PLACEMENT WILL ACTUALLY BUILD (user, 2026-09-23:
+            // "I see 5 windows and a lot of space on the right and left of them").
+            //
+            // This used to give every window an EQUAL cell -- usable width over the
+            // column count -- and take the smallest scale any window allowed in
+            // it. With mixed widths that is the WIDEST window's scale: a
+            // full-width window in a cell sized for a fifth of the row pinned the
+            // scale, and the half-width windows beside it were then drawn far
+            // narrower than their cells. Placement below packs by REAL widths, so
+            // the row came out a good deal narrower than the screen and the
+            // difference sat empty at both ends.
+            //
+            // Now each candidate row count is split exactly as placement splits it
+            // (earlier rows take the remainder), and the scale is the largest that
+            // fits every row's REAL total width and the rows' real stacked height.
+            // It can only be equal or larger than the old answer: the old per-cell
+            // bound was a stricter version of the same constraint.
+            size_t bestRows  = 0;
+            float  bestScale = 0.F;
+            for (size_t rows = 1; rows <= COUNT; ++rows) {
+                const size_t BASE  = COUNT / rows;
+                const size_t EXTRA = COUNT % rows;
+
+                float  scale    = 1.F;
+                float  sumRowH  = 0.F;
+                size_t first    = 0;
+                bool   feasible = true;
+                for (size_t row = 0; row < rows; ++row) {
+                    const size_t N = BASE + (row < EXTRA ? 1 : 0);
+                    if (N == 0) {
+                        feasible = false;
+                        break;
+                    }
+
+                    float rowW = 0.F, rowH = 0.F;
+                    for (size_t i = first; i < first + N; ++i) {
+                        rowW += std::max(1.F, sc<float>(sizes[i].x));
+                        rowH = std::max(rowH, std::max(1.F, sc<float>(sizes[i].y)));
+                    }
+                    first += N;
+
+                    const float ROOM = sc<float>(usable.w) - GAP * sc<float>(N - 1);
+                    if (ROOM <= 1.F) {
+                        feasible = false;
+                        break;
+                    }
+                    scale = std::min(scale, ROOM / rowW);
+                    sumRowH += rowH;
+                }
+
+                const float ROOMH = sc<float>(usable.h) - GAP * sc<float>(rows - 1);
+                if (!feasible || ROOMH <= 1.F || sumRowH <= 0.F)
+                    continue;
+                scale = std::min(scale, ROOMH / sumRowH);
+
+                if (scale > bestScale) {
+                    bestScale = scale;
+                    bestRows  = rows;
+                }
+            }
+
+            if (bestRows == 0 || bestScale <= 0.F)
+                return;
+
+            // Spread the windows over the rows as evenly as possible, earlier rows take
+            // the remainder.
+            const size_t BASE  = COUNT / bestRows;
+            const size_t EXTRA = COUNT % bestRows;
+
+            out.resize(COUNT);
+
+            size_t rowFirst = 0;
+            float  y        = sc<float>(usable.y);
+            for (size_t row = 0; row < bestRows; ++row) {
+                const size_t ROWCOUNT = BASE + (row < EXTRA ? 1 : 0);
+
+                float rowWidth = GAP * sc<float>(ROWCOUNT - 1);
+                float rowH     = 0.F;
+                for (size_t i = 0; i < ROWCOUNT; ++i) {
+                    rowWidth += sc<float>(sizes[rowFirst + i].x) * bestScale;
+                    rowH = std::max(rowH, sc<float>(sizes[rowFirst + i].y) * bestScale);
+                }
+
+                float x = sc<float>(usable.x) + (sc<float>(usable.w) - rowWidth) / 2.F;
+                for (size_t i = rowFirst; i < rowFirst + ROWCOUNT; ++i) {
+                    out[i] = CBox{x, y, sc<float>(sizes[i].x) * bestScale, sc<float>(sizes[i].y) * bestScale};
+                    x += sc<float>(sizes[i].x) * bestScale + GAP;
+                }
+
+                y += rowH + GAP;
+                rowFirst += ROWCOUNT;
+            }
+        }
+
+        // THE MEMO, and every field of it is a KEY: the slot vector is only
+        // reused when nothing the solver reads has moved. There is no
+        // generation number to forget to bump, and no frame counter -- a frame
+        // counter would have been wrong twice over. renderSearch publishes the
+        // top-chrome height MID-frame, so two calls in one frame legitimately
+        // disagree about `usable`; and a hit test between frames must see the
+        // layout that is actually on screen, which is the one whose inputs are
+        // unchanged.
+        //
+        // The key is rebuilt on every call -- that is the O(W) membership walk,
+        // which no longer carries a config lookup per window -- and what it
+        // buys is the O(n^2) row search, the n geometricBox reads the row walk
+        // repeated, and the whole solve.
+        struct SGridMemo {
+            // --- key
+            WORKSPACEID                          ws             = WORKSPACE_INVALID;
+            MONITORID                            mon            = MONITOR_INVALID;
+            std::string                          query;
+            // The same argument Membership's own cache makes for keying on the
+            // generation: `members` holds raw addresses, and an address can be
+            // reused by a later window. Every open, close, kill and destroy
+            // bumps this, so a recycled address is always looked up in a
+            // generation the stale entry does not carry.
+            uint64_t                             membersGen    = 0;
+            Desktop::View::CWindow*              excluded       = nullptr;
+            bool                                 keepExcluded   = false;
+            float                                gap            = 0.F;
+            CBox                                 usable;
+            std::vector<Desktop::View::CWindow*> members;
+            std::vector<Vector2D>                sizes;
+            // --- value
+            std::vector<CBox> slots;
+            bool              valid = false;
+        };
+
+        bool sameBox(const CBox& a, const CBox& b) {
+            return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+        }
+
+        // Two outputs, each with the ordinary layout and the drag's own
+        // one-window-more variant, is four live entries; the cap is double that
+        // so a workspace switch cannot thrash it. Linear over a handful of
+        // entries beats hashing a key this wide.
+        constexpr size_t GRID_MEMO_MAX = 8;
+
+        std::vector<SGridMemo>& gridMemos() {
+            static std::vector<SGridMemo> MEMOS;
+            return MEMOS;
+        }
+    }
+
     bool overviewGridLayout(const PHLWORKSPACE& workspace, PHLMONITOR monitor, const PHLWINDOW& target, CBox& out) {
-        auto WINDOWS = overviewMainGridWindows(workspace, monitor);
+        if (!workspace || !monitor || !target)
+            return false;
+
+        // Reused across calls: the membership walk is the one allocation this
+        // function would otherwise make several dozen times a frame. EMPTIED on
+        // the way out, every way out -- it holds owning window handles, and a
+        // buffer that kept the last grid's would keep a closed window alive
+        // until the next time an overview was opened.
+        static std::vector<PHLWINDOW>                WINDOWS;
+        static std::vector<Desktop::View::CWindow*>  MEMBERS;
+        static std::vector<Vector2D>                 SIZES;
+
+        auto dropWindowRefs = Hyprutils::Utils::CScopeGuard([] { WINDOWS.clear(); });
+
+        overviewMainGridWindowsInto(workspace, monitor, WINDOWS);
 
         // The dragged window keeps a slot for its OWN query: the drag proxy is sized
         // off it, and a proxy sized from the N-1 layout would jump the frame the
         // drag begins. It is absent only from everyone else's layout.
-        if (const auto EXCLUDED = grid().dragExcluded; EXCLUDED && target.get() != EXCLUDED)
+        const auto EXCLUDED     = grid().dragExcluded;
+        const bool KEEPEXCLUDED = EXCLUDED && target.get() == EXCLUDED;
+        if (EXCLUDED && !KEEPEXCLUDED)
             std::erase_if(WINDOWS, [EXCLUDED](const auto& window) { return window.get() == EXCLUDED; });
 
         if (Membership::renderShadowEnabled()) {
@@ -187,8 +421,14 @@ namespace OvInternal {
                                                      WINDOWS[i]->m_class, WINDOWS[i]->m_title);
         }
 
-        const auto TARGETIT = std::ranges::find(WINDOWS, target);
-        if (TARGETIT == WINDOWS.end())
+        size_t index = WINDOWS.size();
+        for (size_t i = 0; i < WINDOWS.size(); ++i) {
+            if (WINDOWS[i] == target) {
+                index = i;
+                break;
+            }
+        }
+        if (index >= WINDOWS.size())
             return false;
 
         CBox usable = {monitor->m_position, monitor->m_size};
@@ -208,91 +448,95 @@ namespace OvInternal {
         // band, only the direction changed. X48's real constraint survives in
         // overviewResultsBandTarget's budget: the band may never grow so tall that
         // the strip and the tiles are pushed off the screen.
-        if (const float TOPCHROME = overviewStripLogicalHeight(monitor) + overviewSearchLogicalHeight(monitor) + overviewResultsLogicalHeight(monitor); TOPCHROME > 0.F) {
-            usable.y += TOPCHROME;
-            usable.h -= TOPCHROME;
+        //
+        // The strip's reserved band is taller than the drawn panel. Inset by the
+        // panel's foot plus the same gap that sits between the search pill and
+        // the strip, not by the unused bottom of the band plus another
+        // mission-control gap -- that pair was the hole between strip and windows.
+        //
+        // The stack is measured from the MONITOR's top edge -- the pill docks
+        // off overviewTopChromeBottomL and the strip's band off m_position.y --
+        // so it is a floor to clamp against, not a margin to add. Adding it to
+        // a work area that already excluded a top bar counted that bar twice
+        // and pushed every tile down by its height (22px under this rice).
+        if (const float TOPCHROME = overviewStripStackL(monitor) + overviewSearchLogicalHeight(monitor) + overviewResultsLogicalHeight(monitor); TOPCHROME > 0.F) {
+            const double BOTTOM = usable.y + usable.h;
+            usable.y            = std::max(usable.y, monitor->m_position.y + TOPCHROME);
+            usable.h            = BOTTOM - usable.y;
             if (usable.h <= 1)
                 return false;
         }
-        const size_t COUNT = WINDOWS.size();
-        const float  GAP   = sc<float>(ScrollOverview::Config::getMissionControlGap());
+        const float GAP = sc<float>(overviewMissionControlGap());
 
         usable.x += GAP;
-        usable.y += GAP;
         usable.w -= 2.0 * GAP;
-        usable.h -= 2.0 * GAP;
+        usable.h -= GAP;
         if (usable.w <= 1 || usable.h <= 1)
             return false;
 
-        // Pick the row count that lets every window share the largest common scale.
-        // Capped at 1.0 so a lone window keeps its real size instead of ballooning.
-        size_t bestRows  = 0;
-        float  bestScale = 0.F;
-        for (size_t rows = 1; rows <= COUNT; ++rows) {
-            const size_t COLS  = (COUNT + rows - 1) / rows;
-            const float  CELLW = (sc<float>(usable.w) - GAP * sc<float>(COLS - 1)) / sc<float>(COLS);
-            const float  CELLH = (sc<float>(usable.h) - GAP * sc<float>(rows - 1)) / sc<float>(rows);
-            if (CELLW <= 1.F || CELLH <= 1.F)
+        MEMBERS.clear();
+        SIZES.clear();
+        MEMBERS.reserve(WINDOWS.size());
+        SIZES.reserve(WINDOWS.size());
+        for (const auto& WINDOW : WINDOWS) {
+            MEMBERS.emplace_back(WINDOW.get());
+            SIZES.emplace_back(overviewGridWindowSize(WINDOW));
+        }
+
+        const uint64_t MEMBERSGEN = Membership::generation();
+
+        auto&      MEMOS = gridMemos();
+        SGridMemo* hit   = nullptr;
+        for (auto& memo : MEMOS) {
+            if (memo.ws != workspace->m_id || memo.mon != monitor->m_id || memo.excluded != EXCLUDED || memo.keepExcluded != KEEPEXCLUDED || memo.gap != GAP)
+                continue;
+            if (memo.membersGen != MEMBERSGEN)
+                continue;
+            if (!sameBox(memo.usable, usable) || memo.query != g_search.query.text)
+                continue;
+            if (memo.members != MEMBERS || memo.sizes != SIZES)
                 continue;
 
-            float rowScale = 1.F;
-            for (const auto& window : WINDOWS) {
-                const auto SIZE = overviewGridWindowSize(window);
-                if (SIZE.x <= 1 || SIZE.y <= 1)
-                    continue;
-
-                rowScale = std::min({rowScale, CELLW / sc<float>(SIZE.x), CELLH / sc<float>(SIZE.y)});
-            }
-
-            if (rowScale > bestScale) {
-                bestScale = rowScale;
-                bestRows  = rows;
-            }
+            hit = &memo;
+            break;
         }
 
-        if (bestRows == 0 || bestScale <= 0.F)
-            return false;
+        if (!hit) {
+            if (MEMOS.size() >= GRID_MEMO_MAX)
+                MEMOS.erase(MEMOS.begin());
 
-        // Spread the windows over the rows as evenly as possible, earlier rows take
-        // the remainder.
-        const size_t BASE  = COUNT / bestRows;
-        const size_t EXTRA = COUNT % bestRows;
-        const size_t INDEX = sc<size_t>(std::distance(WINDOWS.begin(), TARGETIT));
+            MEMOS.emplace_back();
+            hit               = &MEMOS.back();
+            hit->ws           = workspace->m_id;
+            hit->mon          = monitor->m_id;
+            hit->query        = g_search.query.text;
+            hit->membersGen   = MEMBERSGEN;
+            hit->excluded     = EXCLUDED;
+            hit->keepExcluded = KEEPEXCLUDED;
+            hit->gap          = GAP;
+            hit->usable       = usable;
+            hit->members      = MEMBERS;
+            hit->sizes        = SIZES;
 
-        size_t row      = 0;
-        size_t rowFirst = 0;
-        size_t rowCount = 0;
-        for (; row < bestRows; ++row) {
-            rowCount = BASE + (row < EXTRA ? 1 : 0);
-            if (INDEX < rowFirst + rowCount)
-                break;
-
-            rowFirst += rowCount;
+            solveGrid(WINDOWS, SIZES, usable, GAP, hit->slots);
+            hit->valid = !hit->slots.empty();
         }
 
-        if (row >= bestRows)
+        if (!hit->valid || index >= hit->slots.size())
             return false;
 
-        float rowWidth = GAP * sc<float>(rowCount - 1);
-        for (size_t i = 0; i < rowCount; ++i)
-            rowWidth += sc<float>(overviewGridWindowSize(WINDOWS[rowFirst + i]).x) * bestScale;
-
-        float x = sc<float>(usable.x) + (sc<float>(usable.w) - rowWidth) / 2.F;
-        for (size_t i = rowFirst; i < INDEX; ++i)
-            x += sc<float>(overviewGridWindowSize(WINDOWS[i]).x) * bestScale + GAP;
-
-        const auto  SIZE   = overviewGridWindowSize(target);
-        const float WIDTH  = sc<float>(SIZE.x) * bestScale;
-        const float HEIGHT = sc<float>(SIZE.y) * bestScale;
-        const float CELLH  = (sc<float>(usable.h) - GAP * sc<float>(bestRows - 1)) / sc<float>(bestRows);
-        const float Y      = sc<float>(usable.y) + sc<float>(row) * (CELLH + GAP) + (CELLH - HEIGHT) / 2.F;
-
-        out = CBox{x, Y, WIDTH, HEIGHT};
+        out = hit->slots[index];
+        // The strip label's slide (gridShiftL): every slot, after the solve, so
+        // the grid keeps its size and just moves.
+        out.y += g_search.layoutOn(monitor->m_id).gridShiftL;
         return true;
     }
 
-    bool overviewGridSlot(const PHLWINDOW& window, PHLMONITOR monitor, CBox& out) {
-        if (!ScrollOverview::Config::getMissionControl() || !monitor)
+    bool overviewGridSlot(const PHLWINDOW& window, PHLMONITOR monitor, CBox& out, bool* promotedOut) {
+        if (promotedOut)
+            *promotedOut = false;
+
+        if (!overviewMissionControlOn() || !monitor)
             return false;
 
         const auto ACTIVE = monitor->m_activeWorkspace;
@@ -303,14 +547,24 @@ namespace OvInternal {
         // HOME, not m_workspace: a window stashed FROM the active desktop owns a slot
         // in the active grid outright, and asking its m_workspace sent it down the
         // promoted branch instead -- the other half of the duplicate above.
-        if (overviewGridHomeWorkspace(window) != ACTIVE->m_id && !overviewGridPromoted(window, monitor))
-            return false;
+        //
+        // The promoted answer is HANDED BACK rather than asked for a second time
+        // by the caller: overviewGridPromoted arms the release map, and
+        // getOverviewWindowBox was asking it twice per box for a value that
+        // cannot differ between the two calls.
+        if (overviewGridHomeWorkspace(window) != ACTIVE->m_id) {
+            if (!overviewGridPromoted(window, monitor))
+                return false;
+
+            if (promotedOut)
+                *promotedOut = true;
+        }
 
         return overviewGridLayout(ACTIVE, monitor, window, out);
     }
 
     float overviewGridProgress(float scale) {
-        return ScrollOverview::Geometry::gridProgress(scale, ScrollOverview::Config::getScale());
+        return ScrollOverview::Geometry::gridProgress(scale, overviewOpenScale());
     }
 
     CBox overviewGridLerpBox(const CBox& from, const CBox& to, float t) {
@@ -344,8 +598,9 @@ namespace OvInternal {
         return ScrollOverview::Geometry::boxesDiffer(a, b);
     }
 
-    CBox gridReflowBox(const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom, bool promoted, bool exiting) {
-        const int DURATION = exiting ? gridReleaseMs() : ScrollOverview::Config::getMissionControlReflowMs();
+    CBox gridReflowBox(const PHLMONITOR& monitor, const PHLWINDOW& window, const CBox& slot, const CBox* enterFrom, bool promoted, bool exiting) {
+        const uint64_t FRAME = overviewFrameOn(monitor);
+        const int DURATION = exiting ? gridReleaseMs() : overviewMissionControlReflowMs();
         if (DURATION <= 0)
             return slot;
 
@@ -372,39 +627,39 @@ namespace OvInternal {
         // on frames where that culls the whole workspace, its pass is skipped and
         // this function is not called at all. Reseeding then would throw away an
         // ease that is still running and draw the tile at its destination.
-        const bool INFLIGHT = KNOWN && ScrollOverview::Config::animElapsedMs(entry.start) < sc<float>(DURATION);
+        const bool INFLIGHT = KNOWN && overviewAnimElapsedMs(entry.start) < sc<float>(DURATION);
         // Genuinely absent: a tile that stopped being drawn entirely, stayed gone
         // long enough to finish whatever it was doing, and is coming back.
-        const bool UNDRAWN = KNOWN && !INFLIGHT && g_overviewFrame - entry.lastFrame > 1;
+        const bool UNDRAWN = KNOWN && !INFLIGHT && FRAME - entry.lastFrame > 1;
         // ...and the case staleness can never see, because the tile was on screen
         // the whole time: it just crossed onto the active card.
         const bool JOINED = KNOWN && promoted && !entry.promotedLast;
 
         if (!KNOWN || UNDRAWN || JOINED) {
             const CBox START = enterFrom ? *enterFrom : slot;
-            entry            = SGridReflow{window, START, slot, NOW, g_overviewFrame, promoted};
+            entry            = SGridReflow{window, START, slot, NOW, FRAME, promoted};
             if (gridBoxesDiffer(START, slot))
-                G.reflowActive = true;
+                gridSetReflowActive(monitor);
             return START;
         }
 
-        entry.lastFrame    = g_overviewFrame;
+        entry.lastFrame    = FRAME;
         entry.promotedLast = promoted;
 
-        const float ELAPSED = ScrollOverview::Config::animElapsedMs(entry.start);
+        const float ELAPSED = overviewAnimElapsedMs(entry.start);
         const float T       = gridReflowEase(ELAPSED / sc<float>(DURATION), exiting);
         const CBox  CURRENT = overviewGridLerpBox(entry.from, entry.to, T);
 
         if (gridBoxesDiffer(slot, entry.to)) {
-            entry.from     = CURRENT; // retarget from where the tile actually is
-            entry.to       = slot;
-            entry.start    = NOW;
-            G.reflowActive = true;
+            entry.from  = CURRENT; // retarget from where the tile actually is
+            entry.to    = slot;
+            entry.start = NOW;
+            gridSetReflowActive(monitor);
             return CURRENT;
         }
 
         if (T < 1.F)
-            G.reflowActive = true;
+            gridSetReflowActive(monitor);
 
         return CURRENT;
     }

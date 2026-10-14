@@ -1,15 +1,18 @@
 #include "TileChrome.hpp"
+#include "Motion.hpp"
 
 #include "Config.hpp"
 #include "globals.hpp"
 
 #include "AppSearch.hpp"
+#include "Dock.hpp"
 #include "OverviewRender.hpp"
 #include "WindowPill.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <vector>
 
 #include <hyprland/src/helpers/time/Time.hpp>
 
@@ -133,6 +136,9 @@ struct SEase {
 struct SState {
     SEase hover;
     SEase press;
+    // The output this tile was on when its ease was armed. Only used to decide
+    // which overview owes the frames; the ease itself is output-agnostic.
+    MONITORID monitor = MONITOR_INVALID;
 };
 
 std::unordered_map<Desktop::View::CWindow*, SState> g_states;
@@ -142,17 +148,36 @@ PHLWINDOWREF                                        g_pressed;
 // the cursor is no longer on it.
 PHLWINDOWREF                                        g_lingering;
 
+// Captions are queued during TileChrome::render and flushed after the dock, so
+// a title hanging off a window at the bottom of the active card is not covered.
+struct SCaption {
+    PHLWINDOWREF window;
+    CBox         tileBox;
+    float        fade  = 1.F;
+    float        scale = 1.F;
+};
+
+std::vector<SCaption> g_captions;
+
 SState* stateFor(const PHLWINDOW& window, bool create) {
     if (!window)
         return nullptr;
+
+    const auto stamp = [&window](SState& state) -> SState* {
+        // Re-stamped on every lookup rather than only at creation: a window
+        // dragged to the other output has to start owing ITS frames.
+        if (const auto MON = window->m_monitor.lock())
+            state.monitor = MON->m_id;
+        return &state;
+    };
 
     // ponytail: only ever as many entries as tiles the cursor has touched this
     // session, and forget() empties it when the overview closes. Reaping dead
     // windows would need a hook for a map that never gets big.
     if (const auto IT = g_states.find(window.get()); IT != g_states.end())
-        return &IT->second;
+        return stamp(IT->second);
 
-    return create ? &g_states[window.get()] : nullptr;
+    return create ? stamp(g_states[window.get()]) : nullptr;
 }
 
 // Growing is an entrance and shrinking back is an exit, so the direction of the
@@ -170,21 +195,59 @@ float eased(const SEase& ease) {
 // in both directions -- because that is what a CSS transition does, and the
 // symmetry is most of why GNOME's hover feels smoother than an accelerated exit.
 float easedHover(const SEase& ease) {
-    const float T   = std::clamp(std::chrono::duration<float, std::milli>(Time::steadyNow() - ease.start).count() / ease.ms, 0.F, 1.F);
+    // The animation clock: the panel's speed stretches the hover too.
+    const float T   = std::clamp(ScrollOverview::Config::animElapsedMs(ease.start) / std::max(1.F, sc<float>(ease.ms)), 0.F, 1.F);
     const float INV = 1.F - T;
+    const float E   = Motion::housePreset() ? 1.F - INV * INV : Motion::ease(Motion::ERole::DECEL, T);
 
-    return ease.from + (ease.to - ease.from) * (1.F - INV * INV);
+    return ease.from + (ease.to - ease.from) * E;
 }
 
 float shortSide(const CBox& box) {
     return sc<float>(std::min(box.w, box.h));
 }
 
+void drawCaption(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, float fade, float scale) {
+    if (!monitor || !window || tileBox.w < 1 || tileBox.h < 1)
+        return;
+
+    const auto* const HSTATE = stateFor(window, false);
+    if (!HSTATE)
+        return;
+
+    const float A = std::clamp(easedHover(HSTATE->hover), 0.F, 1.F) * fade;
+    if (A <= 0.01F)
+        return;
+
+    // RESTING side, not the growing app-icon: the caption is a hover surface
+    // and is only ever seen at FADE 1, and pinning it here stops the pill
+    // sliding up the screen if a hover lands mid-open.
+    const float ICONSIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * scale, ICON_MAX * scale);
+    const float BOTTOM   = sc<float>(tileBox.y + tileBox.h) + ICONSIDE / 2.F + CAPTION_GAP * scale;
+    float       plateBottom = BOTTOM + CAPTION_H * scale;
+    // Keep the title readable without covering dock icons. The plate is still
+    // drawn after the dock (z-order); this only moves it up off the pill.
+    const auto DOCK = Dock::layout(monitor).pill;
+    if (!DOCK.empty() && plateBottom > sc<float>(DOCK.y))
+        plateBottom = sc<float>(DOCK.y) - CAPTION_GAP * scale;
+    OverviewRender::labelPill(monitor, window->m_title, sc<float>(tileBox.x + tileBox.w / 2.0), plateBottom, A, scale);
 }
 
-void setHovered(const PHLWINDOW& window) {
-    if (g_hovered.lock() == window)
+}
+
+void setHovered(const PHLWINDOW& window, bool lingerOnLeave) {
+    if (g_hovered.lock() == window) {
+        // Already not on a tile, but a linger may still be counting down.
+        // The dock asks for this so a title sitting over the pill drops now.
+        if (!window && !lingerOnLeave) {
+            if (const auto LINGERING = g_lingering.lock()) {
+                if (auto* const LINGER = stateFor(LINGERING, false))
+                    LINGER->hover.hurry();
+            }
+            g_lingering.reset();
+        }
         return;
+    }
 
     // Arming a new tile ends any linger immediately, so only one tile is ever
     // grown. Re-arming the LINGERING tile is not a cancel -- that is the cursor
@@ -199,11 +262,15 @@ void setHovered(const PHLWINDOW& window) {
 
     if (const auto PREVWINDOW = g_hovered.lock()) {
         if (auto* const PREV = stateFor(PREVWINDOW, false)) {
-            // Leaving for empty space holds the blow-up; leaving for another
-            // tile does not.
-            PREV->hover.retarget(0.F, HOVER_OUT_MS, window ? 0.F : HOVER_LINGER_MS);
-            if (!window)
+            // Leaving for empty space holds the blow-up so the close button
+            // stays reachable; leaving for another tile, or for the dock, does
+            // not.
+            const bool LINGER = !window && lingerOnLeave;
+            PREV->hover.retarget(0.F, HOVER_OUT_MS, LINGER ? HOVER_LINGER_MS : 0.F);
+            if (LINGER)
                 g_lingering = PREVWINDOW;
+            else
+                PREV->hover.hurry();
         }
     }
 
@@ -235,6 +302,7 @@ void forget() {
     g_hovered.reset();
     g_pressed.reset();
     g_lingering.reset();
+    g_captions.clear();
 }
 
 PHLWINDOW hovered() {
@@ -264,6 +332,16 @@ PHLWINDOW hovered() {
 
 bool animating() {
     return std::ranges::any_of(g_states, [](const auto& entry) { return entry.second.hover.running() || entry.second.press.running(); });
+}
+
+bool animatingOn(PHLMONITOR monitor) {
+    if (!monitor)
+        return false;
+
+    const auto ID = monitor->m_id;
+    return std::ranges::any_of(g_states, [ID](const auto& entry) {
+        return entry.second.monitor == ID && (entry.second.hover.running() || entry.second.press.running());
+    });
 }
 
 CBox scaledBox(const PHLWINDOW& window, const CBox& base) {
@@ -389,7 +467,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     // does not crawl out of a corner. Below one device pixel there is nothing
     // honest to draw -- a rounded box of zero width is not a small icon, it is a
     // no-op with a texture bound -- so the draw starts when the box does.
-    if (const auto TEX = OverviewRender::appIcon(AppSearch::iconForClass(window->m_class))) {
+    if (const auto TEX = OverviewRender::appIcon(AppSearch::iconForClass(AppSearch::identityClass(window->m_class, window->m_title)))) {
         const float SIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE) * FADE;
 
         CBox iconBox = CBox{sc<float>(tileBox.x + tileBox.w / 2.0) - SIDE / 2.F, sc<float>(tileBox.y + tileBox.h) - SIDE / 2.F, SIDE, SIDE};
@@ -400,25 +478,14 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
             icon.tex = TEX;
             icon.box = iconBox;
             icon.a   = FADE;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(icon));
+            g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(icon));
         }
     }
 
-    // X57. The tile's CAPTION -- the overview had none at all. Same pill as the
-    // dock's tooltip, and it rides the hover ease so it fades in and out with
-    // the tile rather than popping. Below the tile, clear of X8's app icon,
-    // which straddles the bottom edge.
-    if (const auto* const HSTATE = stateFor(window, false)) {
-        const float A = std::clamp(easedHover(HSTATE->hover), 0.F, 1.F) * FADE;
-        if (A > 0.01F) {
-            // RESTING side, not the growing one above: the caption is a hover
-            // surface and is only ever seen at FADE 1, and pinning it here stops
-            // the pill sliding up the screen if a hover lands mid-open.
-            const float ICONSIDE = std::clamp(shortSide(tileBox) * ICON_FRACTION, ICON_MIN * SCALE, ICON_MAX * SCALE);
-            const float BOTTOM   = sc<float>(tileBox.y + tileBox.h) + ICONSIDE / 2.F + CAPTION_GAP * SCALE;
-            OverviewRender::labelPill(monitor, window->m_title, sc<float>(tileBox.x + tileBox.w / 2.0), BOTTOM + CAPTION_H * SCALE, A, SCALE);
-        }
-    }
+    // X57. The tile's CAPTION -- queued, not drawn. Dock::render runs after
+    // every tile, so a label hanging off a window at the bottom of the active
+    // card used to sit under the pill. renderCaptions() flushes these last.
+    g_captions.push_back({window, tileBox, FADE, SCALE});
 
     // V2 (user, 2026-08-17): "on tile mouseover the existing hover CLOSE button
     // is temporarily REPLACED by the 3-button pill". A CROSS-FADE rather than a
@@ -462,7 +529,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
         ring.color         = ScrollOverview::Config::highlightColor().modifyA(ALPHA);
         ring.round         = ROUND + sc<int>(std::round(sc<float>(BORDER) * SCALE));
         ring.roundingPower = 2.F;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(ring));
+        g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(ring));
     }
 
     // The DISC stays light, and that is a legibility constraint rather than a
@@ -475,7 +542,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     disc.color         = CHyprColor{0.93F, 0.93F, 0.93F, 0.95F * ALPHA};
     disc.round         = ROUND;
     disc.roundingPower = 2.F;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(disc));
+    g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(disc));
 
     if (const auto GLYPH = OverviewRender::appIcon(CLOSE_ICON)) {
         const float SIDE = sc<float>(BUTTON.w) * CLOSE_GLYPH;
@@ -485,8 +552,16 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
         x.box = CBox{sc<float>(BUTTON.x + BUTTON.w / 2.0) - SIDE / 2.F, sc<float>(BUTTON.y + BUTTON.h / 2.0) - SIDE / 2.F, SIDE, SIDE};
         x.box.round();
         x.a = ALPHA;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(x));
+        g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(x));
     }
+}
+
+void renderCaptions(PHLMONITOR monitor) {
+    for (const auto& cap : g_captions) {
+        if (const auto window = cap.window.lock())
+            drawCaption(monitor, window, cap.tileBox, cap.fade, cap.scale);
+    }
+    g_captions.clear();
 }
 
 }

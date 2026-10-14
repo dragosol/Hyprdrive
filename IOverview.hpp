@@ -38,6 +38,11 @@ class IOverviewFramePolicy {
     virtual bool shouldAllowSurfaceFrame(SP<CWLSurfaceResource> surface, const Time::steady_tp& now) = 0;
     virtual bool shouldAllowRealtimePreviewSchedule()                                              = 0;
     virtual bool shouldSuppressRenderDamage() const                                                = 0;
+    // One line naming everything on this monitor that is still asking for
+    // frames, for `hyprdrive:debug frames`. Part of the frame policy rather
+    // than a debug side-channel on purpose: whatever decides to keep painting
+    // is what has to be able to say why (2026-09-15).
+    virtual std::string frameDebugLine() const                                                     = 0;
 
     // Set while the overview is drawing itself, so its own damage does not come
     // back round as a reason to draw again.
@@ -106,6 +111,17 @@ class IOverview : public IOverviewFramePolicy, public IOverviewGeometry {
     virtual void resetSwipe()                = 0;
     virtual void onSwipeUpdate(double delta) = 0;
     virtual void onSwipeEnd()                = 0;
+    // 3-finger workspace swipe while the overview is open: cards follow the
+    // fingers, then settle onto the nearest desktop. Outside overview this is
+    // Hyprland's native workspace swipe.
+    virtual void onWorkspaceSwipeBegin()           = 0;
+    virtual void onWorkspaceSwipeUpdate(double delta) = 0;
+    virtual void onWorkspaceSwipeEnd()             = 0;
+
+    // 0 at the desktop, 1 when the overview is fully open. The 3-finger
+    // swipe warps this every update; Super-tap animates it. The dock's
+    // autohide slide reads it so the pill cannot run on a second clock.
+    virtual float openProgress() const = 0;
 
     // ---- ROLE: SELECTION ---------------------------------------------------
     virtual void performPrimaryClickAction()                        = 0;
@@ -119,8 +135,22 @@ class IOverview : public IOverviewFramePolicy, public IOverviewGeometry {
     // selection, which is also where X43's raise lives.
     virtual bool selectAndClose(const PHLWINDOW& window) = 0;
 
+    // Start a live window drag from a box that is ALREADY at mini scale -- a
+    // dock preview cell. The window grows out of that box on the way out
+    // instead of popping to full size for a frame, and from then on the gesture
+    // is the ordinary overview window drag: the same shrink at the dock
+    // boundary, the same minimize on a drop back into it.
+    virtual void beginWindowDragFrom(const PHLWINDOW& window, const CBox& miniOrigin) = 0;
+
     PHLMONITORREF pMonitor;
-    bool          m_isSwiping = false;
+    bool          m_isSwiping    = false;
+    // This swipe is dismissing an already-open overview. Distinct from
+    // `closing`: that flag is the lifecycle (close() has started and will
+    // destroy us). The gesture used to set `closing` at swipe-begin so the
+    // follow math ran in reverse, and then onSwipeEnd's close() saw the flag
+    // and returned without tearing anything down -- overview invisible,
+    // still owning the monitor, clicks and menus dead.
+    bool          m_swipeClosing = false;
 };
 
 const std::vector<SP<IOverview>>& scrollOverviews();
@@ -133,6 +163,10 @@ SP<IOverview>                     scrollOverviewForMonitor(PHLMONITOR monitor);
 SP<IOverview>                     openScrollOverviewForMonitor(PHLMONITOR monitor);
 SP<IOverview>                     scrollOverviewAt(const Vector2D& point);
 SP<IOverview>                     activeScrollOverview();
+// The overview Tab handed the KEYBOARD to (multi-monitor Tab cycle, 2026-09-27).
+// Wins over "the overview under the pointer" until the pointer moves; null
+// clears it.
+void                              setKeyboardOverview(const SP<IOverview>& overview);
 void                              registerScrollOverview(const SP<IOverview>& overview);
 void                              unregisterScrollOverview(IOverview* overview);
 void                              clearScrollOverviews();
@@ -157,6 +191,22 @@ void                              dropScrollOverviewsForMonitor(PHLMONITOR monit
 // toggle that lands on a closing overview, and resetting there would drop the
 // filter mid-close-animation.
 bool                              openScrollOverview(PHLMONITOR monitor);
+
+// The dock's Show Windows (user, 2026-09-24): the overview, filtered as if
+// `query` had been typed. Starts a fresh session when the overview is not
+// already open; an open one just has its query replaced.
+bool                              openScrollOverviewWithQuery(PHLMONITOR monitor, const std::string& query);
+
+// A window about to be dragged INTO the overview from outside it (the dock's
+// hover previews). If the search is filtering it out, the search is dropped --
+// as the first Esc would -- because every drag path requires the window to be
+// in the overview, and one the filter hides could not be picked up at all.
+void                              overviewAdmitWindow(const PHLWINDOW& window);
+// The keyboard's xkb state (main.cpp), for the dock stack pane's typing.
+struct xkb_state* overviewActiveXkbState();
+// Whether the running search keeps `window` out of the overview (OverviewInput.cpp,
+// which can see the gate).
+bool                              overviewSearchHides(const PHLWINDOW& window);
 
 // Start a NEW search session: no query, no selection, nothing held, no
 // half-typed compose sequence. What the dispatcher does before every open, for

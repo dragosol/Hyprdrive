@@ -26,21 +26,30 @@ struct SOverviewShadowConfig {
     Config::CGradientValueData color;
 };
 
+// Read once per card AND once per strip cell, every frame. It used to cost
+// seven map lookups plus TWO unconditional CGradientValueData copies -- the
+// plugin's colour and the compositor's, each a heap allocation, one of which
+// was always thrown away. The colours are now looked at through pointers and
+// exactly one copy is made, into the struct the shadow pass element takes by
+// value; the two compositor ints are resolved to a handle once per call site.
 inline SOverviewShadowConfig getOverviewShadowConfig() {
-    const auto enabled     = ScrollOverview::Config::getShadowEnabled();
-    const auto range       = ScrollOverview::Config::getShadowRange();
-    const auto renderPower = ScrollOverview::Config::getShadowRenderPower();
-    const auto color       = ScrollOverview::Config::getShadowColor();
+    const auto  enabled     = ScrollOverview::Config::getShadowEnabled();
+    const auto  range       = ScrollOverview::Config::getShadowRange();
+    const auto  renderPower = ScrollOverview::Config::getShadowRenderPower();
+    const auto* color       = ScrollOverview::Config::getShadowColor();
 
-    const auto globalRange       = ScrollOverview::Config::getValue<int>("decoration:shadow:range");
-    const auto globalRenderPower = ScrollOverview::Config::getValue<int>("decoration:shadow:render_power");
-    const auto globalColor       = ScrollOverview::Config::getValue<::Config::CGradientValueData>("decoration:shadow:color");
+    static auto& globalRangeVal       = ScrollOverview::Config::valueRef<Hyprlang::INT>("decoration:shadow:range");
+    static auto& globalRenderPowerVal = ScrollOverview::Config::valueRef<Hyprlang::INT>("decoration:shadow:render_power");
+    static auto& globalColorVal       = ScrollOverview::Config::valueRef<::Config::IComplexConfigValue>("decoration:shadow:color");
+
+    const auto globalRange       = sc<int>(*globalRangeVal);
+    const auto globalRenderPower = sc<int>(*globalRenderPowerVal);
 
     Config::CGradientValueData shadowColor;
     if (color && !color->m_colors.empty())
         shadowColor = *color;
-    else if (!globalColor.m_colors.empty())
-        shadowColor = globalColor;
+    else if (const auto* globalColor = ScrollOverview::Config::gradientPtr(globalColorVal); globalColor && !globalColor->m_colors.empty())
+        shadowColor = *globalColor;
 
     return {
         .enabled      = !!enabled,
@@ -57,24 +66,16 @@ struct SOverviewCardRounding {
     float power    = 2.F;
 };
 
-// ponytail: the floor is a constant, not a config knob. Spec §13.1 fixes the
-// "desktops are never square" rule, so a knob could only be used to break it.
-inline constexpr int OVERVIEW_MIN_CARD_ROUNDING = 8;
-
 inline SOverviewCardRounding getOverviewCardRounding(PHLMONITOR monitor, float overviewScale) {
-    const auto THEMEROUNDING = ScrollOverview::Config::getValue<int>("decoration:rounding");
-    const auto THEMEPOWER    = ScrollOverview::Config::getValue<float>("decoration:rounding_power");
+    const auto THEMEROUNDING = ScrollOverview::Config::themeRounding();
+    const auto THEMEPOWER    = ScrollOverview::Config::themeRoundingPower();
 
     const float MONITORSCALE = monitor ? monitor->m_scale : 1.F;
 
-    // E8-c (user): the desktop curve the eye compares against is NOT
-    // decoration:rounding -- it is the rice fake screen rounding, the
-    // quickshell:screenCorners overlay. That layer is exactly radius-sized
-    // (23x23 corner pieces today), so read the radius off the live layer and
-    // the cards follow the rice by construction. Unscaled on purpose: the user
-    // asked for the SAME radius as the desktop curve, not a shrunk one.
-    // ponytail: exact namespace match; a differently-named corner overlay
-    // falls back to the theme path below.
+    // If a screen-corners overlay is present (illogical-impulse names it
+    // quickshell:screenCorners), cards match that radius. Omarchy has none, so
+    // this loop is a no-op and decoration:rounding wins -- including 0, which
+    // is Omarchy's squared default.
     if (monitor) {
         for (auto const& lsRef : monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
             const auto LS = lsRef.lock();
@@ -86,17 +87,17 @@ inline SOverviewCardRounding getOverviewCardRounding(PHLMONITOR monitor, float o
                 continue;
 
             return {
-                .rounding = std::max(1, sc<int>(std::round(DIM * MONITORSCALE))),
-                .power    = std::clamp(THEMEPOWER > 0.F ? THEMEPOWER : 2.F, 1.F, 10.F),
+                .rounding = std::max(0, sc<int>(std::round(DIM * MONITORSCALE))),
+                .power    = THEMEPOWER,
             };
         }
     }
 
-    const int LOGICAL = std::max(THEMEROUNDING, OVERVIEW_MIN_CARD_ROUNDING);
+    const int LOGICAL = std::max(THEMEROUNDING, 0);
 
     return {
-        .rounding = std::max(1, sc<int>(std::round(LOGICAL * MONITORSCALE * overviewScale))),
-        .power    = std::clamp(THEMEPOWER > 0.F ? THEMEPOWER : 2.F, 1.F, 10.F),
+        .rounding = std::max(0, sc<int>(std::round(LOGICAL * MONITORSCALE * overviewScale))),
+        .power    = THEMEPOWER,
     };
 }
 
@@ -119,7 +120,7 @@ inline void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& worksp
 
     const auto CARDROUND = getOverviewCardRounding(monitor, overviewScale);
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
+    g_pHyprRenderer->addPassElement(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
         .monitor       = monitor,
         .fullBox       = baseBox.copy().expand(RANGE).round(),
         .cutoutBox     = baseBox,

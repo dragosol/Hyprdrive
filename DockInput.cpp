@@ -85,10 +85,18 @@ SClaim handlePill(PHLMONITOR mon, const Vector2D& local, EButton role, bool pres
     if (role != EButton::Main)
         return out;
 
+    // EVERY left release ends a press, first and unconditionally. The branches
+    // below return early for the stack popup and the hover panel, and a press on
+    // a non-app icon (trash, a stack, the scratchpad) has no drag state for a
+    // release off the pill to find -- any of those would leave the icon shrunk.
+    if (!pressed)
+        Dock::pressEnd();
+
     // V11 V4. The stack popup floats above BOTH the pill and the hover panel,
     // so it is asked before either. It also answers a RELEASE that has wandered
     // off it, because a release always belongs to the press that started it --
     // that release is how a file gets moved onto another cell.
+    Stacks::traceEvent(std::string("pill button ") + (pressed ? "DOWN" : "UP  ") + " at " + std::to_string(sc<int>(local.x)) + "," + std::to_string(sc<int>(local.y)));
     if (!windowDragActive && Stacks::click(mon, local, !pressed)) {
         out.claimed    = true;
         out.needsFrame = true;
@@ -108,10 +116,15 @@ SClaim handlePill(PHLMONITOR mon, const Vector2D& local, EButton role, bool pres
     // two gestures happened. Both edges are eaten -- the pill is not a window and
     // must not leak a click through to the tile beneath.
     if (!windowDragActive && Dock::pillContains(mon, local)) {
-        if (pressed)
+        if (pressed) {
+            Dock::pressBegin(mon, local);
             Dock::dragBegin(mon, local);
-        else if (!Dock::dragRelease(mon, local))
+        }
+        else if (!Dock::dragRelease(mon, local)) {
+            Stacks::traceEvent("  pill release -> Dock::click");
             Dock::click(mon, local, shiftHeld(), false, ctrlHeld()); // Y4: CTRL cycles, a plain click minimizes the app
+        } else
+            Stacks::traceEvent("  pill release -> taken by dragRelease (no click)");
         out.claimed = true;
         return out;
     }

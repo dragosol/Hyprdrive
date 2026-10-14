@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DockDropModel.hpp"
+
 #include "globals.hpp"
 
 #include <hyprland/src/helpers/time/Time.hpp>  // Time::steady_tp: the frame clock a flight draw is stamped with
@@ -49,6 +51,31 @@ struct SItem {
     bool        stack    = false;
     std::string stackPath;          // absolute, no trailing slash
     bool        stackDir = false;   // a folder fans; a file just opens
+    // Dock stacks B: the faint cell a folder being dragged over the dock will
+    // become (DockDrop's Moses gap). Not a stack yet: nothing reads its path.
+    bool        placeholder = false;
+
+    // THE SCRATCHPAD (Scratchpad.hpp). Not an app and not a location: it owns
+    // no window class and no desktop id, so `scratchpadName` is its handle the
+    // way `uri` is a location's, and its click TOGGLES that special workspace
+    // rather than minimizing anything. Nothing is ever stashed from here -- a
+    // window minimized off a scratchpad would come back to a normal desktop and
+    // quietly empty the shelf.
+    bool        scratchpad = false;
+    std::string scratchpadName;
+
+    // WHAT THE ITEM IS CALLED BY EVERYTHING THAT REMEMBERS IT: the tooltip's
+    // fade, the press squish and DockTilt's hover spring are all keyed on this
+    // one string (Dock.cpp, tooltipSubject). Filled in by dockItems() when the
+    // item is built, because the alternative is rebuilding it -- a prefix and a
+    // concatenation per icon -- inside the render loop of every monitor, every
+    // frame (user, 2026-09-14). Never set it by hand: an item built anywhere
+    // else answers with an empty subject, which is the "no icon" key.
+    std::string subject;
+
+    // 0..1 while the item is arriving (Dock.cpp, "the arrangement"): the icon
+    // grows out of its slot and fades in with it. 1 for every settled item.
+    float       appear = 1.F;
 };
 
 struct SLayout {
@@ -69,6 +96,28 @@ struct SLayout {
 // which is also true while it is still sliding out.
 void setWindowDragActive(bool active);
 
+// A native (desktop) window drag that the DOCK started, by tearing a live
+// preview out. It needs its own flag because the dock swallowed the press that
+// began it: Hyprland therefore never entered its own button state machine for
+// that drag, so nothing on its side will end the drag when the button comes up.
+// The dock has to close what it opened.
+bool dockOwnsNativeDrag();
+void clearDockNativeDrag();
+
+// Spring loading (Dock.cpp, end): a client's file drag held over a running
+// app's icon or one of its previews for delayMs flashes the icon twice and
+// brings the app forward. True while it is waiting or flashing (keep ticking).
+bool    springUpdate(PHLMONITOR monitor, const Vector2D& local, bool folderDrag, int delayMs);
+void    springReset();
+float   springFlash(const SItem& item);
+bool    springArmed(const SItem& item);
+bool    springAnimating();
+// The theme's accent (Hyprland's active border), for chrome drawn elsewhere.
+CHyprColor accentColor();
+
+// The dock is on and dock:monitor puts it on this output.
+bool    onMonitor(PHLMONITOR monitor);
+
 // Pure geometry, so a test rig can assert proportions without a frame.
 SLayout layout(PHLMONITOR monitor);
 void    render(PHLMONITOR monitor);
@@ -77,20 +126,46 @@ void    render(PHLMONITOR monitor);
 // handling asks this before it asks any workspace: the pill floats over the main
 // area, so the card underneath would otherwise claim the drop.
 bool    pillContains(PHLMONITOR monitor, const Vector2D& point);
+// The box a click on a cell is tested against (the icon plus the hover pad) --
+// anything that must agree with the dock about "was that my cell" uses this.
+CBox    cellHitBox(const CBox& iconBox, float scale);
+
+// Dock stacks B. What a drag of files is over. `folderOffer`: the drag is ONE
+// folder, so everything on the pill except a stack's centre and Trash is a gap
+// it can be pinned into (at `gapIndex`, a stack-slot index).
+struct SDropHit {
+    DockDropModel::ECell cell = DockDropModel::ECell::None;
+    std::string          stackPath;
+    int                  gapIndex = -1;
+};
+SDropHit dropCellAt(PHLMONITOR monitor, const Vector2D& point, bool folderOffer);
+// Pill, hover-preview plate, context menu or a stack's fan/pane: the overview's
+// tile hover asks this, so nothing lights up BEHIND dock chrome.
+bool    uiContains(PHLMONITOR monitor, const Vector2D& point);
+
+// Pill, hover-preview plate, or context menu: the pointer is on dock chrome,
+// not on the window painted underneath.
+bool    occupiesPointer(PHLMONITOR monitor, const Vector2D& point);
+
+// While the pointer is on the dock, seat focus leaves the window underneath
+// so wheel/touchpad scroll cycles that icon's windows instead of scrolling
+// the client. Restored when the pointer leaves (or overview/plugin takes over).
+void    syncPointerFocus(PHLMONITOR monitor, const Vector2D& point);
+void    releasePointerFocus();
 
 // X24. A click inside the pill, in the same monitor-local RENDER px as
-// pillContains. An icon toggles its app's minimized state
-// (`click-action='minimize'`); a preview restores that one window. `shift`
-// applies `minimize-shift` -- the whole app rather than just the front window.
+// pillContains. An icon min/maxes the app's window on THIS desktop: restore
+// if it is hidden, minimize if it is visible. A window only on another
+// desktop is focused there -- never launched over, never stashed from here.
+// Launch only when the app has no windows at all. A preview still restores
+// that one window.
 // Returns whether an item claimed the click; the caller swallows the event
 // either way, since the pill is not a window and must not leak clicks through.
 //
 // X33. `middle` runs `middle-click-action` / `shift-middle-click-action`
 // instead, which reach ICONS only -- the reference hangs middle-click off the
 // AppIcon, so previews and Show Applications are not targets for it.
-// Y4. `ctrl` is what CYCLES now -- a plain click minimizes the whole app
-// whatever its window count, which is what X45's count-based branch made
-// impossible for a multi-window app.
+// Scroll (not click) cycles windows. `ctrl` is the leftover click-cycle.
 bool    click(PHLMONITOR monitor, const Vector2D& point, bool shift, bool middle = false, bool ctrl = false);
 
 // Z2. The Y1 hover panel's own button. It sits ABOVE the pill, so `pillContains`
@@ -106,6 +181,23 @@ bool    panelClick(PHLMONITOR monitor, const Vector2D& point, bool release);
 // dock preview -- the client stops committing and the preview freezes. The
 // overview asks this before refusing.
 bool    isPreviewing(const PHLWINDOW& window);
+
+// A window retiled onto a workspace NOBODY IS LOOKING AT. It has a new size,
+// but its client has not drawn at that size yet and the overview refuses its
+// frame callbacks (its tile is off screen), so the strip preview shows the old
+// buffer letterboxed inside the new frame. noteRetiled opens a bounded window of
+// real frames so the client can commit once at the new size and then go quiet
+// again -- deliberately NOT "always render", which would keep every off-screen
+// desktop live for nothing.
+void    noteRetiled(const PHLWINDOW& window);
+bool    isRetiling(const PHLWINDOW& window);
+
+// ...and ASK for the frame. Permitting the callback is only half of it: on a
+// desktop nobody is looking at, nothing requests a frame in the first place, so
+// the client sits on the buffer it already has and the preview stays a still at
+// the old size. This is the same presentFeedback the dock previews drive for
+// exactly that reason.
+void    pumpRetiled(const PHLWINDOW& window, PHLMONITOR monitor, const Time::steady_tp& now);
 
 // X33. A wheel tick over the pill, `up` for one notch away from the user.
 // `scroll_action` decides: `cycle-windows` steps through the windows of the icon
@@ -153,6 +245,14 @@ void unpin(const std::string& desktopId);
 //
 // Returns whether the gesture was a DROP. False is "this was a click after all"
 // (X16's recovery: a release near its own press), and the caller runs click().
+// PRESS FEEDBACK. A held left button on an icon eases it down a little, as if
+// pressed into the pill, and the release springs it back. Tracked apart from the
+// drag state: dragBegin only follows APPS, and the trash, a stack and the
+// scratchpad squish too. Every left release ends it (DockInput::handlePill),
+// as do a drag going live and dragCancel, so an icon can never stay shrunk.
+void pressBegin(PHLMONITOR monitor, const Vector2D& point);
+void pressEnd();
+
 bool dragBegin(PHLMONITOR monitor, const Vector2D& point);
 bool dragMove(PHLMONITOR monitor, const Vector2D& point);
 bool dragRelease(PHLMONITOR monitor, const Vector2D& point);
@@ -180,6 +280,14 @@ void setForeignInsert(int index);
 bool openMenu(PHLMONITOR monitor, const Vector2D& point);
 bool menuOpen();
 void closeMenu();
+// Dock stacks A: while Rename in Dock's field is up the menu owns the keyboard.
+bool menuWantsKeyboard();
+bool menuHandleKey(uint32_t keycode); // a PRESS; true = claimed
+// Get Info's lookup poll: armed when the info view opens; removed on unload.
+void armInfoPoll();
+void stopInfoPoll();
+// The urgent hop's wake-up timer; removed on unload.
+void stopUrgentHopTimer();
 bool menuContains(PHLMONITOR monitor, const Vector2D& point);
 bool menuClick(PHLMONITOR monitor, const Vector2D& point);
 
@@ -216,6 +324,12 @@ bool damageIfChanged(PHLMONITOR monitor);
 // dock latched out of ever requesting another frame.
 void forgetMonitor(MONITORID id);
 
+// WHY THIS DOCK IS ASKING FOR FRAMES, or nullptr when it is not: the name of
+// the needsFrames term that answered. For `hyprdrive:debug frames`, because a
+// monitor repainting with nothing moving is this plugin's most expensive bug
+// class and every previous hunt for one cost a custom build (2026-09-15).
+const char* frameReason(PHLMONITOR monitor);
+
 // X30. Feed the autohide pressure barrier with RELATIVE pointer motion. The
 // bus's mouse.move carries the absolute position, and at the bottom edge the
 // cursor is clamped -- so its position stops changing while the user is still
@@ -230,7 +344,13 @@ void feedPointerMotion(const Vector2D& delta);
 // Y8. `bounceOnLand` hops the icon when the window arrives in it, which a DROP
 // on the pill asks for and a click does not -- the click was its own
 // acknowledgement.
-void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand = false);
+void minimizeWithFlight(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand = false, std::optional<CBox> startBox = std::nullopt);
+// The test rig's dock click: activate the item whose class is `wmClass`.
+bool debugActivate(PHLMONITOR monitor, const std::string& wmClass);
+// DockRoom.hpp: the pill tiled windows make room for, in global logical px --
+// its RESTING box (no hover magnification), and empty whenever they should not
+// (autohide on, dock off, dock:windows_make_room off).
+CBox roomPillGlobal(PHLMONITOR monitor);
 void restoreWithFlight(PHLMONITOR monitor, PHLWINDOW window);
 
 // P0's settleFlights lived here. It is Flight::abortAll(reason) now --
@@ -255,8 +375,10 @@ void revealNow(PHLMONITOR monitor);
 // stack popup and V2's window pill -- and it is one call rather than five copies
 // of the same six lines, so a re-theme moves all of them together instead of
 // four of them. The blur is the live dual-kawase, inheriting decoration:blur:*
-// through the -1 sentinels (X71); the tint on top is the dock's background
-// colour, and `alpha` is multiplied into both.
+// through the -1 sentinels (X71) and skipped entirely when
+// decoration:blur:enabled is off, matching Omarchy windows; the tint on top is
+// the dock's background colour, and `alpha` is multiplied into both.
+CHyprColor accentColor(); // Hyprland's active border colour (the theme accent)
 void frostedPlate(PHLMONITOR monitor, const CBox& box, int rounding, float alpha);
 
 // A dragged icon is drawn as a translucent CLONE -- the original is still in its
@@ -275,6 +397,9 @@ void armBounce(const std::string& wmClass);
 // into being two different hops. `t` runs 0..1 across HOP_MS, and the result is
 // how far the icon is lifted out of the pill, in `iconHeight`'s own units.
 inline constexpr float HOP_MS = 420.F;
+// A stack's bounce seen from a HIDDEN dock: its pile peeks up from the edge --
+// longer than the hop, or it is gone before anyone sees it.
+inline constexpr float STACK_PEEK_MS = 900.F;
 float                  hopLift(float t, float iconHeight);
 
 // Z15. A flight click kills the Y1 hover panel INSTANTLY -- leaving it alive

@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <cmath>
 #include <any>
-#include <cstdarg>
 #include <cstdio>
 #define private public
 #define protected public
@@ -24,10 +23,15 @@
 #undef protected
 #undef private
 
+#include "Locations.hpp"
 #include "FlightController.hpp"
+#include "Motion.hpp"
 
+#include "AppSearch.hpp"
 #include "Config.hpp"
 #include "Dock.hpp"
+#include "FlightBlur.hpp"
+#include "ConfigureHold.hpp"
 #include "IOverview.hpp"
 #include "Minimize.hpp"
 #include "OverviewPassElement.hpp"
@@ -48,6 +52,8 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/state/WorkspaceState.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/BorderPassElement.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
@@ -76,6 +82,9 @@ constexpr const char* KEY_FLIGHT_LOG  = "plugin:hyprdrive:dock:flight_log";
 // its way back through moveWindowToWorkspace + retile + damage, and one held
 // frame still dipped to 7% of the window's area at the z4 gate's frame 232.
 constexpr int LAND_HOLD_FRAMES = 2;
+// How long past its duration a flight may wait for its own monitor to land it
+// before any monitor lands it instead. Far longer than a stalled frame.
+constexpr float FLIGHT_ORPHAN_GRACE_MS = 1500.F;
 
 // The last frame a flight actually put on screen. THIS is what a reversal
 // continues from, and its absence is what "Armed" means -- there is no -1 alpha
@@ -215,6 +224,14 @@ class CHiddenLease {
 struct SFlight {
     uint64_t        id = 0;
     PHLWINDOWREF    window;
+    // THE MONITOR IT FLIES ON. Every box here is in its pixels, and the icon it
+    // aims at is in its dock. Every monitor's dock runs renderFlights, and with
+    // no owner each one advanced and drew every flight: a second copy on the
+    // wrong screen at the wrong coordinates, a driven restore whose real window
+    // was placed by each monitor's offset and scale in turn -- jumping between
+    // two positions every frame -- and a landing hold counted twice a frame
+    // (user, 2026-09-14: minimize and maximize glitch on multiple monitors).
+    MONITORID       monitor = MONITOR_INVALID;
     CBox            from;  // the WINDOW end of the motion, monitor-local RENDER px
     EFlightKind     kind = EFlightKind::MinimizeProxy;
     Time::steady_tp startedAt;
@@ -227,6 +244,12 @@ struct SFlight {
     std::optional<CBox>  start;
     std::optional<float> alphaFrom;
     std::optional<SDrawn> drawn;
+    // The eased progress the previous frame drew at. Motion blur smears along
+    // THIS flight's path from there to now -- never from `drawn`, which can be a
+    // box off another path (a drop seeds `start` at the drop point, so the last
+    // drawn box was the window's own; blurring that jump smeared the whole
+    // window down into the icon: user, 2026-09-30).
+    std::optional<float> lastE;
 
     EFlightPhase phase          = EFlightPhase::Armed;
     int          landHeldFrames = 0;
@@ -239,7 +262,8 @@ struct SFlight {
 // Y4/Y5. ONE FLIGHT PER WINDOW, not one flight: "minimize the whole app" is the
 // default click, and the old single-slot version would teleport two windows of
 // a three-window app on an ordinary gesture.
-std::vector<SFlight> g_flights;
+std::vector<SFlight>  g_flights;
+std::vector<uint64_t> g_flightDoLaterSeqs;
 
 void transition(SFlight& flight, const EFlightPhase to, const char* reason) {
     const auto FROM = flight.phase;
@@ -291,6 +315,9 @@ void warpRestoredWindowAnims(const PHLWINDOW& window) {
 // is 1 - 2^(-10t) snapped to exactly 1 at the end. Extracted from the host's
 // windowManager.js, not recalled -- see spec 13.14's reference-discipline note.
 float easeOutExpo(float t) {
+    // Any animation:curve preset but the house one travels on its DECEL.
+    if (!Motion::housePreset())
+        return Motion::ease(Motion::ERole::DECEL, t);
     return t >= 1.F ? 1.F : 1.F - std::pow(2.F, -10.F * t);
 }
 
@@ -403,6 +430,9 @@ void landingSanity(SFlight& flight, PHLMONITOR monitor, const char* reason) {
 
     // The lease is the unhide, and it is also Z20's draw-list refresh.
     flight.hidden.release();
+    // A driven flight drew the window "animating in" (renderFlights).
+    if (flight.isDriven())
+        WINDOW->m_animatingIn = false;
 
     if (!flight.isRestore()) {
         // A MINIMIZE landed. The window kept focus for the whole flight so the
@@ -434,6 +464,19 @@ void landingSanity(SFlight& flight, PHLMONITOR monitor, const char* reason) {
         }
     } else
         warpRestoredWindowAnims(WINDOW);
+
+    // A TILED window lands where the layout wants it NOW (user, 2026-09-25:
+    // spam-minimizing two tiled windows left one drawn full-width while
+    // Hyprland reported it half-width). Its flight froze the layout's box at
+    // click time -- full width while its sibling was still stashed -- and the
+    // write above put that into the VALUE while the sibling's return had moved
+    // the GOAL to half: value != goal with no animation left to close the gap,
+    // so it stayed. Warp to the goal and make the client match.
+    if (!WINDOW->m_isFloating) {
+        WINDOW->m_realPosition->setValueAndWarp(WINDOW->m_realPosition->goal());
+        WINDOW->m_realSize->setValueAndWarp(WINDOW->m_realSize->goal());
+        WINDOW->sendWindowSize(true);
+    }
 
     WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
 
@@ -489,10 +532,13 @@ CBox restoreForFlight(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& i
         // Overview path: proxy machinery, window hidden for the flight (the tile
         // and the proxy share a render pipeline, so that seam is clean).
         lease = CHiddenLease{window, monitor};
-        g_pEventLoopManager->doLater([W = PHLWINDOWREF{window}] {
-            if (const auto WIN = W.lock())
-                warpRestoredWindowAnims(WIN);
-        });
+        if (g_pEventLoopManager) {
+            const uint64_t seq = g_pEventLoopManager->doLater([W = PHLWINDOWREF{window}] {
+                if (const auto WIN = W.lock())
+                    warpRestoredWindowAnims(WIN);
+            });
+            g_flightDoLaterSeqs.push_back(seq);
+        }
         return {};
     }
 
@@ -544,6 +590,8 @@ enum class EReverse {
 // restored to stale geometry. A flight that is landing is now LANDED, properly,
 // before the fresh one is armed.
 EReverse reverse(PHLMONITOR monitor, const PHLWINDOW& window, bool restoring) {
+    // Whatever happens next, the old flight's smear is over.
+    FlightBlur::reset(window);
     const auto IT = find(window);
     if (IT == g_flights.end()) {
         zdbg("reverse(%d) found=0\n", (int)restoring);
@@ -570,20 +618,41 @@ EReverse reverse(PHLMONITOR monitor, const PHLWINDOW& window, bool restoring) {
         // now would record that as the window's geometry and a later restore
         // would bring it back shrunken. Re-goal to the flight's true target
         // (old.from, render px) before the stash captures it.
-        if (const auto MON = window->m_monitor.lock(); MON && old.from.width >= 1 && !window->isHidden()) {
+        //
+        // The layout's goal NOW, not old.from: old.from was frozen when this
+        // window came back, and in a whole-app restore the first window back is
+        // alone in the layout -- its frozen target was the whole monitor. Pinned
+        // there on the stash, its client was told full screen on every fast
+        // re-click (user, 2026-09-30: prompts walking down the terminal). By the
+        // next click all its siblings are back, so the goal is its real tile.
+        if (!window->isHidden() && window->m_realSize->goal().x >= 1) {
+            window->m_realPosition->m_Value = window->m_realPosition->goal();
+            window->m_realSize->m_Value     = window->m_realSize->goal();
+        } else if (const auto MON = window->m_monitor.lock(); MON && old.from.width >= 1 && !window->isHidden()) {
             const float SCALE = std::max(MON->m_scale, 0.01F);
             window->m_realPosition->m_Value = Vector2D{old.from.x / SCALE + MON->m_position.x, old.from.y / SCALE + MON->m_position.y};
             window->m_realSize->m_Value     = Vector2D{std::max(4.0, old.from.width / SCALE), std::max(4.0, old.from.height / SCALE)};
         }
         window->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
+        if (old.isDriven())
+            window->m_animatingIn = false;
         old.hidden.release();
         Minimize::minimize(window, false); // keep focus: the flight hands off at landing
+        // Z14, for the reversal too (user, 2026-09-30: spam-minimizing left the
+        // window drawn at full size behind every other flight). The stash move
+        // arms Hyprland's own fades and geometry animations on the REAL window,
+        // which then played in place while the proxy flew; the fresh minimize
+        // path warps them, this one never did.
+        warpRestoredWindowAnims(window);
+        window->m_realPosition->m_bIsBeingAnimated = false;
+        window->m_realSize->m_bIsBeingAnimated     = false;
     }
 
     // A reversed flight is always a proxy (never driven): the desktop-driven
     // restore only starts from restore(), not from a reversal.
     SFlight next{.id        = g_nextId++,
                  .window    = window,
+                 .monitor   = old.monitor,
                  .from      = old.from,
                  .kind      = restoring ? EFlightKind::RestoreProxy : EFlightKind::MinimizeProxy,
                  .startedAt = Time::steadyNow()};
@@ -605,6 +674,10 @@ EReverse reverse(PHLMONITOR monitor, const PHLWINDOW& window, bool restoring) {
 }
 
 // ---------------------------------------------------------------------------
+bool anyOn(PHLMONITOR monitor) {
+    return monitor && std::ranges::any_of(g_flights, [&](const SFlight& f) { return f.monitor == monitor->m_id; });
+}
+
 bool any() {
     return !g_flights.empty();
 }
@@ -618,12 +691,20 @@ bool isRestoreFlight(const PHLWINDOW& window) {
     return IT != g_flights.end() && IT->isRestore();
 }
 
-void minimize(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand) {
+void minimize(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand, std::optional<CBox> startBox) {
+    ConfigureHold::CHold oneResize;
     // Z5/Z9r5. Mid-restore click: put it back from mid-air. The window is REAL
     // (hidden) during a restore flight now, so the gate is the flight's
     // existence, and reverse() performs the unhide + stash.
     if (window && reverse(monitor, window, false) == EReverse::Swapped)
         return;
+
+    // The window's own monitor, whichever dock or keybind asked: the flight
+    // leaves from where the window IS and lands in that monitor's dock.
+    if (window && !Minimize::isMinimized(window)) {
+        if (const auto WINDOWMON = window->m_monitor.lock(); WINDOWMON && WINDOWMON->m_enabled)
+            monitor = WINDOWMON;
+    }
 
     const int  DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
     const bool ANIMATE  = monitor && window && DURATION > 0 && !Minimize::isMinimized(window);
@@ -655,9 +736,11 @@ void minimize(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand) {
         // the ACKNOWLEDGEMENT of the drop, so it fires now, while the window is
         // still flying in -- not at the landing.
         if (bounceOnLand)
-            ScrollOverview::Dock::armBounce(window->m_class);
+            ScrollOverview::Dock::armBounce(AppSearch::identityClass(window->m_class, window->m_title));
         std::erase_if(g_flights, [&window](const SFlight& f) { return f.window.lock() == window; });
-        SFlight next{.id = g_nextId++, .window = window, .from = from, .kind = EFlightKind::MinimizeProxy, .startedAt = Time::steadyNow()};
+        SFlight next{.id = g_nextId++, .window = window, .monitor = monitor->m_id, .from = from, .kind = EFlightKind::MinimizeProxy, .startedAt = Time::steadyNow()};
+        if (startBox && startBox->width >= 1 && startBox->height >= 1)
+            next.start = *startBox;
         zdbg("phase id=%llu kind=%s ->Armed reason=minimize\n", (unsigned long long)next.id, kindName(next.kind));
         g_flights.emplace_back(std::move(next));
     }
@@ -668,6 +751,7 @@ void minimize(PHLMONITOR monitor, PHLWINDOW window, bool bounceOnLand) {
 // instantly and the proxy would be a second copy of it. The actual restore
 // happens when the flight lands -- see renderFlights.
 void restore(PHLMONITOR monitor, PHLWINDOW window) {
+    ConfigureHold::CHold oneResize;
     // Z5. Mid-minimize click: bring it straight back from mid-air -- and give it
     // the same click-time restore treatment a fresh flight gets (Z9r5).
     if (window && reverse(monitor, window, true) == EReverse::Swapped) {
@@ -684,6 +768,21 @@ void restore(PHLMONITOR monitor, PHLWINDOW window) {
             }
         }
         return;
+    }
+
+    // The monitor it goes BACK to -- its home desktop's -- whichever dock or
+    // keybind asked. Its minimized copy sits on the stash, which lives on one
+    // monitor only and says nothing about where the window belongs.
+    if (window && Minimize::isMinimized(window)) {
+        const auto HOME = Minimize::originalWorkspace(window);
+        for (const auto& w : State::workspaceState()->workspaces()) {
+            const auto WS = w.lock();
+            if (!WS || WS->m_id != HOME || WS->m_isSpecialWorkspace)
+                continue;
+            if (const auto HOMEMON = WS->m_monitor.lock(); HOMEMON && HOMEMON->m_enabled)
+                monitor = HOMEMON;
+            break;
+        }
     }
 
     const int DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
@@ -752,6 +851,7 @@ void restore(PHLMONITOR monitor, PHLWINDOW window) {
     std::erase_if(g_flights, [&window](const SFlight& f) { return f.window.lock() == window; });
     SFlight next{.id        = g_nextId++,
                  .window    = window,
+                 .monitor   = monitor->m_id,
                  .from      = TO,
                  .kind      = window->isHidden() ? EFlightKind::RestoreProxy : EFlightKind::RestoreDriven,
                  .startedAt = Time::steadyNow()};
@@ -775,10 +875,41 @@ void restore(PHLMONITOR monitor, PHLWINDOW window) {
 // lived in Dock::render. See the header: the version of this that mutated every
 // flight and then drew every flight is the version that broke z5.
 void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady_tp& now, const bool ownsPass) {
+    // Several windows of one app land in the same frame: retile once for all.
+    ConfigureHold::CHold oneResize;
     for (auto it = g_flights.begin(); it != g_flights.end();) {
+        // Another monitor's flight: that monitor advances and draws it. Two
+        // ways it could never get there, both settled from here with the same
+        // landing guarantees rather than left holding a hidden window forever:
+        // its monitor is gone, or the flight has been over for a good while and
+        // nothing on its monitor rendered it home.
+        if (!monitor || it->monitor != monitor->m_id) {
+            const auto OWNER = State::monitorState()->query().id(it->monitor).run();
+            const int  DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
+            if (!OWNER || ScrollOverview::Config::realElapsedMs(it->startedAt) > sc<float>(std::max(0, DURATION)) + FLIGHT_ORPHAN_GRACE_MS) {
+                completeAndErase(it, nullptr, OWNER ? "orphaned" : "monitor-gone");
+                continue;
+            }
+            ++it;
+            continue;
+        }
+
         const auto  WINDOW = it->window.lock();
         const float T      = flightProgress(*it);
-        const auto  ITEM   = WINDOW ? std::ranges::find_if(layout.items, [&](const SItem& item) { return item.wmClass == WINDOW->m_class; }) : layout.items.end();
+        const auto  CLASS  = WINDOW ? AppSearch::identityClass(WINDOW->m_class, WINDOW->m_title) : std::string{};
+        // A file manager window showing a dock LOCATION (the Trash) flies to
+        // that location's icon, not to the file manager's: the location's own
+        // windows are what its icon minimizes and restores (Dock.cpp,
+        // locationWindows). Looked for first, since the file manager's icon
+        // would otherwise match by class.
+        auto ITEM = WINDOW ? std::ranges::find_if(layout.items,
+                                                  [&](const SItem& item) {
+                                                      return !item.uri.empty() && !item.stack && !item.locationName.empty() && WINDOW->m_title == item.locationName &&
+                                                          Locations::openWindows(item.uri);
+                                                  }) :
+                             layout.items.end();
+        if (WINDOW && ITEM == layout.items.end())
+            ITEM = std::ranges::find_if(layout.items, [&](const SItem& item) { return item.wmClass == CLASS; });
 
         if (!WINDOW || T >= 1.F || ITEM == layout.items.end()) {
             zdbg("flightEnd id=%llu win=%d T=%f item=%d restoring=%d held=%d phase=%s\n", (unsigned long long)it->id, (int)(bool)WINDOW, T, ITEM != layout.items.end(),
@@ -825,10 +956,27 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             const CBox  START = it->start.value_or(ITEM->iconBox);
             box               = lerpBox(START, it->from, E);
             alpha             = it->alphaFrom.value_or(0.F) * (1.F - E) + E;
+            // The minimize blur setting (strength and fade, FlightBlur::shape), by the flight's own clock.
+            const CBox PREVBOX = FlightBlur::shape(FlightBlur::ESite::MINIMIZE, lerpBox(START, it->from, it->lastE.value_or(E)), box, T);
+            it->lastE          = E;
 
             WINDOW->m_realPosition->m_Value = Vector2D{box.x / SCALE + monitor->m_position.x, box.y / SCALE + monitor->m_position.y};
             WINDOW->m_realSize->m_Value     = Vector2D{std::max(4.0, box.width / SCALE), std::max(4.0, box.height / SCALE)};
+            // AS ANIMATING, or Hyprland will not scale the window's SUB-surfaces
+            // with it (CSurfacePassElement squishes a subsurface only while the
+            // size animates): Zen's page stayed full size inside a shrinking
+            // frame, and the two flew apart (user, 2026-09-30, spam-minimizing).
+            // Landing warps both vars, which clears the flag again.
+            WINDOW->m_realPosition->m_bIsBeingAnimated = true;
+            WINDOW->m_realSize->m_bIsBeingAnimated     = true;
+            // And "animating in": without it Hyprland CROPS a surface drawn
+            // smaller than the client's size (calculateUVForSurface) instead of
+            // scaling it -- the same bit the overview's tiles set. Cleared at
+            // landing (landingSanity) and on a reversal.
+            WINDOW->m_animatingIn = true;
             WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(alpha);
+            // Motion blur rides the real window's next draw (FlightBlur.hpp).
+            FlightBlur::recordDriven(monitor, WINDOW, PREVBOX, box);
 
             if (it->phase == EFlightPhase::Armed)
                 transition(*it, EFlightPhase::Flying, "first-frame");
@@ -838,17 +986,22 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             continue;
         }
 
+        CBox PREVBOX;
         if (it->isRestore()) {
             // Overview path: proxy machinery (Y5 divergence: GNOME does NOT fade
             // a window back in; the user asked for "fade out/in").
             const CBox START = it->start.value_or(ITEM->iconBox);
             box              = lerpBox(START, it->from, E);
             alpha            = it->alphaFrom.value_or(0.F) * (1.F - E) + E;
+            PREVBOX          = lerpBox(START, it->from, it->lastE.value_or(E));
         } else {
             const CBox START = it->start.value_or(it->from);
             box              = lerpBox(START, ITEM->iconBox, E);
             alpha            = it->alphaFrom.value_or(1.F) * (1.F - E);
+            PREVBOX          = lerpBox(START, ITEM->iconBox, it->lastE.value_or(E));
         }
+        it->lastE = E;
+        PREVBOX   = FlightBlur::shape(FlightBlur::ESite::MINIMIZE, PREVBOX, box, T); // the flight's own clock
 
         if (it->phase == EFlightPhase::Armed)
             transition(*it, EFlightPhase::Flying, "first-frame");
@@ -863,9 +1016,9 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
         // carries Hyprland's shadow and border. Same shadow pass the overview
         // cards use, and the window's own border gradient (focused by Z9, so the
         // active colours), both riding the flight's box and alpha.
-        OvInternal::renderOverviewWorkspaceShadow(monitor, box, 1.F, false, alpha);
-        ScrollOverview::Dock::drawFlightSurface(monitor, WINDOW, box, alpha, now, ownsPass);
-        {
+        const auto drawProxy = [&](bool passIsOurs) {
+            OvInternal::renderOverviewWorkspaceShadow(monitor, box, 1.F, false, alpha);
+            ScrollOverview::Dock::drawFlightSurface(monitor, WINDOW, box, alpha, now, passIsOurs);
             const int BORDERSIZE = std::max(0, ScrollOverview::Config::getValue<int>("general:border_size"));
             if (BORDERSIZE > 0 && alpha > 0.01F) {
                 CBorderPassElement::SBorderData border;
@@ -873,15 +1026,57 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
                 border.grad1      = WINDOW->m_realBorderColor;
                 border.a          = alpha;
                 border.borderSize = BORDERSIZE;
-                border.round      = sc<int>(sc<float>(ScrollOverview::Config::getValue<int>("decoration:rounding")) * monitor->m_scale);
-                g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
+                border.round      = sc<int>(sc<float>(ScrollOverview::Config::themeRounding()) * monitor->m_scale);
+                g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(border));
             }
-        }
+        };
+        // Motion blur (FlightBlur.hpp): the whole proxy -- shadow, window,
+        // border -- smears as one. Drawn into a nested pass, so it must not
+        // flush the real one (passIsOurs = false).
+        if (!FlightBlur::drawBlurred(monitor, WINDOW, PREVBOX, box, [&] { drawProxy(false); }))
+            drawProxy(ownsPass);
         ++it;
+    }
+
+    // A landed / aborted / reversed-into-proxy flight must not leave its window
+    // rendering through the blur transformer.
+    FlightBlur::sweep([](const PHLWINDOW& w) {
+        const auto IT = find(w);
+        return IT != g_flights.end() && IT->isDriven();
+    });
+}
+
+std::optional<SDrawnFlight> drawnFor(const PHLWINDOW& window) {
+    const auto IT = find(window);
+    if (IT == g_flights.end() || !IT->drawn)
+        return std::nullopt;
+    return SDrawnFlight{.box = IT->drawn->box, .alpha = IT->drawn->alpha, .progress = flightProgress(*IT)};
+}
+
+void retargetRestores() {
+    for (auto& f : g_flights) {
+        if (!f.isDriven())
+            continue;
+        const auto W   = f.window.lock();
+        const auto MON = W ? W->m_monitor.lock() : PHLMONITOR{};
+        if (!W || !MON)
+            continue;
+        const float    SCALE = std::max(MON->m_scale, 0.01F);
+        const Vector2D POS   = W->m_realPosition->goal();
+        const Vector2D SZ    = W->m_realSize->goal();
+        f.from               = CBox{(POS.x - MON->m_position.x) * SCALE, (POS.y - MON->m_position.y) * SCALE, SZ.x * SCALE, SZ.y * SCALE};
     }
 }
 
 void abortAll(const std::string& reason) {
+    if (g_pEventLoopManager) {
+        for (auto seq : g_flightDoLaterSeqs) {
+            if (seq)
+                g_pEventLoopManager->removeDoLater(seq);
+        }
+    }
+    g_flightDoLaterSeqs.clear();
+
     if (g_flights.empty())
         return;
 

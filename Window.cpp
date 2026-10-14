@@ -1,4 +1,6 @@
 #include "Window.hpp"
+#include "FlightBlur.hpp"
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <dlfcn.h>
@@ -31,6 +33,7 @@
 #undef protected
 #undef private
 #include "Config.hpp"
+#include "IOverview.hpp"
 #include "OverviewPassElement.hpp"
 #include "OverviewRender.hpp"
 
@@ -89,6 +92,102 @@ struct COverviewAnimatedVariableAccess : Hyprutils::Animation::CBaseAnimatedVari
     }
 };
 
+// THE TILE GEOMETRY, AT DRAW TIME. renderOverviewWindow puts the window at the
+// tile's box for the duration of its call, and a caller that owns the pass
+// flushes before the box is taken back. A caller that does not (the dock's
+// flight at RENDER_POST_WINDOWS, the motion-blurred flight's nested pass) has
+// its surfaces drawn LATER, against the window's real geometry -- and
+// CSurfacePassElement reads that live geometry and the size-animation bit to
+// size, place and crop every surface. Zen's page (a subsurface) came out at its
+// full client size, cropped into the shrunken window, for the first frames of a
+// restore (user, 2026-09-30). So such a caller brackets the window's elements
+// with these two: the first re-applies the tile geometry when the pass reaches
+// it, the second puts the real geometry back.
+struct SDeferredWindowGeometry {
+    PHLWINDOWREF    window;
+    PHLWORKSPACEREF workspace;
+    Vector2D        pos, size;
+    bool            zeroWorkspaceOffset = false;
+
+    // what apply() found, for restore()
+    bool     applied = false;
+    Vector2D prevPos, prevSize, prevOffset;
+    bool     prevAnimatingIn = false, prevPosAnimating = false, prevSizeAnimating = false;
+
+    void apply() {
+        const auto WINDOW = window.lock();
+        if (!WINDOW || applied)
+            return;
+        applied           = true;
+        prevPos           = WINDOW->positionAnimation()->value();
+        prevSize          = WINDOW->sizeAnimation()->value();
+        prevAnimatingIn   = WINDOW->m_animatingIn;
+        prevPosAnimating  = WINDOW->positionAnimation()->isBeingAnimated();
+        prevSizeAnimating = WINDOW->sizeAnimation()->isBeingAnimated();
+        COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->positionAnimation().get(), true);
+        COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->sizeAnimation().get(), true);
+        WINDOW->positionAnimation()->value() = pos;
+        WINDOW->sizeAnimation()->value()     = size;
+        WINDOW->m_animatingIn                = true;
+        if (const auto WS = workspace.lock(); WS && zeroWorkspaceOffset) {
+            prevOffset                = WS->m_renderOffset->value();
+            WS->m_renderOffset->value() = {};
+        }
+    }
+
+    void restore() {
+        const auto WINDOW = window.lock();
+        if (!WINDOW || !applied)
+            return;
+        applied                              = false;
+        WINDOW->positionAnimation()->value() = prevPos;
+        WINDOW->sizeAnimation()->value()     = prevSize;
+        WINDOW->m_animatingIn                = prevAnimatingIn;
+        COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->positionAnimation().get(), prevPosAnimating);
+        COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->sizeAnimation().get(), prevSizeAnimating);
+        if (const auto WS = workspace.lock(); WS && zeroWorkspaceOffset)
+            WS->m_renderOffset->value() = prevOffset;
+    }
+};
+
+class CDeferredWindowGeometryPassElement : public IPassElement {
+  public:
+    CDeferredWindowGeometryPassElement(SP<SDeferredWindowGeometry> state, bool apply) : m_state(std::move(state)), m_apply(apply) {}
+    // A pop that never runs (the pass is dropped) must still give the geometry back.
+    ~CDeferredWindowGeometryPassElement() override {
+        if (!m_apply && m_state)
+            m_state->restore();
+    }
+
+    std::vector<UP<IPassElement>> draw() override {
+        if (m_state)
+            m_apply ? m_state->apply() : m_state->restore();
+        return {};
+    }
+    bool needsLiveBlur() override {
+        return false;
+    }
+    bool needsPrecomputeBlur() override {
+        return false;
+    }
+    const char* passName() override {
+        return m_apply ? "CDeferredWindowGeometryApply" : "CDeferredWindowGeometryRestore";
+    }
+    ePassElementType type() override {
+        return EK_CUSTOM;
+    }
+    bool undiscardable() override {
+        return true;
+    }
+    bool disableSimplification() override {
+        return true;
+    }
+
+  private:
+    SP<SDeferredWindowGeometry> m_state;
+    bool                        m_apply = true;
+};
+
 static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     if (!window)
         return nullptr;
@@ -127,7 +226,65 @@ static float getOverviewWindowTargetOpacity(const PHLWINDOW& window) {
 // busy (20.4% -> 23.9%) for 8 tiles of 2400x1450, which is affordable, so it is
 // left alone. If it ever stops being affordable, the upgrade is to keep the
 // mipmap and skip regeneration while the source texture is unchanged.
-static std::unordered_map<GLuint, SP<Render::IFramebuffer>> g_u2PrefilterFBs;
+//
+// Y17 (GPU, 2026-09-14): it stopped being affordable, and that upgrade is what
+// follows. The old cache was keyed on the GL texture NAME with no notion of
+// "unchanged", which cost three ways:
+//   * the same texture was cleared, re-copied and re-mipmapped once per DRAW --
+//     the tile, its strip mini, the alternate-monitor mini and again for the
+//     other monitor's frame -- four times a frame for one static window;
+//   * nothing ever expired, and a client cycling a dmabuf swapchain retires
+//     texture names that never come back, so the map (and its full-size
+//     framebuffers) grew without bound;
+//   * every ~CScrollOverview released it for ALL overviews, so closing one
+//     monitor's overview threw away the other's mipmaps mid-animation.
+//
+// The cache is now keyed by SURFACE: one entry per surface, shared by all four
+// draws. It is rebuilt only if the source texture object, its size, the target
+// format or the target image description changed, or if the surface COMMITTED
+// since the copy -- notifySurfaceCommit() below, driven from main.cpp's
+// damageSurface hook. That is the same signal the overview already trusts to
+// know a live tile must be repainted (CScrollOverview::shouldHandleSurfaceDamage),
+// so the mipmap can never be staler than the tile it is drawn into. Entries
+// whose surface died, and entries nothing has drawn for a while, are dropped.
+struct SU2PrefilterEntry {
+    SP<Render::IFramebuffer>            fb;
+    WP<CWLSurfaceResource>              surface;
+    WP<Render::ITexture>                srcTex;      // key owner when there is no surface
+    bool                                keyedOnSurface = false;
+    GLuint                              srcTexID       = 0;
+    Vector2D                            srcSize;
+    uint32_t                            format         = 0;
+    NColorManagement::PImageDescription imageDescription;
+    bool                                dirty          = true;
+    uint64_t                            lastUse        = 0;
+    std::chrono::steady_clock::time_point lastCopy{};
+
+    bool                                alive() const {
+        return keyedOnSurface ? !surface.expired() : !srcTex.expired();
+    }
+};
+
+static std::unordered_map<const void*, SU2PrefilterEntry> g_u2PrefilterFBs;
+// Bumped once per prefiltered surface, not per frame -- Window.cpp has no frame
+// of its own. At ~8 tiles a frame this idle window is roughly a second.
+static uint64_t                                           g_u2PrefilterUse  = 0;
+static constexpr uint64_t                                 U2_PREFILTER_IDLE = 512;
+static constexpr int                                      PREFILTER_FRAME_BUDGET = 2;
+
+// Called with the EGL context current (from the render path), so releasing a
+// framebuffer here is safe.
+static void pruneTexturePrefilterCache() {
+    std::erase_if(g_u2PrefilterFBs, [](auto& kv) {
+        auto& entry = kv.second;
+        if (entry.alive() && g_u2PrefilterUse - entry.lastUse <= U2_PREFILTER_IDLE)
+            return false;
+
+        if (entry.fb)
+            entry.fb->release();
+        return true;
+    });
+}
 
 static void prefilterOverviewWindowTextures(const PHLWINDOW& window, PHLMONITOR monitor, double minify, size_t firstElement) {
     // ponytail: default 0.55 is just above the measured 0.5 boundary where
@@ -141,7 +298,10 @@ static void prefilterOverviewWindowTextures(const PHLWINDOW& window, PHLMONITOR 
         return;
 
     const auto FBFORMAT     = g_pHyprRenderer->m_renderData.currentFB->m_drmFormat;
-    auto&      passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+    // currentPass(), not m_renderPass: the dock's hover previews are queued into
+    // a REDIRECTED nested pass (CDockLivePreviewPassElement). For the overview
+    // the two are the same pass.
+    auto&      passElements = g_pHyprRenderer->currentPass().m_passElements;
 
     for (size_t i = firstElement; i < passElements.size(); ++i) {
         if (!passElements[i].element)
@@ -155,63 +315,188 @@ static void prefilterOverviewWindowTextures(const PHLWINDOW& window, PHLMONITOR 
         if (!SRC || !SRC->m_texID || SRC->m_size.x < 2 || SRC->m_size.y < 2)
             continue;
 
-        const int W = sc<int>(SRC->m_size.x);
-        const int H = sc<int>(SRC->m_size.y);
+        const int  W          = sc<int>(SRC->m_size.x);
+        const int  H          = sc<int>(SRC->m_size.y);
+        // COPIED AT THE SIZE IT IS DRAWN, in powers of two (2026-09-30). The
+        // copy used to be full or half resolution whatever the tile's size, so a
+        // 2880-px window drawn as a 500-px tile was copied and mipmapped at 1440
+        // px -- and while the overview was open those copies were re-made many
+        // times a second, which is what drove Hyprland's GPU memory up by
+        // gigabytes (the driver keeps freed buffers for reuse). The copy is now
+        // the smallest 1/2^k of the source that still covers the drawn size:
+        // no finer detail can reach the screen, and the mip chain does the rest.
+        // Powers of two, so a zoom does not reallocate every frame.
+        //
+        // AT MOST HALF (2026-09-30, reverted from 1/16): one bilinear draw
+        // straight down to 1/4..1/16 samples a handful of source texels per
+        // output pixel, so the copy came out ALIASED and the mip chain built on
+        // it could not undo that -- the previews lost their antialiasing for a
+        // saving of a few MiB. An exact 2:1 copy averages every 2x2 block, and
+        // the mip chain does the rest properly.
+        int SHIFT = 0;
+        if (minify <= 0.5 && W >= 4 && H >= 4)
+            SHIFT = 1;
+        const bool HALF       = SHIFT > 0;
+        const int  FBW        = W >> SHIFT;
+        const int  FBH        = H >> SHIFT;
+        const auto SURFACE    = spe->m_data.surface;
+        const auto IMAGEDESC  = g_pHyprRenderer->m_renderData.currentFB ? g_pHyprRenderer->m_renderData.currentFB->imageDescription() : NColorManagement::PImageDescription{};
+        // A surface pass element always carries its surface; the texture is the
+        // fallback key so a hypothetical one without it still gets a mipmap
+        // (rebuilt every draw, exactly as the whole cache used to be).
+        //
+        // AND BY SIZE STEP (2026-09-30). One surface is drawn at two very
+        // different sizes in the same frame -- its grid tile and its strip mini
+        // -- and a single entry per surface was reallocated between the two on
+        // EVERY draw: ~250 full buffer allocations a second with the overview
+        // open, which is what drove Hyprland's GPU memory into the gigabytes
+        // (the driver keeps freed buffers for reuse) and cost the open its
+        // smoothness. Each size step keeps its own copy now.
+        const void* const KEY = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(SURFACE ? sc<const void*>(SURFACE.get()) : sc<const void*>(SRC.get())) +
+                                                              sc<uintptr_t>(SHIFT));
 
-        auto&     fb = g_u2PrefilterFBs[SRC->m_texID];
-        if (!fb)
-            fb = g_pHyprRenderer->createFB("hyprdrive_u2_prefilter");
-        if (!fb)
+        ++g_u2PrefilterUse;
+        if ((g_u2PrefilterUse & 0x3FULL) == 0)
+            pruneTexturePrefilterCache();
+
+        auto& entry = g_u2PrefilterFBs[KEY];
+        if (!entry.fb)
+            entry.fb = g_pHyprRenderer->createFB("hyprdrive_u2_prefilter");
+        if (!entry.fb)
             continue;
-        if (!fb->isAllocated() || fb->m_size != SRC->m_size || fb->m_drmFormat != FBFORMAT) {
-            fb->release();
-            if (!fb->alloc(W, H, FBFORMAT))
+
+        entry.lastUse        = g_u2PrefilterUse;
+        entry.keyedOnSurface = !!SURFACE;
+        entry.surface        = SURFACE;
+        entry.srcTex         = SRC;
+
+        // The source texture object identity is not enough on its own: a client
+        // cycling a small dmabuf swapchain hands back the SAME texture with new
+        // content. The commit flag is what makes this sound.
+        bool       NEEDSCOPY = entry.dirty || !entry.fb->isAllocated() || entry.srcTexID != SRC->m_texID || entry.srcSize != SRC->m_size || entry.format != FBFORMAT ||
+            entry.imageDescription != IMAGEDESC;
+
+        // A NEW FRAME OF CONTENT is not worth a full-resolution copy plus a
+        // mipmap chain every time it lands (measured 2026-09-29, openprof: a
+        // live Moonlight stream on another desktop cost the STRIP 8-10 ms of GPU
+        // a frame -- a 2880x1800 copy + glGenerateMipmap per commit for a cell a
+        // few dozen pixels high -- and the overview fell to 30 fps). Content-only
+        // refreshes are paced by how small the draw is: a strip thumbnail at
+        // ~8 fps, a grid tile at ~30. Size, format or colour changes still copy
+        // at once, and the entry stays dirty so the next draw after the interval
+        // picks the new content up.
+        const bool CONTENTONLY = entry.fb->isAllocated() && entry.fb->m_size == Vector2D{sc<double>(FBW), sc<double>(FBH)} && entry.fb->m_drmFormat == FBFORMAT &&
+            entry.srcSize == SRC->m_size && entry.format == FBFORMAT && entry.imageDescription == IMAGEDESC && entry.lastCopy != std::chrono::steady_clock::time_point{};
+        if (NEEDSCOPY && CONTENTONLY) {
+            const auto NOW     = std::chrono::steady_clock::now();
+            const auto REFRESH = std::chrono::milliseconds(minify < 0.2 ? 125 : 33);
+            // And at most PREFILTER_FRAME_BUDGET of them in one frame: the
+            // overview opening onto a dozen windows that all changed while it
+            // was shut used to rebuild every one in its first frame (37 ms of
+            // GPU, measured). The rest keep last content for a frame or two.
+            // A frame's draws land within a few ms; frames are 16+ ms apart.
+            static auto s_budgetAt = std::chrono::steady_clock::time_point{};
+            static int  s_budget   = 0;
+            if (NOW - s_budgetAt > std::chrono::milliseconds(8)) {
+                s_budgetAt = NOW;
+                s_budget   = PREFILTER_FRAME_BUDGET;
+            }
+            if (NOW - entry.lastCopy < REFRESH || s_budget <= 0)
+                NEEDSCOPY = false;
+            else
+                --s_budget;
+        }
+
+        if (!entry.fb->isAllocated() || entry.fb->m_size != Vector2D{sc<double>(FBW), sc<double>(FBH)} || entry.fb->m_drmFormat != FBFORMAT) {
+            entry.fb->release();
+            NEEDSCOPY = true; // a new buffer has no content yet
+            if (!entry.fb->alloc(FBW, FBH, FBFORMAT))
                 continue;
         }
         if (g_pHyprRenderer->m_renderData.currentFB)
-            fb->setImageDescription(g_pHyprRenderer->m_renderData.currentFB->imageDescription());
+            entry.fb->setImageDescription(IMAGEDESC);
 
-        const CBox    FULLBOX{0, 0, sc<double>(W), sc<double>(H)};
-        const CRegion FULLDAMAGE{FULLBOX};
-
-        {
-            auto bindPrefilter = g_pHyprRenderer->bindTempFB(fb);
-            g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 0.F}}, FULLDAMAGE);
-            g_pHyprRenderer->draw(CTexPassElement::SRenderData{.tex = SRC, .box = FULLBOX, .damage = FULLDAMAGE}, FULLDAMAGE);
-        }
-
-        const auto MIPPED = fb->getTexture();
+        const auto MIPPED = entry.fb->getTexture();
         if (!MIPPED || !MIPPED->m_texID)
             continue;
 
-        glBindTexture(GL_TEXTURE_2D, MIPPED->m_texID);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        if (glGetError() != GL_NO_ERROR) {
+        if (NEEDSCOPY) {
+            const CBox    FULLBOX{0, 0, sc<double>(FBW), sc<double>(FBH)};
+            const CRegion FULLDAMAGE{FULLBOX};
+
+            {
+                auto bindPrefilter = g_pHyprRenderer->bindTempFB(entry.fb);
+
+                // A plain texture copy into a buffer of the TEXTURE's size, so
+                // no monitor projection (2026-10-01): bindTempFB leaves the
+                // monitor's viewport and projection in place, and on a rotated
+                // monitor that projection turns the box 90 degrees -- the copy
+                // landed outside this buffer, and every settled grid tile and
+                // strip mini drew as an empty outline (a half-rotated one while
+                // it flew). Same set-up Hyprland uses to scale a wallpaper into
+                // its own FB (Renderer.cpp, RPT_EXPORT).
+                auto&      RD           = g_pHyprRenderer->m_renderData;
+                const auto OLDPROJ      = RD.projectionType;
+                const auto OLDFBSIZE    = RD.fbSize;
+                const auto OLDTRANSFDMG = RD.transformDamage;
+                GLint      oldViewport[4] = {};
+                glGetIntegerv(GL_VIEWPORT, oldViewport);
+                RD.fbSize          = Vector2D{sc<double>(FBW), sc<double>(FBH)};
+                RD.transformDamage = false;
+                g_pHyprRenderer->setProjectionType(Render::RPT_EXPORT);
+                g_pHyprRenderer->setViewport(0, 0, FBW, FBH);
+                auto restoreTarget = Hyprutils::Utils::CScopeGuard([&RD, OLDPROJ, OLDFBSIZE, OLDTRANSFDMG, oldViewport] {
+                    RD.fbSize          = OLDFBSIZE;
+                    RD.transformDamage = OLDTRANSFDMG;
+                    g_pHyprRenderer->setProjectionType(OLDPROJ);
+                    g_pHyprRenderer->setViewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]);
+                });
+
+                g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor{0.F, 0.F, 0.F, 0.F}}, FULLDAMAGE);
+                g_pHyprRenderer->draw(CTexPassElement::SRenderData{.tex = SRC, .box = FULLBOX, .damage = FULLDAMAGE}, FULLDAMAGE);
+            }
+
+            glBindTexture(GL_TEXTURE_2D, MIPPED->m_texID);
+            glGenerateMipmap(GL_TEXTURE_2D);
+            if (glGetError() != GL_NO_ERROR) {
+                glBindTexture(GL_TEXTURE_2D, 0);
+                // Leave the entry dirty: a half-built mipmap must not be reused.
+                entry.dirty = true;
+                continue;
+            }
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
             glBindTexture(GL_TEXTURE_2D, 0);
-            continue;
+
+            entry.dirty            = false;
+            entry.lastCopy         = std::chrono::steady_clock::now();
+            entry.srcTexID         = SRC->m_texID;
+            entry.srcSize          = SRC->m_size;
+            entry.format           = FBFORMAT;
+            entry.imageDescription = IMAGEDESC;
         }
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        MIPPED->minFilter = GL_LINEAR_MIPMAP_LINEAR;
+
+        // Cheap and unconditional: Hyprland re-applies GL_TEXTURE_MIN_FILTER
+        // from this field every time it binds the texture (OpenGL.cpp:1536).
+        MIPPED->minFilter   = GL_LINEAR_MIPMAP_LINEAR;
 
         spe->m_data.texture = MIPPED;
     }
 }
 
-static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITOR monitor, float renderScale, size_t firstElement) {
+static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITOR monitor, float renderScale, size_t firstElement, int roundingPx = -1) {
     if (!window || !monitor)
         return;
 
-    if (Fullscreen::controller()->isFullscreen(window))
+    if (roundingPx < 0 && Fullscreen::controller()->isFullscreen(window))
         return;
 
-    const int   rounding      = sc<int>(std::round(window->rounding() * monitor->m_scale * renderScale));
+    const int   rounding      = roundingPx >= 0 ? roundingPx : sc<int>(std::round(window->rounding() * monitor->m_scale * renderScale));
     const float roundingPower = window->roundingPower();
 
     if (rounding <= 0)
         return;
 
-    auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+    auto& passElements = g_pHyprRenderer->currentPass().m_passElements;
     for (size_t i = firstElement; i < passElements.size(); ++i) {
         const auto& passElement = passElements[i];
         if (!passElement.element)
@@ -300,7 +585,7 @@ static void blockOverviewWindowBlurOptimization(const PHLWINDOW& window, size_t 
     if (!window)
         return;
 
-    auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+    auto& passElements = g_pHyprRenderer->currentPass().m_passElements;
     for (size_t i = firstElement; i < passElements.size(); ++i) {
         const auto& passElement = passElements[i];
         if (!passElement.element)
@@ -323,7 +608,7 @@ static void scaleOverviewSubsurfaceOffsets(const PHLWINDOW& window, const Vector
         return;
 
     const Vector2D SUBSURFACESCALE = targetSize / REPORTEDSIZE;
-    auto&          passElements    = g_pHyprRenderer->m_renderPass.m_passElements;
+    auto&          passElements    = g_pHyprRenderer->currentPass().m_passElements;
 
     for (size_t i = firstElement; i < passElements.size(); ++i) {
         const auto& passElement = passElements[i];
@@ -542,7 +827,7 @@ static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& wind
     if (std::ranges::none_of(shadowColor.m_colors, [](const CHyprColor& color) { return color.a > 0.F; }))
         return;
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
+    g_pHyprRenderer->addPassElement(makeUnique<COverviewShadowPassElement>(COverviewShadowPassElement::SData{
         .monitor       = monitor,
         .fullBox       = shadowBox,
         .cutoutBox     = cutoutBox.round(),
@@ -605,7 +890,7 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
         data.a            = 1.F;
         data.borderSize   = std::max(1.F, metrics.borderSize);
         data.hasGrad2     = false;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
+        g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(data));
         return;
     }
 
@@ -616,7 +901,7 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
         data.lerp     = window->m_borderFadeAnimationProgress->value();
     } else
         data.grad1 = grad;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(data));
+    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(data));
 }
 
 static void renderOverviewGroupTabIndicators(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const SOverviewWindowMetrics& metrics, float alpha) {
@@ -688,7 +973,7 @@ static void renderOverviewGroupTabIndicators(PHLMONITOR monitor, const PHLWINDOW
         data.color         = color;
         data.round         = rounding;
         data.roundingPower = PROUNDINGPOWER;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(data));
+        g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(data));
     }
 }
 
@@ -735,7 +1020,7 @@ static void renderOverviewGroupTabTitles(PHLMONITOR monitor, const PHLWINDOW& wi
     const auto       FONTWEIGHTACTIVE    = sc<Config::CFontWeightConfigValueData*>(ScrollOverview::Config::valueRef<Config::IComplexConfigValue>("group:groupbar:font_weight_active").ptr());
     const auto       FONTWEIGHTINACTIVE  = sc<Config::CFontWeightConfigValueData*>(ScrollOverview::Config::valueRef<Config::IComplexConfigValue>("group:groupbar:font_weight_inactive").ptr());
     const auto       TITLEFONTFAMILY     = ScrollOverview::Config::getValue<std::string>("group:groupbar:font_family");
-    const auto       FONTFAMILY          = TITLEFONTFAMILY != STRVAL_EMPTY ? TITLEFONTFAMILY : ScrollOverview::Config::getValue<std::string>("misc:font_family");
+    const auto       FONTFAMILY          = TITLEFONTFAMILY != STRVAL_EMPTY ? TITLEFONTFAMILY : ScrollOverview::Config::themeFontFamily();
 
     float xoff = 0.F;
     float yoff = 0.F;
@@ -791,7 +1076,7 @@ static void renderOverviewGroupTabTitles(PHLMONITOR monitor, const PHLWINDOW& wi
         data.tex = titleTex;
         data.box = textBox;
         data.a   = 1.F;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(data));
+        g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(data));
     }
 }
 
@@ -819,7 +1104,7 @@ static SOverviewCustomDecorationRenderState renderOverviewCustomDecorations(PHLM
         }
 
         if (!drewAny) {
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
+            g_pHyprRenderer->addPassElement(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
             drewAny = true;
         }
 
@@ -829,7 +1114,7 @@ static SOverviewCustomDecorationRenderState renderOverviewCustomDecorations(PHLM
     }
 
     if (drewAny)
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
+        g_pHyprRenderer->addPassElement(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
 
     return state;
 }
@@ -872,10 +1157,55 @@ bool shouldUseBlurFramebuffer(const PHLWINDOW& window, PHLMONITOR monitor, const
          overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox));
 }
 
+void notifySurfaceCommit(const SP<CWLSurfaceResource>& surface) {
+    if (!surface || g_u2PrefilterFBs.empty())
+        return;
+
+    // Every size step of it (the key is the surface plus its step, 0..1).
+    for (uintptr_t step = 0; step <= 1; ++step)
+        if (const auto IT = g_u2PrefilterFBs.find(reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(surface.get()) + step)); IT != g_u2PrefilterFBs.end())
+            IT->second.dirty = true;
+}
+
+
+// NOT FREED WHEN THE OVERVIEW CLOSES (user, 2026-09-16: "the workspace strip is
+// visibly refreshing its previews ... antialiasing is not present prior to the
+// refresh"). It was, and every open therefore started cold: the minis and tiles
+// drew plain bilinear -- at strip scale, visibly aliased -- until each window's
+// mipmap was rebuilt, and Y18's one-allocation-per-frame budget made that a
+// window-by-window sharpening anyone could watch. Kept, the next open finds
+// every mipmap it drew last time and only re-copies the windows that committed
+// in between (a blit, no allocation). The price is the copies' GPU memory
+// while the overview is down, bounded by the windows that exist: an entry
+// whose surface is gone is dropped here, and one not drawn for a while is
+// dropped by the prune on the next open.
+void trimTexturePrefilterCache() {
+    std::erase_if(g_u2PrefilterFBs, [](auto& kv) {
+        if (kv.second.alive())
+            return false;
+        if (kv.second.fb)
+            kv.second.fb->release();
+        return true;
+    });
+}
+
+// Everything, for plugin unload: the framebuffers are this object's to free
+// while its code and the EGL context are still there.
+std::pair<size_t, size_t> texturePrefilterCacheBytes() {
+    size_t n = 0, bytes = 0;
+    for (const auto& [key, entry] : g_u2PrefilterFBs) {
+        if (!entry.fb || !entry.fb->isAllocated())
+            continue;
+        ++n;
+        bytes += sc<size_t>(entry.fb->m_size.x * entry.fb->m_size.y * 4.0 * 4.0 / 3.0);
+    }
+    return {n, bytes};
+}
+
 void releaseTexturePrefilterCache() {
-    for (auto& [id, fb] : g_u2PrefilterFBs) {
-        if (fb)
-            fb->release();
+    for (auto& [key, entry] : g_u2PrefilterFBs) {
+        if (entry.fb)
+            entry.fb->release();
     }
     g_u2PrefilterFBs.clear();
 }
@@ -900,14 +1230,25 @@ void renderOverviewWindow(const SRenderParams& params) {
         const auto MONITOR = params.monitor;
         const auto WINDOW  = params.window;
 
-        const auto REALPOS  = WINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         const auto REALSIZE = WINDOW->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         if (REALSIZE.x < 1.0 || REALSIZE.y < 1.0)
             return;
 
-        // Real window in monitor-local pixels (same space as params.windowBox).
+        // The window as renderWindow(ignorePosition) will lay it out: at the
+        // PREVIEW MONITOR'S ORIGIN, not where it really is.
+        //
+        // (user, 2026-09-14: "previews on dock are flaky if the apps live outside
+        // of the monitor I'm looking at the dock from"). Drawn at its real
+        // position, a window on another monitor sits outside this monitor's
+        // pixels: the nested pass discards its surfaces as off-screen (their
+        // bounding box ignores the scale/translate modifier), and the draw
+        // clips its damage against that same off-screen box, so the cell stayed
+        // empty -- every frame for one monitor away, and whenever a workspace
+        // animation parked the window off-screen on this one (Z1, below).
+        // Pinned to the origin it is always on-screen before the modifier moves
+        // it into the cell, wherever the window lives.
         const CBox REALPX{
-            (REALPOS - MONITOR->m_position) * MONITOR->m_scale,
+            Vector2D{},
             REALSIZE * MONITOR->m_scale,
         };
         if (REALPX.width < 1.0 || REALPX.height < 1.0 || params.windowBox.width < 1.0 || params.windowBox.height < 1.0)
@@ -929,44 +1270,75 @@ void renderOverviewWindow(const SRenderParams& params) {
         modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, S);
         modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, Vector2D{OFFX, OFFY});
 
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
+        auto queuePreview = [&]() {
+            // BLUR BEHIND THE PREVIEW (user, 2026-09-29, nested test: grid tiles
+            // blurred, hover previews showed the dock sharp through a see-through
+            // window). renderWindow(standalone) switches blur off outright
+            // (Renderer.cpp:600), and switching it back on per surface is wrong:
+            // Hyprland's live blur reads the framebuffer at the surface's box
+            // BEFORE the scale/translate modifier, i.e. the monitor's top-left
+            // corner, and that is what showed through. So the preview frosts its
+            // own cell -- what is really under it -- ahead of the modifier, and
+            // the window's own alpha goes on top, exactly as on the desktop.
+            if (g_pHyprRenderer->shouldBlur(WINDOW)) {
+                COverviewBlurPassElement::SData frost;
+                // The window's own letterboxed rect in the cell, not the cell.
+                frost.box           = CBox{sc<double>(OFFX + sc<float>(REALPX.x) * S), sc<double>(OFFY + sc<float>(REALPX.y) * S), sc<double>(SCALEDW), sc<double>(SCALEDH)}.round();
+                frost.rounding      = params.previewRoundingPx >= 0 ? params.previewRoundingPx : sc<int>(std::round(WINDOW->rounding() * MONITOR->m_scale * S));
+                frost.roundingPower = WINDOW->roundingPower();
+                frost.alpha         = 1.F;
+                g_pHyprRenderer->addPassElement(makeUnique<COverviewBlurPassElement>(frost));
+            }
+            g_pHyprRenderer->addPassElement(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
 
-        // Z1. renderWindow draws at the window's position PLUS its workspace's
-        // m_renderOffset, but the transform above is computed from the position
-        // alone -- so a window whose workspace is parked off-screen was drawn a
-        // whole monitor away from the cell and clipped to nothing. The offset is
-        // zero until a workspace has been switched away from with an animation,
-        // which is why the preview worked until the user swapped desktops and
-        // then never again. The overview path below already neutralizes it; this
-        // is the same neutralization, restored the same way.
-        const auto     PREVIEWWS      = WINDOW->m_workspace;
-        const bool     OVERRIDEOFFSET = PREVIEWWS && !WINDOW->m_pinned;
-        const Vector2D PREVIOUSOFFSET = OVERRIDEOFFSET ? PREVIEWWS->m_renderOffset->value() : Vector2D{};
-        if (OVERRIDEOFFSET)
-            PREVIEWWS->m_renderOffset->value() = {};
-        auto restorePreviewOffset = Hyprutils::Utils::CScopeGuard([&] {
-            if (OVERRIDEOFFSET && PREVIEWWS)
-                PREVIEWWS->m_renderOffset->value() = PREVIOUSOFFSET;
-        });
-
-        const size_t firstElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
-        // standalone: no decorate path side effects; content only. Rounding is
-        // forced below so the cell still reads as a rounded thumbnail.
-        g_pHyprRenderer->renderWindow(WINDOW, MONITOR, params.now, false, Render::RENDER_PASS_MAIN, false, true);
-        roundStandaloneWindowPassElements(WINDOW, MONITOR, S, firstElement);
-        // Clip every surface of this window to the preview cell so nothing bleeds.
-        {
-            auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+            // Z1 (a window whose workspace is parked off-screen by a switch
+            // animation was drawn a monitor away and clipped to nothing) needed
+            // the workspace's m_renderOffset zeroed around this call. With
+            // ignorePosition renderWindow never reads the position the offset
+            // is added to, so there is nothing left to neutralize.
+            auto&            passElements = g_pHyprRenderer->currentPass().m_passElements;
+            const size_t     firstElement = passElements.size();
+            // standalone: no decorate path side effects; content only. Rounding is
+            // forced below so the cell still reads as a rounded thumbnail.
+            {
+                ScrollOverview::FlightBlur::CSuspend noFlightBlur(WINDOW);
+                g_pHyprRenderer->renderWindow(WINDOW, MONITOR, params.now, false, Render::RENDER_PASS_MAIN, /*ignorePosition*/ true, true);
+            }
+            roundStandaloneWindowPassElements(WINDOW, MONITOR, S, firstElement, params.previewRoundingPx);
+            // The overview's U2 mipmap prefilter, for the dock's thumbnails too
+            // (user, 2026-09-24: "dock window previews lack antialiasing"): a
+            // window shrunk to a preview is minified well past bilinear's
+            // limit, which is what aliased its text and edges.
+            prefilterOverviewWindowTextures(WINDOW, MONITOR, S, firstElement);
+            // Clip every surface of this window to the preview cell so nothing bleeds.
             for (size_t i = firstElement; i < passElements.size(); ++i) {
                 auto* surface = dc<CSurfacePassElement*>(passElements[i].element.get());
                 if (!surface || surface->m_data.pWindow != WINDOW)
                     continue;
                 surface->m_data.clipBox = params.windowBox;
             }
+
+            g_pHyprRenderer->addPassElement(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
+        };
+
+        if (params.ownsRenderPass) {
+            queuePreview();
+            OverviewRender::flushPass(MONITOR);
+            return;
         }
 
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
-        OverviewRender::flushPass(MONITOR);
+        // Hover previews share Hyprland's POST_WINDOWS pass. Queuing a second
+        // copy of an on-desktop window there lets pass simplify drop the real
+        // draw (same untransformed box) so the window vanishes while hovered.
+        auto nested = makeUnique<Render::CRenderPass>();
+        {
+            auto restorePass = g_pHyprRenderer->redirectPass(nested.get());
+            queuePreview();
+        }
+        g_pHyprRenderer->addPassElement(makeUnique<CDockLivePreviewPassElement>(CDockLivePreviewPassElement::SData{
+            .pass = std::move(nested),
+            .box  = params.windowBox,
+        }));
         return;
     }
 
@@ -1001,21 +1373,41 @@ void renderOverviewWindow(const SRenderParams& params) {
     const Vector2D previousWindowSize      = params.window->m_realSize->value();
     const bool     previousAnimatingIn     = params.window->m_animatingIn;
     const bool     previousSizeAnimating   = params.window->sizeAnimation()->isBeingAnimated();
+    const bool     previousPosAnimating    = params.window->positionAnimation()->isBeingAnimated();
     const auto     WORKSPACE               = params.window->m_workspace;
     const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !params.window->m_pinned;
     const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
 
+    // Mark BOTH animated before writing current. Writing position while the
+    // variable is "not being animated" can commit the tile box as the window's
+    // goal; on close that left a border/frame at the top-left (X91 found the
+    // same leak on dock live previews, which no longer rewrite geometry).
+    COverviewAnimatedVariableAccess::setBeingAnimated(params.window->positionAnimation().get(), true);
+    COverviewAnimatedVariableAccess::setBeingAnimated(params.window->sizeAnimation().get(), true);
     params.window->positionAnimation()->value() = params.monitor->m_position + params.windowBox.pos() / params.monitor->m_scale - params.window->m_floatingOffset;
     params.window->sizeAnimation()->value()     = params.windowBox.size() / params.monitor->m_scale;
     params.window->m_animatingIn                 = true;
-    COverviewAnimatedVariableAccess::setBeingAnimated(params.window->sizeAnimation().get(), true);
     if (OVERRIDEWORKSPACEOFFSET)
         WORKSPACE->m_renderOffset->value() = {};
+
+    // Not flushed here: carry the tile geometry to the pass's draw time (above).
+    SP<SDeferredWindowGeometry> deferredGeometry;
+    if (!params.ownsRenderPass) {
+        deferredGeometry = makeShared<SDeferredWindowGeometry>(SDeferredWindowGeometry{
+            .window              = params.window,
+            .workspace           = WORKSPACE,
+            .pos                 = params.window->positionAnimation()->value(),
+            .size                = params.window->sizeAnimation()->value(),
+            .zeroWorkspaceOffset = OVERRIDEWORKSPACEOFFSET,
+        });
+        g_pHyprRenderer->addPassElement(makeUnique<CDeferredWindowGeometryPassElement>(deferredGeometry, true));
+    }
 
     auto restoreWindowGeometry = Hyprutils::Utils::CScopeGuard([&] {
         params.window->positionAnimation()->value() = previousWindowPos;
         params.window->sizeAnimation()->value()     = previousWindowSize;
         params.window->m_animatingIn                 = previousAnimatingIn;
+        COverviewAnimatedVariableAccess::setBeingAnimated(params.window->positionAnimation().get(), previousPosAnimating);
         COverviewAnimatedVariableAccess::setBeingAnimated(params.window->sizeAnimation().get(), previousSizeAnimating);
         if (OVERRIDEWORKSPACEOFFSET && WORKSPACE)
             WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
@@ -1047,10 +1439,13 @@ void renderOverviewWindow(const SRenderParams& params) {
             params.monitor->m_blurFBDirty = true;
     });
 
-    const size_t firstWindowPassElement = g_pHyprRenderer->m_renderPass.m_passElements.size();
+    const size_t firstWindowPassElement = g_pHyprRenderer->currentPass().m_passElements.size();
     // Never rebuild m_blurFB under a temporary blur size.
     const bool   usePrecomputedBlur     = !scaleBlur && shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
-    g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
+    {
+        ScrollOverview::FlightBlur::CSuspend noFlightBlur(params.window);
+        g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
+    }
     scaleOverviewSubsurfaceOffsets(params.window, params.window->sizeAnimation()->value(), firstWindowPassElement);
     prefilterOverviewWindowTextures(params.window, params.monitor,
                                     previousWindowSize.x * params.monitor->m_scale > 0.0 ? params.windowBox.width / (previousWindowSize.x * params.monitor->m_scale) : 0.0,
@@ -1062,7 +1457,7 @@ void renderOverviewWindow(const SRenderParams& params) {
     // a window's own fade in/out by, so this rides the existing plumbing rather
     // than adding a second notion of opacity.
     if (params.alpha < 1.F) {
-        auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+        auto& passElements = g_pHyprRenderer->currentPass().m_passElements;
         for (size_t i = firstWindowPassElement; i < passElements.size(); ++i) {
             auto* surface = dc<CSurfacePassElement*>(passElements[i].element.get());
             if (surface && surface->m_data.pWindow == params.window)
@@ -1082,8 +1477,16 @@ void renderOverviewWindow(const SRenderParams& params) {
     if (!fullscreen)
         renderOverviewWindowBorder(params.monitor, params.window, params.windowBox, metrics, params.selected);
 
+    // Y17 (GPU, 2026-09-14): the per-window flush was left alone. It is not
+    // bookkeeping -- the UNDER decorations above depend on being rendered
+    // before their state is restored, the temporary window geometry is undone
+    // by a scope guard the moment this returns, and the blur-size override is
+    // restored with it. Batching windows into one pass would draw all of them
+    // with the last one's state. Not worth the risk for a CPU-side saving.
     if (params.ownsRenderPass)
         OverviewRender::flushPass(params.monitor);
+    else if (deferredGeometry)
+        g_pHyprRenderer->addPassElement(makeUnique<CDeferredWindowGeometryPassElement>(deferredGeometry, false));
 }
 
 } // namespace OverviewWindow

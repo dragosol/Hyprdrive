@@ -3,12 +3,17 @@
 #include <systemd/sd-bus.h>
 #include <wayland-server.h>
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
+
+// The badge change is told to the DOCK, which decides whether it is visible at
+// all before anything is damaged.
+#include "Dock.hpp"
 
 namespace ScrollOverview::LauncherEntry {
 
@@ -85,6 +90,16 @@ namespace {
         return ok;
     }
 
+    bool readDoubleVariant(sd_bus_message* m, double& out) {
+        if (sd_bus_message_enter_container(m, 'v', "d") <= 0)
+            return false;
+        double     v  = 0.0;
+        const bool OK = sd_bus_message_read_basic(m, 'd', &v) >= 0;
+        sd_bus_message_exit_container(m);
+        out = v;
+        return OK;
+    }
+
     bool readBoolVariant(sd_bus_message* m, bool& out) {
         int v = 0;
         if (sd_bus_message_enter_container(m, 'v', "b") <= 0)
@@ -130,6 +145,10 @@ namespace {
                 handled = readBoolVariant(m, state.countVisible);
             else if (K == "urgent")
                 handled = readBoolVariant(m, state.urgent);
+            else if (K == "progress")
+                handled = readDoubleVariant(m, state.progress);
+            else if (K == "progress-visible")
+                handled = readBoolVariant(m, state.progressVisible);
 
             if (!handled)
                 sd_bus_message_skip(m, "v");
@@ -138,7 +157,8 @@ namespace {
         }
         sd_bus_message_exit_container(m);
 
-        if (BEFORE.count == state.count && BEFORE.countVisible == state.countVisible && BEFORE.urgent == state.urgent)
+        if (BEFORE.count == state.count && BEFORE.countVisible == state.countVisible && BEFORE.urgent == state.urgent && BEFORE.progress == state.progress &&
+            BEFORE.progressVisible == state.progressVisible)
             return 0;
 
         g_states[ID] = state;
@@ -148,9 +168,15 @@ namespace {
         // urgent app did not pull the dock out until an unrelated config reload
         // damaged the screen. The dock's own damageIfChanged decides what
         // actually changes; this only guarantees it gets asked.
+        //
+        // Through damageIfChanged and not a bare damageMonitor (user,
+        // 2026-09-14): a count that moved on an app NOT on the dock, or one
+        // whose badge is switched off, used to repaint both whole outputs
+        // anyway. damageIfChanged compares the pill's appearance and damages
+        // only the monitors where something actually changed.
         for (const auto& MONITOR : State::monitorState()->monitors()) {
             if (MONITOR)
-                g_pHyprRenderer->damageMonitor(MONITOR);
+                Dock::damageIfChanged(MONITOR);
         }
 
         return 0;
@@ -161,6 +187,14 @@ namespace {
         return 0;
     }
 
+}
+
+std::optional<double> anyProgress() {
+    std::optional<double> out;
+    for (const auto& [ID, S] : g_states)
+        if (S.progressVisible)
+            out = std::max(out.value_or(0.0), std::clamp(S.progress, 0.0, 1.0));
+    return out;
 }
 
 SState state(const std::string& desktopId) {

@@ -1,8 +1,12 @@
 #include "AppSearch.hpp"
+#include "Launch.hpp"
 
 #include "globals.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <sys/stat.h>
 #include <ranges>
 #include <cctype>
 #include <cstdint>
@@ -269,8 +273,11 @@ namespace AppSearch {
             return true;
         }
 
+        uint64_t g_inventoryGen = 1;
+
         void scan() {
             Prof::Timer PROF{Prof::scanNs, Prof::scanCalls};
+            ++g_inventoryGen;
             g_entries.clear();
 
             std::unordered_set<std::string> seen;
@@ -695,6 +702,69 @@ namespace AppSearch {
 
             return args;
         }
+
+        // Chromium --app=URL (Omarchy's omarchy-launch-webapp execs that) sets
+        // the Wayland app_id to chrome-{host}_{path}-Default, with '/' in the
+        // path turned into '_'. Omarchy webapp .desktop files have no
+        // StartupWMClass, so the dock would otherwise see a running window and
+        // no Icon=.
+        std::string chromeAppClassStem(const std::string& exec) {
+            std::string url;
+            const auto  ARGS = splitArgs(stripFieldCodes(exec));
+            for (size_t i = 0; i < ARGS.size(); ++i) {
+                if (ARGS[i].starts_with("--app=")) {
+                    url = ARGS[i].substr(6);
+                    break;
+                }
+                if (ARGS[i] == "omarchy-launch-webapp" && i + 1 < ARGS.size()) {
+                    url = ARGS[i + 1];
+                    break;
+                }
+            }
+            if (url.empty())
+                return {};
+
+            std::string rest = url;
+            if (const auto SCHEME = rest.find("://"); SCHEME != std::string::npos)
+                rest = rest.substr(SCHEME + 3);
+            if (rest.empty() || rest.starts_with('/'))
+                return {};
+
+            std::string host, path;
+            if (const auto SLASH = rest.find('/'); SLASH != std::string::npos) {
+                host = rest.substr(0, SLASH);
+                path = rest.substr(SLASH);
+            } else {
+                host = rest;
+                path = "/";
+            }
+
+            if (const auto AT = host.find('@'); AT != std::string::npos)
+                host = host.substr(AT + 1);
+            if (const auto CUT = host.find_first_of("?#"); CUT != std::string::npos)
+                host = host.substr(0, CUT);
+            if (const auto CUT = path.find_first_of("?#"); CUT != std::string::npos)
+                path = path.substr(0, CUT);
+            if (host.empty())
+                return {};
+
+            // GenerateApplicationNameFromURL is host + "_" + path; WM_CLASS then
+            // replaces remaining '/' with '_'. Profile suffix is appended later
+            // ("-Default"), so this stem stops before that.
+            std::string stem = "chrome-" + host + "_" + path;
+            for (char& c : stem) {
+                if (c == '/')
+                    c = '_';
+            }
+            return lower(stem);
+        }
+
+        bool chromeAppClassMatches(const std::string& want, const std::string& exec) {
+            const auto STEM = chromeAppClassStem(exec);
+            if (STEM.empty() || !want.starts_with(STEM))
+                return false;
+            return want.size() == STEM.size() || want[STEM.size()] == '-';
+        }
     }
 
     const std::vector<SEntry>& inventory() {
@@ -708,6 +778,11 @@ namespace AppSearch {
     void refresh() {
         g_scanned = true;
         scan();
+    }
+
+    uint64_t inventoryGeneration() {
+        inventory(); // a first call must not report generation 1 for an unscanned list
+        return g_inventoryGen;
     }
 
     std::vector<const SEntry*> search(const std::string& query, size_t limit) {
@@ -752,9 +827,9 @@ namespace AppSearch {
     static std::string                                     g_iconIndexTheme;
     static bool                                            g_iconIndexBuilt = false;
 
-    static std::vector<std::string> iconRoots() {
+    static std::vector<std::string> iconRoots(const std::string& theme) {
         std::vector<std::string> roots;
-        for (const auto& THEME : themeChain(iconThemeName())) {
+        for (const auto& THEME : themeChain(theme)) {
             for (const auto& BASE : iconBases())
                 roots.emplace_back(BASE + "/" + THEME);
         }
@@ -777,17 +852,16 @@ namespace AppSearch {
     std::mutex  g_iconIndexMutex;
     std::thread g_iconIndexWorker;
 
-    void warmIconIndexLocked() {
-        const auto THEME = iconThemeName();
-        if (g_iconIndexBuilt && g_iconIndexTheme == THEME)
-            return;
+    static std::atomic<uint64_t> g_iconIndexGen{1};
+    static std::atomic<bool>     g_iconRebuildRunning{false};
 
-        g_iconIndex.clear();
-        g_iconIndexTheme = THEME;
-        g_iconIndexBuilt = true;
+    // The walk itself, into a map nobody else can see yet. Pure apart from the
+    // filesystem, so it can run on the worker while readers keep the old index.
+    static std::unordered_map<std::string, SIconCandidate> buildIconIndex(const std::string& theme) {
+        std::unordered_map<std::string, SIconCandidate> index;
 
         std::error_code ec;
-        const auto      ROOTS = iconRoots();
+        const auto      ROOTS = iconRoots(theme);
 
         for (size_t r = 0; r < ROOTS.size(); ++r) {
             if (!std::filesystem::is_directory(ROOTS[r], ec))
@@ -806,7 +880,7 @@ namespace AppSearch {
                 if (SCORE < 0)
                     continue;
 
-                auto& SLOT = g_iconIndex[PATH.stem().string()];
+                auto& SLOT = index[PATH.stem().string()];
 
                 // Roots are in priority order and the old code stopped at the
                 // first root that answered, so a later root must never override
@@ -819,6 +893,19 @@ namespace AppSearch {
                 }
             }
         }
+
+        return index;
+    }
+
+    void warmIconIndexLocked() {
+        const auto THEME = iconThemeName();
+        if (g_iconIndexBuilt && g_iconIndexTheme == THEME)
+            return;
+
+        g_iconIndex      = buildIconIndex(THEME);
+        g_iconIndexTheme = THEME;
+        g_iconIndexBuilt = true;
+        ++g_iconIndexGen;
     }
 
     void warmIconIndex() {
@@ -833,7 +920,10 @@ namespace AppSearch {
         if (g_iconIndexWorker.joinable())
             return;
 
-        g_iconIndexWorker = std::thread([] {
+        // Up for the warm-up too, so pollForChanges never joins -- and so never
+        // blocks a frame on -- a scan that is still walking the themes.
+        g_iconRebuildRunning = true;
+        g_iconIndexWorker    = std::thread([] {
             // Y13. NICED, and the measurement is why: moving the scan off the
             // parse-time path bought 4.1s on when `qs` launches but only 2.3s
             // on when the wallpaper lands, because the worker then spent that
@@ -842,14 +932,187 @@ namespace AppSearch {
             // exactly the work that should yield.
             ::setpriority(PRIO_PROCESS, 0, 10);
 
-            std::scoped_lock lock(g_iconIndexMutex);
-            warmIconIndexLocked();
+            {
+                std::scoped_lock lock(g_iconIndexMutex);
+                warmIconIndexLocked();
+            }
+            g_iconRebuildRunning = false;
         });
+    }
+
+    // ---- OTHER THEMES (dock stacks, 2026-09-24) ------------------------------
+    // The stacks and the Trash can draw from a theme other than the one the
+    // dock's app icons use (the Omarchy theme's icons.theme, or GTK's). Each
+    // such theme gets its own index, built once on its own worker exactly as
+    // the main one is -- a cold theme walk has measured in seconds -- and
+    // until it lands a lookup answers from the main theme.
+    std::mutex                                                              g_altMutex;
+    std::unordered_map<std::string, std::unordered_map<std::string, SIconCandidate>> g_altIndex; // theme -> index
+    std::string                                                             g_altBuilding;       // theme on the worker
+    std::thread                                                             g_altWorker;
+
+    std::string omarchyIconTheme() {
+        static std::string                           cached;
+        static std::chrono::steady_clock::time_point at{};
+        const auto                                   NOW = std::chrono::steady_clock::now();
+        if (at != std::chrono::steady_clock::time_point{} && NOW - at < std::chrono::seconds(2))
+            return cached;
+        at               = NOW;
+        const char* HOME = std::getenv("HOME");
+        std::string name;
+        if (HOME && *HOME) {
+            std::ifstream f(std::string{HOME} + "/.local/state/omarchy/current/theme/icons.theme");
+            std::getline(f, name);
+            name = trim(name);
+        }
+        cached = name;
+        return cached;
+    }
+
+    std::string resolveIconPathInTheme(const std::string& iconName, const std::string& theme) {
+        if (iconName.empty() || iconName.starts_with('/') || theme.empty() || theme == iconThemeName())
+            return resolveIconPath(iconName);
+        {
+            std::scoped_lock lock(g_altMutex);
+            if (const auto IT = g_altIndex.find(theme); IT != g_altIndex.end()) {
+                if (const auto HIT = IT->second.find(iconName); HIT != IT->second.end())
+                    return HIT->second.path;
+                return resolveIconPath(iconName); // not in that theme's chain at all
+            }
+            if (g_altBuilding.empty()) {
+                if (g_altWorker.joinable())
+                    g_altWorker.join(); // the previous theme's worker, long finished
+                g_altBuilding = theme;
+                g_altWorker   = std::thread([theme] {
+                    ::setpriority(PRIO_PROCESS, 0, 10);
+                    auto index = buildIconIndex(theme);
+                    {
+                        std::scoped_lock lock(g_altMutex);
+                        g_altIndex[theme] = std::move(index);
+                        g_altBuilding.clear();
+                    }
+                    ++g_iconIndexGen; // textures keyed on names re-resolve
+                });
+            }
+        }
+        return resolveIconPath(iconName);
     }
 
     void shutdownIconIndex() {
         if (g_iconIndexWorker.joinable())
             g_iconIndexWorker.join();
+        if (g_altWorker.joinable())
+            g_altWorker.join();
+    }
+
+    uint64_t iconIndexGeneration() {
+        return g_iconIndexGen.load();
+    }
+
+    // mtimes of the directories whose contents decide the answers. A directory's
+    // mtime moves when an entry is added, removed or renamed in it, which is what
+    // an install does (and what install scripts that rm + rewrite do). Icon files
+    // land deep inside a theme (hicolor/256x256/apps), so a theme is watched
+    // through its icon-theme.cache as well -- the pacman hook regenerates that
+    // on every package that ships icons.
+    static std::vector<int64_t> stampOf(const std::vector<std::string>& paths) {
+        std::vector<int64_t> out;
+        out.reserve(paths.size());
+        for (const auto& PATH : paths) {
+            struct stat st{};
+            out.emplace_back(::stat(PATH.c_str(), &st) == 0 ? sc<int64_t>(st.st_mtim.tv_sec) * 1'000'000'000LL + st.st_mtim.tv_nsec : -1);
+        }
+        return out;
+    }
+
+    static std::vector<std::string> iconWatchPaths() {
+        std::vector<std::string> paths;
+        for (const auto& THEME : themeChain(iconThemeName())) {
+            for (const auto& BASE : iconBases()) {
+                paths.emplace_back(BASE + "/" + THEME);
+                paths.emplace_back(BASE + "/" + THEME + "/icon-theme.cache");
+            }
+        }
+        paths.emplace_back("/usr/share/pixmaps");
+        return paths;
+    }
+
+    void pollForChanges() {
+        static auto                 lastPoll = std::chrono::steady_clock::time_point{};
+        static std::vector<int64_t> appStamp, iconStamp;
+        static bool                 primed = false;
+
+        const auto NOW = std::chrono::steady_clock::now();
+        if (primed && NOW - lastPoll < std::chrono::seconds(2))
+            return;
+        lastPoll = NOW;
+
+        const auto APPS  = stampOf(appDirs());
+        const auto ICONS = stampOf(iconWatchPaths());
+
+        // The first call only records: the initial scan and warm-up happen on
+        // their own schedule, and treating "never polled" as "changed" would
+        // redo both at plugin load.
+        if (!primed) {
+            primed    = true;
+            appStamp  = APPS;
+            iconStamp = ICONS;
+            return;
+        }
+
+        if (APPS != appStamp) {
+            appStamp = APPS;
+            refresh();
+        }
+
+        if (ICONS != iconStamp && !g_iconRebuildRunning.load()) {
+            iconStamp = ICONS;
+            // The previous worker (the warm-up, or an earlier rebuild) has
+            // finished if the flag is down, so this join returns at once.
+            if (g_iconIndexWorker.joinable())
+                g_iconIndexWorker.join();
+
+            g_iconRebuildRunning = true;
+            g_iconIndexWorker    = std::thread([] {
+                ::setpriority(PRIO_PROCESS, 0, 10);
+                const auto THEME = iconThemeName();
+                auto       fresh = buildIconIndex(THEME);
+                {
+                    std::scoped_lock alt(g_altMutex);
+                    if (g_altBuilding.empty())
+                        g_altIndex.clear(); // rebuilt on their next lookup
+                }
+                {
+                    std::scoped_lock lock(g_iconIndexMutex);
+                    g_iconIndex      = std::move(fresh);
+                    g_iconIndexTheme = THEME;
+                    g_iconIndexBuilt = true;
+                }
+                ++g_iconIndexGen;
+                g_iconRebuildRunning = false;
+            });
+        }
+    }
+
+    // Is this exact name in the icon index? resolveIconPath answers the generic
+    // tile for a miss, which is right for an app and wrong for a caller walking
+    // a fallback list (a file's content-type icon names, most specific first).
+    // Called from the RENDER path (a stack's pile), so it must never wait: under
+    // try_lock, and "not known yet" while the startup scan holds the index --
+    // the caller then falls back to a generic icon and asks again later
+    // (review 2026-09-24: an unlocked read raced the rebuild, and a blocking
+    // lock stalled the frame for the whole startup scan).
+    std::optional<bool> iconExistsNow(const std::string& iconName) {
+        if (iconName.empty())
+            return false;
+        std::unique_lock lock(g_iconIndexMutex, std::try_to_lock);
+        if (!lock.owns_lock() || g_iconIndex.empty())
+            return std::nullopt;
+        return g_iconIndex.contains(iconName);
+    }
+
+    bool iconExists(const std::string& iconName) {
+        return iconExistsNow(iconName).value_or(false);
     }
 
     std::string resolveIconPath(const std::string& iconName) {
@@ -924,10 +1187,11 @@ namespace AppSearch {
         if (args.empty())
             return false;
 
-        const auto BINARY = args.front();
+        auto binary = args.front();
         args.erase(args.begin());
+        ScrollOverview::Launch::wrap(binary, args); // its own scope, not Hyprland's (Launch.hpp)
 
-        CProcess process(BINARY, args);
+        CProcess process(binary, args);
         return process.runAsync();
     }
 
@@ -939,7 +1203,8 @@ namespace AppSearch {
         if (ARGS.empty() || !::Config::Supplementary::executor())
             return false;
 
-        std::string cmd = "[" + execRule + "]";
+        // The rule rides the environment, which uwsm-app keeps (Launch.hpp).
+        std::string cmd = "[" + execRule + "] " + ScrollOverview::Launch::prefix();
         for (const auto& WORD : ARGS)
             cmd += " " + shellQuote(WORD);
 
@@ -979,19 +1244,25 @@ namespace AppSearch {
         // Called from the overview's per-window membership gate, so it runs for
         // every window every frame. The inventory is small but the compare is
         // not free; the answer only changes when the inventory is rescanned.
+        // Keyed on the GENERATION, not the vector's address: a rescan rewrites
+        // the vector in place, so the address never changed and a class looked
+        // up before its app was installed stayed a miss forever.
         static std::unordered_map<std::string, size_t> cache;
-        static const std::vector<SEntry>*              cachedFor = nullptr;
+        static uint64_t                                cachedGen = 0;
 
         const auto& INV = inventory();
-        if (cachedFor != &INV || (cache.size() > INV.size() + 64)) {
+        if (cachedGen != g_inventoryGen || (cache.size() > INV.size() + 64)) {
             cache.clear();
-            cachedFor = &INV;
+            cachedGen = g_inventoryGen;
         }
 
         if (const auto IT = cache.find(wmClass); IT != cache.end())
             return IT->second;
 
-        const auto WANT  = lower(wmClass);
+        // A synthesized quickshell identity resolves on the TITLE half: the
+        // class half is shared by every panel and matches nothing on its own.
+        static constexpr std::string_view QS_PREFIX = "org.quickshell:";
+        const auto WANT  = lower(wmClass.starts_with(QS_PREFIX) ? wmClass.substr(QS_PREFIX.size()) : wmClass);
         size_t     found = std::string::npos;
 
         for (size_t i = 0; i < INV.size(); ++i) {
@@ -1002,14 +1273,59 @@ namespace AppSearch {
             // component covers the rest ("kitty", "firefox").
             const auto ID   = lower(ENTRY.id);
             const auto TAIL = ID.substr(ID.find_last_of('.') == std::string::npos ? 0 : ID.find_last_of('.') + 1);
-            if (lower(ENTRY.wmClass) == WANT || ID == WANT || TAIL == WANT || lower(ENTRY.name) == WANT) {
+            if (lower(ENTRY.wmClass) == WANT || ID == WANT || TAIL == WANT || lower(ENTRY.name) == WANT ||
+                chromeAppClassMatches(WANT, ENTRY.exec)) {
                 found = i;
                 break;
             }
         }
 
+        // A LOOSER second pass, only when nothing above claimed the class (user,
+        // 2026-10-13: LocalSend had no dock icon). Flutter and Electron apps
+        // name their window after a reverse-DNS id the desktop file never
+        // states -- `org.localsend.localsend_app` for `localsend.desktop`, no
+        // StartupWMClass. So: the class's last part without a trailing
+        // `_app` / `-app` / `-desktop`, then its middle parts, each against
+        // whole desktop ids. Strict matches always win, so no app that resolved
+        // before can resolve differently now.
+        if (found == std::string::npos) {
+            std::vector<std::string> parts;
+            for (size_t at = 0; at <= WANT.size();) {
+                const size_t DOT = WANT.find('.', at);
+                parts.emplace_back(WANT.substr(at, DOT == std::string::npos ? std::string::npos : DOT - at));
+                at = DOT == std::string::npos ? WANT.size() + 1 : DOT + 1;
+            }
+            std::vector<std::string> cands;
+            if (!parts.empty()) {
+                std::string last = parts.back();
+                for (const std::string_view SUFFIX : {"_app", "-app", "-desktop", "_desktop"})
+                    if (last.size() > SUFFIX.size() + 2 && last.ends_with(SUFFIX))
+                        last.resize(last.size() - SUFFIX.size());
+                cands.push_back(last);
+                // The middle of `org.localsend.localsend_app`; never the first
+                // part (org, com, io, dev ...).
+                for (size_t k = 1; k + 1 < parts.size(); ++k)
+                    if (parts[k].size() >= 3)
+                        cands.push_back(parts[k]);
+            }
+            for (const auto& C : cands) {
+                for (size_t i = 0; i < INV.size() && found == std::string::npos; ++i)
+                    if (lower(INV[i].id) == C)
+                        found = i;
+                if (found != std::string::npos)
+                    break;
+            }
+        }
+
         cache[wmClass] = found;
         return found;
+    }
+
+    std::string identityClass(const std::string& wmClass, const std::string& title) {
+        if (wmClass != "org.quickshell" || title.empty())
+            return wmClass;
+
+        return "org.quickshell:" + title;
     }
 
     std::string appNameForClass(const std::string& wmClass) {
@@ -1040,12 +1356,12 @@ namespace AppSearch {
         // was thousands of string compares per frame for an answer that only
         // changes when the inventory is rebuilt.
         static std::unordered_map<std::string, size_t> cache;
-        static const void*                             cachedFor = nullptr;
+        static uint64_t                                cachedGen = 0;
 
         const auto& INV = inventory();
-        if (cachedFor != &INV) {
+        if (cachedGen != g_inventoryGen) {
             cache.clear();
-            cachedFor = &INV;
+            cachedGen = g_inventoryGen;
         }
 
         if (const auto IT = cache.find(id); IT != cache.end())
@@ -1063,12 +1379,25 @@ namespace AppSearch {
         return found == std::string::npos ? nullptr : &INV[found];
     }
 
+    std::vector<SAction> actionsFromFile(const std::string& path);
+
     std::vector<SAction> actionsForClass(const std::string& wmClass) {
         const auto IDX = entryIndexForClass(wmClass);
-        if (IDX == std::string::npos || inventory()[IDX].path.empty())
+        if (IDX == std::string::npos)
+            return {};
+        return actionsFromFile(inventory()[IDX].path);
+    }
+
+    std::vector<SAction> actionsForId(const std::string& id) {
+        const auto* ENTRY = entryForId(id);
+        return ENTRY ? actionsFromFile(ENTRY->path) : std::vector<SAction>{};
+    }
+
+    std::vector<SAction> actionsFromFile(const std::string& path) {
+        if (path.empty())
             return {};
 
-        std::ifstream file(inventory()[IDX].path);
+        std::ifstream file(path);
         if (!file.is_open())
             return {};
 
@@ -1123,8 +1452,10 @@ namespace AppSearch {
         std::vector<SAction> out;
         for (const auto& ID : order) {
             const auto IT = found.find(ID);
-            if (IT != found.end() && !IT->second.name.empty() && !IT->second.exec.empty())
+            if (IT != found.end() && !IT->second.name.empty() && !IT->second.exec.empty()) {
                 out.emplace_back(IT->second);
+                out.back().id = ID;
+            }
         }
 
         return out;
@@ -1135,10 +1466,11 @@ namespace AppSearch {
         if (args.empty())
             return false;
 
-        const auto BINARY = args.front();
+        auto binary = args.front();
         args.erase(args.begin());
+        ScrollOverview::Launch::wrap(binary, args); // its own scope, not Hyprland's (Launch.hpp)
 
-        CProcess process(BINARY, args);
+        CProcess process(binary, args);
         return process.runAsync();
     }
 }
@@ -1278,6 +1610,15 @@ int main() {
     // X28. The menu's Actions section. Nautilus is the entry on this host that
     // actually ships an Actions= list, so it is the only honest fixture; assert
     // the shape rather than a literal list, which upstream is free to reorder.
+    // Quickshell's shared app_id: identity is the title, and only for that
+    // class. Everything else must come back byte-identical or the whole
+    // identity path would start lying about ordinary windows.
+    assert(identityClass("org.quickshell", "Omamail") == "org.quickshell:Omamail");
+    assert(identityClass("org.quickshell", "") == "org.quickshell");
+    assert(identityClass("kitty", "Omamail") == "kitty");
+    if (!idForClass("org.quickshell:Omamail").empty())
+        std::printf("quickshell identity: org.quickshell:Omamail -> \"%s\"\n", idForClass("org.quickshell:Omamail").c_str());
+
     assert(idForClass("definitely-not-an-app-zzz").empty());
     assert(actionsForClass("definitely-not-an-app-zzz").empty());
     if (const auto NAUT = idForClass("org.gnome.Nautilus"); !NAUT.empty()) {

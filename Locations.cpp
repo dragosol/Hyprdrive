@@ -1,6 +1,10 @@
 #include "Locations.hpp"
+#include "Launch.hpp"
 
 #include "Config.hpp"
+#include "MountSort.hpp"
+#include "GvfsMount.hpp"
+#include "StackModel.hpp"
 
 #include <gio/gio.h>
 #include <gio/gunixmounts.h>
@@ -27,6 +31,7 @@ namespace {
     constexpr const char* KEY_SHOW_MOUNTS = "plugin:hyprdrive:dock:show_mounts";
     constexpr const char* KEY_MOUNTS_NET  = "plugin:hyprdrive:dock:show_mounts_network";
     constexpr const char* KEY_MOUNTS_ONLY_MOUNTED = "plugin:hyprdrive:dock:show_mounts_only_mounted";
+    constexpr const char* KEY_MOUNT_SORT          = "plugin:hyprdrive:dock:mount_sort";
 
     constexpr const char* TRASH_URI = "trash:///";
 
@@ -50,6 +55,10 @@ namespace {
     bool                                  g_have = false;
 
     std::unordered_set<std::string>       g_openLocations;
+
+    // See Locations::generation(). Bumped by the poll below, and only when the
+    // poll actually changed one of the two things a caller can observe.
+    uint64_t                              g_generation = 1;
 
     // The first name a GIcon offers, which is the one the icon theme is asked
     // for. A GFileIcon -- a custom per-directory icon -- has no name at all and
@@ -272,7 +281,7 @@ namespace {
             return;
 
         sd_bus_message* call = nullptr;
-        if (sd_bus_message_new_method_call(bus, &call, "org.freedesktop.FileManager1", "/org/freedesktop/FileManager1", "org.freedesktop.Properties", "Get") < 0 || !call)
+        if (sd_bus_message_new_method_call(bus, &call, "org.freedesktop.FileManager1", "/org/freedesktop/FileManager1", "org.freedesktop.DBus.Properties", "Get") < 0 || !call)
             return;
 
         sd_bus_message_set_auto_start(call, 0);
@@ -314,6 +323,138 @@ namespace {
     }
 }
 
+// THE FILE MANAGER'S OWN MOUNTS (GvfsMount.hpp): an smb://, sftp:// or MTP
+// mount made in Nautilus is gvfsd's, not the kernel's. Asked of gvfsd's
+// MountTracker exactly the way readOpenLocations asks Nautilus: never
+// auto-started (no gvfsd, no network mounts -- nothing to wait for) and
+// bounded at TIMEOUT_US, because this is the render thread once a second.
+// The list itself is gvfsd's in-memory table: no server is contacted, so a
+// share whose server has gone away still answers at once.
+// NAUTILUS'S ICON THEME (user, 2026-10-08: "network drives icon also needs to
+// adopt whatever icon theme nautilus is using"). Nautilus is GTK 4 and takes
+// the theme from org.gnome.desktop.interface icon-theme; the dock's bare names
+// resolve against GTK 3's settings.ini, which here names none (so Adwaita),
+// while Nautilus drew arcticons-dark -> breeze-dark. A dconf read is a mapped
+// file, not a round trip. The schema is looked up first: g_settings_new()
+// ABORTS the process on a schema that is not installed.
+static std::string nautilusIconTheme() {
+    static GSettings* settings = [] {
+        GSettingsSchemaSource* SRC = g_settings_schema_source_get_default();
+        GSettingsSchema*       SCH = SRC ? g_settings_schema_source_lookup(SRC, "org.gnome.desktop.interface", TRUE) : nullptr;
+        if (!SCH)
+            return static_cast<GSettings*>(nullptr);
+        const bool HASKEY = g_settings_schema_has_key(SCH, "icon-theme");
+        g_settings_schema_unref(SCH);
+        return HASKEY ? g_settings_new("org.gnome.desktop.interface") : static_cast<GSettings*>(nullptr);
+    }();
+    if (!settings)
+        return {};
+    gchar*      v   = g_settings_get_string(settings, "icon-theme");
+    std::string out = v ? v : "";
+    g_free(v);
+    return out;
+}
+
+static void readGvfsMounts(std::vector<SLocation>& out, bool network) {
+    sd_bus* bus = userBus();
+    if (!bus)
+        return;
+
+    sd_bus_message* call = nullptr;
+    if (sd_bus_message_new_method_call(bus, &call, "org.gtk.vfs.Daemon", "/org/gtk/vfs/mounttracker", "org.gtk.vfs.MountTracker", "ListMounts2") < 0 || !call)
+        return;
+    sd_bus_message_set_auto_start(call, 0);
+    sd_bus_message_append(call, "b", 1); // user-visible only
+
+    sd_bus_error    error = SD_BUS_ERROR_NULL;
+    sd_bus_message* reply = nullptr;
+    const int       R     = sd_bus_call(bus, call, TIMEOUT_US, &error, &reply);
+    sd_bus_message_unref(call);
+    sd_bus_error_free(&error);
+    if (R < 0 || !reply)
+        return;
+
+    // "@<theme>:" makes OverviewRender::appIcon resolve in that theme and its
+    // Inherits= chain -- the theme Nautilus draws these very icons with.
+    const auto THEME  = nautilusIconTheme();
+    const auto PREFIX = THEME.empty() ? std::string{} : "@" + THEME + ":";
+
+    // A byte string from gvfsd carries its NUL; one that fails to read is "".
+    const auto readBytes = [&](std::string& into) {
+        const void* data = nullptr;
+        size_t      size = 0;
+        into.clear();
+        if (sd_bus_message_read_array(reply, 'y', &data, &size) < 0 || !data)
+            return false;
+        into.assign(static_cast<const char*>(data), size);
+        while (!into.empty() && into.back() == '\0')
+            into.pop_back();
+        return true;
+    };
+
+    if (sd_bus_message_enter_container(reply, 'a', "(sossssssbay(aya{sv})ay)") > 0) {
+        while (sd_bus_message_enter_container(reply, 'r', "sossssssbay(aya{sv})ay") > 0) {
+            Gvfs::SMount m;
+            const char * id = nullptr, *obj = nullptr, *display = nullptr, *stable = nullptr, *xcontent = nullptr, *icon = nullptr, *symicon = nullptr, *enc = nullptr;
+            int          visible = 0;
+            bool         ok      = sd_bus_message_read(reply, "sossssssb", &id, &obj, &display, &stable, &xcontent, &icon, &symicon, &enc, &visible) >= 0;
+            ok                   = ok && readBytes(m.fuse);
+            if (ok && sd_bus_message_enter_container(reply, 'r', "aya{sv}") > 0) {
+                readBytes(m.prefix);
+                if (sd_bus_message_enter_container(reply, 'a', "{sv}") > 0) {
+                    while (sd_bus_message_enter_container(reply, 'e', "sv") > 0) {
+                        const char* key = nullptr;
+                        sd_bus_message_read(reply, "s", &key);
+                        std::string value;
+                        if (sd_bus_message_enter_container(reply, 'v', "ay") > 0) {
+                            readBytes(value);
+                            sd_bus_message_exit_container(reply);
+                        } else
+                            sd_bus_message_skip(reply, "v");
+                        if (key)
+                            m.spec.emplace_back(key, std::move(value));
+                        sd_bus_message_exit_container(reply);
+                    }
+                    sd_bus_message_exit_container(reply);
+                }
+                sd_bus_message_exit_container(reply);
+            }
+            std::string defaultLocation;
+            readBytes(defaultLocation);
+            sd_bus_message_exit_container(reply);
+            if (!ok)
+                continue;
+
+            m.display     = display ? display : "";
+            m.icon        = icon ? icon : "";
+            m.userVisible = visible != 0;
+            if (m.prefix.empty())
+                m.prefix = "/";
+            if (!Gvfs::listed(m) || (!network && Gvfs::isNetwork(Gvfs::specValue(m, "type"))))
+                continue;
+            const auto URI = Gvfs::uriFor(m);
+            if (!URI)
+                continue;
+
+            SLocation loc;
+            loc.uri       = *URI;
+            loc.mountPath = m.fuse; // what fstab order and the dedupe below compare
+            loc.name      = m.display.empty() ? *URI : m.display;
+            loc.icon      = Gvfs::firstThemedIcon(m.icon);
+            loc.mount     = true;
+            loc.canEject  = false;
+            loc.mounted   = true;
+            if (loc.icon.empty())
+                loc.icon = Gvfs::isNetwork(Gvfs::specValue(m, "type")) ? "folder-remote" : FALLBACK_MEDIA;
+            loc.icon = PREFIX + loc.icon;
+            if (std::ranges::none_of(out, [&](const SLocation& l) { return l.uri == loc.uri; }))
+                out.emplace_back(std::move(loc));
+        }
+        sd_bus_message_exit_container(reply);
+    }
+    sd_bus_message_unref(reply);
+}
+
 const std::vector<SLocation>& items() {
     const auto NOW = std::chrono::steady_clock::now();
     if (g_have && NOW - g_polled < POLL)
@@ -321,18 +462,65 @@ const std::vector<SLocation>& items() {
 
     g_polled = NOW;
     g_have   = true;
+
+    // Compared, not just replaced: the dock's item cache hangs off
+    // generation(), and a poll that re-reads the same mount table and the same
+    // trash must not invalidate it. Copies of a handful of small structs once a
+    // second is nothing; rebuilding the whole dock item model at 1Hz for no
+    // visible change is exactly what this was meant to stop.
+    const auto WEREITEMS = g_items;
+    const auto WEREOPEN  = g_openLocations;
+
     g_items.clear();
 
     // `Locations.getApps()`: removables first, then the trash.
-    if (Config::getValue<bool>(KEY_SHOW_MOUNTS))
+    if (Config::getValue<bool>(KEY_SHOW_MOUNTS)) {
         readMounts(g_items);
+        readGvfsMounts(g_items, Config::getValue<bool>(KEY_MOUNTS_NET));
+        // dock:mount_sort (MountSort.hpp). `mounted` keeps the mount table's
+        // order, which is the order the drives happened to be mounted in. Stable,
+        // so drives with the same name keep that order between themselves.
+        switch (MountSort::orderFromName(Config::getValue<std::string>(KEY_MOUNT_SORT))) {
+            case MountSort::EOrder::Name:
+                std::ranges::stable_sort(g_items, [](const SLocation& a, const SLocation& b) { return StackModel::naturalLess(a.name, b.name); });
+                break;
+            case MountSort::EOrder::Smart: std::ranges::stable_sort(g_items, [](const SLocation& a, const SLocation& b) { return MountSort::smartLess(a.name, b.name); }); break;
+            case MountSort::EOrder::Fstab: {
+                // g_unix_mount_points_get is fstab, in file order (glib caches
+                // it on the file's mtime, so this is no re-parse per poll).
+                std::vector<std::string> fstab;
+                GList*                   points = g_unix_mount_points_get(nullptr);
+                for (GList* l = points; l; l = l->next)
+                    if (auto* POINT = static_cast<GUnixMountPoint*>(l->data))
+                        if (const char* P = g_unix_mount_point_get_mount_path(POINT))
+                            fstab.emplace_back(P);
+                g_list_free_full(points, reinterpret_cast<GDestroyNotify>(g_unix_mount_point_free));
+                std::ranges::stable_sort(g_items, [&](const SLocation& a, const SLocation& b) {
+                    return MountSort::fstabRank(fstab, a.mountPath) < MountSort::fstabRank(fstab, b.mountPath);
+                });
+                break;
+            }
+            case MountSort::EOrder::Mounted: break;
+        }
+    }
 
     if (Config::getValue<bool>(KEY_SHOW_TRASH))
         readTrash(g_items.emplace_back());
 
     readOpenLocations();
 
+    if (g_items != WEREITEMS || g_openLocations != WEREOPEN)
+        ++g_generation;
+
     return g_items;
+}
+
+uint64_t generation() {
+    // items() is what polls, so asking for the generation without asking for
+    // the items would hand back a number from before the poll that the caller's
+    // very next line is about to run.
+    items();
+    return g_generation;
 }
 
 bool openWindows(const std::string& uri) {
@@ -359,7 +547,12 @@ void activate(const std::string& uri) {
     // FileManager1 activation can land on Dolphin when Nautilus is slow or
     // stuck. This rice uses Nautilus as the file manager (dock + overview
     // search + trash). One argv element so a volume label stays one URI.
-    spawn("nautilus", {uri});
+    // Nautilus lives on: its own scope, not Hyprland's (Launch.hpp). The gio
+    // mount helpers below are gone in a second and stay as they are.
+    std::string              binary = "nautilus";
+    std::vector<std::string> args   = {uri};
+    Launch::wrap(binary, args);
+    spawn(binary, args);
 }
 
 void emptyTrash() {

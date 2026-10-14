@@ -10,6 +10,18 @@
 namespace ScrollOverview::Minimize {
 
 bool                   isMinimized(PHLWINDOW window);
+// Whether this workspace IS the stash. Scratchpad.hpp needs the question asked
+// in exactly one place: every OTHER special workspace is a scratchpad, and
+// confusing the two would have the dock offering to "hide" the stash, or have a
+// restore drag a window out of the user's scratchpad.
+bool                   isStash(const PHLWORKSPACE& workspace);
+
+// Re-adopt windows found on the stash with no ledger entry. The ledger lives in
+// plugin memory, so a plugin RELOAD wipes it while the compositor keeps every
+// stashed window exactly where it was -- stranded on special:minimized, which is
+// never shown, with the dock reporting "nothing is minimized" (measured
+// 2026-09-12). Called once at load.
+void                   adoptStashedWindows();
 // `handoffFocus` false keeps the window focused after it is stashed -- the dock
 // flight wants that, so the flying proxy renders the window BRIGHT (Zen and
 // other focus-themed clients darken the instant they lose focus, and a minimize
@@ -18,6 +30,19 @@ bool                   isMinimized(PHLWINDOW window);
 // via handoffMinimizedFocus. A non-flight minimize passes true and hands off
 // immediately (X33: a stashed window must not keep the keyboard).
 bool                   minimize(PHLWINDOW window, bool handoffFocus = true);
+
+// A WHOLE-APP GESTURE (a dock click that minimizes every window of an app).
+// Held around the loop, it records each window's box before the first of them
+// moves; minimize() then pins each one at ITS recorded box instead of the one
+// the layout re-tiled it to after its siblings left -- which is what told the
+// last terminal out that it was full screen (user, 2026-09-30).
+class CGestureBoxes {
+  public:
+    explicit CGestureBoxes(const std::vector<PHLWINDOW>& windows);
+    ~CGestureBoxes();
+    CGestureBoxes(const CGestureBoxes&)            = delete;
+    CGestureBoxes& operator=(const CGestureBoxes&) = delete;
+};
 // X33 focus handoff, deferred: give the keyboard to a window on the workspace
 // the stashed window came from (or reset it). Called when a minimize FLIGHT
 // lands, so the window stays focused/bright for the whole animation.
@@ -30,6 +55,23 @@ std::vector<PHLWINDOW> minimized();
 // needs it to place the window's tile, and the flight needs it to know which
 // way an off-screen desktop lies. WORKSPACE_INVALID when not minimized.
 WORKSPACEID            originalWorkspace(PHLWINDOW window);
+
+// A WHOLE-APP RESTORE PUTS EACH WINDOW BACK IN ITS OWN SLOT (user, 2026-09-30:
+// "it remembers the tiling layout but not which window goes where"). Dwindle
+// re-inserts restored windows by its own rules, so the shape comes back with
+// the windows shuffled. Held around the restore loop: it records where each
+// tiled window was before the first comes back, and when it ends it swaps any
+// window sitting in another's slot into its own.
+class CRestoreSlots {
+  public:
+    explicit CRestoreSlots(const std::vector<PHLWINDOW>& windows);
+    ~CRestoreSlots();
+    CRestoreSlots(const CRestoreSlots&)            = delete;
+    CRestoreSlots& operator=(const CRestoreSlots&) = delete;
+
+  private:
+    std::vector<std::pair<PHLWINDOWREF, CBox>> m_slots;
+};
 
 // Z6. Recreate-if-reaped and SWITCH to the desktop a stashed window came from,
 // so a cross-workspace restore flight lands where the user is looking instead
