@@ -47,10 +47,22 @@
 #                                           ~/.local/lib/hyprdrive (default: repo build)
 # Needs (hyprtest): pywayland for ptr/vkbd (pip install --user pywayland==0.4.18), wtype, grim, kitty, mutter.
 # Env: HL_STATE (default /tmp/hyprdrive-hl), HL_USER (default hyprtest).
+#      HL_NAME=x is HL_STATE=/tmp/hl-x: a second, independent instance (its own
+#      state dir, runtime dir, sockets and outer mutter) so two agents can test
+#      at once. Every command of one run must carry the same name. Kept SHORT on
+#      purpose: Hyprland's sockets live at $HL_STATE/rt/hypr/<61-char sig>/
+#      .socket2.sock and a unix socket path stops at 107 bytes -- a longer
+#      state dir truncates them (.socket.soc, no .socket2.sock at all), and
+#      every event-socket client (Quickshell's Hyprland module) fails.
 set -euo pipefail
 
 HL_USER=${HL_USER:-hyprtest}
-STATE=${HL_STATE:-/tmp/hyprdrive-hl}
+if [ -n "${HL_NAME:-}" ]; then
+    case $HL_NAME in *[!A-Za-z0-9_-]*) echo "hl: HL_NAME must be [A-Za-z0-9_-]" >&2; exit 1 ;; esac
+    STATE=${HL_STATE:-/tmp/hl-$HL_NAME}
+else
+    STATE=${HL_STATE:-/tmp/hyprdrive-hl}
+fi
 RT=$STATE/rt
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
@@ -77,7 +89,7 @@ if [ "${1:-}" != __inner ]; then
             rm -rf "$tmp"; exit 0 ;;
         shot)
             out=${1:-}; [ -n "$out" ] || die "usage: shot <file.png> [OUTPUT]"
-            as env -i HOME=/nonexistent PATH=/usr/bin bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
+            as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
             [ -s "$out.tmp" ] || { rm -f "$out.tmp"; die "empty screenshot"; }
             mv "$out.tmp" "$out"; echo "$out"; exit 0 ;;
     esac
@@ -85,13 +97,17 @@ if [ "${1:-}" != __inner ]; then
         as bash -c "mkdir -p '$STATE' && chmod 755 '$STATE'"
     fi
     as test -d "$STATE" || die "not started (no $STATE)"
+    # The inner side runs under env -i, so it is handed HL_STATE explicitly
+    # (above, and in shot): without it a named instance's commands fell through
+    # to the DEFAULT /tmp/hyprdrive-hl -- `HL_STATE=... hl.sh stop` stopped
+    # whichever other run was using the default (2026-10-14).
     # stage the current script + helpers (hyprtest cannot read dragos's home)
     for f in hl.sh vptr.py vkbd.py wlr-virtual-pointer-unstable-v1.xml virtual-keyboard-unstable-v1.xml; do
         as bash -c "cat > '$STATE/$f'" < "$HERE/$f"
     done
     since=$(date '+%Y-%m-%d %H:%M:%S')
     rc=0
-    as env -i HOME=/nonexistent PATH=/usr/bin bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
+    as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
     if [ "$cmd" = stop ]; then
         # coredumpctl as dragos does list hyprtest's crashes (metadata only).
         st=$(as cat "$STATE/started-at" 2>/dev/null || echo "$since")
@@ -200,6 +216,8 @@ start)
         *) die "start: unknown arg $1" ;;
     esac; shift; done
     [ -r "$cfg" ] || die "start: config not readable as $(id -un): $cfg"
+    # <RT>/hypr/<61-char signature>/.socket2.sock must fit in sun_path (107).
+    [ $(( ${#RT} + 6 + 61 + 14 )) -le 107 ] || die "start: state dir $STATE is too long for Hyprland's socket paths (use a shorter HL_STATE / HL_NAME)"
     running && die "already running (hl.sh stop first)"
     [ -z "$(ours)" ] || die "leftover processes on $RT: $(ours | tr '\n' ' ') -- run hl.sh stop"
     rm -rf "$RT" "$STATE"/{sig,wl,*.pid,outer.log,hypr.out,py,nclients,client.*.log,vkbd.log,vkbd.fifo,vkbd.fifo.ack}
