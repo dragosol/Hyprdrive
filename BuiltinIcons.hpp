@@ -16,6 +16,11 @@ namespace ScrollOverview::BuiltinIcons {
     inline constexpr std::string_view STACK_EMPTY = "hyprdrive-stack-empty";
     // Hold to swap's mark, drawn beside the "Swap" label in the overview.
     inline constexpr std::string_view SWAP        = "hyprdrive-swap";
+    // The dock's scratchpad chevron (assets/scratchpad-symbolic.svg). Embedded
+    // so a hyprpm install -- which builds the .so and copies nothing else --
+    // still has it; Scratchpad::iconName() is its only reader, and it hands
+    // the dock a FILE (see there), so this name is never drawn directly.
+    inline constexpr std::string_view SCRATCHPAD  = "hyprdrive-scratchpad";
 
     // The SVG source for `name`, with #ACCENT replaced by `accentHex`
     // ("#rrggbb"). Empty for an unknown name.

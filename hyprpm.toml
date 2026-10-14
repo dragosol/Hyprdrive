@@ -1,11 +1,36 @@
+# hyprpm manifest -- `hyprpm add https://github.com/dragosol/Hyprdrive`.
+#
+# NATIVE: one build for plain Hyprland and Omarchy alike (Integration.hpp
+# decides at runtime). hyprpm builds the .so and copies nothing else, so the .so
+# carries what it needs (the scratchpad glyph is #embed-ded). What hyprpm cannot
+# install is the Lua fragments -- the overview submap and the 3-finger gestures;
+# Super tap and the dock work without them. For those, from a checkout:
+#     make install        (fragments + loader + one require line in hyprland.lua)
+# 00-plugin.lua finds hyprpm's copy at /var/cache/hyprpm/$USER/Hyprdrive/.
+#
+# BUILD = the .so plus symcheck (nm/ldd only): an undefined symbol is a
+# lazy-bind compositor kill, so it is never optional. Not `make all`: that also
+# runs the host tests and python checks, which need -devel packages and python
+# modules a hyprpm user has no reason to have.
+#
+# COMMIT PINS map a Hyprland commit to the plugin commit that builds against it,
+# for users on an OLDER Hyprland than this branch's HEAD targets. HEAD targets
+# 0.56.2 (efb50993780079460b0cbed1363e2166a2de1d9f) itself, so it has no pin:
+# pinning the current version would freeze every 0.56.2 user at one commit and
+# hide every fix after it. When HEAD moves to the next Hyprland, add
+#     ["efb50993780079460b0cbed1363e2166a2de1d9f", "<last commit built on 0.56.2>"]
+# to commit_pins below.
+
 [repository]
-name = "Hyprdrive-Omarchy"
+name = "Hyprdrive"
 authors = ["dragos"]
+commit_pins = []
 
 [hyprdrive]
-description = "Hyprdrive for Omarchy: mission-control overview + dock."
+description = "Hyprdrive: mission-control overview, workspace strip, search and dock for Hyprland (Omarchy-aware)."
 authors = ["dragos", "yayuuu"]
 output = "hyprdrive.so"
 build = [
-    "make all",
+    "make hyprdrive.so",
+    "bash scripts/symcheck.sh",
 ]

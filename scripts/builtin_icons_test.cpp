@@ -69,6 +69,13 @@ int main() {
         const double C = coverage(SVG);
         CHECK(C > 0.08 && C < 0.6);
     }
+    // The scratchpad chevron, embedded for hyprpm installs: line art, no accent.
+    {
+        const auto SVG = BuiltinIcons::svg(BuiltinIcons::SCRATCHPAD, "#12ab34");
+        CHECK(SVG.starts_with("<svg") && SVG.find("M3 10.5") != std::string::npos);
+        const double C = coverage(SVG);
+        CHECK(C > 0.02 && C < 0.5);
+    }
     CHECK(BuiltinIcons::svg("hyprdrive-nope", "#fff").empty());
     CHECK(BuiltinIcons::trashName(true, "x", "y") == "hyprdrive-trash-empty-light-white");
     CHECK(BuiltinIcons::trashName(false, "dark", "color") == "hyprdrive-trash-full-dark-color");

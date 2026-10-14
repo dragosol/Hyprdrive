@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Remove Hyprdrive: everything scripts/install-fragments.sh put in place.
 #
-#   - the plugin:        ~/.local/lib/hyprdrive/
+#   - the plugin:        $PREFIX/lib/hyprdrive/ (PREFIX default ~/.local)
+#   - the CLI:           $PREFIX/bin/hyprdrive-integration
 #   - the fragments:     ~/.config/hypr/hyprdrive/  (moved aside, not deleted:
 #                        their raw-snippet blocks are the user's own edits)
 #   - the loader:        ~/.config/hypr/hyprdrive.lua
@@ -18,13 +19,16 @@
 # not done here -- a live unload mid-gesture can take the session down.
 set -eu
 CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}
-LIBDIR=$HOME/.local/lib/hyprdrive
+PREFIX=${PREFIX:-$HOME/.local}
+LIBDIR=$PREFIX/lib/hyprdrive
+CLI=$PREFIX/bin/hyprdrive-integration
 FRAGS=$CONFIG/hypr/hyprdrive
 LOADER=$CONFIG/hypr/hyprdrive.lua
 HYPRLAND_LUA=$CONFIG/hypr/hyprland.lua
 PANEL=$CONFIG/omarchy/plugins/dragos.hyprdrive
 
 if [ -d "$LIBDIR" ]; then rm -rf "$LIBDIR"; echo "removed $LIBDIR"; fi
+if [ -f "$CLI" ]; then rm -f "$CLI"; echo "removed $CLI"; fi
 
 if [ -d "$FRAGS" ]; then
     BACKUP="$FRAGS.removed-$(date +%Y%m%d-%H%M%S)"
@@ -34,7 +38,9 @@ fi
 
 if [ -f "$LOADER" ]; then rm -f "$LOADER"; echo "removed $LOADER"; fi
 
-if [ -f "$HYPRLAND_LUA" ] && grep -q 'require("hypr.hyprdrive")' "$HYPRLAND_LUA"; then
+# Either spelling install-fragments writes: require("hypr.hyprdrive") on
+# Omarchy, require("hyprdrive") on plain Hyprland.
+if [ -f "$HYPRLAND_LUA" ] && grep -Eq '^require\("(hypr\.)?hyprdrive"\)' "$HYPRLAND_LUA"; then
     # Exactly the block install-fragments appends: its comment and the require.
     python3 - "$HYPRLAND_LUA" <<'PY'
 import sys, re, os, stat
@@ -44,7 +50,7 @@ p = sys.argv[1]
 mode = stat.S_IMODE(os.stat(p).st_mode)
 s = open(p).read()
 s2 = re.sub(r'\n?-- Hyprdrive \(overview \+ dock\)\. Fragments live in hypr/hyprdrive/\.\n', '\n', s)
-s2 = re.sub(r'^require\("hypr\.hyprdrive"\)\n?', '', s2, flags=re.M)
+s2 = re.sub(r'^require\("(hypr\.)?hyprdrive"\)\n?', '', s2, flags=re.M)
 if s2 != s:
     bak = p + ".hyprdrive-bak"
     if os.path.lexists(bak):
@@ -53,7 +59,7 @@ if s2 != s:
         fh.write(s)
     os.chmod(bak, mode)
     open(p, "w").write(s2)
-    print(f"removed require(\"hypr.hyprdrive\") from {p} (backup: {p}.hyprdrive-bak)")
+    print(f"removed the hyprdrive require() from {p} (backup: {p}.hyprdrive-bak)")
 PY
 fi
 

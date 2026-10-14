@@ -1,27 +1,54 @@
 #!/usr/bin/env bash
-# Install Hyprdrive on Omarchy: the .so, the Lua fragments, and a require()
-# from ~/.config/hypr/hyprland.lua.
+# Install Hyprdrive: the .so, the Lua fragments and their loader, a require()
+# from ~/.config/hypr/hyprland.lua -- and, ON OMARCHY ONLY, the settings panel.
+#
+# One script for both desktops (native port P0-3). Which one this is comes from
+# scripts/hyprdrive-integration (Integration.hpp's rule: HYPRDRIVE_NO_OMARCHY /
+# HYPRDRIVE_INTEGRATION, else `omarchy` on PATH and its state dir). On plain
+# Hyprland nothing under ~/.config/omarchy is created or touched.
 #
 # Appearance is not installed. The plugin reads Hyprland's live theme values
 # (borders, rounding, blur, shadows); Omarchy already writes those on
 # `omarchy theme set` and reloads the compositor.
 #
-#   scripts/install-fragments.sh            live install
+#   scripts/install-fragments.sh            live install (`make install` runs this)
 #   scripts/install-fragments.sh DIR        fragments only, for tests
+#
+# Env: PREFIX (default ~/.local) -- the .so goes to $PREFIX/lib/hyprdrive and the
+# hyprdrive-integration CLI to $PREFIX/bin; 00-plugin.lua is written with that
+# PREFIX so the loader finds the .so wherever it went.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-DEST=${1:-$HOME/.config/hypr/hyprdrive}
+PREFIX=${PREFIX:-$HOME/.local}
+CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}
+DEST=${1:-$CONFIG/hypr/hyprdrive}
 SRC=$ROOT/config/hyprdrive
 LOADER_SRC=$ROOT/config/hyprdrive.lua
-LOADER_DEST=$HOME/.config/hypr/hyprdrive.lua
-HYPRLAND_LUA=$HOME/.config/hypr/hyprland.lua
-LIBDIR=$HOME/.local/lib/hyprdrive
+LOADER_DEST=$CONFIG/hypr/hyprdrive.lua
+HYPRLAND_LUA=$CONFIG/hypr/hyprland.lua
+HYPRLAND_CONF=$CONFIG/hypr/hyprland.conf
+LIBDIR=$PREFIX/lib/hyprdrive
+INTEGRATION_CLI=$ROOT/scripts/hyprdrive-integration
 
 [ -d "$SRC" ] || { echo "install-fragments: no $SRC" >&2; exit 1; }
+case $PREFIX in
+    /*) ;;
+    *) echo "install-fragments: PREFIX must be absolute (got $PREFIX)" >&2; exit 1 ;;
+esac
+
+# omarchy | none, and why -- printed, because "why did it (not) install the
+# panel" is the first question anyone will have.
+INTEGRATION=$(sh "$INTEGRATION_CLI" --why) || INTEGRATION=none
+DESKTOP=$(printf '%s\n' "$INTEGRATION" | sed -n 1p)
+echo "integration: $DESKTOP ($(printf '%s\n' "$INTEGRATION" | sed -n 's/^reason: //p'))"
+
 mkdir -p "$DEST"
 
 for f in "$SRC"/*.lua; do
-    python3 "$ROOT/scripts/fragment.py" write "$DEST/$(basename "$f")" < "$f"
+    # @HYPRDRIVE_PREFIX@ -> PREFIX (00-plugin.lua's .so search). Python, not
+    # sed: a PREFIX with | or & in it is a path, not a sed expression.
+    python3 -c 'import sys; sys.stdout.write(sys.stdin.read().replace("@HYPRDRIVE_PREFIX@", sys.argv[1]))' "$PREFIX" < "$f" \
+        | python3 "$ROOT/scripts/fragment.py" write "$DEST/$(basename "$f")"
 done
 
 echo "fragments installed in $DEST"
@@ -34,19 +61,39 @@ fi
 install -Dm644 "$LOADER_SRC" "$LOADER_DEST"
 echo "loader: $LOADER_DEST"
 
+# The require line. Omarchy puts ~/.config on package.path, so its configs say
+# require("hypr.hyprdrive") and that is what an Omarchy install keeps writing.
+# Plain Hyprland only has the config dir itself (~/.config/hypr/?.lua), where
+# the same file is require("hyprdrive"). Either existing spelling counts as
+# present: requiring the loader twice under two module names would run every
+# fragment twice.
 if [ -f "$HYPRLAND_LUA" ]; then
-    if grep -q 'require("hypr.hyprdrive")' "$HYPRLAND_LUA" || grep -q "require('hypr.hyprdrive')" "$HYPRLAND_LUA"; then
-        echo "hyprland.lua already requires hypr.hyprdrive"
+    if grep -Eq "^[[:space:]]*require[[:space:]]*\\(?[[:space:]]*[\"'](hypr\\.)?hyprdrive[\"']" "$HYPRLAND_LUA"; then
+        echo "hyprland.lua already requires the hyprdrive loader"
     else
-        cat >> "$HYPRLAND_LUA" <<'LUA'
-
--- Hyprdrive (overview + dock). Fragments live in hypr/hyprdrive/.
-require("hypr.hyprdrive")
-LUA
-        echo "added require(\"hypr.hyprdrive\") to $HYPRLAND_LUA"
+        if [ "$DESKTOP" = omarchy ]; then MODULE=hypr.hyprdrive; else MODULE=hyprdrive; fi
+        printf '\n-- Hyprdrive (overview + dock). Fragments live in hypr/hyprdrive/.\nrequire("%s")\n' "$MODULE" >> "$HYPRLAND_LUA"
+        echo "added require(\"$MODULE\") to $HYPRLAND_LUA"
     fi
+elif [ -f "$HYPRLAND_CONF" ]; then
+    # HYPRLANG USERS. Hyprland 0.56 reads hyprland.lua when it exists and
+    # hyprland.conf only when it does not, so creating a hyprland.lua here
+    # would silently swap out the user's whole config. Say what works instead.
+    cat >&2 <<EOF
+install-fragments: $HYPRLAND_CONF is a hyprlang config, and Hyprdrive's
+fragments (overview submap, 3-finger gestures, settings) are Lua. They are
+installed in $DEST but nothing loads them. Two honest options:
+  * stay on hyprland.conf: add
+        plugin = $LIBDIR/hyprdrive.so
+    The plugin loads; tapping SUPER opens the overview and the dock works.
+    The fragments' binds and gestures do not exist -- bind the dispatchers
+    yourself, e.g.  bind = SUPER, TAB, hyprdrive:overview, toggle all
+  * move to Lua (Hyprland 0.56's hyprland.lua) and add
+        require("hyprdrive")
+    at the end; then re-run make install.
+EOF
 else
-    echo "install-fragments: no $HYPRLAND_LUA -- add: require(\"hypr.hyprdrive\")" >&2
+    echo "install-fragments: no $HYPRLAND_LUA -- add at its end: require(\"hyprdrive\")" >&2
 fi
 
 if [ -f "$ROOT/hyprdrive.so" ]; then
@@ -56,8 +103,21 @@ else
     echo "install-fragments: no hyprdrive.so -- run make all first, then re-run this" >&2
 fi
 
+install -Dm755 "$INTEGRATION_CLI" "$PREFIX/bin/hyprdrive-integration"
+echo "cli: $PREFIX/bin/hyprdrive-integration"
+
 PLUGIN_SRC=$ROOT/omarchy-plugin
-PLUGIN_DEST=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/dragos.hyprdrive
+PLUGIN_DEST=$CONFIG/omarchy/plugins/dragos.hyprdrive
+# THE PANEL IS AN OMARCHY SHELL PLUGIN: it imports qs.Commons/qs.Ui from the
+# Omarchy shell and cannot run anywhere else (audit B1). Off Omarchy it is not
+# copied, and -- the point -- ~/.config/omarchy is never created: an empty
+# omarchy tree in a plain home is exactly the half-signal that makes other
+# tools (and the old detection) think Omarchy is there.
+if [ "$DESKTOP" != omarchy ]; then
+    echo "omarchy plugin: skipped (integration: $DESKTOP)"
+    exit 0
+fi
+
 # INSTALLED FROM THE MARKETPLACE: `omarchy plugin add` cloned this very
 # repository into $PLUGIN_DEST, and its root manifest.json points the shell at
 # omarchy-plugin/Panel.qml. The panel is already installed -- it IS this

@@ -44,7 +44,7 @@ hyprdrive.so: $(OBJS)
 	$(CXX) -shared $(OBJS) -o $@ $(LDLIBS)
 
 # dock stacks C: the icons are #embed-ded, so their object depends on them.
-.build/BuiltinIcons.o: $(wildcard assets/icons/*.svg)
+.build/BuiltinIcons.o: $(wildcard assets/icons/*.svg) assets/scratchpad-symbolic.svg
 
 .build/%.o: %.cpp | $(VERSION_HEADER)
 	@mkdir -p .build
@@ -71,13 +71,20 @@ PREFIX ?= $(HOME)/.local
 # check, not just hyprdrive.so: `make install` used to skip symcheck entirely,
 # which is how an undefined-symbol .so reached ~/.local/lib and killed every
 # login until the plugin was moved aside (2026-09-15).
+#
+# Native and Omarchy alike (scripts/install-fragments.sh asks
+# scripts/hyprdrive-integration which one this is): the .so and the scratchpad
+# glyph under $(PREFIX)/lib/hyprdrive, the hyprdrive-integration CLI in
+# $(PREFIX)/bin, the Lua fragments + loader in ~/.config/hypr, one require line
+# in hyprland.lua, and the settings panel ONLY on Omarchy. Force a native
+# install on a machine with Omarchy files: HYPRDRIVE_NO_OMARCHY=1 make install.
 install: hyprdrive.so check
 	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/hyprdrive.so
 	install -Dm644 assets/scratchpad-symbolic.svg $(PREFIX)/lib/hyprdrive/scratchpad-symbolic.svg
-	bash scripts/install-fragments.sh
+	PREFIX="$(PREFIX)" bash scripts/install-fragments.sh
 
 uninstall:
-	bash scripts/uninstall.sh
+	PREFIX="$(PREFIX)" bash scripts/uninstall.sh
 
 clean:
 	rm -rf .build hyprdrive.so

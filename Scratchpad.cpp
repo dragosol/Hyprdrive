@@ -1,11 +1,15 @@
 #include "Scratchpad.hpp"
 
 #include "AppSearch.hpp"
+#include "BuiltinIcons.hpp"
 #include "Minimize.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 
 #include <dlfcn.h>
 #include <string_view>
@@ -132,7 +136,48 @@ std::string iconName() {
     if (!BUNDLED.empty())
         return BUNDLED;
 
-    // Fallback when the asset is missing (a bare .so copied somewhere by hand):
+    // NO SIDE FILE: a hyprpm install builds the .so in a temp checkout and
+    // copies only the .so. The chevron is embedded (BuiltinIcons::SCRATCHPAD),
+    // and written ONCE to $XDG_CACHE_HOME/hyprdrive/ so the dock draws it down
+    // the very same path as the side file -- a FILE, tinted white like every
+    // symbolic dock icon. Handing the dock the builtin name instead would take
+    // OverviewRender's builtin path, which neither tints nor pads. Rewritten
+    // only when the bytes differ, so an updated plugin brings its own glyph.
+    static const std::string MATERIALISED = [] {
+        const auto SVG = BuiltinIcons::svg(BuiltinIcons::SCRATCHPAD, "#000000");
+        if (SVG.empty())
+            return std::string{};
+        const char* const CACHE = std::getenv("XDG_CACHE_HOME");
+        const char* const HOME  = std::getenv("HOME");
+        const std::filesystem::path DIR = (CACHE && *CACHE) ? std::filesystem::path(CACHE) / "hyprdrive" :
+            (HOME && *HOME)                                 ? std::filesystem::path(HOME) / ".cache/hyprdrive" :
+                                                              std::filesystem::path{};
+        if (DIR.empty())
+            return std::string{};
+        const auto      PATH = DIR / "scratchpad-symbolic.svg";
+        std::error_code ec;
+        std::filesystem::create_directories(DIR, ec);
+        {
+            std::ifstream in(PATH, std::ios::binary);
+            const std::string HAVE{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+            if (HAVE == SVG)
+                return PATH.string();
+        }
+        const auto TMP = PATH.string() + ".tmp";
+        {
+            std::ofstream out(TMP, std::ios::binary | std::ios::trunc);
+            out << SVG;
+            if (!out)
+                return std::string{};
+        }
+        std::filesystem::rename(TMP, PATH, ec);
+        return ec ? std::string{} : PATH.string();
+    }();
+
+    if (!MATERIALISED.empty())
+        return MATERIALISED;
+
+    // Last resort (no writable cache dir either):
     // resolved against the live theme rather than hardcoded, since a user on
     // another icon theme may carry none of these, and a dock slot whose icon
     // does not resolve is a blank square.

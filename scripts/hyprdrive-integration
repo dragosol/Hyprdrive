@@ -54,6 +54,9 @@ answer() { # name source reason
 }
 
 # --- online: the running plugin's answer --------------------------------------
+# An override in the CALLER's environment means "decide as if", not "ask the
+# compositor what it decided under its own environment": it goes offline.
+if [ -n "${HYPRDRIVE_NO_OMARCHY:-}${HYPRDRIVE_INTEGRATION:-}" ]; then offline=1; fi
 if [ $offline = 0 ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v hyprctl >/dev/null 2>&1; then
     out=$(hyprctl hyprdrive-integration 2>/dev/null) || out=
     name=$(printf '%s\n' "$out" | sed -n 1p)
