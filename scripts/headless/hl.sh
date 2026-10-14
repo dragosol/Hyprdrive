@@ -37,7 +37,8 @@
 #   hl.sh tap <Key>[+<Key>...]              e.g. tap Escape, tap Super+Tab (also down/up <Key>)
 #   hl.sh key <wtype args...>               wtype (new device per call; not for the overview)
 #   hl.sh ptr move X Y | click [left|right|middle] | tap X Y [btn] | down|up [btn]
-#             | scroll DY | drag X1 Y1 X2 Y2 [steps]   pointer via wlr-virtual-pointer
+#             | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms]]
+#                                           pointer via wlr-virtual-pointer
 #                                           (tap = move+click on ONE device: what a Qt
 #                                           client window needs; see vptr.py)
 #   hl.sh warp X Y                          hl.dsp.cursor.move (compositor warp, no device)
