@@ -27,6 +27,10 @@
 #                     FingerSwipeModel.
 #   native_search_test  NativeSearch.hpp: the leading-program parse and the
 #                     terminal choice the search uses off Omarchy.
+#   app_info_test     AppInfo.cpp's Get Info script against stand-in pacman,
+#                     rpm and dpkg: every installed manager is asked in turn.
+#   icon_score_test   IconScore.hpp: the largest SVG design of an icon wins
+#                     (directory names only), as the icon index walks a theme.
 #
 # Anything that needs a running Hyprland is a GATE (scripts/gates/), not a host
 # test, and lives in scripts/suite.sh instead.
@@ -78,6 +82,8 @@ run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-con
 # shellcheck disable=SC2046
 run stack_reader_test scripts/stack_reader_test.cpp StackReader.cpp StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
 run omarchy_search_test scripts/omarchy_search_test.cpp OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
+run app_info_test scripts/app_info_test.cpp AppInfo.cpp
+run icon_score_test scripts/icon_score_test.cpp
 run integration_test scripts/integration_test.cpp
 run native_search_test scripts/native_search_test.cpp
 # shellcheck disable=SC2046

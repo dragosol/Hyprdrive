@@ -2626,6 +2626,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // must be joined (with any package query killed) before the code goes.
     ScrollOverview::Dock::stopInfoPoll();
     ScrollOverview::Dock::stopUrgentHopTimer();
+    ScrollOverview::Dock::stopFavoritesWatch();
     AppInfo::shutdown();
     disableScrollOverviewHooks();
 

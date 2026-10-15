@@ -56,7 +56,12 @@ namespace ScrollOverview::Locations {
 
     // The reference's one trash action, and it asks NAUTILUS to do it, with the
     // confirmation dialog: this plugin never deletes the user's files itself.
+    // Without a Nautilus on the session bus it runs `gio trash --empty`, which
+    // asks nothing -- so the caller confirms first (emptyTrashAsksFirst false).
     void emptyTrash();
+
+    // True when emptyTrash() will show Nautilus's own "Empty Trash?" dialog.
+    bool emptyTrashAsksFirst();
 
     // The reference's removable actions. A mount can offer both, and the menu
     // draws a row for each, so which one runs is the ROW's answer and not the

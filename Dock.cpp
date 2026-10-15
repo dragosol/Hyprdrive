@@ -59,6 +59,9 @@
 #include <fstream>
 #include <optional>
 #include <ranges>
+#include <string_view>
+#include <sys/inotify.h>
+#include <unistd.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -576,6 +579,8 @@ SFavoritesStore& favoritesStore() {
     return store;
 }
 
+void armFavoritesWatch();
+
 // The store is the source of truth and the plugin is NOT its only writer: a
 // profile revert (hdprof), an editor, or a second session all change the file
 // under a running dock. Reading it ONCE at first use made every such write
@@ -584,6 +589,7 @@ SFavoritesStore& favoritesStore() {
 // itself working perfectly (measured 2026-08-13, zrig/danglingC/x34-*).
 std::vector<std::string>& favorites() {
     auto& STORE = favoritesStore();
+    armFavoritesWatch();
 
     const auto NOW = Time::steadyNow();
     if (STORE.loaded && std::chrono::duration<float, std::milli>(NOW - STORE.checkedAt).count() < FAVORITES_POLL_MS)
@@ -655,6 +661,69 @@ void writeFavorites() {
     // cache on every pin.
     auto& STORE = favoritesStore();
     STORE.stamp = std::filesystem::last_write_time(PATH, ec);
+}
+
+// E12b. THE POLL ONLY RUNS WHEN SOMETHING ASKS. favorites() is on the layout
+// path, and on an idle desktop nothing lays the dock out: an outside write
+// (hdprof, an editor, `echo >>`) sat unread until a window opened or closed.
+// So the store's folder is watched, and a write to the file re-reads it and
+// asks for a frame -- the 500 ms throttle is for the layout path's own calls,
+// not for a change the kernel just reported. The folder rather than the file:
+// an editor saves by renaming a new file over the old one, which a watch on
+// the old inode never sees. Our own writes arrive here too and cost nothing:
+// writeFavorites() adopted their mtime, so the poll finds nothing new.
+int              g_favWatchFd    = -1;
+wl_event_source* g_favWatchSrc   = nullptr;
+bool             g_favWatchTried = false; // once: no retry per layout call, none after unload
+
+int onFavoritesDirEvent(int, uint32_t, void*) {
+    alignas(struct inotify_event) char buf[4096];
+    bool                               store = false;
+    for (;;) {
+        const ssize_t N = ::read(g_favWatchFd, buf, sizeof(buf));
+        if (N <= 0)
+            break;
+        for (ssize_t off = 0; off < N;) {
+            const auto* EV = reinterpret_cast<const struct inotify_event*>(buf + off);
+            if (EV->len > 0 && std::string_view{EV->name} == favoritesPath().filename().string())
+                store = true;
+            off += sizeof(struct inotify_event) + EV->len;
+        }
+    }
+    if (!store)
+        return 0;
+
+    auto&      STORE = favoritesStore();
+    const auto WAS   = STORE.generation;
+    STORE.checkedAt  = {};
+    favorites();
+    if (STORE.generation != WAS) {
+        for (const auto& MON : State::monitorState()->monitors())
+            if (MON)
+                g_pHyprRenderer->damageMonitor(MON);
+    }
+    return 0;
+}
+
+void armFavoritesWatch() {
+    if (g_favWatchTried || !g_pCompositor || !g_pCompositor->m_wlEventLoop)
+        return;
+    g_favWatchTried = true;
+
+    const auto PATH = favoritesPath();
+    if (PATH.empty())
+        return;
+    std::error_code ec;
+    std::filesystem::create_directories(PATH.parent_path(), ec);
+
+    g_favWatchFd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (g_favWatchFd < 0)
+        return;
+    if (inotify_add_watch(g_favWatchFd, PATH.parent_path().c_str(), IN_CLOSE_WRITE | IN_MOVED_TO) < 0 ||
+        !(g_favWatchSrc = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, g_favWatchFd, WL_EVENT_READABLE, onFavoritesDirEvent, nullptr))) {
+        ::close(g_favWatchFd);
+        g_favWatchFd = -1;
+    }
 }
 
 void toggleFavorite(const std::string& id) {
@@ -1060,6 +1129,9 @@ SItemsKey itemsKey() {
     SItemsKey key;
     key.membership = Membership::generation();
     key.windows    = windowDigest();
+    // favorites() first: it is the poll, and the generation alone is only as
+    // fresh as the last call that ran it.
+    favorites();
     key.favorites  = favoritesStore().generation;
     key.locations  = Locations::generation();
     key.stacks     = Stacks::generation();
@@ -2461,6 +2533,14 @@ struct STooltip {
 };
 STooltip g_tip;
 
+// No fade: the plate is simply not there on the next frame.
+void dropTooltip() {
+    g_tip.name.clear();
+    g_tip.subject.clear();
+    g_tip.peek.clear();
+    g_tip.out = false;
+}
+
 // "App · Title" INSIDE THE WINDOW (user, 2026-09-24: "a little tooltip inside
 // the window when I'm hovering the dock ... that way I know which terminal
 // window I'm chatting with ... centered at the top inside the app window. This
@@ -3391,6 +3471,8 @@ enum class ERow : uint8_t {
     StackEmptyAsk,
     StackEmptyConfirm,
     StackEmptyCancel,
+    // Empty Trash with no Nautilus to show its dialog: the dock asks, in place.
+    EmptyTrashConfirm,
 };
 
 // OMARCHY-STYLE ROWS: a Nerd Font glyph column, the label, and a dim hint on the
@@ -3885,7 +3967,8 @@ void activateRow(PHLMONITOR monitor, const SItem& item, const SRow& row) {
         case ERow::StackOpen: Locations::activate(item.uri); return;
         case ERow::StackUnpin: Stacks::unpin(item.stackPath); return; // "Remove from Dock": the folder is untouched
 
-        case ERow::EmptyTrash: Locations::emptyTrash(); return;
+        case ERow::EmptyTrash:
+        case ERow::EmptyTrashConfirm: Locations::emptyTrash(); return;
         case ERow::Mount: Locations::mount(item.uri); return;
         case ERow::Unmount: Locations::unmount(item.uri, false); return;
         case ERow::Eject: Locations::unmount(item.uri, true); return;
@@ -4561,7 +4644,13 @@ void hotkey(int number, bool shift, bool ctrl) {
     if (!MONITOR)
         return;
 
-    const auto LAYOUT = layout(MONITOR);
+    // The RESTING arrangement, not layout(): that is the slid one, and a dock
+    // that is fully away has no layout at all (no pill, no hit area -- see
+    // layout()). Autohide is the default, so every first press of a hotkey on
+    // a hidden dock found zero slots and did nothing; only a second press,
+    // after the first had revealed the dock, reached the app. A slot is an app
+    // whether or not the pill is on screen.
+    const auto LAYOUT = arranged(MONITOR->m_id, baseLayout(MONITOR));
     const int  INDEX  = number - 1;
     if (INDEX < 0 || INDEX >= sc<int>(LAYOUT.items.size()))
         return;
@@ -5201,6 +5290,7 @@ bool openMenu(PHLMONITOR monitor, const Vector2D& point) {
         return false;
 
     g_menu = SMenu{.monitor = monitor->m_id, .item = *ITEM, .anchor = ITEM->iconBox, .box = {}, .rows = buildRows(*ITEM, monitor)};
+    dropTooltip(); // the menu's first frame must not carry the name plate over its rows
     return true;
 }
 
@@ -5212,17 +5302,29 @@ void closeMenu() {
     g_menu.reset();
 }
 
+// Any open menu hears ESCAPE (it closes it, as every menu does); only the
+// Rename field takes the rest of the keyboard.
 bool menuWantsKeyboard() {
-    return g_menu && g_menu->editing;
+    return g_menu.has_value();
 }
 
 // The Rename field's keys. Enter saves (an unchanged or empty name restores the
 // folder's own), Esc cancels, and every other key belongs to the field while it
-// is up -- nothing typed at it reaches the window underneath.
+// is up -- nothing typed at it reaches the window underneath. Without the field,
+// Esc closes the menu and every other key goes where it was going.
 bool menuHandleKey(uint32_t keycode) {
     if (!menuWantsKeyboard())
         return false;
     auto& M = *g_menu;
+    if (!M.editing) {
+        if (keycode != 1) // ESC
+            return false;
+        for (const auto& MON : State::monitorState()->monitors())
+            if (MON && MON->m_id == M.monitor)
+                g_pHyprRenderer->damageMonitor(MON);
+        closeMenu();
+        return true;
+    }
     if (keycode == 28) { // ENTER
         const auto BASE = Stacks::labelFor(M.item.stackPath);
         Stacks::setLabel(M.item.stackPath, M.editText == BASE ? std::string{} : M.editText);
@@ -5299,6 +5401,18 @@ void stopInfoPoll() {
     }
 }
 
+void stopFavoritesWatch() {
+    g_favWatchTried = true; // a layout call during the teardown must not re-arm it
+    if (g_favWatchSrc) {
+        wl_event_source_remove(g_favWatchSrc);
+        g_favWatchSrc = nullptr;
+    }
+    if (g_favWatchFd >= 0) {
+        ::close(g_favWatchFd);
+        g_favWatchFd = -1;
+    }
+}
+
 bool menuClick(PHLMONITOR monitor, const Vector2D& point) {
     if (!menuContains(monitor, point))
         return false;
@@ -5316,6 +5430,17 @@ bool menuClick(PHLMONITOR monitor, const Vector2D& point) {
             SRow{.kind = ERow::Separator},
             SRow{.kind = ERow::StackEmptyCancel, .label = "Cancel", .glyph = MenuGlyph::BACK},
             SRow{.kind = ERow::StackEmptyConfirm, .label = "Move to Trash", .glyph = MenuGlyph::TRASH, .danger = true},
+        };
+        return true;
+    }
+    // Empty Trash asks first when Nautilus will not: without it the empty is
+    // `gio trash --empty`, which deletes for good and asks nothing.
+    if (ROW->kind == ERow::EmptyTrash && !ROW->disabled && !Locations::emptyTrashAsksFirst()) {
+        g_menu->rows = {
+            SRow{.kind = ERow::InfoLine, .label = "Empty the Trash for good?", .glyph = MenuGlyph::TRASH},
+            SRow{.kind = ERow::Separator},
+            SRow{.kind = ERow::StackEmptyCancel, .label = "Cancel", .glyph = MenuGlyph::BACK},
+            SRow{.kind = ERow::EmptyTrashConfirm, .label = "Empty Trash", .glyph = MenuGlyph::TRASH, .danger = true},
         };
         return true;
     }
@@ -7260,7 +7385,14 @@ void render(PHLMONITOR monitor) {
 
     // An open stack's fan or pane covers where its tooltip would sit (user,
     // 2026-09-24): the popup already says what it is.
-    if (g_menu || Stacks::isOpen())
+    // A context menu takes the tooltip down AT ONCE, not on the fade: the plate
+    // sits exactly where the menu's rows open, and the fade-out only advances
+    // on repaints a still menu does not ask for -- so the old name stayed drawn
+    // over a row (Trash's Get Info, a drive's Unmount, a stack's Remove from
+    // Dock) for up to four seconds. openMenu drops it too; this keeps it down.
+    if (g_menu)
+        dropTooltip();
+    else if (Stacks::isOpen())
         renderTooltip(monitor, LAYOUT, CBox{}, "");
     else if (CELL)
         renderTooltip(monitor, LAYOUT, CELL->first, CELL->second->m_title, sc<float>(g_hover.drawn.y), tooltipSubject(CELL->second),

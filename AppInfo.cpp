@@ -39,6 +39,10 @@ case "$ex" in
     [ -n "$u" ] && printf 'Address\t%s\n' "$u"
     exit 0 ;;
 esac
+# Every package manager that is installed is ASKED, in turn, not just the first
+# one found: a box can carry more than one (fedora with dpkg installed, Arch with
+# rpm for a tool), and an if/elif chain let a dpkg miss on fedora fall straight
+# to "Local" without ever asking rpm, which owned the file.
 if command -v pacman >/dev/null 2>&1; then
   pkg=$(pacman -Qqo "$p" 2>/dev/null | head -1)
   if [ -n "$pkg" ]; then
@@ -52,16 +56,20 @@ if command -v pacman >/dev/null 2>&1; then
             if (s!="") print "Size\t" s; if (d!="") print "Installed\t" d; if (u!="" && u!="None") print "Homepage\t" u }'
     exit 0
   fi
-elif command -v dpkg >/dev/null 2>&1; then
+fi
+if command -v rpm >/dev/null 2>&1; then
+  # rpm prints "not owned by any package" on STDOUT, so the exit status is the
+  # answer; a file two packages own lists both, and the first is shown.
+  if pkg=$(rpm -qf --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n' "$p" 2>/dev/null) && [ -n "$pkg" ]; then
+    pkg=$(printf '%s\n' "$pkg" | head -1)
+    printf 'Version\t%s\nSource\trpm\nPackage\t%s\n' "${pkg#*	}" "${pkg%%	*}"
+    exit 0
+  fi
+fi
+if command -v dpkg >/dev/null 2>&1; then
   pkg=$(dpkg -S "$p" 2>/dev/null | head -1 | cut -d: -f1)
   if [ -n "$pkg" ]; then
     printf 'Version\t%s\nSource\tdpkg\nPackage\t%s\n' "$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null)" "$pkg"
-    exit 0
-  fi
-elif command -v rpm >/dev/null 2>&1; then
-  pkg=$(rpm -qf --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n' "$p" 2>/dev/null)
-  if [ $? -eq 0 ] && [ -n "$pkg" ]; then
-    printf 'Version\t%s\nSource\trpm\nPackage\t%s\n' "${pkg#*	}" "${pkg%%	*}"
     exit 0
   fi
 fi

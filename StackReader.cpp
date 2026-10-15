@@ -327,6 +327,12 @@ namespace ScrollOverview::StackReader {
             const int WD = inotify_add_watch(g_inotify, D.c_str(), IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF | IN_ATTRIB);
             if (WD >= 0)
                 g_watchDir[WD] = D;
+            // A folder that is (re)starting to be watched was NOT watched a moment
+            // ago -- unpinned, or gone and back -- so whatever the cache holds for
+            // it is from before, and nothing told the cache what changed in
+            // between. Re-pinning a folder served that old listing ("Empty folder,
+            // 0 of 0" over a folder with files) until some later file event.
+            invalidate(D);
         }
     }
 

@@ -228,6 +228,13 @@ namespace {
         // which is why the generation moves HERE too.
         store().stamp = std::filesystem::last_write_time(PATH, ec);
         ++g_storeGeneration;
+        // And a frame: a pin or an unpin from a bind or hyprctl (stack("pin
+        // ...")) touches no pointer, and an idle dock never redrew -- the new
+        // cell appeared only when something else moved.
+        if (g_pHyprRenderer)
+            for (const auto& M : State::monitorState()->monitors())
+                if (M)
+                    g_pHyprRenderer->damageMonitor(M);
     }
 
     Stacks::SStack* find(const std::string& path) {
@@ -494,7 +501,6 @@ namespace {
         bool                typing     = false;
         int                 cols       = 1;     // the pane's column count (Task 7); 1 for the fan
         Vector2D            lastMouse;
-        Time::steady_tp     lastDrawn{};                  // keyboardActive: only a popup actually on screen takes keys
         std::string         query;                        // the pane's search field
         CBox                fieldBox, headerBox, sortBox; // the pane's chrome, as DRAWN
         std::vector<SRow>   rows;        // published for the pointer
@@ -1435,6 +1441,9 @@ namespace ScrollOverview::Stacks {
         store().items.emplace_back(SStack{.path = CANON});
         decorate(store().items.back());
         writeStore();
+        // H1. Read it afresh: a folder pinned before keeps its old listing in
+        // the reader's cache, and nothing watched it while it was unpinned.
+        StackReader::invalidate(CANON);
         return true;
     }
 
@@ -1945,17 +1954,6 @@ namespace ScrollOverview::Stacks {
         return {};
     }
 
-    // Only a popup that is really in front of the user takes keys: not leaving,
-    // its monitor still there, and drawn within the last half second (a popup
-    // whose dock stopped drawing -- hidden, another monitor -- must not keep
-    // swallowing the keyboard; review 2026-09-24).
-    //
-    // OR THE POINTER IS ON IT (user, 2026-09-30: "grid mode should be
-    // searchable whenever I am moused over anywhere in the grid box"). A
-    // settled pane is a still image and is not redrawn, so "drawn within the
-    // last half second" went false half a second after the pointer stopped, and
-    // typing only filtered while the mouse was moving. A pointer resting on the
-    // pane says it is in front of the user just as well.
     // THE FAN TAKES TYPING only while the pointer is on it (user, 2026-10-08:
     // "if the stack is open and I'm focused on it (mousing-over the stack)"):
     // anywhere in its area, on its cell, or on the filter field itself. The
@@ -2016,18 +2014,29 @@ namespace ScrollOverview::Stacks {
         P.lastScrollAt = Time::steadyNow();
     }
 
+    // Only a popup that is really in front of the user takes keys: not leaving,
+    // its monitor still there, and its dock on screen there (a popup whose dock
+    // is not drawn -- hidden, switched off for that output -- must not keep
+    // swallowing the keyboard; review 2026-09-24). An open popup holds its dock
+    // out (holdsDock), so in practice that is "open": the popup takes the
+    // keyboard the moment it opens, wherever the pointer is (H4).
+    //
+    // It used to be "drawn within the last half second, or the pointer is on
+    // it". A settled popup is a still image and is not redrawn, so with the
+    // pointer away it lost the keyboard half a second after it settled while
+    // still visibly open: Escape did not close the fan, arrows were dropped,
+    // and with a window focused the first key went to that window (the key's
+    // own repaint then handed the popup the rest).
+    //
+    // TYPING into the FAN is a separate rule and stays pointer-bound (user,
+    // 2026-10-08, fanFocused above): this decides who hears the keys at all.
     bool keyboardActive() {
         if (!g_popup || g_popup->leaving)
             return false;
         const auto MONITOR = popupMonitorPtr();
         if (!MONITOR)
             return false;
-        if (elapsed(g_popup->lastDrawn) < 500.F)
-            return true;
-        if (!g_popup->grid && fanFocused())
-            return true;
-        const auto POINTER = g_pInputManager->getMouseCoordsInternal();
-        return MONITOR->logicalBox().containsPoint(POINTER) && contains(MONITOR, (POINTER - MONITOR->m_position) * MONITOR->m_scale);
+        return !Dock::layout(MONITOR).pill.empty();
     }
 
     // Arrows move the selection, Enter opens, Esc closes the preview first and
@@ -2506,7 +2515,6 @@ namespace ScrollOverview::Stacks {
             return;
         }
 
-        g_popup->lastDrawn = Time::steadyNow();
         const float SCALE = std::max(monitor->m_scale, 0.01F);
         const float ALPHA = Motion::houseFixed(true, PROGRESS); // the same curve both ways, so a reversal is seamless
 
