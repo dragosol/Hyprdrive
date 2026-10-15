@@ -174,10 +174,12 @@ SDispatcher* findDispatcher(const std::string_view name) {
             // one that is not here cannot be called at all (user, 2026-09-19:
             // "attempt to call a nil value (field 'debug')").
             .name            = "debug",
-            .argPattern      = std::regex{"^(frames|mem|motion|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+)$"},
+            // `gesture .+`: the script is parsed by the topic itself
+            // (DebugGestureScript.hpp), which reports a bad step precisely.
+            .argPattern      = std::regex{"^(frames|mem|motion|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
             .defaultArg      = "frames",
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: frames | mem | motion | scratchpad | type [text] | activate <class> | press <keycode> | ripple [x y]",
+            .invalidArgError = "expected: frames | mem | motion | scratchpad | type [text] | activate <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "debug"); },
             .luaLegacy       = [](lua_State* L) {
                 ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.debug");

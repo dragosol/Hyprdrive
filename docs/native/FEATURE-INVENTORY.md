@@ -32,7 +32,7 @@ I verified the following by reading `~/Projects/hyprdrive-native/scripts/headles
   - `W` = `H win <cmd>`. kitty is the fixture.
 - **Overview open/closed.** Run socat as hyprtest on `$RT/hypr/$SIG/.socket2.sock` and expect `hyprdrive>>1` / `hyprdrive>>0` (legacy `scrolloverview>>1`, OverviewManager.cpp:35). Or use `HD 'debug("frames")'`: it prints an overview line per monitor and writes `~hyprtest/.local/state/hyprdrive/frames.txt`. `hyprctl submap` = `hyprdrive` only if the test config defines the fragment-30 submap. `test.lua` is vanilla and does not, so add the 30-keybinds block to test the production click path.
 - **Every test also passes on these.** `H stop` reports "no coredumps", and the instance PID survives the test (compositor alive).
-- **Gestures are blocked.** There is no touchpad in headless, and `wlr-virtual-pointer` cannot emit swipe or pinch. uinput is off-limits: hyprtest is in the `input` group, so a virtual device would also reach dragos's GNOME session. Gesture behaviour therefore needs a test hook such as a proposed `debug swipe <fingers> <dx> <dy> <phase>`, which would drive `g_pTrackpadGestures` as GestureDrive.cpp already does. This is marked **[NEEDS HOOK]** below.
+- **Gestures go through `debug gesture`.** There is no touchpad in headless, and `wlr-virtual-pointer` cannot emit swipe or pinch. uinput is off-limits: hyprtest is in the `input` group, so a virtual device would also reach dragos's GNOME session. Instead, `hl.sh gesture '<script>'` (the `hyprdrive:debug gesture` topic, docs/DEBUG.md) feeds synthetic swipes, pinches and raw finger frames into `CInputManager::onSwipe*`/`onPinch*` and FingerSwipe's frame handler, the same entry points libinput and TouchpadRaw use. Items below that say **[NEEDS HOOK]** were written before it existed; the hook is that topic now.
 - **Other hooks proposed.** `debug dock`, which would print dock item boxes from the pure `Dock::layout()`. Relative motion in `vptr.py`, needed for autohide pressure.
 
 ## A. Plugin core, identity, dispatchers, IPC
@@ -87,7 +87,8 @@ I verified the following by reading `~/Projects/hyprdrive-native/scripts/headles
   - `press <evdev>`: one key through the search handler.
   - `activate <class>`: a left click on that app's dock icon.
   - `ripple [x y]`.
-  - Code: main.cpp:1588, Config.cpp:168.
+  - `gesture <script>|state|stop`: synthetic touchpad gestures (docs/DEBUG.md).
+  - Code: main.cpp:1588, Config.cpp:168, DebugGesture.cpp, DebugGestureScript.hpp.
   - Omarchy: no.
   - Test: each topic once.
   - Pass: `frames` prints a line per monitor (`[desktop] idle` when idle). `motion` prints `house=1`.
@@ -646,16 +647,18 @@ I verified the following by reading `~/Projects/hyprdrive-native/scripts/headles
   - Test: J1, then unload the plugin.
   - Pass: no crash, and the workspace reports dwindle.
 
-## K. Trackpad gestures (all [NEEDS HOOK] headless)
+## K. Trackpad gestures (headless through `debug gesture`, docs/DEBUG.md)
 
 All of these are `Omarchy: no`.
 
 - **K1. 3-finger up/down: overview following the fingers**, reversible mid-gesture, on all monitors.
   - Code: OverviewGesture.cpp:41.
-  - Pass with a hook: progress scales with the injected delta, and release past half opens.
+  - Test: `hl.sh gesture 'swipe 3 up 150 6 10 hold'`, SHOT, `hl.sh gesture 'swipe update 3 0 -300; swipe end'`.
+  - Pass: the held shot is part-way open; `gesture state` then shows 1 overview open, and `swipe 3 down 400` closes it.
 - **K2. 3-finger horizontal workspace swipe.** Inside the overview the cards follow; on the desktop it is Hyprland's native swipe; `workspace_all` steps through every number including empty ones.
   - Code: OverviewGesture.hpp.
-  - Pass with a hook: activeworkspace +1.
+  - Test: bind 4 fingers `horizontal` to `workspace`; `hl.sh gesture 'swipe 4 left 1500 20 8'`.
+  - Pass: activeworkspace +1. In the overview, `swipe 4 left 600 20 8 hold` shows the detent pill.
 - **K3. Scrolling-layout tape.** The swipe scrolls a scrolling desktop's windows first and continues into the next desktop past either end (4 fingers jump directly). The `scroll` action pans columns, and pans the viewed card in the overview.
   - Code: OverviewGesture.hpp (desktop tape).
 - **K4. One-way actions.** `scratchpad_show/hide`, `fullscreen_on`, `unfullscreen_or_close`; `close` with a longer travel and a way back (commits only on a real release); `fullscreen/maximize`, `float/tile`, `move`, `resize`, `special`, `zoom` (cursor zoom, live/toggle/mult), `dispatcher`, `keys` (sends a chord at the end).
@@ -664,10 +667,12 @@ All of these are `Omarchy: no`.
   - Code: OverviewGesture.cpp:621-830.
 - **K6. keep_swipe.** A swipe keeps going while any finger that started it is down. Reads the touchpad's raw multitouch slots by opening the evdev node a second time, read-only.
   - Code: FingerSwipe.cpp, FingerSwipeModel.hpp, TouchpadRaw.cpp.
-  - Test: host `scripts/finger_swipe_test.cpp` covers the model. Live: no device in headless.
+  - Test: host `scripts/finger_swipe_test.cpp` covers the model. Live: `hl.sh gesture 'keep 3 up 1 10'`.
+  - Pass: with keep_swipe on the overview opens; with it off it springs back closed.
 - **K7. swipe_while_dragging.** With one finger holding a drag, 3/4 other fingers swipe desktops and a dragged window comes along.
   - Code: FingerSwipeModel.hpp.
-  - Test: host test only.
+  - Test: `hl.sh gesture 'drag 3 up 12'`.
+  - Pass: with swipe_while_dragging on the overview opens; off, nothing.
 - **K8. Gesture cleanup on unload** (ends an in-flight gesture).
   - Code: GestureCleanup.cpp.
   - Test: unload with nothing in flight. Pass: survives.

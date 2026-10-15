@@ -140,6 +140,22 @@ namespace ScrollOverview::FingerSwipe {
         return g_model.swallowPointer() && e.device && e.device->m_isTouchpad;
     }
 
+    void debugFrame(const FingerSwipeModel::SFrame& f) {
+        onFrame(f);
+    }
+
+    std::string debugMode() {
+        using enum FingerSwipeModel::EMode;
+        switch (g_model.mode()) {
+            case Idle: return "idle";
+            case Native: return "native";
+            case Continue: return "continue";
+            case DragArm: return "drag-arm";
+            case DragSwipe: return "drag-swipe";
+        }
+        return "?";
+    }
+
     void shutdown() {
         // A swipe of ours mid-flight: finish it while its code is still here.
         if (ourMode())

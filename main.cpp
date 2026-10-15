@@ -49,6 +49,7 @@
 using namespace Hyprutils::String;
 
 #include "ScratchpadExit.hpp"
+#include "DebugGesture.hpp"
 #include "ToolSearch.hpp"
 #include "TextInput.hpp"
 #include "StackReader.hpp"
@@ -1592,6 +1593,20 @@ static Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char
 static SDispatchResult onDebugDispatcher(std::string arg) {
     CConstVarList     data(arg, 0, 's', true);
     const std::string TOPIC = std::string{data[0]};
+    // `gesture <script>` / `gesture state` / `gesture stop`: synthetic touchpad
+    // swipes, pinches and raw finger frames, fed where libinput's go in
+    // (DebugGestureScript.hpp has the language; docs/DEBUG.md the recipes).
+    if (TOPIC == "gesture") {
+        std::string_view rest{arg};
+        const auto       AT = rest.find("gesture");
+        rest                = rest.substr(AT + 7);
+        bool       report   = false;
+        const auto OUT      = ScrollOverview::DebugGesture::run(rest, report);
+        if (OUT.empty())
+            return {};
+        // A report rides on .error like every other topic's (see above).
+        return {.success = false, .error = OUT};
+    }
     // `activate <class>`: exactly a left click on that app's dock icon, for the
     // nested test rig (whose dock no real pointer can reach).
     if (TOPIC == "activate") {
@@ -1685,7 +1700,7 @@ static SDispatchResult onDebugDispatcher(std::string arg) {
         return {};
     }
     if (TOPIC != "frames")
-        return {.success = false, .error = "hyprdrive:debug frames|mem|activate <class>|scratchpad|type [text]|press <keycode>"};
+        return {.success = false, .error = "hyprdrive:debug frames|mem|motion|activate <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
 
     std::string report = "hyprdrive frames:";
     for (const auto& monitor : State::monitorState()->monitors()) {
@@ -2618,6 +2633,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // through it, and the spring timer must not fire into unloaded code.
     ScrollOverview::Spring::shutdown();
     ScrollOverview::HotCorner::shutdown();
+    ScrollOverview::DebugGesture::shutdown();
     ScrollOverview::FingerSwipe::shutdown();
 
     if (g_pTrackpadGestures)
