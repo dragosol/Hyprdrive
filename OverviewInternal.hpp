@@ -660,7 +660,13 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // ------------------------------------------------------------------------
     std::vector<SSearchRow> runningApps, menuRows, otherApps;
 
-    if (!Q.empty() && !MENU_BROWSE) {
+    // `/` starts an agent command (`/claude <prompt>`), so a `/` query is
+    // answered by the AI & Tools column alone. Fed to the app and menu
+    // matchers it found every .desktop file whose Exec is an absolute path --
+    // Boxes, Virtual Machine Manager, Rygel Preferences -- under a `/`.
+    const bool AGENT_COMMAND = OmarchySearch::isAgentQuery(Q);
+
+    if (!Q.empty() && !MENU_BROWSE && !AGENT_COMMAND) {
         for (const auto* E : AppSearch::search(Q, 6)) {
             SSearchRow row{E->name, "", E->icon, "", E, {}, std::nullopt, 0};
             if (overviewWindowForApp(*E))
@@ -677,8 +683,10 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // with space for fourteen rows still never showed more than eight
     // (user, 2026-09-23).
     const size_t MENU_LIMIT = (Q.empty() || MENU_BROWSE) ? 24 : OVERVIEW_RESULT_ROWS_ALONE;
-    for (const auto& item : OmarchySearch::searchMenu(Q, MENU_LIMIT))
-        menuRows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 0});
+    if (!AGENT_COMMAND) {
+        for (const auto& item : OmarchySearch::searchMenu(Q, MENU_LIMIT))
+            menuRows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 0});
+    }
 
     rows.insert(rows.end(), std::make_move_iterator(runningApps.begin()), std::make_move_iterator(runningApps.end()));
     rows.insert(rows.end(), std::make_move_iterator(otherApps.begin()), std::make_move_iterator(otherApps.end()));
