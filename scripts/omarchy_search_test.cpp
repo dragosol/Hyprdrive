@@ -406,6 +406,22 @@ int main() {
         fs::remove_all(DIR);
     }
 
+    // D6a: fd prints a directory with a trailing slash; the row's name is the
+    // folder's own, its subtitle the parent -- never "" and the folder itself.
+    {
+        const auto DIRHIT = OmarchySearch::splitFoundPath("/home/u/Documents/");
+        CHECK(DIRHIT.name == "Documents");
+        CHECK(DIRHIT.dir == "/home/u");
+        CHECK(DIRHIT.path == "/home/u/Documents");
+        const auto FILEHIT = OmarchySearch::splitFoundPath("/home/u/Documents/hdtest-unique.txt");
+        CHECK(FILEHIT.name == "hdtest-unique.txt" && FILEHIT.dir == "/home/u/Documents" && FILEHIT.path == "/home/u/Documents/hdtest-unique.txt");
+        const auto TOP = OmarchySearch::splitFoundPath("/srv//");
+        CHECK(TOP.name == "srv" && TOP.dir == "/" && TOP.path == "/srv");
+        const auto BARE = OmarchySearch::splitFoundPath("notes.txt");
+        CHECK(BARE.name == "notes.txt" && BARE.dir.empty());
+        CHECK(OmarchySearch::splitFoundPath("/").name.empty()); // skipped by the worker
+    }
+
     std::cout << "omarchy_search_test: " << s_testsPassed << " checks OK" << std::endl;
     return 0;
 }

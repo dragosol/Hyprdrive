@@ -99,6 +99,16 @@ bool setDefaultAgent(const SSearchItem& item);
 std::optional<SSearchItem> evaluateCalculator(const std::string& query);
 std::vector<SSearchItem> searchMenu(const std::string& query, size_t limit = 10);
 std::vector<SSearchItem> fileResults();
+
+// One line of fd's output, split into what a Files & Folders row shows. fd
+// prints a DIRECTORY with a trailing slash (`/home/u/Documents/`), and cutting
+// that at its last '/' gave an empty name and the folder itself as its parent:
+// every folder hit was an icon with no text (D6a). Trailing slashes go first;
+// `path` is what is opened, `name` the row's title, `dir` its subtitle.
+struct SFoundPath {
+    std::string path, dir, name;
+};
+SFoundPath splitFoundPath(std::string line);
 bool fileSearchBusy();
 
 // EVERYTHING THE ROW BUILDER READS THAT IS NOT THE QUERY, as one number.

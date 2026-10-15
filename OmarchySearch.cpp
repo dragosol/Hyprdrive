@@ -2004,6 +2004,18 @@ static pid_t spawnFd(int outFd, const char* home, const std::vector<std::string>
     return RC == 0 ? pid : -1;
 }
 
+SFoundPath splitFoundPath(std::string line) {
+    while (line.size() > 1 && line.back() == '/')
+        line.pop_back();
+
+    SFoundPath   out;
+    const size_t SLASH = line.find_last_of('/');
+    out.name           = SLASH != std::string::npos ? line.substr(SLASH + 1) : line;
+    out.dir            = SLASH == std::string::npos ? "" : (SLASH == 0 ? "/" : line.substr(0, SLASH));
+    out.path           = std::move(line);
+    return out;
+}
+
 static void fileWorkerLoop() {
     uint64_t gen = 0;
     while (g_fileRunning) {
@@ -2116,10 +2128,9 @@ static void fileWorkerLoop() {
                 if (line.empty())
                     continue;
 
-                std::string path = line;
-                size_t slash = path.find_last_of('/');
-                std::string name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
-                std::string dir  = (slash != std::string::npos) ? path.substr(0, slash) : "";
+                auto [path, dir, name] = splitFoundPath(line);
+                if (name.empty())
+                    continue;
 
                 int score = scoreFileItem(name, path, terms);
                 if (score < 0)
