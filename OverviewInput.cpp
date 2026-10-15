@@ -832,7 +832,7 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
 
         // Tab is the pane cycle only as a plain key (Shift+Tab included). A
         // chord -- SUPER+TAB is the README's suggested overview toggle -- is the
-        // user's bind (borrowed into the submap, see borrowGlobalChordBinds);
+        // user's bind (borrowed into the submap, see borrowGlobalPassthroughBinds and SubmapBorrow.hpp);
         // taking it as a plain Tab cycled panes instead of closing (O5).
         if ((KEYSYM == XKB_KEY_Tab || KEYSYM == XKB_KEY_ISO_Left_Tab) && BASE_MODS != 0)
             return;

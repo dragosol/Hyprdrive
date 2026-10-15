@@ -73,6 +73,7 @@ run dock_drop_test scripts/dock_drop_test.cpp
 run finger_swipe_test scripts/finger_swipe_test.cpp
 run debug_gesture_test scripts/debug_gesture_test.cpp
 run hot_corner_test scripts/hot_corner_test.cpp
+run submap_borrow_test scripts/submap_borrow_test.cpp
 # shellcheck disable=SC2046
 run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-config --cflags --libs librsvg-2.0)
 # shellcheck disable=SC2046

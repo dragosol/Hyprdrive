@@ -18,6 +18,7 @@
 #include "Placement.hpp"
 #include "BuiltinIcons.hpp"
 #include "WorkspacePlan.hpp"
+#include "SubmapBorrow.hpp"
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/config/shared/workspace/WorkspaceRuleManager.hpp>
 
@@ -10600,45 +10601,22 @@ void CScrollOverview::reopen() {
 // binds that were live when it opened are marked submap-universal, and those,
 // and only those, are unmarked on the way out. Read from the live bind table
 // rather than restated here, so Omarchy's own definitions stay the source.
+//
+// O5/B19: the user's keyboard CHORDS too (Super/Ctrl/Alt held) -- the README's
+// own SUPER+TAB toggle could open the overview and never close it. Which binds
+// qualify is SubmapBorrow.hpp's rule (host-tested).
 static std::vector<WP<SKeybind>> g_passthroughBinds;
 
-static bool isGlobalPassthroughBindKey(std::string key) {
-    std::ranges::transform(key, key.begin(), [](unsigned char c) { return sc<char>(std::tolower(c)); });
-    return key.starts_with("xf86") || key == "print" || key == "sys_req";
-}
-
-// O5/B19: the same goes for the user's keyboard CHORDS (Super/Ctrl/Alt held).
-// The submap exists for its click binds only -- inside it the global
-// SUPER+mouse:272 drag bind cannot eat a click -- yet it also killed every
-// keyboard bind: the README's own SUPER+TAB overview toggle could open the
-// overview but never close it, SUPER+H never minimized, and a SUPER+S (or
-// Omarchy's SUPER+grave) scratchpad toggle was inert. A chord is never query
-// text, so the binds that were live when the overview opened stay live in it;
-// the keys the overview takes for itself (SUPER+W on a tile, Mosaic's
-// SUPER+arrows, a stack popup's keys) are cancelled at the key event, before
-// Hyprland matches any bind, exactly as they were.
-static constexpr uint32_t CHORD_MODS = HL_MODIFIER_META | HL_MODIFIER_CTRL | HL_MODIFIER_ALT;
-
-static bool isGlobalChordBind(const SKeybind& keybind) {
-    if (keybind.mouse || keybind.catchAll || keybind.key.empty() || keybind.key.starts_with("mouse") || (keybind.modmask & CHORD_MODS) == 0)
-        return false;
-
-    // A bind ON a modifier key (SUPER_L released, say) is not a chord the
-    // overview leaves alone: it is the tap the plugin itself reads.
-    std::string key = keybind.key;
-    std::ranges::transform(key, key.begin(), [](unsigned char c) { return sc<char>(std::tolower(c)); });
-    for (const std::string_view MOD : {"super", "control", "ctrl", "alt", "shift", "meta", "hyper"})
-        if (key.starts_with(MOD))
-            return false;
-    return true;
-}
+static_assert(ScrollOverview::SubmapBorrow::MOD_SHIFT == HL_MODIFIER_SHIFT && ScrollOverview::SubmapBorrow::MOD_CTRL == HL_MODIFIER_CTRL &&
+              ScrollOverview::SubmapBorrow::MOD_ALT == HL_MODIFIER_ALT && ScrollOverview::SubmapBorrow::MOD_META == HL_MODIFIER_META);
 
 static void borrowGlobalPassthroughBinds(const std::string& fromSubmap) {
     if (!g_pKeybindManager)
         return;
 
     for (const auto& keybind : g_pKeybindManager->m_keybinds) {
-        if (!keybind || keybind->submapUniversal || keybind->submap.name != fromSubmap || !(isGlobalPassthroughBindKey(keybind->key) || isGlobalChordBind(*keybind)))
+        if (!keybind || keybind->submapUniversal || keybind->submap.name != fromSubmap ||
+            !ScrollOverview::SubmapBorrow::borrows(keybind->key, keybind->modmask, keybind->mouse, keybind->catchAll))
             continue;
 
         keybind->submapUniversal = true;
