@@ -580,13 +580,15 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CBoolValue>(KEY("mosaic:default"), "mosaic: new desktops use the Mosaic layout (needs mosaic:enabled)", false));
     // The chords Mosaic takes while it is on (audit A20). hdpanel reads these
     // when it writes 40-panel.lua; the plugin only holds them, so they can be
-    // set from hyprland.lua or the settings like any other key. "auto" is the
-    // old behaviour on Omarchy (Super+L replaces Omarchy's two-way layout
-    // toggle; Super+arrows become mosaic-aware focus) and NOTHING elsewhere: on
-    // plain Hyprland those chords are the user's, and silently unbinding them
-    // was the bug. An explicit chord / modifier takes it on any desktop.
+    // set from hyprland.lua or the settings like any other key. The cycle's
+    // "auto" is Super+L on every desktop (on Omarchy in place of its two-way
+    // layout toggle; on plain Hyprland the same chord, J4/A18 -- "none" keeps a
+    // Super+L of the user's own). The focus binds' "auto" is Super+arrows on
+    // Omarchy and NOTHING elsewhere: on plain Hyprland the arrows are the
+    // user's, and silently unbinding them was the bug. An explicit chord /
+    // modifier takes it on any desktop.
     addKey(makeShared<CStringValue>(KEY("mosaic:cycle_bind"),
-                                    "mosaic: the chord that cycles Dwindle -> Scrolling -> Mosaic -- auto (SUPER + L on Omarchy, none elsewhere), none, or a chord like SUPER + M",
+                                    "mosaic: the chord that cycles Dwindle -> Scrolling -> Mosaic -- auto (SUPER + L), none, or a chord like SUPER + M",
                                     Hyprlang::STRING{"auto"}));
     addKey(makeShared<CStringValue>(KEY("mosaic:focus_binds"),
                                     "mosaic: modifier for mosaic-aware focus on the arrow keys -- auto (SUPER on Omarchy, none elsewhere), none, or a modifier like SUPER or SUPER + ALT",

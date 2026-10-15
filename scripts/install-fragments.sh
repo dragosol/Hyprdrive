@@ -124,8 +124,10 @@ PLUGIN_DEST=$CONFIG/omarchy/plugins/dragos.hyprdrive
 # copies (install follows the links):
 #   $PREFIX/share/hyprdrive/settings/        shell.qml, SettingsPage.qml,
 #                                            Schema.js, Model.js, the mark
-#   $PREFIX/lib/hyprdrive/                   hdpanel, hdicons, hd-layout-cycle,
-#                                            hyprdrive-power-watch
+#   $PREFIX/lib/hyprdrive/                   hdpanel, hdicons, hyprdrive-power-watch,
+#                                            hd-layout-cycle (a link to the one in bin)
+#   $PREFIX/bin/hyprdrive-layout-cycle       Super+L's layout cycle (A18); 40-panel.lua
+#                                            binds it there while Mosaic is on
 #   $PREFIX/bin/hyprdrive-settings           the launcher (one instance, deep links)
 #   $PREFIX/share/applications/hyprdrive-settings.desktop
 if [ "$DESKTOP" != omarchy ]; then
@@ -134,9 +136,16 @@ if [ "$DESKTOP" != omarchy ]; then
     for f in shell.qml SettingsPage.qml Schema.js Model.js hyprdrive-icon.png; do
         install -Dm644 "$ROOT/settings/$f" "$SHARE/settings/$f"
     done
-    for f in hdpanel hdicons hd-layout-cycle; do
+    for f in hdpanel hdicons; do
         install -Dm755 "$PLUGIN_SRC/bin/$f" "$LIBDIR/$f"
     done
+    # The layout cycle is a command of its own here (A18): on PATH, and what
+    # hdpanel binds Super+L to. lib/ keeps a link under the old name, which a
+    # 40-panel.lua written before this release binds by path.
+    install -Dm755 "$PLUGIN_SRC/bin/hd-layout-cycle" "$PREFIX/bin/hyprdrive-layout-cycle"
+    rm -f "$LIBDIR/hd-layout-cycle"
+    ln -s ../../bin/hyprdrive-layout-cycle "$LIBDIR/hd-layout-cycle"
+    echo "layout cycle: $PREFIX/bin/hyprdrive-layout-cycle"
     install -Dm755 "$ROOT/settings/hyprdrive-power-watch" "$LIBDIR/hyprdrive-power-watch"
     subst() { # file mode dest -- @HYPRDRIVE_PREFIX@ -> PREFIX, as for the fragments
         python3 -c 'import sys; sys.stdout.write(sys.stdin.read().replace("@HYPRDRIVE_PREFIX@", sys.argv[1]))' "$PREFIX" < "$1" > "$3.tmp"

@@ -12,8 +12,10 @@ integration() (Integration.hpp's answer, through scripts/hyprdrive-integration)
 and never stat()s an Omarchy path of its own:
   - compositor animations back on: Omarchy's looknfeel leaves on Omarchy, a
     snapshot of the user's own `hyprctl animations -j` elsewhere;
-  - Mosaic's chords: plugin:hyprdrive:mosaic:cycle_bind / focus_binds, whose
-    "auto" means Omarchy's Super+L / Super+arrows there and nothing here;
+  - Mosaic's chords: plugin:hyprdrive:mosaic:cycle_bind / focus_binds. The
+    cycle's "auto" is Super+L on both desktops (on Omarchy in place of its
+    two-way toggle); the focus binds' "auto" is Super+arrows on Omarchy and
+    nothing here;
   - where Super+L's per-workspace layouts persist (layouts_store()).
 """
 from __future__ import annotations
@@ -185,14 +187,33 @@ MOSAIC_ON = PLUGIN + "mosaic:enabled"
 MOSAIC_DEFAULT = PLUGIN + "mosaic:default"
 MOSAIC_CYCLE = PLUGIN + "mosaic:cycle_bind"
 MOSAIC_FOCUS = PLUGIN + "mosaic:focus_binds"
-# What "auto" means for those two on Omarchy -- the chords its bindings.lua
-# ships (the layout toggle, and movefocus on the arrows). Off Omarchy "auto"
-# is no chord at all: those keys belong to the user's own config.
-OMARCHY_CYCLE_CHORD = "SUPER + L"
+# What "auto" means for those two. The cycle is Super+L on EVERY desktop: on
+# Omarchy it replaces the two-way layout toggle Omarchy's bindings.lua ships
+# there, and on plain Hyprland it is the same chord, so Super+L means the same
+# thing wherever Hyprdrive runs (J4/A18). It is bound inside hyprdrive_loaded()
+# only, so a missing plugin leaves whatever the config bound there itself, and
+# cycle_bind = "none" (or another chord) keeps a Super+L of your own. The
+# focus binds' "auto" stays Omarchy's Super+arrows there and nothing here:
+# the arrows are the user's own on plain Hyprland (A20).
+CYCLE_CHORD = "SUPER + L"
 OMARCHY_FOCUS_MODS = "SUPER"
-# Super+L's script while Mosaic is on. It ships beside this file, so an
-# installed panel binds the installed copy and a dev checkout its own.
-LAYOUT_CYCLE = pathlib.Path(__file__).resolve().parent / "hd-layout-cycle"
+
+
+def _layout_cycle():
+    """Super+L's script while Mosaic is on, by absolute path.
+
+    A native install (`make install`) puts it on PATH as
+    $PREFIX/bin/hyprdrive-layout-cycle, and this file lives in
+    $PREFIX/lib/hyprdrive -- bind that one. Everywhere else (the Omarchy
+    panel, a dev checkout) it ships beside this file."""
+    here = pathlib.Path(__file__).resolve().parent
+    installed = here.parent.parent / "bin" / "hyprdrive-layout-cycle"
+    if here.name == "hyprdrive" and here.parent.name == "lib" and os.access(installed, os.X_OK):
+        return installed
+    return here / "hd-layout-cycle"
+
+
+LAYOUT_CYCLE = _layout_cycle()
 # Where omarchy-hyprland-workspace-layout-toggle (and hd-layout-cycle) persist
 # each workspace's layout ON OMARCHY. Omarchy hard-codes ~/.local/state, so
 # this does too; its workspace-layouts.lua replays the files on every parse.
@@ -726,14 +747,15 @@ def chord_setting(store, key):
 def mosaic_chords(store):
     """-> (cycle chord or "", focus modifiers or "", auto_cycle, auto_focus).
 
-    "auto" is resolved at PARSE time, in the fragment (hyprdrive_omarchy()),
-    so a desktop that gains or loses Omarchy is right on its next reload; the
-    returned chord for auto is Omarchy's, to be wrapped in that check."""
+    The cycle's "auto" is Super+L everywhere. The focus binds' "auto" is
+    resolved at PARSE time, in the fragment (hyprdrive_omarchy()), so a
+    desktop that gains or loses Omarchy is right on its next reload; the
+    returned modifier for it is Omarchy's, to be wrapped in that check."""
     cycle = chord_setting(store, MOSAIC_CYCLE)
     focus = chord_setting(store, MOSAIC_FOCUS)
     auto_cycle, auto_focus = cycle == "auto", focus == "auto"
     if auto_cycle:
-        cycle = OMARCHY_CYCLE_CHORD
+        cycle = CYCLE_CHORD
     if auto_focus:
         focus = OMARCHY_FOCUS_MODS
     if cycle.lower() in ("none", "off", "false", "0"):
@@ -750,8 +772,9 @@ def mosaic_lua(store):
         cycle, focus, auto_cycle, auto_focus = mosaic_chords(store)
 
         def guarded(auto, body):
-            # "auto" takes the chord only on Omarchy, where it replaces the
-            # toggle Omarchy ships on it; elsewhere the chord is the user's.
+            # The focus binds' "auto" takes the arrows only on Omarchy, where
+            # they replace the movefocus binds Omarchy ships; elsewhere the
+            # arrows are the user's.
             if not body:
                 return []
             if not auto:
@@ -767,9 +790,11 @@ def mosaic_lua(store):
                 "-- unbind-then-bind its bindings.lua template documents. Mosaic off",
                 "-- removes these lines, and the next parse binds the old one untouched.",
                 "-- The chord is plugin:hyprdrive:mosaic:cycle_bind (auto = Super+L on",
-                "-- Omarchy, nothing elsewhere).",
+                "-- every desktop; \"none\" keeps a Super+L of your own).",
             ]
-            lines += guarded(auto_cycle, [
+            # Not desktop-guarded: the chord is the same on both. It sits in
+            # the hyprdrive_loaded() block like everything else here.
+            lines += guarded(False, [
                 "hl.unbind(%s)" % lua_lit(cycle),
                 "hl.bind(%s, hl.dsp.exec_cmd(%s), { description = %s })" % (
                     lua_lit(cycle), lua_lit(shlex.quote(str(LAYOUT_CYCLE))), lua_lit("Cycle workspace layout")),

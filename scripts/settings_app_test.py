@@ -86,9 +86,17 @@ lines = na.mosaic_lua({"keys": {na.MOSAIC_ON: True, na.MOSAIC_CYCLE: "SUPER + M"
 txt = "\n".join(lines)
 check("none: an explicit chord is bound unguarded",
       "hl.unbind('SUPER + M')" in txt and "'SUPER + ALT + LEFT'" in txt and "hyprdrive_omarchy" not in txt)
-txt = "\n".join(na.mosaic_lua({"keys": {na.MOSAIC_ON: True, na.MOSAIC_CYCLE: "auto", na.MOSAIC_FOCUS: "auto"}}))
-check("none: auto chords only inside hyprdrive_omarchy()",
-      all(l.startswith("    ") for l in txt.splitlines() if "hl.bind(" in l or "hl.unbind(" in l))
+lines = na.mosaic_lua({"keys": {na.MOSAIC_ON: True, na.MOSAIC_CYCLE: "auto", na.MOSAIC_FOCUS: "auto"}})
+cyc = [l for l in lines if l.startswith("hl.") and "SUPER + L" in l]
+check("none: auto cycle = Super+L, unbind-then-bind, not desktop-guarded (J4/A18)",
+      cyc == ["hl.unbind('SUPER + L')",
+              "hl.bind('SUPER + L', hl.dsp.exec_cmd('/x/hd-layout-cycle'), { description = 'Cycle workspace layout' })"], repr(cyc))
+check("none: auto focus binds only inside hyprdrive_omarchy()",
+      all(l.startswith("    ") for l in lines if ("hl.bind(" in l or "hl.unbind(" in l) and "SUPER + L" not in l)
+      and any("SUPER + LEFT" in l for l in lines))
+lines = om.mosaic_lua({"keys": {om.MOSAIC_ON: True}})
+check("omarchy: the cycle bind is unchanged (Super+L -> the script beside hdpanel)",
+      "hl.bind('SUPER + L', hl.dsp.exec_cmd('/x/hd-layout-cycle'), { description = 'Cycle workspace layout' })" in lines)
 store = {"animSnapshot": [
     {"name": "global", "enabled": True, "speed": 8.0, "bezier": "default", "style": ""},
     {"name": "windows", "enabled": True, "speed": 4.0, "bezier": "snappy", "style": "popin 80%"},

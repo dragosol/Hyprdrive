@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # The layout cycle while the settings' Mosaic switch is on: 40-panel.lua binds
-# it to plugin:hyprdrive:mosaic:cycle_bind -- Super+L on Omarchy (after
-# unbinding Omarchy's omarchy-hyprland-workspace-layout-toggle), no chord at all
-# on plain Hyprland unless one is chosen.
+# it to plugin:hyprdrive:mosaic:cycle_bind -- Super+L by default on every
+# desktop (on Omarchy after unbinding its omarchy-hyprland-workspace-layout-
+# toggle). A native `make install` also puts it on PATH as
+# hyprdrive-layout-cycle, so any chord can run it.
 #
 # Cycles the active workspace dwindle -> scrolling -> mosaic -> dwindle. With
 # plugin:hyprdrive:mosaic:enabled off, or the plugin not loaded at all, it is
@@ -22,7 +23,11 @@
 #     ~/.config/hypr/hyprdrive/45-workspace-layouts.lua, which the hyprdrive
 #     loader sources like every other fragment. One line per workspace (hdpanel
 #     rewrites the same file when Mosaic is switched off).
-# The confirmation is omarchy-notification-send on Omarchy, notify-send elsewhere.
+# The confirmation is omarchy-notification-send on Omarchy, notify-send elsewhere
+# -- and only when a notification daemon owns the bus name. A session without
+# one (plain Hyprland, nothing installed) would otherwise D-Bus-activate
+# whatever claims org.freedesktop.Notifications (Plasma's plasma_waitforname on
+# Fedora) and hang until the activation timeout.
 
 ACTIVE=$(hyprctl activeworkspace -j) || exit 1
 ACTIVE_WORKSPACE=$(jq -r '.id' <<<"$ACTIVE")
@@ -42,7 +47,8 @@ mosaic_enabled() {
 integration() {
   local here cli name
   here=$(dirname "$(readlink -f "$0")")
-  for cli in "$here/../../bin/hyprdrive-integration" "$(command -v hyprdrive-integration 2>/dev/null)"; do
+  # $PREFIX/bin (installed as hyprdrive-layout-cycle) or $PREFIX/lib/hyprdrive.
+  for cli in "$here/hyprdrive-integration" "$here/../../bin/hyprdrive-integration" "$(command -v hyprdrive-integration 2>/dev/null)"; do
     if [[ -n $cli && -x $cli ]]; then
       name=$("$cli" 2>/dev/null | head -1)
       [[ $name == omarchy || $name == none ]] && { echo "$name"; return; }
@@ -96,9 +102,17 @@ hyprctl eval "$RULE" >/dev/null 2>&1 || \
 
 LABEL=$NEW_LAYOUT
 [[ $NEW_LAYOUT == mosaic ]] && LABEL=Mosaic
+# Is a notification daemon running? gdbus answers "(true,)" when the name has
+# an owner; without gdbus, assume one (notify-send is time-boxed anyway).
+notifier_running() {
+  command -v gdbus >/dev/null 2>&1 || return 0
+  [[ $(timeout 2 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+        --method org.freedesktop.DBus.NameHasOwner org.freedesktop.Notifications 2>/dev/null) == "(true,)" ]]
+}
+
 if [[ $DESKTOP == omarchy ]] && command -v omarchy-notification-send >/dev/null 2>&1; then
   omarchy-notification-send -g 󱂬 "Workspace layout set to $LABEL"
-elif command -v notify-send >/dev/null 2>&1; then
-  notify-send -a Hyprdrive -t 2000 "Workspace layout set to $LABEL"
+elif command -v notify-send >/dev/null 2>&1 && notifier_running; then
+  timeout 5 notify-send -a Hyprdrive -t 2000 "Workspace layout set to $LABEL" || true
 fi
 exit 0

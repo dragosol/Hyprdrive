@@ -178,7 +178,7 @@ Prefix: `plugin:hyprdrive:mosaic:`
 | --- | --- | --- | --- | --- |
 | `enabled` | bool | `false` |  | mosaic: Super+L cycles Dwindle -> Scrolling -> Mosaic (the panel asks before turning it on) |
 | `default` | bool | `false` |  | mosaic: new desktops use the Mosaic layout (needs mosaic:enabled) |
-| `cycle_bind` | string | `"auto"` |  | mosaic: the chord that cycles Dwindle -> Scrolling -> Mosaic -- auto (SUPER + L on Omarchy, none elsewhere), none, or a chord like SUPER + M |
+| `cycle_bind` | string | `"auto"` |  | mosaic: the chord that cycles Dwindle -> Scrolling -> Mosaic -- auto (SUPER + L), none, or a chord like SUPER + M |
 | `focus_binds` | string | `"auto"` |  | mosaic: modifier for mosaic-aware focus on the arrow keys -- auto (SUPER on Omarchy, none elsewhere), none, or a modifier like SUPER or SUPER + ALT |
 
 ## `drag`

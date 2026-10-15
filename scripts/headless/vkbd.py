@@ -40,6 +40,11 @@ for row, start in (("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm", 44)):
 for i in range(1, 11):
     KEYS[f"F{i}"] = 58 + i
 KEYS.update({"F11": 87, "F12": 88})
+# Keys a desktop config binds that the tests press: Print and the media keys
+# (the us keymap gives them their XF86 keysyms), and the backtick.
+KEYS.update({"Print": 99, "grave": 41, "XF86AudioMute": 113, "XF86AudioLowerVolume": 114,
+             "XF86AudioRaiseVolume": 115, "XF86AudioNext": 163, "XF86AudioPlay": 164,
+             "XF86AudioPrev": 165, "XF86Calculator": 140})
 PLAIN = {"-": 12, "=": 13, "[": 26, "]": 27, ";": 39, "'": 40, "`": 41, "\\": 43,
          ",": 51, ".": 52, "/": 53, " ": 57, "\n": 28, "\t": 15}
 SHIFTED = dict(zip('!@#$%^&*()', range(2, 12)))

@@ -64,9 +64,10 @@ and Scrolling, after GNOME's planned Mosaic. Each window keeps its own size,
 and the windows gather in a cluster in the middle of the screen. Opening a
 window never resizes the others. When they no longer fit, the desktop tiles
 them in Dwindle style, and it goes back to the mosaic once they fit again.
-Turn it on with `mosaic:enabled`. On plain Hyprland you then pick the chord
-that cycles Dwindle -> Scrolling -> Mosaic (`mosaic:cycle_bind`, e.g.
-`"SUPER + M"`). On Omarchy that chord is Super+L. It is best on large
+Turn it on with `mosaic:enabled`; Super+L then cycles Dwindle -> Scrolling ->
+Mosaic (`hyprdrive-layout-cycle`), and each desktop keeps its layout across a
+reload or a reboot. Pick another chord with `mosaic:cycle_bind` (e.g.
+`"SUPER + M"`, or `"none"` to keep a Super+L of your own). It is best on large
 displays, and it is the part of Hyprdrive most likely to have rough edges.
 
 **Hot corner** (off by default): rest the pointer in a screen corner to open

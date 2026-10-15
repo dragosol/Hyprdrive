@@ -69,6 +69,7 @@ check: hyprdrive.so
 	bash scripts/keycheck.sh
 	bash scripts/gen_keys_table.sh --check
 	bash scripts/host_tests.sh
+	bash scripts/layout_cycle_test.sh
 	python3 scripts/manifest_check.py
 	python3 scripts/private_modes_test.py
 	python3 scripts/hdicons_test.py

@@ -302,11 +302,11 @@ Item {
   // NATIVE. Schema.js is shared with the Omarchy panel and speaks Omarchy
   // where that is true there (the hot corner's menu button, Super+L). Off
   // Omarchy these rows say what happens here instead -- the chords Mosaic
-  // takes are plugin:hyprdrive:mosaic:cycle_bind, and "auto" takes none.
+  // takes are plugin:hyprdrive:mosaic:cycle_bind, whose "auto" is Super+L.
   readonly property bool omarchyDesktop: (hd.integration || theme.integration || "none") === "omarchy"
   readonly property string mosaicChord: {
     var v = String(k("plugin:hyprdrive:mosaic:cycle_bind", "auto"))
-    if (v === "auto") return omarchyDesktop ? "SUPER + L" : ""
+    if (v === "auto") return "SUPER + L"
     return v === "none" ? "" : v
   }
   function chordLabel(c) {

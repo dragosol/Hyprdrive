@@ -251,11 +251,12 @@ var sections = [
           desc: "New desktops, and any you have not set with Super+L, start in Mosaic. Off restores the previous default." }
       ]},
       // The chords Mosaic takes while it is on (hdpanel chord_options). Auto
-      // is Omarchy's Super+L / Super+arrows there and nothing on plain
-      // Hyprland, where those keys are the user's own.
+      // is Super+L for the cycle on every desktop; for the focus keys it is
+      // Omarchy's Super+arrows there and nothing on plain Hyprland, where the
+      // arrows are the user's own.
       { title: "Keys", rows: [
         { type: "choice", key: P + "mosaic:cycle_bind", label: "Cycle key", when: "mosaicOn",
-          desc: "Cycles the current desktop Dwindle → Scrolling → Mosaic. Auto is Super+L on Omarchy, in place of its two-way toggle, and no key on plain Hyprland." },
+          desc: "Cycles the current desktop Dwindle → Scrolling → Mosaic. Auto is Super+L (on Omarchy in place of its two-way toggle)." },
         { type: "choice", key: P + "mosaic:focus_binds", label: "Focus keys", when: "mosaicOn",
           desc: "With the arrow keys, move focus by position on a Mosaic desktop and as usual elsewhere. Auto is Super+arrows on Omarchy and no keys on plain Hyprland." }
       ]}
