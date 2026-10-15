@@ -32,6 +32,7 @@ I've done all five steps on fedora. The plugin builds, `make check` passes, and 
 - Run `. ~/sdk/hyprland-0.56.2/env.sh && make hyprdrive.so`. No Makefile changes were needed. Full build takes 46 s with `nice`, with only deprecation warnings (`addConfigKeyword`).
 - `make check` passes everything (symcheck, keycheck, gen_keys_table, host_tests, manifest, private_modes, hdicons). None of the checks needed Omarchy.
 - Installed to `~hyprtest/.local/lib/hyprdrive/hyprdrive.so` with `scripts/headless/hl.sh install`. I didn't use `make install` because it also installs the Omarchy fragments.
+  - To install as hyprtest into a temp home, use `make install-only` (section 7): `make install` rebuilds when it is run as another user.
 
 **5. Harness: `scripts/headless/hl.sh`**
 - **Commands:**
@@ -74,3 +75,20 @@ I've done all five steps on fedora. The plugin builds, `make check` passes, and 
    - I installed pywayland 0.4.18 into hyprtest's user Python packages.
    - Hyprland 0.56.2 and aquamarine 0.14 source clones are in `~/src` on fedora, for reference.
    - The "started without start-hyprland" warning is dismissed on purpose: that launcher restarts Hyprland after a crash, which would hide crashes in tests.
+**7. Installing into a test home (added 2026-10-15)**
+- **`make install` as hyprtest rebuilt the plugin and failed.** The `.build/*.d` dependency files name the SDK headers the objects were compiled against (under dragos's home). hyprtest cannot read them, so make treated every header as missing and recompiled all 52 objects, which then failed for lack of the SDK. `make install` itself still builds and runs `check` first, as before.
+- **The fix is `make install-only`.** It runs only the copy step, with no prerequisites. It refuses if there is no `hyprdrive.so`, never compiles, and doesn't run `check`. Goals that compile nothing (`install-only`, `uninstall`, `clean`) also skip pkg-config, so a user without the SDK on `PKG_CONFIG_PATH` gets no "Package hyprland was not found" noise.
+- **The recipe for a temp test home:**
+  1. As dragos, in the worktree: `. ~/sdk/hyprland-0.56.2/env.sh && make` (build plus `check`).
+  2. Copy the built tree where hyprtest can read it: `cp -a <worktree> /tmp/<label>-src && chmod -R a+rX /tmp/<label>-src`.
+  3. As hyprtest, with a vanilla `hyprland.lua` already in `/tmp/<label>-home/.config/hypr`: `sudo -n -u hyprtest env HOME=/tmp/<label>-home HYPRDRIVE_NO_OMARCHY=1 make -C /tmp/<label>-src install-only PREFIX=/tmp/<label>-home/.local`.
+  4. `HL_NAME=<label> hl.sh start --no-plugin --config /tmp/<label>-home/.config/hypr/hyprland.lua`. The installed `00-plugin.lua` loads the plugin.
+- **The test home is now the run's HOME.** hl.sh takes HOME from `--home DIR`, from `--env HOME=DIR`, or (when neither is given) from a `--config DIR/.config/hypr/<file>`. Hyprland, every `win` client, `--user-config`, `--lua-home`/`--omarchy` (LUA_PATH) and the default `--so` all use it. Before this, the inner side always used hyprtest's real home, so `require("hyprdrive")` quietly loaded hyprtest's stale install and its old .so. To check which .so is loaded, look for `/tmp/<label>-home` in `/proc/<Hyprland pid>/maps`. pywayland still comes from hyprtest's real home (`PYTHONUSERBASE`).
+- **Harness additions:**
+  - `ptr drag X1 Y1 X2 Y2 [steps [hold_ms [left|middle|right]]]`: a held drag with any button.
+  - `ptr hover X Y [ms]`: arrive at a point and stay there on one device.
+  - `ptr rel DX DY [n [ms]]`: relative motion, which is what `dock:require_pressure` reads.
+  - `ptr seq "move X Y [steps]" "wait MS" "rel ..." "down|up|click [btn]" "scroll DY"`: several steps on one device, for hover-only UI.
+  - `start --keep-notify`: keeps startup notifications, such as the plugin's init-failure toast. Trigger that toast with `--env HYPRDRIVE_TEST_MISSING_HOOK=<hook>` (A15).
+  - `stop` makes `$RT` writable before removing it, because read-only copies made by xdg-open handlers used to fail it.
+  - `shot` resolves a relative path against the caller's cwd and creates its directory.

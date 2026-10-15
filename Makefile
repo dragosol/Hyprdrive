@@ -14,12 +14,16 @@ OPT ?= -O2
 PKGS := pixman-1 libdrm hyprland pangocairo fontconfig libinput libudev wayland-server \
         xkbcommon libsystemd gio-2.0 gio-unix-2.0 $(LUA_PC)
 
+# Goals that compile nothing ask pkg-config nothing: install-only runs as a user
+# who may not have the SDK on PKG_CONFIG_PATH at all (see install-only).
+ifneq ($(if $(MAKECMDGOALS),$(filter-out install-only uninstall clean,$(MAKECMDGOALS)),all),)
 CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build \
             $(shell pkg-config --cflags $(PKGS))
 # fontconfig: Fonts.cpp asks it which family "monospace" is and whether an icon
 # font covers the UI glyphs. Hyprland's pango already loads it; linking it
 # names the dependency instead of leaning on the host's.
 LDLIBS   := $(shell pkg-config --libs libsystemd gio-2.0 gio-unix-2.0 fontconfig)
+endif
 
 ifeq ($(CXX),g++)
     CXXFLAGS += -fno-gnu-unique
@@ -32,7 +36,7 @@ DEPS := $(OBJS:.o=.d)
 VERSION_HEADER = .build/PluginVersion.hpp
 VERSION_SCRIPT = scripts/generate-plugin-version.sh
 
-.PHONY: all check clean install uninstall FORCE
+.PHONY: all check clean install install-only uninstall FORCE
 
 # An undefined symbol is a lazy-bind compositor kill (three same-day incidents
 # recorded in symcheck.sh's header), so the check IS part of the build. So is
@@ -86,6 +90,17 @@ PREFIX ?= $(HOME)/.local
 # QML in $(PREFIX)/share/hyprdrive, hdpanel/hdicons in lib). Force a native
 # install on a machine with Omarchy files: HYPRDRIVE_NO_OMARCHY=1 make install.
 install: hyprdrive.so check
+	$(MAKE) --no-print-directory install-only PREFIX="$(PREFIX)"
+
+# install-only: the copy step alone, with NO prerequisites -- for installing a
+# .so that was built and checked already, as another user. The .build/*.d deps
+# name the SDK headers the objects were compiled against; a user who cannot
+# read them (the headless harness's hyprtest, given a tree dragos built) sees
+# every header as missing, so `make install` rebuilt the plugin there and
+# failed. This target never compiles: it refuses when there is no .so, and it
+# does not run `check` (the builder runs `make`, which does, first).
+install-only:
+	@[ -s hyprdrive.so ] || { echo "install-only: no hyprdrive.so -- run make (build + check) first" >&2; exit 1; }
 	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/hyprdrive.so
 	install -Dm644 assets/scratchpad-symbolic.svg $(PREFIX)/lib/hyprdrive/scratchpad-symbolic.svg
 	PREFIX="$(PREFIX)" bash scripts/install-fragments.sh
