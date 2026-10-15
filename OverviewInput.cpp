@@ -414,6 +414,9 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                 return;
             }
 
+            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED && std::exchange(g_search.pointer.uiPress, false))
+                return;
+
             // The pill's own gestures: hover panel > pill drag/click > off-pill
             // cancel. Behind the result-drag release above -- a dropped result
             // sits inside the pill and is offered first -- and behind the
@@ -443,13 +446,18 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                     return;
                 }
                 if (searchLayoutHere().pill.containsPoint(lastMousePosLocal)) {
-                    g_search.query.active = true;
-                    g_search.nav.zone = EOverviewNavZone::Search;
-                    g_search.nav.selection = -1;
+                    // Focuses the search: with nothing typed that is the root
+                    // browse (overviewSearchPaneUp).
+                    g_search.query.active    = true;
+                    g_search.nav.zone        = EOverviewNavZone::Search;
+                    g_search.nav.selection   = -1;
+                    g_search.pointer.uiPress = true;
                     damage();
+                    requestInputFrame();
                     return;
                 }
                 if (searchLayoutHere().containerBox.width > 1.F && searchLayoutHere().containerBox.containsPoint(lastMousePosLocal)) {
+                    g_search.pointer.uiPress = true;
                     return;
                 }
             }

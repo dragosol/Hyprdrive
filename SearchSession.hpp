@@ -491,6 +491,11 @@ struct SSearchSession {
     // ---- what the pointer is in the middle of ---------------------------
     struct SPointer {
         std::optional<SResultDrag> drag;
+        // The press landed on the search pill or the results pane: its
+        // RELEASE is the search's too. Left to the grid it ran the default
+        // click -- select the window under the cursor and close -- so a click
+        // on the pill shut the overview instead of focusing the search.
+        bool uiPress = false;
     } pointer;
 
     // ---- what the last drawn frame published ----------------------------
