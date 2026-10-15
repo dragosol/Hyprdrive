@@ -161,9 +161,11 @@ var sections = [
       // kind instant; nothing changes while the compositor does not animate
       // desktops at all (Omarchy's default) or with the overview open.
       { title: "Desktop changes", rows: [
-        { type: "toggle", key: P + "animation:desktop_keyboard", label: "Animate desktop changes from keys",
+        { type: "toggle", key: "animations:workspaces", label: "Slide between desktops", when: "compositorAnimOn",
+          desc: "Hyprland's own desktop-change animation. Omarchy's look ships it off; the two switches below only act while it is on." },
+        { type: "toggle", key: P + "animation:desktop_keyboard", label: "Animate desktop changes from keys", when: "desktopSlideOn",
           desc: "Slide when a key or the scroll wheel changes the desktop: Super+1…0, Super+Tab, Super+scroll, moving a window along with you." },
-        { type: "toggle", key: P + "animation:desktop_focus", label: "Animate desktop changes when focus moves",
+        { type: "toggle", key: P + "animation:desktop_focus", label: "Animate desktop changes when focus moves", when: "desktopSlideOn",
           desc: "Slide when the desktop changes because a window elsewhere takes focus: a dock click, a notification, an app asking for attention." }
       ]},
       { title: "Timing", rows: [

@@ -145,6 +145,12 @@ KEY_META = [
     _k(PLUGIN + "dock:blur_passes", "int", "dock", -1, min=-1, max=8),
     # Animation
     _k("animations:enabled", "bool", "animation", True),
+    # Hyprland's `workspaces` animation leaf ("Slide between desktops"). Not an
+    # option getoption knows: read from `hyprctl animations` and written as an
+    # hl.animation leaf. Omarchy's looknfeel (and configs copied from it) turn
+    # it off, which leaves the two desktop-change switches below with nothing
+    # to act on.
+    _k("animations:workspaces", "bool", "animation", True),
     _k(PLUGIN + "anim_scale", "float", "animation", 1.0, min=0, max=10),
     _k(PLUGIN + "animation:curve", "enum", "animation", "hyprdrive", options=CURVES),
     _k(PLUGIN + "open_speed", "float", "animation", 2.6, min=0.5, max=8),
@@ -439,6 +445,27 @@ def anim_leaf_lua(leaf, enabled, speed=None, curve=None, style=None):
     return "hl.animation({ %s })" % ", ".join(fields)
 
 
+# "Slide between desktops": the workspaces leaf as the switch turns it on.
+# easeOutQuint is Omarchy's windows/layers curve; a config without it gets
+# Hyprland's "default" bezier rather than a name that is not there.
+SLIDE_KEY = "animations:workspaces"
+
+
+def workspace_slide_lua(on):
+    _, beziers = anim_tree()
+    curve = "easeOutQuint" if "easeOutQuint" in beziers else "default"
+    return anim_leaf_lua("workspaces", on, 4.0, curve, "slide")
+
+
+def workspace_slide_live():
+    """The workspaces leaf's live state, or None."""
+    leaves, _ = anim_tree()
+    for a in leaves:
+        if a.get("name") == "workspaces":
+            return bool(a.get("enabled"))
+    return None
+
+
 # Extra leaves Omarchy does not override; disable them explicitly so they
 # cannot keep animating via inherit-as-true (internalEnabled -1).
 DISABLE_EXTRA_LEAVES = ("windowsMove",)
@@ -554,10 +581,13 @@ def apply_live_many(pairs, store=None):
     """Omarchy uses the Lua config parser; hyprctl keyword is a no-op. eval hl.config."""
     global _NEEDS_RELOAD
     anim = None
+    slide = None
     rest = []
     for key, value in pairs:
         if key == "animations:enabled":
             anim = bool(value)
+        elif key == SLIDE_KEY:
+            slide = bool(value)
         else:
             rest.append((key, value))
     if rest:
@@ -577,6 +607,13 @@ def apply_live_many(pairs, store=None):
             return False
         if not restored:
             _NEEDS_RELOAD = True
+        if anim and slide is None and SLIDE_KEY in store.get("keys", {}):
+            # The restore put the leaves back as they were; a slide the
+            # settings own goes back to its switch.
+            slide = bool(store["keys"][SLIDE_KEY])
+    if slide is not None:
+        if not eval_lua(workspace_slide_lua(slide)):
+            return False
     return True
 
 
@@ -700,6 +737,7 @@ def compose_fragment(machine, existing_path):
 def write_panel_fragment(store):
     keys = dict(store.get("keys", {}))
     anim = keys.pop("animations:enabled", None)
+    slide = keys.pop(SLIDE_KEY, None)
     body = [
         "-- hyprdrive fragment 40-panel -- written by the Hyprdrive settings (hdpanel).",
         "-- MACHINE-OWNED above the raw-snippet marker.",
@@ -712,6 +750,10 @@ def write_panel_fragment(store):
         if not anim:
             for leaf in anim_disable_names(store):
                 body.append(anim_leaf_lua(leaf, False))
+    # After the user's own animation lines (fragments load last), so the
+    # switch wins over a looknfeel that turned the leaf off.
+    if slide is not None and anim is not False:
+        body.append(workspace_slide_lua(slide))
     tree = {}
     for k, v in keys.items():
         nest_set(tree, k, v)
@@ -1069,7 +1111,7 @@ def live_keys():
     """Every panel key's live value in ONE hyprctl call (--batch), ~4 ms
     instead of one process per key."""
     out = {}
-    batch = "; ".join("j/getoption %s" % m["key"] for m in KEY_META)
+    batch = "; ".join("j/getoption %s" % m["key"] for m in KEY_META if m["key"] != SLIDE_KEY)
     text = hyprctl("--batch", batch)
     if text:
         dec = json.JSONDecoder()
@@ -1100,6 +1142,9 @@ def live_keys():
             v = getoption(meta["key"])
             if v is not None:
                 out[meta["key"]] = v
+    slide = workspace_slide_live()
+    if slide is not None:
+        out[SLIDE_KEY] = slide
     return out
 
 
