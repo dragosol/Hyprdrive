@@ -339,6 +339,7 @@ class CScrollOverview : public IOverview {
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
+    PHLWINDOW selectedOverviewTile(size_t* workspaceIdx = nullptr);
     CBox      tileBox(const PHLWINDOW& window) const;
     CBox      overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const;
     void      refreshWindows() override;

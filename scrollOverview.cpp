@@ -1829,20 +1829,39 @@ void CScrollOverview::selectHoveredWorkspace() {
     focusOverviewWorkspace(HOVEREDWORKSPACE, workspaceIdx);
 }
 
+// The tile the overview shows as selected: whichever device last moved the
+// ring. Arrows set keyboardTile and any pointer motion clears it
+// (updateTileHover), so after the arrows it is the keyboard's tile, after the
+// mouse the tile under the pointer, and over empty space nothing at all --
+// never closeOnWindow on its own, which the pointer hover does not update and
+// which still names the window focused when the overview opened.
+PHLWINDOW CScrollOverview::selectedOverviewTile(size_t* workspaceIdx) {
+    if (g_search.nav.keyboardTile && g_search.nav.zone == EOverviewNavZone::Tile)
+        return getOverviewWindowToShow(closeOnWindow.lock());
+
+    lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+    return windowAtOverviewCursor(workspaceIdx);
+}
+
+// `window select|close` acts on the overview window under the cursor (README)
+// -- or the keyboard's tile after the arrows -- from a mouse bind, a keyboard
+// bind and hyprctl alike. A5: the keyboard/hyprctl path used closeOnWindow, so
+// `window close` closed the window that was focused when the overview opened,
+// not the one hovered.
 bool CScrollOverview::windowDispatcherAction(const std::string& action) {
     const auto CURRENTKEYBIND = g_pKeybindManager ? g_pKeybindManager->m_currentKeybind : SP<SKeybind>{};
     const bool FROMMOUSEBIND  = CURRENTKEYBIND && CURRENTKEYBIND->key.starts_with("mouse:");
 
-    PHLWINDOW WINDOW;
+    // A mouse bind is the pointer's by definition, even right after the arrows.
     size_t    workspaceIdx = viewportCurrentWorkspace;
-
+    PHLWINDOW WINDOW;
     if (FROMMOUSEBIND) {
         lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
         WINDOW            = windowAtOverviewCursor(&workspaceIdx);
     } else
-        WINDOW = getOverviewWindowToShow(closeOnWindow.lock());
+        WINDOW = selectedOverviewTile(&workspaceIdx);
 
-    if (!WINDOW)
+    if (!WINDOW || !shouldShowOverviewWindow(WINDOW))
         return false;
 
     if (action == "select")

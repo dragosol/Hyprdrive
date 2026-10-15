@@ -837,20 +837,12 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
         // same key meaning the same thing, aimed at the window the OVERVIEW is
         // showing as selected rather than the one the compositor last focused.
         //
-        // "Selected" is whichever device last moved the ring: arrows set
-        // keyboardTile, and any pointer motion clears it (updateTileHover). So
-        // after the arrows it is the keyboard's tile; after the mouse it is the
-        // tile under the pointer; and over empty space it is nothing at all --
+        // "Selected" is whichever device last moved the ring (see
+        // selectedOverviewTile): over empty space it is nothing at all --
         // closing whatever closeOnWindow still pointed at would be a window
         // vanishing that the user was not looking at.
         if ((KEYSYM == XKB_KEY_w || KEYSYM == XKB_KEY_W) && MODS == HL_MODIFIER_META) {
-            PHLWINDOW target;
-            if (g_search.nav.keyboardTile && g_search.nav.zone == EOverviewNavZone::Tile)
-                target = getOverviewWindowToShow(closeOnWindow.lock());
-            else {
-                lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-                target            = windowAtOverviewCursor();
-            }
+            const auto target = selectedOverviewTile();
 
             if (target && shouldShowOverviewWindow(target)) {
                 target->sendClose();
