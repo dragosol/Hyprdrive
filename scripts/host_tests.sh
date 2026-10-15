@@ -33,6 +33,8 @@
 #                     rpm and dpkg: every installed manager is asked in turn.
 #   icon_score_test   IconScore.hpp: the largest SVG design of an icon wins
 #                     (directory names only), as the icon index walks a theme.
+#   icon_size_test    IconSize.hpp: icon texture sizes (bucketed to the drawn
+#                     size, never upscaled) and a downscale that filters.
 #   desktop_switch_test  DesktopSwitchModel.hpp: Super+scroll's step and clamp,
 #                     one step per wheel notch, and the desktop-switch cause.
 #
@@ -91,6 +93,8 @@ run stack_reader_test scripts/stack_reader_test.cpp StackReader.cpp StackModel.c
 run omarchy_search_test scripts/omarchy_search_test.cpp OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
 run app_info_test scripts/app_info_test.cpp AppInfo.cpp
 run icon_score_test scripts/icon_score_test.cpp
+# shellcheck disable=SC2046
+run icon_size_test scripts/icon_size_test.cpp $(pkg-config --cflags --libs cairo)
 run integration_test scripts/integration_test.cpp
 run native_search_test scripts/native_search_test.cpp
 # shellcheck disable=SC2046
