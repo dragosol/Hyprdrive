@@ -1240,12 +1240,12 @@ bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
         }
     }
 
+    // close() closes every other overview first and keeps the last word for
+    // this one, whose selection is the focus the caller asked for. Closing the
+    // others from here first handed that last word to whichever of them ran
+    // first (its own close() closed this one mid-way, then finished) -- C5.
     if (workspaceIdx >= images.size()) {
         closeOnWindow = window;
-        for (const auto& overview : scrollOverviews()) {
-            if (overview && overview.get() != this)
-                overview->close();
-        }
         close();
         return true;
     }
@@ -1253,10 +1253,6 @@ bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
     if (!selectOverviewWindow(window, workspaceIdx, true))
         return false;
 
-    for (const auto& overview : scrollOverviews()) {
-        if (overview && overview.get() != this)
-            overview->close();
-    }
     close();
     return true;
 }
@@ -1795,17 +1791,17 @@ void CScrollOverview::performPrimaryClickAction() {
     // last focused window when it has one, through that monitor's own overview
     // (selectAndClose closes every overview, this one included); a desktop with
     // nothing to focus switches and closes with that overview closing LAST, so
-    // it is the one whose close decides where focus lands.
+    // it is the one whose close decides where focus lands. close() itself
+    // closes every OTHER overview first and runs its own teardown last (C5:
+    // closing the others from here first made THIS monitor's close -- the
+    // first of them -- close HIT's before finishing its own, so this monitor
+    // had the last word and focus never moved to the monitor picked).
     if (const auto HIT = altCellAt(lastMousePosLocal)) {
         const auto LAST = getOverviewWindowToShow(HIT->workspace->getLastFocusedWindow());
         if (LAST && LAST->m_workspace == HIT->workspace && shouldShowOverviewWindow(LAST) && HIT->overview->selectAndClose(LAST))
             return;
 
         HIT->overview->focusOverviewWorkspace(HIT->workspace, HIT->workspaceIdx);
-        for (const auto& overview : scrollOverviews()) {
-            if (overview && overview.get() != HIT->overview)
-                overview->close();
-        }
         HIT->overview->close();
         return;
     }
@@ -9610,6 +9606,25 @@ void CScrollOverview::close() {
             closeOnWindow = FOCUSEDWINDOW;
     }
 
+    // C1/C5: a desktop was picked (a strip cell, an alternate strip's cell, a
+    // card, keyboard navigation onto another desktop) rather than a window.
+    // Every one of those switched the monitor with changeWorkspace(..., noFocus)
+    // so the overview could keep the keyboard -- which left Hyprland's focus,
+    // and with it the seat keyboard restoreOverviewKeyboard hands back below,
+    // on the window of the desktop just left: typed text landed in a window
+    // nobody could see. Leaving for another desktop is a workspace switch, so
+    // focus follows it the way Hyprland's own switch would: the desktop's focus
+    // candidate (its last focused window), or -- an empty desktop -- no window
+    // at all, on this monitor (the `!closeOnWindow` branch below).
+    const auto ORIGINWORKSPACEID =
+        focusSyncedFromWorkspaceID != WORKSPACE_INVALID ? focusSyncedFromWorkspaceID : (pMonitor->m_activeWorkspace ? pMonitor->m_activeWorkspace->m_id : WORKSPACE_INVALID);
+    const bool LEFTFORDESKTOP = !closeOnWindow && SELECTEDWORKSPACE && !SELECTEDWORKSPACE->m_isSpecialWorkspace && SELECTEDWORKSPACE->m_id != ORIGINWORKSPACEID;
+    if (LEFTFORDESKTOP) {
+        const auto CANDIDATE = getOverviewWindowToShow(SELECTEDWORKSPACE->getFocusCandidate());
+        if (CANDIDATE && CANDIDATE->m_workspace == SELECTEDWORKSPACE && shouldShowOverviewWindow(CANDIDATE))
+            closeOnWindow = CANDIDATE;
+    }
+
     closeOnWindow = getOverviewWindowToShow(closeOnWindow.lock());
 
     // Y9 + the section 5 checklist: "Click / activate tile: focus + raise that
@@ -9697,6 +9712,15 @@ void CScrollOverview::close() {
 
         if (SELECTEDWORKSPACE && SELECTEDWORKSPACE != pMonitor->m_activeWorkspace)
             pMonitor->changeWorkspace(SELECTEDWORKSPACE, false, true, true);
+
+        // C1/C5, an empty desktop picked: nothing on it to focus, so the focus
+        // left on the previous desktop's window goes (Hyprland's own switch to
+        // an empty workspace does the same) and the monitor -- possibly another
+        // one, picked from an alternate strip -- becomes the focused one.
+        if (LEFTFORDESKTOP) {
+            Desktop::focusState()->rawMonitorFocus(pMonitor.lock());
+            Desktop::focusState()->rawWindowFocus(nullptr, Desktop::FOCUS_REASON_WORKSPACE_CHANGE);
+        }
     } else if (closeOnWindow == Desktop::focusState()->window() && closeOnWindow->m_workspace == pMonitor->m_activeWorkspace) {
         if (focusSyncedFromWorkspaceID != WORKSPACE_INVALID) {
             const auto ACTIVEIDX   = activeWorkspaceIndex();
