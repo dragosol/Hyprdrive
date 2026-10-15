@@ -2,7 +2,10 @@
 """Synthesized pointer for the headless harness (wlr-virtual-pointer-v1).
 
 Usage: vptr.py XEXT YEXT move X Y | click [left|right|middle] | tap X Y [btn]
-                         | down [btn] | up [btn] | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms]]
+                         | down [btn] | up [btn] | scroll DY
+                         | drag X1 Y1 X2 Y2 [steps [hold_ms [btn]]]
+                         | hover X Y [ms] | rel DX DY [n [interval_ms]]
+                         | seq STEP [STEP...]
 
 X/Y are layout coordinates; XEXT/YEXT the layout bounding box (hl.sh passes
 it). Every call is a NEW virtual pointer device, which a toolkit client (Qt
@@ -11,6 +14,21 @@ separate `move` reaches it with no enter/motion and is dropped. `tap X Y` moves
 and clicks on one device -- use it for clicks on client windows. Events go through Hyprland's real pointer path (keybinds, plugin input
 hooks), unlike hl.dsp.cursor.move, which only warps. Needs the bindings that
 hl.sh generates with pywayland.scanner into $PYTHONPATH/hlproto.
+
+ONE DEVICE FOR A SEQUENCE. Hover-only UI (a reveal on enter, a tooltip after a
+delay) and held drags with another button need the pointer to stay one device
+for the whole gesture:
+  hover X Y [ms]      arrive at X Y (a nudge, so the client sees motion) and
+                      stay there ms (default 800) before the device goes
+  rel DX DY [n [ms]]  RELATIVE motion, n times (default 1) every ms (default
+                      16): a hand pushing against a screen edge, which an
+                      absolute move clamps away (dock:require_pressure)
+  drag ... [btn]      the drag with left (default), middle or right held
+  seq STEP...         each STEP one quoted string, run in order on one device:
+                        "move X Y [steps]"  glide there (steps>1) or jump
+                        "rel DX DY [n [ms]]"  "down [btn]"  "up [btn]"
+                        "click [btn]"  "scroll DY"  "wait MS"
+                      e.g. seq "move 200 900 10" "wait 600" "move 200 700 10" "click"
 """
 import os
 import sys
@@ -46,12 +64,47 @@ def main(argv):
     vp = mgr.create_virtual_pointer(seat)
     d.roundtrip()
 
+    pos = [None, None]  # the last absolute position this device sent
+
     def move(x, y):
         x = max(0, min(int(float(x)), xext - 1))
         y = max(0, min(int(float(y)), yext - 1))
+        pos[0], pos[1] = x, y
         vp.motion_absolute(ms(), x, y, xext, yext)
         vp.frame()
         d.flush()
+
+    def glide(x, y, steps):
+        steps = max(1, int(steps))
+        if pos[0] is None or steps == 1:
+            move(x, y)
+            d.roundtrip()
+            return
+        x0, y0 = pos
+        for i in range(1, steps + 1):
+            time.sleep(1 / 120)
+            move(x0 + (float(x) - x0) * i / steps, y0 + (float(y) - y0) * i / steps)
+        d.roundtrip()
+
+    def rel(dx, dy, n=1, every_ms=16):
+        for i in range(int(n)):
+            if i:
+                time.sleep(float(every_ms) / 1000)
+            vp.motion(ms(), float(dx), float(dy))
+            vp.frame()
+            d.flush()
+        d.roundtrip()
+
+    def arrive(x, y):
+        # what tap/drag do before a press: a motion the client sees on this
+        # device, then a 1 px nudge and back (see tap)
+        move(x, y)
+        d.roundtrip()
+        time.sleep(0.05)
+        move(float(x) + 1, y)
+        d.roundtrip()
+        move(x, y)
+        d.roundtrip()
 
     def button(b, pressed):
         vp.button(ms(), BTN.get(b, BTN["left"]), 1 if pressed else 0)
@@ -85,6 +138,40 @@ def main(argv):
         vp.axis(ms(), 0, float(args[0]))  # vertical
         vp.frame()
         d.flush()
+    elif cmd == "hover":
+        arrive(args[0], args[1])
+        time.sleep((float(args[2]) if len(args) > 2 else 800) / 1000)
+    elif cmd == "rel":
+        rel(args[0], args[1], *(args[2:4]))
+    elif cmd == "seq":
+        for step in args:
+            w = step.split()
+            if not w:
+                continue
+            op, a = w[0], w[1:]
+            if op == "move":
+                glide(a[0], a[1], a[2] if len(a) > 2 else 1)
+            elif op == "rel":
+                rel(a[0], a[1], *(a[2:4]))
+            elif op in ("down", "up"):
+                button(a[0] if a else "left", op == "down")
+                d.roundtrip()
+            elif op == "click":
+                b = a[0] if a else "left"
+                button(b, True)
+                d.roundtrip()
+                time.sleep(0.05)
+                button(b, False)
+                d.roundtrip()
+            elif op == "scroll":
+                vp.axis_source(0)
+                vp.axis(ms(), 0, float(a[0]))
+                vp.frame()
+                d.roundtrip()
+            elif op == "wait":
+                time.sleep(float(a[0]) / 1000)
+            else:
+                sys.exit(f"vptr: seq: unknown step {step!r}")
     elif cmd == "drag":
         x1, y1, x2, y2 = map(float, args[:4])
         steps = int(args[4]) if len(args) > 4 else 30
@@ -92,18 +179,18 @@ def main(argv):
         # what the overview's hold-to-swap (hold_to_swap_ms) waits for. The
         # inner side runs under env -i, so it is an argument, not an env var.
         hold = float(args[5]) / 1000 if len(args) > 5 else 0.0
-        move(x1, y1)
-        d.roundtrip()
+        btn = args[6] if len(args) > 6 else "left"
+        if btn not in BTN:
+            sys.exit(f"vptr: drag: button {btn!r} is not left, right or middle")
         if os.environ.get("VPTR_HOVER", "1") == "1":
             # A client window (Qt) only takes a press after a motion it saw on
             # this device (see tap); a 1 px nudge and back, before the press.
+            arrive(x1, y1)
             time.sleep(0.05)
-            move(x1 + 1, y1)
-            d.roundtrip()
+        else:
             move(x1, y1)
             d.roundtrip()
-            time.sleep(0.05)
-        button("left", True)
+        button(btn, True)
         for i in range(1, steps + 1):
             time.sleep(1 / 120)
             move(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
@@ -120,7 +207,7 @@ def main(argv):
                 d.roundtrip()
             move(x2, y2)
             d.roundtrip()
-        button("left", False)
+        button(btn, False)
     else:
         sys.exit(f"vptr: unknown command {cmd}")
     d.roundtrip()

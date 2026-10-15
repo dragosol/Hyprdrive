@@ -1338,6 +1338,13 @@ static void failNotif(const std::string& reason) {
 // Helper function to find a function by name and ensure it contains one of the requested substrings in its demangled name (to disambiguate overloads).
 static void* findFnOrThrow(const std::string& name, std::initializer_list<std::string_view> demangledNeedles) {
     auto fns = HyprlandAPI::findFunctionsByName(SCROLLOVERVIEW_HANDLE, name);
+    // A15's test hook: the hook named here reads as missing, as it would on a
+    // Hyprland that renamed it -- the one way to see the failure toast, and
+    // the unload after a PARTIAL init (the hooks before it already live),
+    // without building against a mismatched Hyprland. Headless only:
+    //   hl.sh start --env HYPRDRIVE_TEST_MISSING_HOOK=setPositionGlobal
+    if (const char* MISSING = std::getenv("HYPRDRIVE_TEST_MISSING_HOOK"); MISSING && name == MISSING)
+        fns.clear();
     if (fns.empty()) {
         failNotif(std::format("no fns for hook {}", name));
         throw std::runtime_error(std::format("[hyprdrive] No fns for hook {}", name));

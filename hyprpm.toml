@@ -1,4 +1,6 @@
-# hyprpm manifest -- `hyprpm add https://github.com/dragosol/Hyprdrive`.
+# hyprpm manifest -- `hyprpm add https://github.com/dragosol/Hyprdrive origin/hyprland-native`
+# (hyprpm's second argument is a git revision for `git reset --hard` in a fresh
+# clone, so a branch other than the default one needs its origin/ name).
 #
 # NATIVE: one build for plain Hyprland and Omarchy alike (Integration.hpp
 # decides at runtime). hyprpm builds the .so and copies nothing else, so the .so

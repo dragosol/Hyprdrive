@@ -19,10 +19,22 @@
 # Usage (as dragos on fedora; every process runs as hyprtest via sudo -n -u):
 #   hl.sh start [--no-plugin] [--so PATH]   start; loads the plugin via hyprctl
 #         [--config FILE | --user-config]   Hyprland -c FILE (hyprtest-readable), or
-#                                           hyprtest's own ~/.config/hypr/hyprland.lua
+#                                           HOME's ~/.config/hypr/hyprland.lua
 #                                           (default: the generated vanilla test.lua)
+#         [--home DIR]                      the HOME of the whole run (a temp home a
+#                                           `make install PREFIX=DIR/.local` went into):
+#                                           Hyprland, every client, --user-config,
+#                                           --lua-home and the default --so use it, so
+#                                           require("hyprdrive") reads DIR's fragments,
+#                                           not hyprtest's real install. Also taken from
+#                                           --env HOME=DIR, and from --config
+#                                           DIR/.config/hypr/<file> when neither is given.
 #         [--no-bus]                        NO session bus for Hyprland (the no-D-Bus
 #                                           crash test; the outer mutter keeps its own)
+#         [--keep-notify]                   keep startup notifications (normally dismissed
+#                                           for the "started without start-hyprland" toast)
+#                                           -- e.g. a plugin's init-failure toast when the
+#                                           config loads it (--env HYPRDRIVE_TEST_MISSING_HOOK=<hook>)
 #         [--env K=V]...                    extra environment for Hyprland only, e.g.
 #                                           --env HYPRDRIVE_NO_OMARCHY=1
 #         [--omarchy]                       a FORCED-Omarchy run: HYPRDRIVE_INTEGRATION=omarchy
@@ -30,8 +42,9 @@
 #                                           require("hypr.hyprdrive"), which needs ~/.config
 #                                           on package.path; combine with --user-config)
 #         [--lua-home]                      only the package.path half: LUA_PATH(_5_4) =
-#                                           ~/.config/?.lua;~/.config/?/init.lua;; (hyprtest's
-#                                           home; Hyprland prepends its config dir to it)
+#                                           $HOME/.config/?.lua;$HOME/.config/?/init.lua;;
+#                                           (the run's HOME, see --home; Hyprland prepends
+#                                           its config dir to it)
 #   hl.sh stop                              exit Hyprland, kill everything, report cores
 #                                           of THIS instance only (see stop: matched by
 #                                           the core's XDG_RUNTIME_DIR, else by pid)
@@ -39,17 +52,24 @@
 #   hl.sh h <hyprctl args...>               hyprctl against the instance
 #   hl.sh eval '<lua>'                      = h eval '<lua>'
 #   hl.sh overview [arg]                    hl.plugin.hyprdrive.overview(arg|"toggle all")
-#   hl.sh shot <file.png> [OUTPUT]          grim of one output (default HEADLESS-1)
+#   hl.sh shot <file.png> [OUTPUT]          grim of one output (default HEADLESS-1); a
+#                                           relative path is the caller's cwd's
 #   hl.sh win [cmd...]                      launch a client (default: kitty)
 #   hl.sh mon2                              add HEADLESS-2 at 1920x0
 #   hl.sh type <text>                       type via the instance's own virtual keyboard
 #   hl.sh tap <Key>[+<Key>...]              e.g. tap Escape, tap Super+Tab (also down/up <Key>)
 #   hl.sh key <wtype args...>               wtype (new device per call; not for the overview)
 #   hl.sh ptr move X Y | click [left|right|middle] | tap X Y [btn] | down|up [btn]
-#             | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms]]
+#             | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms [btn]]]
+#             | hover X Y [ms] | rel DX DY [n [ms]] | seq STEP...
 #                                           pointer via wlr-virtual-pointer
 #                                           (tap = move+click on ONE device: what a Qt
-#                                           client window needs; see vptr.py)
+#                                           client window needs; drag with middle/right
+#                                           held: drag X1 Y1 X2 Y2 30 0 middle; hover =
+#                                           arrive and stay; rel = relative motion, e.g.
+#                                           pushing into an edge; seq = several steps on
+#                                           one device: seq "move 200 900 10" "wait 600"
+#                                           "click" -- see vptr.py)
 #   hl.sh warp X Y                          hl.dsp.cursor.move (compositor warp, no device)
 #   hl.sh sig                               instance signature
 #   hl.sh errors                            configerrors captured at startup + live
@@ -112,6 +132,10 @@ if [ "${1:-}" != __inner ]; then
             rm -rf "$tmp"; exit 0 ;;
         shot)
             out=${1:-}; [ -n "$out" ] || die "usage: shot <file.png> [OUTPUT]"
+            # The caller's cwd, said outright: callers that cd into the checkout
+            # to run scripts/headless/hl.sh found their shots in the checkout.
+            case $out in /*) ;; *) out=$PWD/$out ;; esac
+            mkdir -p "$(dirname "$out")"
             as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
             [ -s "$out.tmp" ] || { rm -f "$out.tmp"; die "empty screenshot"; }
             mv "$out.tmp" "$out"; echo "$out"; exit 0 ;;
@@ -130,8 +154,30 @@ if [ "${1:-}" != __inner ]; then
             printf '%s' "$STATE/staged/$(basename "$f")"
         }
         args=()
+        home=
+        for ((i = 1; i <= $#; i++)); do
+            case ${!i} in
+                --home) j=$((i + 1)); home=${!j} ;;
+                --env) j=$((i + 1)); case ${!j} in HOME=*) home=${!j#HOME=} ;; esac ;;
+            esac
+        done
+        # --config DIR/.config/hypr/<file> with no HOME given: the file reads its
+        # fragments from $HOME/.config/hypr, so DIR is the home it was installed
+        # for. Without this the run silently loaded hyprtest's REAL install
+        # (its stale .so included) behind a temp config (phase 3, 2026-10-14).
+        if [ -z "$home" ]; then
+            for ((i = 1; i < $#; i++)); do
+                [ "${!i}" = --config ] || continue
+                j=$((i + 1)); c=$(realpath -m "${!j}")
+                case $c in */.config/hypr/*) h=${c%%/.config/hypr/*}
+                    as test -d "$h" 2>/dev/null && { home=$h; args+=(--home "$h"); echo "hl: HOME=$h (from --config; --home overrides)"; } ;;
+                esac
+            done
+        fi
         while [ $# -gt 0 ]; do case $1 in
             --so|--config) args+=("$1" "$(stage "$2")"); shift 2 ;;
+            --home) as test -d "$2" -a -r "$2" 2>/dev/null || die "start: --home $2 is not a directory $HL_USER can read"
+                    args+=("$1" "$2"); shift 2 ;;
             --env) case $2 in
                        *=/*) k=${2%%=*} v=${2#*=}; [ -f "$v" ] && v=$(stage "$v"); args+=(--env "$k=$v") ;;
                        *) args+=(--env "$2") ;;
@@ -203,14 +249,22 @@ fi
 # ---------------------------------------------------------------- inner side
 # Runs as hyprtest with a scrubbed environment.
 shift
-export HOME=$(getent passwd "$(id -un)" | cut -d: -f6)
+# The run's HOME: hyprtest's own, or the one `start --home` recorded (see the
+# header) -- for every command of the run, so a `win` client, `ptr` and `shot`
+# see the same home Hyprland does.
+REALHOME=$(getent passwd "$(id -un)" | cut -d: -f6)
+set_home() {
+    export HOME=$1
+    export PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin
+}
+set_home "$(cat "$STATE/home" 2>/dev/null || echo "$REALHOME")"
+# pywayland (vptr/vkbd) is pip --user in the REAL home, whatever HOME is.
+export PYTHONUSERBASE=$REALHOME/.local
 export USER=$(id -un) LOGNAME=$(id -un)
-export PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin
 export XDG_RUNTIME_DIR=$RT
 export LIBSEAT_BACKEND=logind          # never the builtin/noop backend
 export GIO_USE_VFS=local GSETTINGS_BACKEND=memory NO_AT_BRIDGE=1
 unset WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS HYPRLAND_INSTANCE_SIGNATURE
-SO_DEFAULT=$HOME/.local/lib/hyprdrive/hyprdrive.so
 
 sig()   { cat "$STATE/sig" 2>/dev/null || die "no instance (not started?)"; }
 wlsock(){ cat "$STATE/wl" 2>/dev/null || die "no wayland socket recorded"; }
@@ -285,18 +339,24 @@ LUA
 case ${1:-} in
 start)
     shift
-    plugin=1; so=$SO_DEFAULT; cfg=$STATE/test.lua; bus=1; envs=(); luahome=0
+    plugin=1; so=; cfg=$STATE/test.lua; bus=1; envs=(); luahome=0; home=$REALHOME; usercfg=0; keepnotify=0
     while [ $# -gt 0 ]; do case $1 in
         --no-plugin) plugin=0 ;;
         --so) so=$2; shift ;;
         --config) cfg=$2; shift ;;
-        --user-config) cfg=$HOME/.config/hypr/hyprland.lua ;;
+        --user-config) usercfg=1 ;;
+        --home) home=$2; shift ;;
         --no-bus) bus=0 ;;
-        --env) case $2 in *=*) envs+=("$2") ;; *) die "start: --env wants K=V" ;; esac; shift ;;
+        --keep-notify) keepnotify=1 ;;
+        --env) case $2 in HOME=*) home=${2#HOME=} ;; *=*) envs+=("$2") ;; *) die "start: --env wants K=V" ;; esac; shift ;;
         --omarchy) envs+=("HYPRDRIVE_INTEGRATION=omarchy"); luahome=1 ;;
         --lua-home) luahome=1 ;;
         *) die "start: unknown arg $1" ;;
     esac; shift; done
+    [ -d "$home" ] || die "start: HOME $home is not a directory"
+    set_home "$home"
+    [ $usercfg = 0 ] || cfg=$HOME/.config/hypr/hyprland.lua
+    so=${so:-$HOME/.local/lib/hyprdrive/hyprdrive.so}
     if [ $luahome = 1 ]; then
         # liblua seeds package.path from LUA_PATH_5_4 / LUA_PATH (";;" = the
         # default path); Hyprland then prepends its config dir to it.
@@ -311,8 +371,10 @@ start)
     [ $(( ${#RT} + 6 + 61 + 14 )) -le 107 ] || die "start: state dir $STATE is too long for Hyprland's socket paths (use a shorter HL_STATE / HL_NAME)"
     running && die "already running (hl.sh stop first)"
     [ -z "$(ours)" ] || die "leftover processes on $RT: $(ours | tr '\n' ' ') -- run hl.sh stop"
+    [ ! -d "$RT" ] || chmod -R u+w "$RT" 2>/dev/null || true
     rm -rf "$RT" "$STATE"/{sig,wl,*.pid,pids,outer.log,hypr.out,py,nclients,client.*.log,vkbd.log,vkbd.fifo,vkbd.fifo.ack}
     mkdir -m700 "$RT"
+    [ "$HOME" = "$REALHOME" ] && rm -f "$STATE/home" || echo "$HOME" > "$STATE/home"
     date '+%Y-%m-%d %H:%M:%S' > "$STATE/started-at"
     write_config; write_busconf
     cd /
@@ -334,7 +396,7 @@ start)
     env ${envs[@]+"${envs[@]}"} WAYLAND_DISPLAY=outer-0 HYPRLAND_NO_SD_NOTIFY=1 HYPRLAND_NO_SD_VARS=1 \
         setsid ${launcher[@]+"${launcher[@]}"} Hyprland -c "$cfg" > "$STATE/hypr.out" 2>&1 < /dev/null &
     echo $! > "$STATE/hypr.pid"; echo $! >> "$STATE/pids"
-    echo "hl: config $cfg, session bus $([ $bus = 1 ] && echo yes || echo NO)${envs[*]+, env ${envs[*]}}"
+    echo "hl: config $cfg, HOME $HOME, session bus $([ $bus = 1 ] && echo yes || echo NO)${envs[*]+, env ${envs[*]}}"
     for _ in $(seq 75); do
         s=$(ls -t "$RT/hypr" 2>/dev/null | head -1 || true)
         [ -n "$s" ] && [ -S "$RT/hypr/$s/.socket.sock" ] && HYPRLAND_INSTANCE_SIGNATURE=$s hyprctl -j monitors >/dev/null 2>&1 && break
@@ -360,7 +422,7 @@ start)
     sleep 0.5
     # "started without start-hyprland" toast: expected here (start-hyprland is
     # a crash-restarting watchdog, which would hide crashes from a test)
-    hc dismissnotify >/dev/null 2>&1 || true
+    [ $keepnotify = 1 ] || hc dismissnotify >/dev/null 2>&1 || true
     # a keyboard for the seat, or no window ever gets keyboard focus
     gen_proto
     WAYLAND_DISPLAY=$(wlsock) PYTHONPATH=$STATE/py HL_VKBD_FIFO=$STATE/vkbd.fifo setsid python3 "$STATE/vkbd.py" \
@@ -399,12 +461,16 @@ stop)
     [ -n "$pids" ] && { echo "hl: SIGKILL $(echo $pids)"; kill -9 $pids 2>/dev/null || true; sleep 0.5; }
     pids=$(ours)
     [ -z "$pids" ] || die "processes survived: $pids"
-    rm -rf "$RT" "$STATE"/{sig,wl,*.pid}   # pids stays: the outer side reads it after this
+    # u+w first: a client can leave read-only copies under $RT (fedora's
+    # default xdg-open handler copies the file it opens), and rm -rf then
+    # failed with "Permission denied" after a clean stop (phase 3).
+    [ ! -d "$RT" ] || chmod -R u+w "$RT" 2>/dev/null || true
+    rm -rf "$RT" "$STATE"/{sig,wl,*.pid,home}   # pids stays: the outer side reads it after this
     echo "hl: stopped, no processes left on $RT (log kept: $STATE/hyprland.last.log)"
     ;;
 status)
     running || { echo "hl: not running"; exit 1; }
-    echo "hl: sig $(sig) wayland $(wlsock)"
+    echo "hl: sig $(sig) wayland $(wlsock) HOME $HOME"
     echo "hl: processes: $(ours | xargs -r ps -o comm= -p | tr '\n' ' ')"
     hc monitors | grep '^Monitor'; hc plugin list
     ;;

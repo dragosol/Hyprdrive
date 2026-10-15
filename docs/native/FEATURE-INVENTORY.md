@@ -115,7 +115,8 @@ I verified the following by reading `~/Projects/hyprdrive-native/scripts/headles
 - **A15. Failure notification.** A red toast "[hyprdrive] Failure in initialization" when a symbol hook is missing.
   - Code: main.cpp:1329.
   - Omarchy: no.
-  - Test: load against a mismatched Hyprland. **[NOT HEADLESS-SAFE / skip]**
+  - Test: `start --env HYPRDRIVE_TEST_MISSING_HOOK=setPositionGlobal` (any hook name in main.cpp's `findFnOrThrow` calls). For the config-loaded path, add `--keep-notify --no-plugin --config <home>/.config/hypr/hyprland.lua`.
+  - Pass: a red toast "[hyprdrive] Failure in initialization: no fns for hook <name>", `plugin list` is empty, Hyprland keeps running and the pointer still moves, and no core.
 - **A16. uwsm-app launch wrapping.** Apps spawned by the overview or dock run in their own `app-*.scope`.
   - Code: Launch.hpp.
   - Omarchy: partly (uwsm, which Omarchy uses; without it, unchanged).
@@ -459,7 +460,8 @@ I verified the following by reading `~/Projects/hyprdrive-native/scripts/headles
   - Code: Dock.cpp:2078, main.cpp (X30 relative motion).
   - Omarchy: no.
   - Test: `PTR move` to y = height-1, wait 500 ms, SHOT, move up, wait.
-  - Pass: the pill shows, then hides. `require_pressure=true` needs relative motion, which vptr.py lacks (**[NEEDS HOOK]**).
+  - Pass: the pill shows, then hides.
+  - Pressure: with `require_pressure=true` and `pressure_threshold=100`, run `PTR seq "move 960 1079" "wait 1500" "rel 0 20 10 30" "wait 1500"`. The pill stays hidden while the pointer only touches the edge, and it shows after the push. A push of 50 px (`rel 0 5 10 30`) does not show it.
 - **E18. Windows make room.** With autohide off, tiled windows overlapping the pill are shortened just enough (`windows_make_room`).
   - Code: DockRoom.cpp, main.cpp hkTargetPlace.
   - Omarchy: no.
@@ -767,7 +769,7 @@ All of these are `Omarchy: no`.
 
 ## Q. Not classified / needs a decision
 
-- `dock:require_pressure` and pressure behaviour: relative motion is needed for the test.
+- `dock:require_pressure`: now tested under E17 (`ptr rel` / `ptr seq` give relative motion).
 - Frame-cadence internals (scrollOverview.cpp:4512, 8559-8770): the "adaptive preview pulse", "idle pulse" and suspended-client wake. These are performance policy rather than user features. Test by checking that `debug frames` says idle 1 s after settling.
 - `hover_gate`, `x*`, `y*`, `z*` and `v*` scripts under `scripts/gates/` (about 50 gates) were written for the old nested rig (`scripts/lib/rig.sh`, the user session, `headless_on`). They are a ready source of pass criteria to port onto hl.sh: x24 minimize, x26 drag, x28 menu, x32 Show Apps, x34 hotkeys, x47 hover preview, x48 results band, v4 stacks, v5 sushi, y8 bounce, z1-z3 previews/positions.
 - Host unit tests (`scripts/*_test.cpp`, `make check` / `host_tests.sh`) cover the pure models: geometry, strip layout, workspace plan, drop table, finger swipe, hot corner, mosaic pack, motion spacing, mount sort, gvfs, stack model/reader, tool search parse, search letters, icon overrides, omarchy search. These should run on fedora as plain builds before any headless session.
