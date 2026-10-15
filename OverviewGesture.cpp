@@ -24,6 +24,7 @@
 #include <linux/input-event-codes.h>
 #include <xkbcommon/xkbcommon.h>
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
@@ -658,7 +659,92 @@ void maybeClickFromHold(bool cancelled) {
     wl_event_source_timer_update(g_holdClickTimer, HOLD_CANCEL_GRACE_MS);
 }
 
+// What a TOUCHPAD's events do to the click-gesture state, one function per
+// event. attachPadFingerListeners hangs them on every pointer device; the
+// debug gesture hook (DebugGesture.cpp) calls the same ones through the pad*
+// entry points below, so a headless test runs this exact code.
+void onPadHoldBegin(uint32_t fingers) {
+    clickLog("holdBegin fingers=%u\n", fingers);
+    g_sawSwipeOrPinch = false;
+    g_holdBeganAt     = Time::steadyNow();
+    notePadFingers(fingers);
+}
+
+void onPadHoldEnd(bool cancelled) {
+    clickLog("holdEnd cancelled=%d last=%u\n", cancelled ? 1 : 0, g_lastPadFingers);
+    maybeClickFromHold(cancelled);
+    notePadFingersEnd(cancelled);
+}
+
+void onPadGestureBegin(uint32_t fingers) {
+    g_sawSwipeOrPinch = true;
+    notePadFingers(fingers);
+}
+
+// Clickfinger (Omarchy default, and what user.trackpad-gestures used) maps
+// 1/2/3-finger physical clicks to left/right/middle. The old plugin bound
+// o.bind("mouse:274", screenshot). Hyprland sets event.mouse=true on pads,
+// so we have to recognize BTN_MIDDLE on the touchpad device itself.
+//
+// BEFORE the press reaches the bus (noteButtonDevice, from main.cpp's
+// CInputManager::onMouseButton hook), never from the device's own button
+// signal: that listener is attached after Hyprland's, which is the one that
+// runs onMouseButton and so the bus -- it saw each press only AFTER
+// handleClickGestureButton had already judged it, by the PREVIOUS press's
+// device. A mouse's middle click after any touchpad click then read as a
+// 3-finger click: the overview toggled and the paste was eaten (found with
+// the debug hook's `button`, 2026-10-15).
+void onPadButton(bool isPad, const IPointer::SButtonEvent& e) {
+    if (e.state != WL_POINTER_BUTTON_STATE_PRESSED)
+        return;
+    g_padButtonFromTouchpad = isPad;
+    if (!isPad || e.button != BTN_MIDDLE)
+        return;
+    if (resolvedPadFingers() >= 4)
+        return;
+    notePadFingers(3);
+}
+
 } // namespace
+
+void padHoldBegin(uint32_t fingers) {
+    onPadHoldBegin(fingers);
+}
+
+void padHoldEnd(bool cancelled) {
+    onPadHoldEnd(cancelled);
+}
+
+void padGestureBegin(uint32_t fingers) {
+    onPadGestureBegin(fingers);
+}
+
+void padGestureUpdate(uint32_t fingers) {
+    notePadFingers(fingers);
+}
+
+void padGestureEnd(bool cancelled) {
+    notePadFingersEnd(cancelled);
+}
+
+void noteButtonDevice(bool fromTouchpad, const IPointer::SButtonEvent& event) {
+    onPadButton(fromTouchpad, event);
+}
+
+void padButton(uint32_t button, bool pressed) {
+    const IPointer::SButtonEvent E{
+        .timeMs = sc<uint32_t>(Time::millis(Time::steadyNow())),
+        .button = button,
+        .state  = pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED,
+        .mouse  = true, // what Hyprland sets on a touchpad's buttons too
+    };
+    // What the onMouseButton hook does first (flag the press as the pad's),
+    // then the bus event onMouseButton itself emits: the click gestures
+    // (handleClickGestureButton), the overview and the dock all take it there.
+    onPadButton(true, E);
+    Event::SCallbackInfo info;
+    Event::bus()->m_events.input.mouse.button.emit(E, info);
+}
 
 void sendGestureChord(const std::string& chord) {
     auto parts = splitChord(chord);
@@ -739,44 +825,15 @@ void attachPadFingerListeners() {
     for (auto& ptr : g_pInputManager->m_pointers) {
         if (!ptr)
             continue;
-        g_padListeners.emplace_back(ptr->m_pointerEvents.holdBegin.listen([](IPointer::SHoldBeginEvent e) {
-            clickLog("holdBegin fingers=%u\n", e.fingers);
-            g_sawSwipeOrPinch = false;
-            g_holdBeganAt     = Time::steadyNow();
-            notePadFingers(e.fingers);
-        }));
-        g_padListeners.emplace_back(ptr->m_pointerEvents.holdEnd.listen([](IPointer::SHoldEndEvent e) {
-            clickLog("holdEnd cancelled=%d last=%u\n", e.cancelled ? 1 : 0, g_lastPadFingers);
-            maybeClickFromHold(e.cancelled);
-            notePadFingersEnd(e.cancelled);
-        }));
-        g_padListeners.emplace_back(ptr->m_pointerEvents.swipeBegin.listen([](IPointer::SSwipeBeginEvent e) {
-            g_sawSwipeOrPinch = true;
-            notePadFingers(e.fingers);
-        }));
+        g_padListeners.emplace_back(ptr->m_pointerEvents.holdBegin.listen([](IPointer::SHoldBeginEvent e) { onPadHoldBegin(e.fingers); }));
+        g_padListeners.emplace_back(ptr->m_pointerEvents.holdEnd.listen([](IPointer::SHoldEndEvent e) { onPadHoldEnd(e.cancelled); }));
+        g_padListeners.emplace_back(ptr->m_pointerEvents.swipeBegin.listen([](IPointer::SSwipeBeginEvent e) { onPadGestureBegin(e.fingers); }));
         g_padListeners.emplace_back(ptr->m_pointerEvents.swipeUpdate.listen([](IPointer::SSwipeUpdateEvent e) { notePadFingers(e.fingers); }));
         g_padListeners.emplace_back(ptr->m_pointerEvents.swipeEnd.listen([](IPointer::SSwipeEndEvent e) { notePadFingersEnd(e.cancelled); }));
-        g_padListeners.emplace_back(ptr->m_pointerEvents.pinchBegin.listen([](IPointer::SPinchBeginEvent e) {
-            g_sawSwipeOrPinch = true;
-            notePadFingers(e.fingers);
-        }));
+        g_padListeners.emplace_back(ptr->m_pointerEvents.pinchBegin.listen([](IPointer::SPinchBeginEvent e) { onPadGestureBegin(e.fingers); }));
         g_padListeners.emplace_back(ptr->m_pointerEvents.pinchUpdate.listen([](IPointer::SPinchUpdateEvent e) { notePadFingers(e.fingers); }));
         g_padListeners.emplace_back(ptr->m_pointerEvents.pinchEnd.listen([](IPointer::SPinchEndEvent e) { notePadFingersEnd(e.cancelled); }));
-        // Clickfinger (Omarchy default, and what user.trackpad-gestures used) maps
-        // 1/2/3-finger physical clicks to left/right/middle. The old plugin bound
-        // o.bind("mouse:274", screenshot). Hyprland sets event.mouse=true on pads,
-        // so we have to recognize BTN_MIDDLE on the touchpad device itself.
-        const bool isPad = ptr->m_isTouchpad;
-        g_padListeners.emplace_back(ptr->m_pointerEvents.button.listen([isPad](IPointer::SButtonEvent e) {
-            if (e.state != WL_POINTER_BUTTON_STATE_PRESSED)
-                return;
-            g_padButtonFromTouchpad = isPad;
-            if (!isPad || e.button != BTN_MIDDLE)
-                return;
-            if (resolvedPadFingers() >= 4)
-                return;
-            notePadFingers(3);
-        }));
+        // No button listener: see onPadButton (noteButtonDevice).
     }
     clickLog("attachPadFingerListeners pointers=%zu listeners=%zu\n", g_attachedPointerCount, g_padListeners.size());
 }

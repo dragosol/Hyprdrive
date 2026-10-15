@@ -108,6 +108,7 @@ static CFunctionHook* g_pScrollScheduleFrameHook   = nullptr;
 static CFunctionHook* g_pScrollSendFrameEventsHook = nullptr;
 static CFunctionHook* g_pScrollSurfaceFrameHook    = nullptr;
 static CFunctionHook* g_pScrollMouseMovedHook      = nullptr;
+static CFunctionHook* g_pMouseButtonHook           = nullptr;
 typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
 typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
@@ -116,6 +117,7 @@ typedef void (*origScheduleFrame)(void*, Aquamarine::IOutput::scheduleFrameReaso
 typedef void (*origSendFrameEventsToWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&);
 typedef void (*origSurfaceFrame)(void*, const Time::steady_tp&);
 typedef void (*origOnMouseMoved)(void*, IPointer::SMotionEvent);
+typedef void (*origOnMouseButton)(void*, IPointer::SButtonEvent, SP<IPointer>);
 
 static bool g_unloading = false;
 
@@ -214,6 +216,14 @@ static void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e) {
         return;
     rc<origOnMouseMoved>(g_pScrollMouseMovedHook->m_original)(thisptr, e);
     ScrollOverview::Dock::feedPointerMotion(e.delta);
+}
+
+// The click gestures need to know a press is the TOUCHPAD's while they judge
+// it, and only this call has the device (the bus event onMouseButton emits
+// carries none). See onPadButton in OverviewGesture.cpp.
+static void hkOnMouseButton(void* thisptr, IPointer::SButtonEvent e, SP<IPointer> pointer) {
+    noteButtonDevice(pointer && pointer->m_isTouchpad, e);
+    rc<origOnMouseButton>(g_pMouseButtonHook->m_original)(thisptr, e, pointer);
 }
 
 static void hkScheduleFrame(void* thisptr, Aquamarine::IOutput::scheduleFrameReason reason) {
@@ -2035,6 +2045,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         findFnOrThrow("onMouseMoved", {"CInputManager::onMouseMoved("}),
         rc<void*>(hkOnMouseMoved));
     g_pScrollMouseMovedHook->hook();
+
+    g_pMouseButtonHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("onMouseButton", {"CInputManager::onMouseButton("}), rc<void*>(hkOnMouseButton));
+    g_pMouseButtonHook->hook();
 
     g_pSendWindowSizeHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("sendWindowSize", {"CWindow::sendWindowSize("}), rc<void*>(hkSendWindowSize));
     g_pSendWindowSizeHook->hook();
