@@ -59,6 +59,9 @@
 #include <fstream>
 #include <optional>
 #include <ranges>
+#include <string_view>
+#include <sys/inotify.h>
+#include <unistd.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -576,6 +579,8 @@ SFavoritesStore& favoritesStore() {
     return store;
 }
 
+void armFavoritesWatch();
+
 // The store is the source of truth and the plugin is NOT its only writer: a
 // profile revert (hdprof), an editor, or a second session all change the file
 // under a running dock. Reading it ONCE at first use made every such write
@@ -584,6 +589,7 @@ SFavoritesStore& favoritesStore() {
 // itself working perfectly (measured 2026-08-13, zrig/danglingC/x34-*).
 std::vector<std::string>& favorites() {
     auto& STORE = favoritesStore();
+    armFavoritesWatch();
 
     const auto NOW = Time::steadyNow();
     if (STORE.loaded && std::chrono::duration<float, std::milli>(NOW - STORE.checkedAt).count() < FAVORITES_POLL_MS)
@@ -655,6 +661,69 @@ void writeFavorites() {
     // cache on every pin.
     auto& STORE = favoritesStore();
     STORE.stamp = std::filesystem::last_write_time(PATH, ec);
+}
+
+// E12b. THE POLL ONLY RUNS WHEN SOMETHING ASKS. favorites() is on the layout
+// path, and on an idle desktop nothing lays the dock out: an outside write
+// (hdprof, an editor, `echo >>`) sat unread until a window opened or closed.
+// So the store's folder is watched, and a write to the file re-reads it and
+// asks for a frame -- the 500 ms throttle is for the layout path's own calls,
+// not for a change the kernel just reported. The folder rather than the file:
+// an editor saves by renaming a new file over the old one, which a watch on
+// the old inode never sees. Our own writes arrive here too and cost nothing:
+// writeFavorites() adopted their mtime, so the poll finds nothing new.
+int              g_favWatchFd    = -1;
+wl_event_source* g_favWatchSrc   = nullptr;
+bool             g_favWatchTried = false; // once: no retry per layout call, none after unload
+
+int onFavoritesDirEvent(int, uint32_t, void*) {
+    alignas(struct inotify_event) char buf[4096];
+    bool                               store = false;
+    for (;;) {
+        const ssize_t N = ::read(g_favWatchFd, buf, sizeof(buf));
+        if (N <= 0)
+            break;
+        for (ssize_t off = 0; off < N;) {
+            const auto* EV = reinterpret_cast<const struct inotify_event*>(buf + off);
+            if (EV->len > 0 && std::string_view{EV->name} == favoritesPath().filename().string())
+                store = true;
+            off += sizeof(struct inotify_event) + EV->len;
+        }
+    }
+    if (!store)
+        return 0;
+
+    auto&      STORE = favoritesStore();
+    const auto WAS   = STORE.generation;
+    STORE.checkedAt  = {};
+    favorites();
+    if (STORE.generation != WAS) {
+        for (const auto& MON : State::monitorState()->monitors())
+            if (MON)
+                g_pHyprRenderer->damageMonitor(MON);
+    }
+    return 0;
+}
+
+void armFavoritesWatch() {
+    if (g_favWatchTried || !g_pCompositor || !g_pCompositor->m_wlEventLoop)
+        return;
+    g_favWatchTried = true;
+
+    const auto PATH = favoritesPath();
+    if (PATH.empty())
+        return;
+    std::error_code ec;
+    std::filesystem::create_directories(PATH.parent_path(), ec);
+
+    g_favWatchFd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (g_favWatchFd < 0)
+        return;
+    if (inotify_add_watch(g_favWatchFd, PATH.parent_path().c_str(), IN_CLOSE_WRITE | IN_MOVED_TO) < 0 ||
+        !(g_favWatchSrc = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, g_favWatchFd, WL_EVENT_READABLE, onFavoritesDirEvent, nullptr))) {
+        ::close(g_favWatchFd);
+        g_favWatchFd = -1;
+    }
 }
 
 void toggleFavorite(const std::string& id) {
@@ -1060,6 +1129,9 @@ SItemsKey itemsKey() {
     SItemsKey key;
     key.membership = Membership::generation();
     key.windows    = windowDigest();
+    // favorites() first: it is the poll, and the generation alone is only as
+    // fresh as the last call that ran it.
+    favorites();
     key.favorites  = favoritesStore().generation;
     key.locations  = Locations::generation();
     key.stacks     = Stacks::generation();
@@ -5302,6 +5374,18 @@ void stopInfoPoll() {
     if (g_infoPoll) {
         wl_event_source_remove(g_infoPoll);
         g_infoPoll = nullptr;
+    }
+}
+
+void stopFavoritesWatch() {
+    g_favWatchTried = true; // a layout call during the teardown must not re-arm it
+    if (g_favWatchSrc) {
+        wl_event_source_remove(g_favWatchSrc);
+        g_favWatchSrc = nullptr;
+    }
+    if (g_favWatchFd >= 0) {
+        ::close(g_favWatchFd);
+        g_favWatchFd = -1;
     }
 }
 

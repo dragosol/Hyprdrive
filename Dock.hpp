@@ -288,6 +288,8 @@ void armInfoPoll();
 void stopInfoPoll();
 // The urgent hop's wake-up timer; removed on unload.
 void stopUrgentHopTimer();
+// The favourites store's folder watch (an outside edit applies live); removed on unload.
+void stopFavoritesWatch();
 bool menuContains(PHLMONITOR monitor, const Vector2D& point);
 bool menuClick(PHLMONITOR monitor, const Vector2D& point);
 
