@@ -5,6 +5,7 @@
 #include "FingerSwipe.hpp"
 #include "GestureDrive.hpp"
 #include "IOverview.hpp"
+#include "OverviewGesture.hpp"
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
@@ -27,19 +28,41 @@ namespace ScrollOverview::DebugGesture {
             return sc<uint32_t>(Time::millis(Time::steadyNow()));
         }
 
-        // One step, into the entry point a real touchpad's event takes.
+        // One step, into the entry point a real touchpad's event takes. A
+        // device's swipe/pinch signal reaches BOTH Hyprland (CInputManager) and
+        // the click gestures' pad handlers, so the steps do too -- a swipe that
+        // begins inside a cancelled hold's grace is what stops a click.
         void feed(const SStep& s) {
             const auto T = nowMs();
             switch (s.kind) {
-                case EKind::SwipeBegin: g_pInputManager->onSwipeBegin({.timeMs = T, .fingers = s.fingers}); break;
-                case EKind::SwipeUpdate: g_pInputManager->onSwipeUpdate({.timeMs = T, .fingers = s.fingers, .delta = {s.dx, s.dy}}); break;
-                case EKind::SwipeEnd: g_pInputManager->onSwipeEnd({.timeMs = T, .cancelled = s.cancelled}); break;
-                case EKind::PinchBegin: g_pInputManager->onPinchBegin({.timeMs = T, .fingers = s.fingers}); break;
+                case EKind::SwipeBegin:
+                    g_pInputManager->onSwipeBegin({.timeMs = T, .fingers = s.fingers});
+                    padGestureBegin(s.fingers);
+                    break;
+                case EKind::SwipeUpdate:
+                    g_pInputManager->onSwipeUpdate({.timeMs = T, .fingers = s.fingers, .delta = {s.dx, s.dy}});
+                    padGestureUpdate(s.fingers);
+                    break;
+                case EKind::SwipeEnd:
+                    g_pInputManager->onSwipeEnd({.timeMs = T, .cancelled = s.cancelled});
+                    padGestureEnd(s.cancelled);
+                    break;
+                case EKind::PinchBegin:
+                    g_pInputManager->onPinchBegin({.timeMs = T, .fingers = s.fingers});
+                    padGestureBegin(s.fingers);
+                    break;
                 case EKind::PinchUpdate:
                     g_pInputManager->onPinchUpdate({.timeMs = T, .fingers = s.fingers, .delta = {s.dx, s.dy}, .scale = s.scale, .rotation = s.rotation});
+                    padGestureUpdate(s.fingers);
                     break;
-                case EKind::PinchEnd: g_pInputManager->onPinchEnd({.timeMs = T, .cancelled = s.cancelled}); break;
+                case EKind::PinchEnd:
+                    g_pInputManager->onPinchEnd({.timeMs = T, .cancelled = s.cancelled});
+                    padGestureEnd(s.cancelled);
+                    break;
                 case EKind::Frame: FingerSwipe::debugFrame(s.frame); break;
+                case EKind::HoldBegin: padHoldBegin(s.fingers); break;
+                case EKind::HoldEnd: padHoldEnd(s.cancelled); break;
+                case EKind::Button: padButton(s.button, s.pressed); break;
                 case EKind::Wait: break;
             }
             ++g_played;

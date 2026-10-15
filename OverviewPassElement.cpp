@@ -320,8 +320,11 @@ std::vector<UP<IPassElement>> COverviewShadowPassElement::draw() {
         return {};
 
     CRegion shadowDamage = g_pHyprRenderer->m_renderData.damage.copy().intersect(data.fullBox);
-    if (data.ignoreWindow)
+    if (data.ignoreWindow) {
         shadowDamage.subtract(roundedRectRegion(data.cutoutBox, data.rounding + 1, data.roundingPower));
+        for (const auto& BOX : data.extraCutouts)
+            shadowDamage.subtract(roundedRectRegion(BOX, data.rounding + 1, data.roundingPower));
+    }
 
     if (shadowDamage.empty())
         return {};

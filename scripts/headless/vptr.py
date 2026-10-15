@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Synthesized pointer for the headless harness (wlr-virtual-pointer-v1).
 
-Usage: vptr.py XEXT YEXT move X Y | click [left|right|middle] | tap X Y [btn]
+Usage: vptr.py XEXT YEXT move X Y | click [left|right|middle [N]] | tap X Y [btn]
                          | down [btn] | up [btn] | scroll DY
                          | drag X1 Y1 X2 Y2 [steps [hold_ms [btn]]]
                          | hover X Y [ms] | rel DX DY [n [interval_ms]]
                          | seq STEP [STEP...]
+                         | path PAUSE_MS X1 Y1 X2 Y2 [...]
+
+`path` visits each point in turn on ONE device with no button, resting
+PAUSE_MS at each: a hand moving the same mouse there and back (a hot-corner
+round trip). Separate `move` calls are separate devices.
 
 X/Y are layout coordinates; XEXT/YEXT the layout bounding box (hl.sh passes
 it). Every call is a NEW virtual pointer device, which a toolkit client (Qt
@@ -115,10 +120,14 @@ def main(argv):
         move(args[0], args[1])
     elif cmd == "click":
         b = args[0] if args else "left"
-        button(b, True)
-        d.roundtrip()
-        time.sleep(0.05)
-        button(b, False)
+        for i in range(int(args[1]) if len(args) > 1 else 1):
+            if i:
+                time.sleep(0.3)
+            button(b, True)
+            d.roundtrip()
+            time.sleep(0.05)
+            button(b, False)
+            d.roundtrip()
     elif cmd == "tap":
         move(args[0], args[1])
         d.roundtrip()
@@ -208,6 +217,13 @@ def main(argv):
             move(x2, y2)
             d.roundtrip()
         button(btn, False)
+    elif cmd == "path":
+        pause = float(args[0]) / 1000
+        pts = list(map(float, args[1:]))
+        for i in range(0, len(pts) - 1, 2):
+            move(pts[i], pts[i + 1])
+            d.roundtrip()
+            time.sleep(pause)
     else:
         sys.exit(f"vptr: unknown command {cmd}")
     d.roundtrip()

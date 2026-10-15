@@ -59,10 +59,12 @@
 #   hl.sh type <text>                       type via the instance's own virtual keyboard
 #   hl.sh tap <Key>[+<Key>...]              e.g. tap Escape, tap Super+Tab (also down/up <Key>)
 #   hl.sh key <wtype args...>               wtype (new device per call; not for the overview)
-#   hl.sh ptr move X Y | click [left|right|middle] | tap X Y [btn] | down|up [btn]
+#   hl.sh ptr move X Y | click [left|right|middle [N]] | tap X Y [btn] | down|up [btn]
 #             | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms [btn]]]
 #             | hover X Y [ms] | rel DX DY [n [ms]] | seq STEP...
+#             | path PAUSE_MS X1 Y1 X2 Y2 [...]
 #                                           pointer via wlr-virtual-pointer
+#                                           (path = moves on ONE device, no button)
 #                                           (tap = move+click on ONE device: what a Qt
 #                                           client window needs; drag with middle/right
 #                                           held: drag X1 Y1 X2 Y2 30 0 middle; hover =

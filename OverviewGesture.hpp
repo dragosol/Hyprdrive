@@ -127,6 +127,23 @@ void addClickGesture(size_t fingers, const std::string& action, uint32_t mods, b
 void removeClickGesture(size_t fingers, uint32_t mods);
 void attachPadFingerListeners();
 bool handleClickGestureButton(const IPointer::SButtonEvent& event);
+// A touchpad's events without a touchpad, for the debug gesture hook
+// (DebugGesture.cpp): the same handlers attachPadFingerListeners puts on every
+// pointer device. Holds have no CInputManager entry point (Hyprland hands them
+// straight to the pointer-gestures protocol), so these are where a hold goes in.
+// padButton is a clickpad button: the device's listener with the touchpad flag
+// set, then the input.mouse.button bus event, which is where the click gestures
+// (handleClickGestureButton), the overview and the dock take a press.
+void padHoldBegin(uint32_t fingers);
+void padHoldEnd(bool cancelled);
+void padGestureBegin(uint32_t fingers); // a swipe or pinch began
+void padGestureUpdate(uint32_t fingers);
+void padGestureEnd(bool cancelled);
+void padButton(uint32_t button, bool pressed);
+// Every pointer button, with the device it came from, BEFORE Hyprland emits it
+// on the bus (main.cpp's onMouseButton hook): whether this press is the
+// touchpad's is what makes a BTN_MIDDLE a 3-finger click.
+void noteButtonDevice(bool fromTouchpad, const IPointer::SButtonEvent& event);
 void sendGestureChord(const std::string& chord);
 
 // ONE-WAY GESTURES (user, 2026-09-24: "4f up to reveal and 4f down to close

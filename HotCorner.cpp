@@ -33,6 +33,19 @@ namespace ScrollOverview::HotCorner {
         CHyprSignalListener g_move, g_button;
         wl_event_source*    g_timer = nullptr;
 
+        // Every pointer device's own motion, below Hyprland's move event. While
+        // an overview is up it cancels input.mouse.move, so Hyprland never
+        // records where the pointer went (mouseMoveUnified returns before it
+        // stores m_lastCursorPosFloored) and then DROPS the next move whose
+        // floored position equals the stale one -- the pixel the overview
+        // opened at. The corner opened it, so that pixel is the corner: the
+        // round trip "flick to the corner, away, back" never told the corner
+        // it was back, and the overview stayed open. A device's motion signal
+        // fires on every move and after Hyprland has moved the cursor (its own
+        // listener is attached first), so the position read here is the new one.
+        std::vector<CHyprSignalListener> g_deviceMoves;
+        std::vector<WP<IPointer>>        g_attachedPointers;
+
         int  g_buttonsDown = 0;
         // Waiting out the delay for the pointer resting in the corner.
         bool g_pending = false;
@@ -170,15 +183,62 @@ namespace ScrollOverview::HotCorner {
             // 0 disarms a wl timer, so "no delay" is the next loop turn.
             wl_event_source_timer_update(g_timer, std::clamp<int>(Config::getValue<int>(KEY_DELAY), 1, 2000));
         }
+
+        // Only needed while an overview is up: otherwise the bus event already
+        // carries every move, and running onMove twice per move is harmless
+        // but pointless.
+        void onDeviceMove() {
+            if (overviewUp())
+                onMove();
+        }
+
+        // The listeners belong to the POINTER SET, so that set changing is the
+        // only thing that makes them stale. Compared device by device, not by
+        // count: one device unplugged and another plugged in keeps the count
+        // and would leave the new one unheard. Asked again on every bus move
+        // and button -- a new device's first move still reaches the bus.
+        bool pointersChanged() {
+            const auto& NOW = g_pInputManager->m_pointers;
+            if (NOW.size() != g_attachedPointers.size())
+                return true;
+            for (size_t i = 0; i < NOW.size(); ++i)
+                if (g_attachedPointers[i].lock() != NOW[i])
+                    return true;
+            return false;
+        }
+
+        void attachDevices() {
+            if (!g_pInputManager) {
+                g_deviceMoves.clear();
+                g_attachedPointers.clear();
+                return;
+            }
+            if (!pointersChanged())
+                return;
+            g_deviceMoves.clear();
+            g_attachedPointers.clear();
+            for (const auto& P : g_pInputManager->m_pointers) {
+                g_attachedPointers.emplace_back(P);
+                if (!P)
+                    continue;
+                g_deviceMoves.emplace_back(P->m_pointerEvents.motion.listen([](const IPointer::SMotionEvent&) { onDeviceMove(); }));
+                g_deviceMoves.emplace_back(P->m_pointerEvents.motionAbsolute.listen([](const IPointer::SMotionAbsoluteEvent&) { onDeviceMove(); }));
+            }
+        }
     }
 
     void init() {
         if (!g_timer)
             g_timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, fire, nullptr);
 
-        g_move = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo&) { onMove(); });
+        attachDevices();
+        g_move = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo&) {
+            attachDevices();
+            onMove();
+        });
 
         g_button = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent e, Event::SCallbackInfo&) {
+            attachDevices();
             if (e.state == WL_POINTER_BUTTON_STATE_PRESSED) {
                 ++g_buttonsDown;
                 // A click in the corner was meant for whatever is there (the
@@ -196,6 +256,8 @@ namespace ScrollOverview::HotCorner {
     void shutdown() {
         g_move.reset();
         g_button.reset();
+        g_deviceMoves.clear();
+        g_attachedPointers.clear();
         if (g_timer)
             wl_event_source_remove(g_timer);
         g_timer       = nullptr;

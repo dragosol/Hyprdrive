@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <string>
 
+#include "DebugPaths.hpp"
+
 inline HANDLE SCROLLOVERVIEW_HANDLE = nullptr;
 
 // The search query, the keyboard selection, the result drag and the layout the
@@ -39,7 +41,7 @@ namespace Prof {
         // The sentinel file is read once per plugin LOAD, so `touch` it and
         // hot-reload the plugin and the same instrument is live.
         static const bool ON = std::getenv("HYPRDRIVE_PROFILE") != nullptr || std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr ||
-                               ::access("/tmp/hyprdrive-profile.on", F_OK) == 0;
+                               ::access(ScrollOverview::DebugPaths::path("hyprdrive-profile.on").c_str(), F_OK) == 0;
         return ON;
     }
 

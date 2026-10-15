@@ -18,6 +18,13 @@
 //   frame          -> FingerSwipe's raw-finger frame handler, the one
 //                     TouchpadRaw calls per evdev SYN_REPORT.
 //
+//   hold / button  -> the click gestures' touchpad handlers (OverviewGesture:
+//                     padHold*, padButton): what a pointer device's holdBegin/
+//                     holdEnd and clickpad button signals run, the button then
+//                     on the input.mouse.button bus event. Swipe and pinch
+//                     steps pass through the same handlers, as a touchpad's
+//                     own swipe/pinch signals do.
+//
 // THE SCRIPT: steps separated by ';', run in order; `wait` and the macros'
 // step spacing make it play over real time, so the compositor renders the
 // frames in between (a scrub can be photographed mid-way with `hold`).
@@ -32,6 +39,9 @@
 //                                     are down (tracking id, position in mm) and
 //                                     whether the clickpad button is held. An
 //                                     empty `frame` is every finger lifted.
+//   hold begin F                      libinput's hold: F fingers resting
+//   hold end [cancel]                 (cancel: they moved, or the pad clicked)
+//   button left|right|middle down|up  a clickpad button, from the touchpad
 //   wait MS
 //
 // Macros (expanded here; the parse is what the test checks):
@@ -55,6 +65,13 @@
 //       swipe_while_dragging: one finger holds the clickpad button (a drag),
 //       F more land and travel MM mm, lift, then the button is let go.
 //       libinput sends no gesture at all for this -- only the raw frames.
+//   click F [MS]
+//       an F-finger physical click (clickfinger). The fingers rest (hold
+//       begin), the press cancels the hold, then for 1/2/3 fingers the
+//       button clickfinger maps them to (left/right/middle) goes down and,
+//       MS later (default 40), up. 4+ fingers map to no button: the
+//       cancelled hold is all libinput sends, so the click gesture rides
+//       OverviewGesture's HOLD_CANCEL_GRACE_MS deferral.
 
 #include "FingerSwipeModel.hpp"
 
@@ -76,6 +93,9 @@ namespace ScrollOverview::DebugGestureScript {
         PinchUpdate,
         PinchEnd,
         Frame,
+        HoldBegin,
+        HoldEnd,
+        Button,
         Wait,
     };
 
@@ -87,7 +107,13 @@ namespace ScrollOverview::DebugGestureScript {
         bool                       cancelled = false;
         uint32_t                   ms        = 0;
         FingerSwipeModel::SFrame   frame;
+        uint32_t                   button    = 0; // evdev code (BTN_LEFT...), Button steps
+        bool                       pressed   = false;
     };
+
+    // evdev codes (linux/input-event-codes.h), spelled out so the parse needs
+    // no Linux header on the host.
+    inline constexpr uint32_t BTN_LEFT_CODE = 0x110, BTN_RIGHT_CODE = 0x111, BTN_MIDDLE_CODE = 0x112;
 
     // libinput delta units per mm for the raw-finger macros' own swipe updates:
     // FingerSwipeModel's starting estimate, so a continued swipe moves at the
@@ -138,6 +164,20 @@ namespace ScrollOverview::DebugGestureScript {
         }
         inline SStep frame(const std::vector<FingerSwipeModel::STouch>& t, bool button) {
             return SStep{.kind = EKind::Frame, .frame = {.touches = t, .button = button}};
+        }
+        inline bool buttonCode(const std::string& s, uint32_t& out) {
+            if (s == "left")
+                out = BTN_LEFT_CODE;
+            else if (s == "right")
+                out = BTN_RIGHT_CODE;
+            else if (s == "middle")
+                out = BTN_MIDDLE_CODE;
+            else
+                return false;
+            return true;
+        }
+        inline SStep button(uint32_t code, bool pressed) {
+            return SStep{.kind = EKind::Button, .button = code, .pressed = pressed};
         }
         // Optional trailing [STEPS [MS]] [hold] after `at`.
         inline std::expected<void, std::string> tail(const std::vector<std::string>& w, size_t at, uint32_t& steps, uint32_t& ms, bool* hold) {
@@ -245,6 +285,37 @@ namespace ScrollOverview::DebugGestureScript {
                 }
                 if (!hold)
                     out.push_back({.kind = EKind::PinchEnd});
+            } else if (V == "hold") {
+                SStep s;
+                if (W.size() == 3 && W[1] == "begin" && count(W[2], s.fingers, 1, 9))
+                    s.kind = EKind::HoldBegin;
+                else if (W.size() >= 2 && W.size() <= 3 && W[1] == "end" && (W.size() == 2 || W[2] == "cancel")) {
+                    s.kind      = EKind::HoldEnd;
+                    s.cancelled = W.size() == 3;
+                } else
+                    return BAD("hold begin F (1..9) | hold end [cancel]");
+                out.push_back(s);
+            } else if (V == "button") {
+                uint32_t code = 0;
+                if (W.size() != 3 || !buttonCode(W[1], code) || (W[2] != "down" && W[2] != "up"))
+                    return BAD("button left|right|middle down|up");
+                out.push_back(button(code, W[2] == "down"));
+            } else if (V == "click") {
+                uint32_t F = 0, ms = 40;
+                if (W.size() < 2 || W.size() > 3 || !count(W[1], F, 1, 9) || (W.size() == 3 && !count(W[2], ms, 0, 1000)))
+                    return BAD("click F(1..9) [MS]");
+                // The fingers rest long enough for libinput to call it a hold,
+                // then the press cancels it.
+                out.push_back({.kind = EKind::HoldBegin, .fingers = F});
+                out.push_back(wait(30));
+                out.push_back({.kind = EKind::HoldEnd, .cancelled = true});
+                if (F <= 3) {
+                    const uint32_t CODE = F == 1 ? BTN_LEFT_CODE : F == 2 ? BTN_RIGHT_CODE : BTN_MIDDLE_CODE;
+                    out.push_back(button(CODE, true));
+                    if (ms)
+                        out.push_back(wait(ms));
+                    out.push_back(button(CODE, false));
+                }
             } else if (V == "frame") {
                 SStep s{.kind = EKind::Frame};
                 for (size_t i = 1; i < W.size(); ++i) {
@@ -327,7 +398,7 @@ namespace ScrollOverview::DebugGestureScript {
                 out.push_back(frame({HELD}, true)); // the swiping fingers lift
                 out.push_back(frame({}, false));    // then the button is let go
             } else
-                return BAD("unknown step (swipe, pinch, frame, wait, keep, drag)");
+                return BAD("unknown step (swipe, pinch, frame, hold, button, wait, keep, drag, click)");
         }
         if (out.empty())
             return std::unexpected("empty script");

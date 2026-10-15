@@ -172,7 +172,7 @@ case "$W" in
     # before this one ran with flight_log=true, so a shared file would hand the
     # grader z7's and z4's flights as well as this arm's. Truncate here, after
     # the spawn (which flies nothing) and before the first click.
-    : > /tmp/ovdbg.log
+    : > "$XDG_RUNTIME_DIR/ovdbg.log"   # DebugPaths.hpp
     rm -f $OUT/z5.mp4
     wf-recorder -f $OUT/z5.mp4 -c libvpx-vp9 -r 30 >$OUT/z5-wfr.log 2>&1 & WFR=$!
     sleep 2.5
@@ -200,7 +200,7 @@ case "$W" in
     kill -INT $WFR 2>/dev/null; wait $WFR 2>/dev/null
     [ "$(fixws)" = special:minimized ] || { echo "z5 RIG FAULT: odd click count should end minimized (fixws=$(fixws))"; exit 1; }
     rm -f $OUT/z5-*.png; ffmpeg -loglevel error -i $OUT/z5.mp4 $OUT/z5-%03d.png
-    cp /tmp/ovdbg.log $OUT/z5-flight.log 2>/dev/null   # the z5log arm's evidence, kept beside the film
+    cp "$XDG_RUNTIME_DIR/ovdbg.log" $OUT/z5-flight.log 2>/dev/null   # the z5log arm's evidence, kept beside the film
     echo "z5 filmed: $(ls $OUT/z5-*.png | wc -l) frames"
     ;;
   zfocus)

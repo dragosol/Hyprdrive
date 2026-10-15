@@ -357,7 +357,7 @@ like these, and the shape is the lesson.
   clicks graded through the plugin's own drawn-box log, which is the only
   instrument that can separate a 400ms EASE_OUT_EXPO from a teleport at 30fps.
   It existed in `zflight_gate.py` and nothing had ever called it. `z_rig.sh`
-  truncates `/tmp/ovdbg.log` at the top of the z5 arm (zdbg APPENDS, and every
+  truncates `$XDG_RUNTIME_DIR/ovdbg.log` at the top of the z5 arm (zdbg APPENDS, and every
   earlier arm runs with `flight_log=true`), and the log is kept beside the film
   as `z5-flight.log`. Both arms carry mutation controls in
   `zrig/danglingB/z5/z5-controls.log`: a same-size 700px displacement in one

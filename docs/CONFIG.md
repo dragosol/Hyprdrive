@@ -35,7 +35,7 @@ Prefix: `plugin:hyprdrive:`
 | `drag_mini_scale` | float | `0.45` | 0.05 .. 1 | size of the drag proxy while it hovers another workspace, as a fraction of its tile size |
 | `drag_mini_ms` | int | `150` | >= 0 | ms for the drag proxy to shrink to, or grow back from, mini scale |
 | `drag_recentre_ms` | int | `160` | >= 0 | ms for the drag proxy's grab point to slide to its centre while over a drop target |
-| `wallpaper` | int | `0` | 0 .. 2 | wallpaper mode |
+| `wallpaper` | int | `0` | 0 .. 2 | wallpaper behind the cards: 0 blurred and dimmed, 1 black, 2 same as 0; the cards always show it |
 | `blur` | bool | `false` |  | blur the overview wallpaper |
 | `layout_motion_blur` | int | `16` | 0 .. 32 | motion blur samples while the layout moves or resizes a window -- a dwindle retile, the scrolling tape, a window opening (0 = off); never an interactive drag |
 | `live_layer_frost` | bool | `true` |  | evaluate dock/bar frost against the overview backdrop instead of the stale optimized blur FB |
@@ -90,7 +90,7 @@ Prefix: `plugin:hyprdrive:dock:`
 | `press_tilt` | bool | `true` |  | a pressed dock icon leans further in toward the press point, with a glare where it is pressed |
 | `dance_urgent` | bool | `true` |  | hyprgnomedock: wiggle an urgent app's icon (D2D dance-urgent-applications) |
 | `urgent_notify` | bool | `true` |  | an urgent app's icon hops up from the screen edge while the dock is hidden (it no longer reveals the dock) |
-| `flight_log` | bool | `false` |  | flight lifecycle log to /tmp/ovdbg.log, for scripts/z_rig.sh + zflight_gate.py |
+| `flight_log` | bool | `false` |  | flight lifecycle log to $XDG_RUNTIME_DIR/ovdbg.log (else /tmp), for scripts/z_rig.sh + zflight_gate.py |
 | `show_favorites` | bool | `true` |  | hyprgnomedock: pinned apps in the dock whether running or not (D2D show-favorites) |
 | `show_apps_button` | bool | `true` |  | hyprgnomedock: the Show Applications button (D2D show-show-apps-button) |
 | `show_apps_at_top` | bool | `false` |  | hyprgnomedock: Show Applications at the START of the dock (D2D show-apps-at-top) |

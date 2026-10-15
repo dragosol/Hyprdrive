@@ -1,6 +1,7 @@
 // The "mosaic" layout: see Mosaic.hpp and MosaicPack.hpp.
 #include "Mosaic.hpp"
 #include "MosaicPack.hpp"
+#include "DebugPaths.hpp"
 #include "Dock.hpp"
 
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -119,8 +120,9 @@ namespace ScrollOverview::Mosaic {
         long long           id = 0;
     };
 
-    // TRACE, for the next odd recording: `touch /tmp/hyprdrive-mosaic.on` and
-    // every resize step and arrangement decision lands in /tmp/hyprdrive-mosaic.log.
+    // TRACE, for the next odd recording: `touch $XDG_RUNTIME_DIR/hyprdrive-mosaic.on`
+    // and every resize step and arrangement decision lands in
+    // $XDG_RUNTIME_DIR/hyprdrive-mosaic.log (DebugPaths.hpp).
     static void trace(const std::string& line) {
         static bool                                  on      = false;
         static std::chrono::steady_clock::time_point checked = {};
@@ -128,11 +130,11 @@ namespace ScrollOverview::Mosaic {
         if (NOW - checked > std::chrono::seconds(1)) {
             checked = NOW;
             std::error_code ec;
-            on      = std::filesystem::exists("/tmp/hyprdrive-mosaic.on", ec);
+            on      = std::filesystem::exists(ScrollOverview::DebugPaths::path("hyprdrive-mosaic.on"), ec);
         }
         if (!on)
             return;
-        if (std::ofstream f("/tmp/hyprdrive-mosaic.log", std::ios::app); f)
+        if (std::ofstream f(ScrollOverview::DebugPaths::path("hyprdrive-mosaic.log"), std::ios::app); f)
             f << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() % 100000000 << ' ' << line << '\n';
     }
 

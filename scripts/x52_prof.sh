@@ -14,7 +14,7 @@ export WAYLAND_DISPLAY=$(cd /run/user/1000 && ls -t wayland-[0-9]* 2>/dev/null |
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
 export HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
-LOG=/tmp/hyprdrive-prof.log
+LOG=$XDG_RUNTIME_DIR/hyprdrive-prof.log   # DebugPaths.hpp
 
 dsp() { hyprctl eval "return hl.dispatch($1)" >/dev/null 2>&1; }
 ov()  { dsp "hl.plugin.hyprdrive.overview([[$1]])"; }

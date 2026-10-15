@@ -630,7 +630,12 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CIntValue>(KEY("drag_recentre_ms"),
                                  "ms for the drag proxy's grab point to slide to its centre while over a drop target", 160,
                                  SIntValueOptions{.min = 0}));
-    addKey(makeShared<CIntValue>(KEY("wallpaper"), "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
+    // Upstream scrolloverview's modes were 0 global only, 1 per-workspace only,
+    // 2 both. Since E8-c (3933dd0) every card carries the wallpaper itself
+    // (cardWallpaperFB, rounded in the shader), so "global only" no longer
+    // exists and 2 renders exactly as 0: kept so an old config stays valid.
+    addKey(makeShared<CIntValue>(KEY("wallpaper"), "wallpaper behind the cards: 0 blurred and dimmed, 1 black, 2 same as 0; the cards always show it", 0,
+                                 SIntValueOptions{.min = 0, .max = 2}));
     addKey(makeShared<CBoolValue>(KEY("blur"), "blur the overview wallpaper", false));
 
     // OVERVIEW_CPP_SPEC §13.9. Defaults are the user's dumped Dash to Dock
@@ -708,7 +713,7 @@ static void registerConfigValuesFor() {
     // `show-apps-always-in-the-edge`, at the reference's values. The last two are
     // a pair: false/true is what puts the button at the right-hand end of a
     // bottom dock rather than in among the apps.
-    addKey(makeShared<CBoolValue>(KEY("dock:flight_log"), "flight lifecycle log to /tmp/ovdbg.log, for scripts/z_rig.sh + zflight_gate.py", false));
+    addKey(makeShared<CBoolValue>(KEY("dock:flight_log"), "flight lifecycle log to $XDG_RUNTIME_DIR/ovdbg.log (else /tmp), for scripts/z_rig.sh + zflight_gate.py", false));
     addKey(makeShared<CBoolValue>(KEY("dock:show_favorites"), "hyprgnomedock: pinned apps in the dock whether running or not (D2D show-favorites)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:show_apps_button"), "hyprgnomedock: the Show Applications button (D2D show-show-apps-button)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:show_apps_at_top"), "hyprgnomedock: Show Applications at the START of the dock (D2D show-apps-at-top)", false));

@@ -129,6 +129,40 @@ int main() {
         CHECK(I && countKind(*I, EKind::PinchUpdate) == 4 && countKind(*I, EKind::PinchEnd) == 0 && (*I).back().scale == 2.5);
     }
 
+    // ---- holds, clickpad buttons and the click macro -------------------------
+    {
+        const auto R = parse("hold begin 4; hold end cancel; hold end; button middle down; button left up");
+        CHECK(R && R->size() == 5);
+        CHECK(R && (*R)[0].kind == EKind::HoldBegin && (*R)[0].fingers == 4);
+        CHECK(R && (*R)[1].kind == EKind::HoldEnd && (*R)[1].cancelled);
+        CHECK(R && (*R)[2].kind == EKind::HoldEnd && !(*R)[2].cancelled);
+        CHECK(R && (*R)[3].kind == EKind::Button && (*R)[3].button == BTN_MIDDLE_CODE && (*R)[3].pressed);
+        CHECK(R && (*R)[4].kind == EKind::Button && (*R)[4].button == BTN_LEFT_CODE && !(*R)[4].pressed);
+    }
+    {
+        // 3 fingers: clickfinger's middle button, after the hold it cancels.
+        const auto R = parse("click 3");
+        CHECK(R && R->size() == 6);
+        CHECK(R && (*R)[0].kind == EKind::HoldBegin && (*R)[0].fingers == 3);
+        CHECK(R && (*R)[2].kind == EKind::HoldEnd && (*R)[2].cancelled);
+        CHECK(R && (*R)[3].kind == EKind::Button && (*R)[3].button == BTN_MIDDLE_CODE && (*R)[3].pressed);
+        CHECK(R && (*R)[4].kind == EKind::Wait && (*R)[4].ms == 40);
+        CHECK(R && (*R)[5].kind == EKind::Button && (*R)[5].button == BTN_MIDDLE_CODE && !(*R)[5].pressed);
+        const auto L = parse("click 1 0"), M = parse("click 2");
+        CHECK(L && countKind(*L, EKind::Wait) == 1 && L->back().button == BTN_LEFT_CODE);
+        CHECK(M && M->back().button == BTN_RIGHT_CODE);
+        // 4 fingers: no button exists for them, only the cancelled hold.
+        const auto F = parse("click 4");
+        CHECK(F && countKind(*F, EKind::Button) == 0 && F->back().kind == EKind::HoldEnd && F->back().cancelled);
+    }
+    CHECK(!parse("hold begin 0"));
+    CHECK(!parse("hold end now"));
+    CHECK(!parse("hold 3"));
+    CHECK(!parse("button middle"));
+    CHECK(!parse("button side down"));
+    CHECK(!parse("click 0"));
+    CHECK(!parse("click 3 40 hold"));
+
     // ---- errors ------------------------------------------------------------
     CHECK(!parse(""));
     CHECK(!parse(" ; ;"));

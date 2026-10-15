@@ -1,6 +1,7 @@
 #include "Compat.hpp"
 
 #include "Config.hpp"
+#include "DebugPaths.hpp"
 #include "globals.hpp"
 
 #include <hyprland/src/config/ConfigManager.hpp>
@@ -13,7 +14,12 @@
 
 namespace {
 
-constexpr const char* COMPAT_LOG = "/tmp/hyprdrive-compat.log";
+// Per session (DebugPaths.hpp): openLog truncates it, and a second Hyprland
+// loading the plugin used to empty the first one's log under its gate.
+const std::string& compatLog() {
+    static const std::string PATH = ScrollOverview::DebugPaths::path("hyprdrive-compat.log");
+    return PATH;
+}
 
 struct SPair {
     std::string           modern;
@@ -29,7 +35,7 @@ std::vector<SPair>& pairs() {
 bool g_warned = false;
 
 void appendLog(const std::string& line) {
-    if (FILE* const F = std::fopen(COMPAT_LOG, "a")) {
+    if (FILE* const F = std::fopen(compatLog().c_str(), "a")) {
         std::fputs(line.c_str(), F);
         std::fputc('\n', F);
         std::fclose(F);
@@ -108,7 +114,7 @@ std::filesystem::path stateDir(const char* name) {
 namespace ScrollOverview::Compat {
 
 void openLog() {
-    if (FILE* const F = std::fopen(COMPAT_LOG, "w")) {
+    if (FILE* const F = std::fopen(compatLog().c_str(), "w")) {
         std::fprintf(F, "# %s compat log -- every use of a pre-rename name, and the one warning\n", NAME);
         std::fclose(F);
     }
