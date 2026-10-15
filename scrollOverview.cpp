@@ -6874,7 +6874,8 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
     const auto MONITOR = IN.monitor;
     out.monitorId      = MONITOR ? MONITOR->m_id : MONITOR_INVALID;
 
-    out.label = !IN.queried ? "Search, calculate or run" : (IN.emptyResult ? std::string(IN.query) + "    no matches" : std::string(IN.query));
+    out.placeholder = IN.query.empty();
+    out.label       = out.placeholder ? "Search, calculate or run" : (IN.emptyResult ? std::string(IN.query) + "    no matches" : std::string(IN.query));
 
     // The pill is laid out in the SAME logical space as the strip it sits above.
     // That placement is load-bearing and is NOT the part X22 changed: laid out
@@ -7666,7 +7667,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         return;
 
     texFade = FADE;
-    const CHyprColor FG = !L.queried ? ScrollOverview::Config::themeMutedText() : (L.emptyResult ? ScrollOverview::Config::themeUrgent() : ScrollOverview::Config::themeForeground());
+    const CHyprColor FG = L.placeholder ? ScrollOverview::Config::themeMutedText() : (L.emptyResult ? ScrollOverview::Config::themeUrgent() : ScrollOverview::Config::themeForeground());
 
     const int  FONTPX = std::max(1, sc<int>(std::round(OVERVIEW_PILL_TEXTPX * SCALE)));
     const auto NOW    = Time::steadyNow();
@@ -7753,7 +7754,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         return;
     }
 
-    const auto TEX = OverviewRender::text(L.label, FG, FONTPX, false, "", sc<int>(L.fieldW), L.queried ? 600 : 0);
+    const auto TEX = OverviewRender::text(L.label, FG, FONTPX, false, "", sc<int>(L.fieldW), L.placeholder ? 0 : 600);
     if (!TEX || !TEX->ok())
         return;
 

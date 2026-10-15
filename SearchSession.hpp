@@ -316,6 +316,10 @@ struct SSearchLayout {
     int   rounding      = 0;
     float roundingPower = 2.F;
     bool  queried = false, emptyResult = false;
+    // Nothing typed: the pill shows the muted placeholder. NOT !queried -- a
+    // submenu or the root browse has the results up with an empty query, and
+    // its pill used to be blank.
+    bool  placeholder = true;
 
     CBox  pill, badge;
     // The pill BEFORE the strip label's nudge, and how far it may be lifted
