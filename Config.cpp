@@ -713,7 +713,7 @@ static void registerConfigValuesFor() {
     // `show-apps-always-in-the-edge`, at the reference's values. The last two are
     // a pair: false/true is what puts the button at the right-hand end of a
     // bottom dock rather than in among the apps.
-    addKey(makeShared<CBoolValue>(KEY("dock:flight_log"), "flight lifecycle log to /tmp/ovdbg.log, for scripts/z_rig.sh + zflight_gate.py", false));
+    addKey(makeShared<CBoolValue>(KEY("dock:flight_log"), "flight lifecycle log to $XDG_RUNTIME_DIR/ovdbg.log (else /tmp), for scripts/z_rig.sh + zflight_gate.py", false));
     addKey(makeShared<CBoolValue>(KEY("dock:show_favorites"), "hyprgnomedock: pinned apps in the dock whether running or not (D2D show-favorites)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:show_apps_button"), "hyprgnomedock: the Show Applications button (D2D show-show-apps-button)", true));
     addKey(makeShared<CBoolValue>(KEY("dock:show_apps_at_top"), "hyprgnomedock: Show Applications at the START of the dock (D2D show-apps-at-top)", false));

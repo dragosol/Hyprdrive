@@ -48,7 +48,7 @@ cd "$(dirname "$0")/../../.."
 source scripts/lib/rig.sh
 rig_env || exit 1
 
-LOG=/tmp/hyprdrive-compat.log
+LOG=$XDG_RUNTIME_DIR/hyprdrive-compat.log   # DebugPaths.hpp (rig_env sets XDG_RUNTIME_DIR)
 FRAG=$HOME/.config/hypr/hyprdrive/99-compat-probe.lua
 OUT=/mnt/host/zrig/phase9/x53; mkdir -p $OUT
 FAIL=0

@@ -1,6 +1,7 @@
 #include "OverviewGesture.hpp"
 
 #include "Config.hpp"
+#include "DebugPaths.hpp"
 #include "IOverview.hpp"
 #include "scrollOverview.hpp"
 #include "OmarchySearch.hpp"
@@ -399,7 +400,7 @@ void clickLog(const char* fmt, ...) {
     if (!ENABLED)
         return;
 
-    if (FILE* F = fopen("/tmp/hyprdrive-click.log", "a")) {
+    if (FILE* F = fopen(ScrollOverview::DebugPaths::path("hyprdrive-click.log").c_str(), "a")) {
         va_list ap;
         va_start(ap, fmt);
         vfprintf(F, fmt, ap);

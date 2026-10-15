@@ -25,6 +25,8 @@
 #   debug_gesture_test  DebugGestureScript.hpp: the `hyprdrive:debug gesture`
 #                     script parse, and its keep/drag macros through the real
 #                     FingerSwipeModel.
+#   debug_paths_test  DebugPaths.hpp: debug logs under $XDG_RUNTIME_DIR, /tmp
+#                     only without one.
 #   native_search_test  NativeSearch.hpp: the leading-program parse and the
 #                     terminal choice the search uses off Omarchy.
 #
@@ -72,6 +74,7 @@ run icon_overrides_test scripts/icon_overrides_test.cpp
 run dock_drop_test scripts/dock_drop_test.cpp
 run finger_swipe_test scripts/finger_swipe_test.cpp
 run debug_gesture_test scripts/debug_gesture_test.cpp
+run debug_paths_test scripts/debug_paths_test.cpp
 run hot_corner_test scripts/hot_corner_test.cpp
 # shellcheck disable=SC2046
 run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-config --cflags --libs librsvg-2.0)

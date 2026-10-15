@@ -69,13 +69,17 @@ if MODE == 'z5log':
     # cannot make this call because a 400ms EASE_OUT_EXPO legitimately moves
     # ~900px between two 30fps film frames.
     #
-    # The plugin's zdbg writes /tmp/ovdbg.log, in the guest, always. The host
-    # path below it is where this arm used to be read from when the grader ran
-    # host-side; kept as a fallback so a host-side replay of a copied log still
-    # works. FLIGHT_LOG overrides both, which is what the mutation control uses.
+    # The plugin's zdbg writes $XDG_RUNTIME_DIR/ovdbg.log in the guest
+    # (DebugPaths.hpp; /tmp/ovdbg.log from builds before it, or with no
+    # runtime dir). The host path last is where this arm used to be read from
+    # when the grader ran host-side; kept as a fallback so a host-side replay of
+    # a copied log still works. FLIGHT_LOG overrides them all, which is what the
+    # mutation control uses.
     import os as _os
     import re as _re
-    _cands = [p for p in (_os.environ.get('FLIGHT_LOG'), '/tmp/ovdbg.log',
+    _cands = [p for p in (_os.environ.get('FLIGHT_LOG'),
+                          _os.path.join(_os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % _os.getuid()), 'ovdbg.log'),
+                          '/tmp/ovdbg.log',
                           '/home/dragos/hyprvm/share/zrig/ovdbg.log') if p]
     _log = next((p for p in _cands if _os.path.exists(p)), None)
     assert _log, 'no flight log: %s -- dock:flight_log was never on' % (_cands,)
@@ -132,7 +136,9 @@ if MODE == 'z5phase':
     #      spot. Both bails that used to live there ended in the wrong state.
     import os as _os
     import re as _re
-    _cands = [p for p in (_os.environ.get('FLIGHT_LOG'), '/tmp/ovdbg.log',
+    _cands = [p for p in (_os.environ.get('FLIGHT_LOG'),
+                          _os.path.join(_os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % _os.getuid()), 'ovdbg.log'),
+                          '/tmp/ovdbg.log',
                           '/home/dragos/hyprvm/share/zrig/ovdbg.log') if p]
     _log = next((p for p in _cands if _os.path.exists(p)), None)
     assert _log, 'no flight log: %s -- dock:flight_log was never on' % (_cands,)

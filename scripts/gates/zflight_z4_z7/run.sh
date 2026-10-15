@@ -81,7 +81,7 @@ film_arm z5
 # The film says the picture was continuous; the plugin's own drawn-box log says
 # the REVERSAL continued the old flight instead of restarting it, which is the
 # claim, and which no 30fps pixel metric can carry (a 400ms EASE_OUT_EXPO moves
-# ~900px between two frames). z_rig truncates /tmp/ovdbg.log at the top of the
+# ~900px between two frames). z_rig truncates $XDG_RUNTIME_DIR/ovdbg.log at the top of the
 # z5 arm, so what it grades is this arm's flights and nothing else.
 # ...and z5phase reads the same run a third way: as the FLIGHT STATE MACHINE's
 # own transition log. z5/z5log both grade BOXES -- where the proxy was drawn --

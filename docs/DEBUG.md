@@ -127,7 +127,27 @@ hl.sh gesture state
 ```
 
 Set `HYPRDRIVE_CLICK_LOG=1` in the compositor's environment to log every
-click-gesture decision to `/tmp/hyprdrive-click.log`.
+click-gesture decision to `hyprdrive-click.log` (see "Debug files" below).
 
 What it does not cover: anything that needs libinput's own timing or
 acceleration. The deltas and hold durations are taken exactly as given.
+
+## Debug files
+
+Every debug log, and every file whose presence switches one on, lives in the
+compositor's `$XDG_RUNTIME_DIR` (`DebugPaths.hpp`). If that is unset or not a
+directory, they live in `/tmp`. They used to be fixed `/tmp` paths shared by
+every Hyprland on the machine, so one test instance's plugin load truncated
+another's compat log. In the headless harness, `$XDG_RUNTIME_DIR` is the
+instance's own `/tmp/hl-<name>/rt`.
+
+| file | what it is |
+| --- | --- |
+| `hyprdrive-compat.log` | each use of a pre-rename name, and the one warning. Truncated at plugin load |
+| `hyprdrive-click.log` | click-gesture decisions, written only with `HYPRDRIVE_CLICK_LOG=1` |
+| `ovdbg.log` | the dock's flight lifecycle, written only with `dock:flight_log = true` |
+| `hyprdrive-openprof.on` | if present, each overview open writes `hyprdrive-openprof.log` |
+| `hyprdrive-openprof.ab` | if present, the open profiler alternates `render:new_render_scheduling` |
+| `hyprdrive-profile.on` | if present at plugin load, the search profiler writes `hyprdrive-prof.log` (as do `HYPRDRIVE_PROFILE` / `SCROLLOVERVIEW_PROFILE`) |
+| `hyprdrive-stacklog.on` | if present, dock stacks write `hyprdrive-stack.log` |
+| `hyprdrive-mosaic.on` | if present (checked each second), Mosaic writes `hyprdrive-mosaic.log` |
