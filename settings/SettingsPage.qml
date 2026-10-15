@@ -2529,19 +2529,27 @@ Item {
           menuLayer.kind = kind
           menuLayer.onPick = onPick
           menu.width = Math.max(item.width, kind === "curve" ? ui.space(260) : ui.space(180))
+          menuFlick.contentY = 0
           var p = item.mapToItem(menuLayer, 0, item.height + ui.space(6))
-          var h = Math.min(menuList.implicitHeight + ui.space(12), menuLayer.height - ui.space(20))
+          var h = menu.height
           menu.x = Math.max(ui.space(10), Math.min(p.x, menuLayer.width - menu.width - ui.space(10)))
           menu.y = p.y + h > menuLayer.height - ui.space(10) ? Math.max(ui.space(10), item.mapToItem(menuLayer, 0, 0).y - h - ui.space(6)) : p.y
           menuIn.restart()
         }
         function close() { owner = null }
+        // The list's height, from the options themselves. menuList.implicitHeight
+        // is the Column's last layout, and the Column lays out the new rows only
+        // after openFor has placed the card -- so a menu opened right after a
+        // shorter one was placed with the shorter one's height and ran off the
+        // window (the 18 gesture actions after a 5-item fade menu).
+        readonly property real rowHeight: kind === "curve" ? ui.space(46) : ui.space(32)
+        readonly property real listHeight: options.length * rowHeight + Math.max(0, options.length - 1) * menuList.spacing
 
         MouseArea { anchors.fill: parent; onClicked: menuLayer.close() }
 
         Rectangle {
           id: menu
-          height: Math.min(menuList.implicitHeight + ui.space(12), menuLayer.height - ui.space(20))
+          height: Math.min(menuLayer.listHeight + ui.space(12), menuLayer.height - ui.space(20))
           radius: ui.space(10)
           color: root.mix(root.bg, root.fg, 0.07)
           border.width: 1
@@ -2554,9 +2562,10 @@ Item {
             NumberAnimation { target: menu; property: "scale"; from: 0.94; to: 1; duration: root.calm; easing.type: Easing.OutBack }
           }
           Flickable {
+            id: menuFlick
             anchors.fill: parent
             anchors.margins: ui.space(6)
-            contentHeight: menuList.implicitHeight
+            contentHeight: menuLayer.listHeight
             boundsBehavior: Flickable.StopAtBounds
             clip: true
             Column {
@@ -2570,7 +2579,7 @@ Item {
                   required property var modelData
                   readonly property bool sel: modelData.value === menuLayer.value
                   width: menuList.width
-                  height: menuLayer.kind === "curve" ? ui.space(46) : ui.space(32)
+                  height: menuLayer.rowHeight
                   radius: ui.space(7)
                   color: optArea.containsMouse ? root.tint(root.accent, 0.18) : (sel ? root.tint(root.fg, 0.06) : "transparent")
                   Behavior on color { ColorAnimation { duration: root.quick } }
