@@ -228,6 +228,13 @@ namespace {
         // which is why the generation moves HERE too.
         store().stamp = std::filesystem::last_write_time(PATH, ec);
         ++g_storeGeneration;
+        // And a frame: a pin or an unpin from a bind or hyprctl (stack("pin
+        // ...")) touches no pointer, and an idle dock never redrew -- the new
+        // cell appeared only when something else moved.
+        if (g_pHyprRenderer)
+            for (const auto& M : State::monitorState()->monitors())
+                if (M)
+                    g_pHyprRenderer->damageMonitor(M);
     }
 
     Stacks::SStack* find(const std::string& path) {
@@ -1435,6 +1442,9 @@ namespace ScrollOverview::Stacks {
         store().items.emplace_back(SStack{.path = CANON});
         decorate(store().items.back());
         writeStore();
+        // H1. Read it afresh: a folder pinned before keeps its old listing in
+        // the reader's cache, and nothing watched it while it was unpinned.
+        StackReader::invalidate(CANON);
         return true;
     }
 

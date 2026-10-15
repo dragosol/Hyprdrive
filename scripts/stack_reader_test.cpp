@@ -1,8 +1,10 @@
 // StackReader's directory read: caps, hidden files, directories, birth time.
 #include "../StackReader.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <thread>
 #include <fstream>
 #include <string>
 #include <unistd.h>
@@ -61,6 +63,28 @@ int main() {
     check(keptText == "old", "the existing file was not overwritten");
     auto SELF = ScrollOverview::StackReader::moveOrCopyNow((DEST).string(), {DIR.string()});
     check(!SELF.error.empty() && SELF.moved == 0, "a folder into its own child refused");
+
+    // H1. Unpin, a file lands, pin again: the listing is read afresh rather than
+    // served from the cache the folder had before it stopped being watched.
+    const auto settled = [](const std::string& dir, size_t want) {
+        for (int i = 0; i < 300; ++i) {
+            const auto LS = ScrollOverview::StackReader::listing(dir);
+            if (LS.ready && LS.entries.size() == want)
+                return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return false;
+    };
+    const auto PIN = DIR / "pinned";
+    fs::create_directories(PIN);
+    ScrollOverview::StackReader::watch({PIN.string()});
+    check(settled(PIN.string(), 0), "pinned empty folder lists 0");
+    ScrollOverview::StackReader::watch({});
+    std::ofstream(PIN / "t1.txt") << "t";
+    ScrollOverview::StackReader::drainInotify();
+    ScrollOverview::StackReader::watch({PIN.string()});
+    check(settled(PIN.string(), 1), "re-pinned folder lists the file that arrived while unpinned");
+    ScrollOverview::StackReader::shutdown();
 
     fs::remove_all(DIR);
     std::printf("stack_reader_test: %d checks, %d failed\n", g_checks, g_fail);
