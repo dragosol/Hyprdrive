@@ -370,7 +370,16 @@ int main() {
             auto codex = OmarchySearch::searchAgents("/codex");
             CHECK(codex.size() == 1);
             CHECK(OmarchySearch::canBeDefaultAgent(codex.front()));
+            // D10: the write moves the inputs generation AT ONCE -- the caller
+            // re-reads the memoised rows on the next line to move the
+            // selection onto the agent's new slot, well inside the 250ms poll
+            // (and inside the same st_mtime second as any earlier write).
+            const auto GEN_BEFORE = OmarchySearch::searchInputsGeneration();
             CHECK(OmarchySearch::setDefaultAgent(codex.front()));
+            CHECK(OmarchySearch::searchInputsGeneration() != GEN_BEFORE);
+            const auto GEN_AGAIN = OmarchySearch::searchInputsGeneration();
+            CHECK(OmarchySearch::setDefaultAgent(codex.front()));
+            CHECK(OmarchySearch::searchInputsGeneration() != GEN_AGAIN);
             CHECK(slurpFile(HOME / ".config/hyprdrive/default-agent") == "codex\n");
             CHECK(!fs::exists(HOME / ".config/omarchy"));
             CHECK(OmarchySearch::isDefaultAgent(codex.front()));

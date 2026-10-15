@@ -65,6 +65,14 @@ std::string menuRootTitle() {
     return omarchyMode() ? "Omarchy Menu" : "System";
 }
 
+// Settings THIS process just wrote (the default agent, by Ctrl x2). The poll in
+// searchInputsGeneration would see the file's mtime within 250ms -- or never,
+// when the write lands in the same second as the last one (st_mtime is whole
+// seconds) -- and the caller that wrote it re-reads the rows on the very next
+// line to put the selection on the agent's new slot. So the writer bumps this,
+// and the generation moves before that re-read (D10).
+static std::atomic<uint64_t> g_localInputsEpoch{0};
+
 // PROGRAM LOOKUPS, CACHED FOR A FEW SECONDS. Off Omarchy every agent row, the
 // terminal choice and every menu row asks "is X installed?" -- per row, each
 // time the row memo is cold. One access() sweep of PATH per name per window of
@@ -843,11 +851,15 @@ bool setDefaultAgent(const SSearchItem& item) {
         // off Omarchy (or integration = none). Best effort: Omarchy's file is
         // the one that counts here.
         writeOneLine(hyprdriveDefaultAgentPath(), PREFIX);
+        g_localInputsEpoch.fetch_add(1, std::memory_order_acq_rel);
         return true;
     }
 
     const auto NAME = nativeAgentName(PREFIX);
-    return !NAME.empty() && writeOneLine(hyprdriveDefaultAgentPath(), NAME);
+    if (NAME.empty() || !writeOneLine(hyprdriveDefaultAgentPath(), NAME))
+        return false;
+    g_localInputsEpoch.fetch_add(1, std::memory_order_acq_rel);
+    return true;
 }
 
 // The default agent's rows first, every other row in the order it already had.
@@ -2246,7 +2258,8 @@ uint64_t searchInputsGeneration() {
     // The worker's own counter needs no poll and must not wait for one.
     // ...and the dictionary/translator's, for the same reason: an answer lands
     // between frames and the memoised rows have to notice on the next one.
-    return fsFingerprint ^ (g_fileDoneGen.load(std::memory_order_acquire) * 1099511628211ULL) ^ (ToolSearch::generation() * 0x9E3779B97F4A7C15ULL);
+    return fsFingerprint ^ (g_fileDoneGen.load(std::memory_order_acquire) * 1099511628211ULL) ^ (ToolSearch::generation() * 0x9E3779B97F4A7C15ULL) ^
+        (g_localInputsEpoch.load(std::memory_order_acquire) * 0xC2B2AE3D27D4EB4FULL);
 }
 
 std::vector<SSearchItem> fileResults() {

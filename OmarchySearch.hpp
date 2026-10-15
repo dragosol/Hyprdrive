@@ -120,8 +120,9 @@ bool fileSearchBusy();
 // of those files does. This is the key a caller memoises on.
 //
 // The filesystem half is re-read at most every 250ms, which is also the ceiling
-// on how long a `omarchy default agent ...` run in a terminal (or a Ctrl x2 in
-// the search field) takes to show up. The file-search worker's own generation
+// on how long a `omarchy default agent ...` run in a terminal takes to show up.
+// A Ctrl x2 in the search field writes the file from THIS process and moves the
+// generation at once (setDefaultAgent), so the selection can follow the agent. The file-search worker's own generation
 // is folded in unpolled, so an async result lands on the next frame.
 uint64_t searchInputsGeneration();
 void setResultsCallback(std::function<void()> cb);
