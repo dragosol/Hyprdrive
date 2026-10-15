@@ -111,6 +111,17 @@ bool isMinimized(PHLWINDOW window) {
     return window && entryFor(window) != g_entries.end();
 }
 
+void onWindowMoved(PHLWINDOW window, PHLWORKSPACE workspace) {
+    // minimize() records the entry first and moves the window ONTO the stash
+    // after, and restore() drops the entry before moving it off -- so a move
+    // off the stash with the entry still standing is never one of ours.
+    if (!window || isStash(workspace))
+        return;
+
+    if (const auto IT = entryFor(window); IT != g_entries.end())
+        g_entries.erase(IT);
+}
+
 WORKSPACEID originalWorkspace(PHLWINDOW window) {
     if (!window)
         return WORKSPACE_INVALID;
