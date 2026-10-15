@@ -25,7 +25,16 @@
 #                                           crash test; the outer mutter keeps its own)
 #         [--env K=V]...                    extra environment for Hyprland only, e.g.
 #                                           --env HYPRDRIVE_NO_OMARCHY=1
+#         [--omarchy]                       a FORCED-Omarchy run: HYPRDRIVE_INTEGRATION=omarchy
+#                                           and --lua-home (an Omarchy hyprland.lua says
+#                                           require("hypr.hyprdrive"), which needs ~/.config
+#                                           on package.path; combine with --user-config)
+#         [--lua-home]                      only the package.path half: LUA_PATH(_5_4) =
+#                                           ~/.config/?.lua;~/.config/?/init.lua;; (hyprtest's
+#                                           home; Hyprland prepends its config dir to it)
 #   hl.sh stop                              exit Hyprland, kill everything, report cores
+#                                           of THIS instance only (see stop: matched by
+#                                           the core's XDG_RUNTIME_DIR, else by pid)
 #   hl.sh status                            pids, monitors, plugin list
 #   hl.sh h <hyprctl args...>               hyprctl against the instance
 #   hl.sh eval '<lua>'                      = h eval '<lua>'
@@ -48,6 +57,10 @@
 #   hl.sh log [n]                           tail of the instance's hyprland.log
 #   hl.sh install [SO]                      copy a built hyprdrive.so into hyprtest's
 #                                           ~/.local/lib/hyprdrive (default: repo build)
+#   hl.sh gesture '<script>'                synthetic touchpad gestures through the plugin's
+#                                           hyprdrive:debug gesture topic, e.g.
+#                                           gesture 'swipe 3 up 400' | gesture state
+#                                           (script language: DebugGestureScript.hpp)
 # Needs (hyprtest): pywayland for ptr/vkbd (pip install --user pywayland==0.4.18), wtype, grim, kitty, mutter.
 # Env: HL_STATE (default /tmp/hyprdrive-hl), HL_USER (default hyprtest).
 #      HL_NAME=x is HL_STATE=/tmp/hl-x: a second, independent instance (its own
@@ -140,13 +153,49 @@ if [ "${1:-}" != __inner ]; then
     rc=0
     as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
     if [ "$cmd" = stop ]; then
-        # coredumpctl as dragos does list hyprtest's crashes (metadata only).
+        # THIS instance's cores only. Every instance runs as hyprtest, so the
+        # uid alone counted a crash of ANOTHER agent's run (HL_NAME=x) as this
+        # one's (2026-10-14). systemd-coredump keeps each crashed process's
+        # environment in the journal (COREDUMP_ENVIRON, readable as dragos), and
+        # every process of an instance carries XDG_RUNTIME_DIR=$STATE/rt -- the
+        # same test ours() uses. A core without an environment falls back to
+        # its pid: one this instance recorded (started, or alive at stop) in
+        # $STATE/pids, and only since this instance started.
         st=$(as cat "$STATE/started-at" 2>/dev/null || echo "$since")
-        # columns: DOW DATE TIME TZ PID UID GID SIG COREFILE EXE SIZE
         uid=$(id -u "$HL_USER")
-        cores=$(coredumpctl list --no-legend --no-pager --since "$st" 2>/dev/null | awk -v u="$uid" '$6==u' || true)
-        if [ -n "$cores" ]; then echo "hl: COREDUMPS since $st:"; echo "$cores"; rc=3
-        else echo "hl: no coredumps since $st"; fi
+        pidsf=$(mktemp); as cat "$STATE/pids" > "$pidsf" 2>/dev/null || true
+        report=$(journalctl --no-pager -o json --since "$st" MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1 COREDUMP_UID="$uid" 2>/dev/null |
+            python3 -c 'import json, sys
+rt, pidsf = sys.argv[1], sys.argv[2]
+pids = set(open(pidsf).read().split())
+mine = other = 0
+for line in sys.stdin:
+    try: d = json.loads(line)
+    except ValueError: continue
+    env = d.get("COREDUMP_ENVIRON")
+    if isinstance(env, list):  # journal fields with binary data come as byte lists
+        env = bytes(env).decode("utf-8", "replace")
+    pid = str(d.get("COREDUMP_PID", ""))
+    if isinstance(env, str):
+        ours = ("XDG_RUNTIME_DIR=" + rt) in env.split(chr(10))
+    else:
+        ours = pid in pids
+    if not ours:
+        other += 1
+        continue
+    mine += 1
+    sig = d.get("COREDUMP_SIGNAL_NAME") or d.get("COREDUMP_SIGNAL", "?")
+    exe = d.get("COREDUMP_EXE") or d.get("COREDUMP_COMM", "?")
+    print("  pid %s %s %s" % (pid, sig, exe))
+print("#other %d" % other)' "$STATE/rt" "$pidsf" || true)
+        rm -f "$pidsf"
+        other=$(printf '%s\n' "$report" | sed -n 's/^#other //p'); other=${other:-0}
+        mine=$(printf '%s\n' "$report" | grep -v '^#other' | grep -c . || true)
+        note=; [ "$other" = 0 ] || note=" ($other core(s) of other hyprtest instances ignored)"
+        if [ "$mine" -gt 0 ]; then
+            echo "hl: COREDUMPS of this instance since $st:$note"
+            printf '%s\n' "$report" | grep -v '^#other'; rc=3
+        else echo "hl: no coredumps of this instance since $st$note"; fi
     fi
     exit $rc
 fi
@@ -236,7 +285,7 @@ LUA
 case ${1:-} in
 start)
     shift
-    plugin=1; so=$SO_DEFAULT; cfg=$STATE/test.lua; bus=1; envs=()
+    plugin=1; so=$SO_DEFAULT; cfg=$STATE/test.lua; bus=1; envs=(); luahome=0
     while [ $# -gt 0 ]; do case $1 in
         --no-plugin) plugin=0 ;;
         --so) so=$2; shift ;;
@@ -244,8 +293,16 @@ start)
         --user-config) cfg=$HOME/.config/hypr/hyprland.lua ;;
         --no-bus) bus=0 ;;
         --env) case $2 in *=*) envs+=("$2") ;; *) die "start: --env wants K=V" ;; esac; shift ;;
+        --omarchy) envs+=("HYPRDRIVE_INTEGRATION=omarchy"); luahome=1 ;;
+        --lua-home) luahome=1 ;;
         *) die "start: unknown arg $1" ;;
     esac; shift; done
+    if [ $luahome = 1 ]; then
+        # liblua seeds package.path from LUA_PATH_5_4 / LUA_PATH (";;" = the
+        # default path); Hyprland then prepends its config dir to it.
+        lp="$HOME/.config/?.lua;$HOME/.config/?/init.lua;;"
+        envs+=("LUA_PATH_5_4=$lp" "LUA_PATH=$lp")
+    fi
     # The default config is generated: write it before asking whether it is
     # readable, or a fresh HL_STATE (no test.lua yet) can never start.
     [ "$cfg" != "$STATE/test.lua" ] || write_config
@@ -254,7 +311,7 @@ start)
     [ $(( ${#RT} + 6 + 61 + 14 )) -le 107 ] || die "start: state dir $STATE is too long for Hyprland's socket paths (use a shorter HL_STATE / HL_NAME)"
     running && die "already running (hl.sh stop first)"
     [ -z "$(ours)" ] || die "leftover processes on $RT: $(ours | tr '\n' ' ') -- run hl.sh stop"
-    rm -rf "$RT" "$STATE"/{sig,wl,*.pid,outer.log,hypr.out,py,nclients,client.*.log,vkbd.log,vkbd.fifo,vkbd.fifo.ack}
+    rm -rf "$RT" "$STATE"/{sig,wl,*.pid,pids,outer.log,hypr.out,py,nclients,client.*.log,vkbd.log,vkbd.fifo,vkbd.fifo.ack}
     mkdir -m700 "$RT"
     date '+%Y-%m-%d %H:%M:%S' > "$STATE/started-at"
     write_config; write_busconf
@@ -263,7 +320,7 @@ start)
     setsid dbus-run-session --config-file="$STATE/bus.conf" -- mutter --headless --wayland --no-x11 \
         --virtual-monitor 1920x1080 --wayland-display outer-0 \
         > "$STATE/outer.log" 2>&1 < /dev/null &
-    echo $! > "$STATE/outer.pid"
+    echo $! > "$STATE/outer.pid"; echo $! >> "$STATE/pids"
     for _ in $(seq 50); do [ -S "$RT/outer-0" ] && break; sleep 0.2; done
     [ -S "$RT/outer-0" ] || { tail "$STATE/outer.log"; die "outer mutter did not come up"; }
     # 2. Hyprland nested in it, with its own session bus like a real login.
@@ -276,7 +333,7 @@ start)
     [ $bus = 1 ] || launcher=()
     env ${envs[@]+"${envs[@]}"} WAYLAND_DISPLAY=outer-0 HYPRLAND_NO_SD_NOTIFY=1 HYPRLAND_NO_SD_VARS=1 \
         setsid ${launcher[@]+"${launcher[@]}"} Hyprland -c "$cfg" > "$STATE/hypr.out" 2>&1 < /dev/null &
-    echo $! > "$STATE/hypr.pid"
+    echo $! > "$STATE/hypr.pid"; echo $! >> "$STATE/pids"
     echo "hl: config $cfg, session bus $([ $bus = 1 ] && echo yes || echo NO)${envs[*]+, env ${envs[*]}}"
     for _ in $(seq 75); do
         s=$(ls -t "$RT/hypr" 2>/dev/null | head -1 || true)
@@ -286,6 +343,7 @@ start)
     done
     [ -n "${s:-}" ] || { tail -20 "$STATE/hypr.out"; die "no instance socket after 15 s"; }
     echo "$s" > "$STATE/sig"
+    ours >> "$STATE/pids"   # Hyprland itself (the wrapper's child), mutter's helpers
     # Config errors NOW, before this script's own `hyprctl eval` below: an eval
     # starts with m_errors.clear() (0.56 CConfigManager::eval), so a startup
     # error -- a Lua runtime error inside a require()d fragment included --
@@ -307,7 +365,7 @@ start)
     gen_proto
     WAYLAND_DISPLAY=$(wlsock) PYTHONPATH=$STATE/py HL_VKBD_FIFO=$STATE/vkbd.fifo setsid python3 "$STATE/vkbd.py" \
         > "$STATE/vkbd.log" 2>&1 < /dev/null &
-    echo $! > "$STATE/vkbd.pid"
+    echo $! > "$STATE/vkbd.pid"; echo $! >> "$STATE/pids"
     echo "hl: Hyprland up, sig $s wayland $(wlsock)"
     hc monitors | grep '^Monitor'
     if grep -q '[^[:space:]]' "$STATE/configerrors.start"; then
@@ -320,6 +378,7 @@ start)
         running || { tail -30 "$STATE/hypr.out"; die "Hyprland died loading the plugin"; }
         hc plugin list
     fi
+    ours >> "$STATE/pids"
     ;;
 stop)
     # input helpers first, while the display is still alive
@@ -333,13 +392,14 @@ stop)
     s=$(cat "$STATE/sig" 2>/dev/null || true)
     [ -n "$s" ] && [ -f "$RT/hypr/$s/hyprland.log" ] && cp "$RT/hypr/$s/hyprland.log" "$STATE/hyprland.last.log"
     pids=$(ours)
+    [ -z "$pids" ] || echo "$pids" >> "$STATE/pids"   # for the outer side's core match
     [ -n "$pids" ] && kill $pids 2>/dev/null || true
     sleep 1
     pids=$(ours)
     [ -n "$pids" ] && { echo "hl: SIGKILL $(echo $pids)"; kill -9 $pids 2>/dev/null || true; sleep 0.5; }
     pids=$(ours)
     [ -z "$pids" ] || die "processes survived: $pids"
-    rm -rf "$RT" "$STATE"/{sig,wl,*.pid}
+    rm -rf "$RT" "$STATE"/{sig,wl,*.pid}   # pids stays: the outer side reads it after this
     echo "hl: stopped, no processes left on $RT (log kept: $STATE/hyprland.last.log)"
     ;;
 status)
@@ -367,6 +427,7 @@ win)
     shift; [ $# -gt 0 ] || set -- kitty
     cd /
     WAYLAND_DISPLAY=$(wlsock) setsid "$@" > "$STATE/client.$$.log" 2>&1 < /dev/null &
+    echo $! >> "$STATE/pids"
     echo "hl: launched $* (pid $!)"
     for _ in $(seq 25); do
         n=$(hc -j clients | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
@@ -391,6 +452,11 @@ key)
     # wtype: a NEW virtual keyboard per call; fine for plain windows, but the
     # overview reacts to the new device (use type/tap there)
     shift; WAYLAND_DISPLAY=$(wlsock) wtype "$@" ;;
+gesture)
+    # The plugin's report (state, a parse error) comes back as the dispatch
+    # error text, which `dispatch` prints and `eval` would drop.
+    shift; g=$*; g=${g//\\/\\\\}; g=${g//\"/\\\"}
+    hc dispatch "hl.plugin.hyprdrive.debug(\"gesture $g\")" ;;
 warp)
     hc eval "hl.dispatch(hl.dsp.cursor.move({ x = $2, y = $3 }))" ;;
 ptr)
