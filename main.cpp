@@ -2608,6 +2608,11 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // is a call into unloaded code when that loop is destroyed.
     OvInternal::cancelPointerHandoff();
     ScrollOverview::Flight::abortAll("plugin-exit");
+    // Minimized windows sit on special:minimized, which is never shown: with
+    // the plugin gone nothing could bring them back (they stayed there until a
+    // reload re-adopted them). After every flight has been settled above, and
+    // before ConfigureHold::flush below, since the restore holds configures.
+    ScrollOverview::Minimize::restoreAllForUnload();
     // A flying window may hold the flight's blur transformer; its destructor is
     // this plugin's code, so it goes before the dlclose (Hyprland's own exit too).
     ScrollOverview::FlightBlur::shutdown();

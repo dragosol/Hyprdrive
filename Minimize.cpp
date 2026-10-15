@@ -79,6 +79,8 @@ void dropDeadEntries() {
     std::erase_if(g_entries, [](const auto& e) { return !e.window.lock(); });
 }
 
+PHLWORKSPACE putBack(PHLWINDOW window, const SEntry& ENTRY);
+
 }
 
 bool isStash(const PHLWORKSPACE& workspace) {
@@ -399,6 +401,50 @@ bool restore(PHLWINDOW window) {
     const auto ENTRY = *IT;
     g_entries.erase(IT);
 
+    const auto WORKSPACE = putBack(window, ENTRY);
+    if (!WORKSPACE)
+        return false;
+
+    if (const auto MONITOR = WORKSPACE->m_monitor.lock(); MONITOR && MONITOR->m_activeWorkspace != WORKSPACE)
+        MONITOR->changeWorkspace(WORKSPACE, false, true, true);
+
+    // X43: focus and stacking are two different things. A restored window that
+    // is merely focused can come back underneath whatever was on top of it.
+    Desktop::windowState()->raise(window);
+    Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
+
+    return true;
+}
+
+void restoreAllForUnload() {
+    ConfigureHold::CHold oneResize;
+    dropDeadEntries();
+    // Anything on the stash the ledger does not know (it cannot, normally:
+    // adoptStashedWindows ran at load) is put back too, never left behind.
+    adoptStashedWindows();
+
+    // The ledger empties first: each move below fires window.moveToWorkspace,
+    // and nothing may find a half-restored entry there.
+    const auto ENTRIES = std::exchange(g_entries, {});
+    for (const auto& ENTRY : ENTRIES) {
+        const auto WINDOW = ENTRY.window.lock();
+        if (WINDOW && WINDOW->m_isMapped && isStash(WINDOW->m_workspace))
+            putBack(WINDOW, ENTRY);
+    }
+
+    // The stash is empty now; this strong ref is all that kept it alive (see
+    // stash()). Dropped HERE, while the plugin is still whole, rather than by
+    // the static's destructor inside dlclose.
+    g_stash.reset();
+}
+
+namespace {
+
+// The part of a restore that is the window's own: its desktop (recreated if
+// Hyprland reaped it), its tiled/floating state and its box. No workspace
+// switch, no focus -- restore() adds those for the user's one window; an
+// unload putting every window back must not hop desktops or steal focus.
+PHLWORKSPACE putBack(PHLWINDOW window, const SEntry& ENTRY) {
     // Minimizing the last window of a workspace lets Hyprland reap it the
     // moment the user looks away, and without this the window is stranded on
     // the stash with no way back. Measured: leave the workspace and it is gone.
@@ -407,7 +453,7 @@ bool restore(PHLWINDOW window) {
         WORKSPACE = State::workspaceState()->create(ENTRY.workspace, ENTRY.monitor, ENTRY.workspaceName);
 
     if (!WORKSPACE)
-        return false;
+        return nullptr;
 
     Desktop::globalWindowController()->moveWindowToWorkspace(window, WORKSPACE);
 
@@ -446,15 +492,9 @@ bool restore(PHLWINDOW window) {
         TARGET->warpPositionSize();
     }
 
-    if (const auto MONITOR = WORKSPACE->m_monitor.lock(); MONITOR && MONITOR->m_activeWorkspace != WORKSPACE)
-        MONITOR->changeWorkspace(WORKSPACE, false, true, true);
+    return WORKSPACE;
+}
 
-    // X43: focus and stacking are two different things. A restored window that
-    // is merely focused can come back underneath whatever was on top of it.
-    Desktop::windowState()->raise(window);
-    Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
-
-    return true;
 }
 
 }
