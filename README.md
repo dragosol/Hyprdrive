@@ -1,343 +1,336 @@
-# Hyprdrive for Omarchy
+# Hyprdrive
 
 A mission-control overview, a full dock with stacks, and Mosaic, a hybrid
-layout, for [Hyprland](https://hyprland.org) on [Omarchy](https://omarchy.org/).
-Everything is set from a settings panel in Omarchy's own bar, and it follows
-your Omarchy theme instead of shipping one of its own.
+layout, for [Hyprland](https://hyprland.org) 0.56. This branch
+(`hyprland-native`) runs on plain Hyprland. On [Omarchy](https://omarchy.org/)
+it notices Omarchy and integrates with it.
 
 ![Tap Super: every window on every desktop, in one overview](https://hyprdrive.shastasia.com/readme/overview.gif)
 
 [Website](https://hyprdrive.shastasia.com) ·
 [Demo film on YouTube](https://www.youtube.com/watch?v=RRkIViQvAOY) ·
-[Releases](https://github.com/dragosol/hyprdrive-omarchy/releases)
+[All config keys](docs/CONFIG.md)
 
-> Built against Hyprland **0.56.2** (Omarchy 4).
+> Built and tested against Hyprland **0.56.2** with a **Lua** config
+> (`hyprland.lua`). Other Hyprland versions are not supported: the plugin
+> refuses to load on an ABI mismatch, which shows up as `[he] Version mismatch`.
 
 ## What it does
 
-**Overview** (tap Super):
+**Overview.** Tap Super (press and release, no other key), or swipe up with 3
+fingers:
 
-- Mission-control grid of real compositor-rendered windows.
-- Type-to-search: installed apps, open windows, and GNOME search providers.
+- A mission-control grid of real, compositor-rendered windows. On a trackpad it
+  follows your fingers, and reversing mid-swipe undoes it.
+- Type to search: installed apps, open windows, files and GNOME search
+  providers, all in one list.
 
   ![Just start typing: apps, windows and files in one search](https://hyprdrive.shastasia.com/readme/search.gif)
 
-- Workspace strip. Drag a tile onto a strip cell and the window teleports there,
-  including an empty desktop, to give it one of its own.
+- A workspace strip. Drag a tile onto a strip cell and the window moves there.
+  Drop it on the empty cell and it gets a desktop of its own.
 
   ![Drag a window to a new desktop](https://hyprdrive.shastasia.com/readme/new-desktop.gif)
 
-- Scroll-wheel workspace stepping, trackpad follow, keyboard navigation.
-- Several monitors act as one: the overview opens and closes on all of them,
-  and Tab walks search -> each monitor's grid (or strip -> grid on each
-  monitor when no results are up). Picking a window moves the cursor into it
-  and releases a game's pointer lock.
-- On a scrolling-layout desktop, the 3-finger swipe scrolls its windows first
-  and carries on into the next/previous desktop past either end (4 fingers
-  still jump desktops directly).
-- Super/Alt/Ctrl+click a dock app that is not running (or "Open in Empty
-  Workspace" in its menu) opens it on an empty desktop.
-- **Smooth frames** (Hyprdrive panel -> Textures, `smooth_frames`): lets
-  Hyprland render ahead when the GPU runs late, so animations drop a refresh
-  instead of halving the frame rate. hyprdrive suggests it once if the overview
-  keeps dropping frames.
+- **Hold to swap:** drag a window over another one and hold it there. Let go
+  and the two trade places (`drag:hold_to_swap`, on by default).
+- You can step through workspaces with the scroll wheel, a trackpad swipe
+  (with magnetic detents and a name pill on the card the swipe is settling on)
+  or the keyboard.
+- Several monitors act as one. The overview opens and closes on all of them,
+  and Tab walks from the search to each monitor's grid.
+- On a scrolling-layout desktop, the 3-finger swipe first scrolls that
+  desktop's windows, then carries on into the next or previous desktop past
+  either end.
 
-**Dock**:
+**Dock:**
 
-- Dash-to-Dock behaviour counted over the desktop you are on: launch, focus,
-  cycle, whole-app minimize/restore, favorites, running dots, badges, autohide.
-- Minimize/restore flies into the icon, motion-blurred (`dock:minimize_motion_blur`). Hover an icon for live window previews.
-- Windows the layout moves or resizes (retiles, the scrolling tape, opening, the scratchpad) are motion-blurred too (`layout_motion_blur`).
-- With autohide off, tiled windows under the dock shorten to clear it (`dock:windows_make_room`).
-- Stacks, macOS style: a pinned folder shows its 4 newest files as a pile;
-  click it and they fan out, or it opens as a searchable pane when the fan
-  would not fit. Space previews the hovered item (GNOME Sushi), arrows and
-  Enter work, and the right-click menu has recent items, sort, Display as
-  Stack/Folder, View as Grid, Rename in Dock, Trash actions and Remove from
-  Dock. Downloads is pinned on first run; drag stacks to reorder them. Drop
-  files from any file manager onto a stack to move them in (copied across
-  drives, never overwriting) or onto Trash to trash them; drag a folder onto
-  the dock and it parts to make room -- let go to pin it there. Trash and
-  empty stacks use hyprdrive's own artwork (`dock:builtin_icons = false` for
-  the icon theme's). Files drag out of a fan into any app as a real drag;
-  images, videos and PDFs show real previews; a download in progress shows a
-  bar, and a stack bounces when something new arrives (a hidden dock peeks the
-  pile up from the edge). The
-  store is `~/.local/state/hyprdrive/stacks`; removing a stack never touches
-  the folder.
+- Dash-to-Dock behaviour, counted over the desktop you are on: launch, focus,
+  cycle, whole-app minimize/restore, favourites, running dots, badges and
+  autohide.
+- Minimize and restore fly into the icon, motion-blurred. Hover an icon to see
+  live window previews.
+- **Stacks**, in the macOS style. A pinned folder shows its newest files as a
+  pile. Click it and they fan out, or they open in a searchable grid when a fan
+  would not fit. Space previews the hovered item through GNOME Sushi. Drop
+  files onto a stack to move them in, or onto Trash. Drag files out of a fan
+  into any app. A download in progress shows a progress bar. Downloads is
+  pinned on first run.
 
   ![A Downloads stack fanning out, with a Space preview](https://hyprdrive.shastasia.com/readme/stacks.gif)
 
-**Mosaic** (experimental): a third layout beside Dwindle and Scrolling, after
-GNOME's planned Mosaic. Windows keep their own size and gather in a cluster in
-the middle of the screen, every window leaning toward the centre. Opening a
-window never resizes the others: only the newcomer may come in smaller. When
-the windows no longer fit, the desktop tiles them dwindle-style (a new window
-splits the focused one), and it goes back to the mosaic -- every window at the
-size it had -- once they fit again, by closing windows or shrinking one.
-Turn it on in the panel's Mosaic section, then Super+L cycles Dwindle ->
-Scrolling -> Mosaic, and Super+arrows move the focus between mosaic windows.
-Drag a window's corner to resize it: the others hold still while you drag,
-and the window grows only as far as an arrangement can fit everyone at their
-size -- push past that and the desktop darkens; let go there to tile. A window
-that opens floating joins the mosaic (dialogs stay afloat), and an app closed
-at a size you like reopens at that size. Best on large displays.
+**Mosaic** (experimental, off by default) is a third layout beside Dwindle
+and Scrolling, after GNOME's planned Mosaic. Each window keeps its own size,
+and the windows gather in a cluster in the middle of the screen. Opening a
+window never resizes the others. When they no longer fit, the desktop tiles
+them in Dwindle style, and it goes back to the mosaic once they fit again.
+Turn it on with `mosaic:enabled`. On plain Hyprland you then pick the chord
+that cycles Dwindle -> Scrolling -> Mosaic (`mosaic:cycle_bind`, e.g.
+`"SUPER + M"`). On Omarchy that chord is Super+L. It is best on large
+displays, and it is the part of Hyprdrive most likely to have rough edges.
 
-**Hot corner** (off by default; panel -> Overview): rest the pointer in a screen
-corner to open the overview, and again to close it, with an optional ripple.
-**Hold to swap** (panel -> Overview): in the overview, drag a window over another
-and hold it there; let go and the two trade places.
+**Hot corner** (off by default): rest the pointer in a screen corner to open
+the overview, and again to close it. An optional ripple runs across the
+screen.
 
-**Dock icons** (settings panel -> Icons): give any app on the dock a different
-icon. Pick an app, then search your icon theme, folders of your own (a
-downloaded icon pack, say) or, if you switch it on, the
-[selfh.st](https://selfh.st/icons) collection of about 3,000 app logos. The
-picture is copied into `~/.local/share/hyprdrive/icons`, so tidying the folder
-later does not take the dock's icon with it. Reset, or Restore defaults for
-every app, puts the app's own icon back. The Trash has its own group with one
-icon per state -- empty or full, on a dark dock or a light one -- and the dock
-shows whichever matches. The choices are kept in
-`~/.local/state/hyprdrive/icons`, one `desktop-id<TAB>icon` per line.
+**Gestures:** the 3-finger up and down swipes are installed by `make install`.
+Any other gesture can be bound with `hl.plugin.hyprdrive.gesture{...}`: the
+overview, workspace or all-workspace swipes, scratchpad show and hide, a
+one-way fullscreen, a close with a way back, a keyboard chord and more. Two
+behaviours are on by default:
 
-**Settings panel** (`dragos.hyprdrive`, in Omarchy's bar): every option in one
-place -- one animation curve and speed for everything, per-animation motion
-blur, a trackpad gesture editor, dock and overview options, Mosaic, and
-performance and AC/battery profiles. "Send feedback" at the bottom opens a short
-GitHub form with your version filled in. The same keys are plain Lua fragments
-in `~/.config/hypr/hyprdrive/` if you would rather edit files.
+- `gestures:keep_swipe`: a swipe keeps going while one of the fingers that
+  started it is still down.
+- `gestures:swipe_while_dragging`: with one finger holding a drag, three more
+  fingers can still swipe desktops.
 
-**Search tools** (opt-in, see below):
+Both read the touchpad's own multitouch slots. This needs the session's normal
+read access to the touchpad device, and without it they quietly fall back to
+libinput's behaviour.
 
-- `define <word>` turns the results panel into a dictionary (Wiktionary).
-- `tr <lang> <text>` / `tr en:fr <text>` / `translate <text>` turns it into a
-  translator (MyMemory, or your own LibreTranslate). Enter copies a result.
+**Search tools** (opt-in, see [Network use](#network-use)): `define <word>`
+looks a word up in a dictionary, and `tr <lang> <text>` translates.
 
-`SUPER+SPACE` stays the Omarchy menu. `SUPER+1..0` stay workspace focus. A Super
-*tap* (press and release, no other key) toggles the overview.
+## Requirements
 
-## Theming
-
-![Change the Omarchy theme and Hyprdrive follows](https://hyprdrive.shastasia.com/readme/themes.gif)
-
-Appearance is Hyprland's. The plugin does not ship colours, rounding, or blur of
-its own. Unset plugin keys (alpha 0 / `-1`) read the compositor's live values,
-and every surface goes through the accessors in `Config.hpp`:
-
-| what you see | Hyprland key | accessor |
-| --- | --- | --- |
-| selection, hover, running dots | `general:col.active_border` | `highlightColor()` |
-| overview cards | `decoration:rounding` | `themeRounding()` |
-| dock pill and dock highlights | `plugin:hyprdrive:dock:corner_radius` (24) | `dockCornerRadius()` |
-| dock / overview frost | `decoration:blur:*` | `-1` follow |
-| workspace-card shadows | `decoration:shadow:*` | `-1` follow |
-| dock / search / strip / results fill | Omarchy terminal background (`colors.toml`), else `misc:background_color` | `dockBackgroundColor()` |
-
-Omarchy already writes the border colour from the theme accent and reloads
-Hyprland on `omarchy theme set`. Squared windows (`decoration:rounding = 0`)
-stay squared in the overview; the dock keeps its original Dash-to-Dock pill
-radius of 24, including hover and selection highlights. Blur off means frost
-off — that is inheritance, not a missing feature.
-
-Do not pin `plugin:hyprdrive:col_highlight` (or dock colours) in a fragment
-unless you want that value frozen across theme changes.
+- **Hyprland 0.56** (built against 0.56.2) with a **Lua config**,
+  `~/.config/hypr/hyprland.lua`. With a hyprlang `hyprland.conf` the plugin
+  still loads, and both tap-Super and the dock work. The installed fragments
+  (the overview's click submap, the 3-finger gestures, the settings rules) are
+  Lua, though, so nothing loads them; `make install` says so and suggests what
+  to do.
+- **To build:** a C++23 compiler with `#embed` (GCC 15+ or Clang 19+), `make`
+  and `pkg-config`. You also need the development files for Hyprland 0.56
+  (its headers come with the Hyprland package on most distros), pixman,
+  libdrm, pango/cairo, fontconfig, libinput, libudev, wayland-server,
+  xkbcommon, libsystemd, gio and Lua 5.4.
+- **Optional at runtime:**
+  - Quickshell (`qs`) 0.3 and Python 3, for the settings app
+  - an icon font such as a Nerd Font. Without one, the plugin draws its own
+    built-in glyphs.
+  - GNOME Sushi, for Space-to-preview in stacks
+  - `curl` and `jq`, for the search tools
+  - `ffmpeg`, for the search easter egg
 
 ## Install
 
-Install the **latest release**, not the tip of the branch: the branch can be
-ahead of the last release with work that has not been released yet. Each release
-is a `vX.Y.Z` tag ([Releases](https://github.com/dragosol/hyprdrive-omarchy/releases)),
-and the commands below check out the newest one.
+The plugin is compiled against the Hyprland on your machine, so it is built
+locally rather than downloaded.
 
-The plugin is compiled against the Hyprland on your machine (the headers come
-with the `hyprland` package), so it is built locally rather than downloaded.
-
-**Needs:** Omarchy on Hyprland 0.56, and the build tools (`base-devel`, `pkgconf`;
-everything else it links against ships with Omarchy). Optional: `ffmpeg` for the
-search easter egg, GNOME Sushi for Space-to-preview in dock stacks.
-
-### From the Omarchy plugin marketplace
-
-The marketplace installs the settings panel; the compositor plugin is then built
-from that same checkout -- this is the manual step.
+### From source (recommended)
 
 ```bash
-omarchy plugin add https://github.com/dragosol/hyprdrive-omarchy
-cd ~/.config/omarchy/plugins/dragos.hyprdrive
-make all
-make install
-hyprctl plugin load ~/.local/lib/hyprdrive/hyprdrive.so
-hyprctl reload
-```
-
-Enable the panel with `omarchy plugin enable dragos.hyprdrive` (or answer yes when
-`plugin add` asks). To update: `omarchy plugin update dragos.hyprdrive`, then run
-`make all && make install` in that folder again and log out and back in.
-
-### From source
-
-```bash
-git clone https://github.com/dragosol/hyprdrive-omarchy.git ~/Projects/hyprdrive-omarchy
-cd ~/Projects/hyprdrive-omarchy
-git checkout "$(git tag --list 'v*' --sort=-v:refname | head -1)"   # the latest release
-make all
-make install
+git clone -b hyprland-native https://github.com/dragosol/Hyprdrive.git ~/Projects/Hyprdrive
+cd ~/Projects/Hyprdrive
+make install PREFIX=~/.local
 hyprctl plugin load ~/.local/lib/hyprdrive/hyprdrive.so
 hyprctl reload
 hyprctl configerrors
 ```
 
-### Update to the latest release
+`make install` builds the plugin and runs the checks (`make check`: a symbol
+check and the host tests). It then installs:
+
+- `hyprdrive.so` in `$PREFIX/lib/hyprdrive/`
+- the `hyprdrive-integration` CLI in `$PREFIX/bin/`
+- the Lua fragments in `~/.config/hypr/hyprdrive/`, with their loader, and
+  one `require` line at the end of `~/.config/hypr/hyprland.lua`
+- the settings: the standalone app on plain Hyprland, or the bar panel on
+  Omarchy (see below)
+
+`PREFIX` defaults to `~/.local`. Wherever it points, the loader is written to
+find the `.so` there.
+
+`hl.plugin.load` in the loader only runs when the config is parsed, and a
+`hyprctl reload` does not repeat it. So the first session needs the explicit
+`hyprctl plugin load` above (or a log-out and back in). From then on the
+fragment loads it at every login.
+
+**Updating:** `git pull`, then `make install` again, then log out and back in.
+After a Hyprland update the plugin may refuse to load with
+`[he] Version mismatch`. Rebuild from scratch with `make clean && make install`.
+
+**Removal:** run `make uninstall` from the checkout. It removes the plugin, the
+loader and the `require` line (a backup of `hyprland.lua` is kept). It moves
+the fragments aside rather than deleting them, because they may hold your own
+edits. Your saved state in `~/.local/state/hyprdrive` (favourites, stacks,
+Mosaic sizes) is kept.
+
+### With hyprpm
 
 ```bash
-cd ~/Projects/hyprdrive-omarchy
-git fetch --tags
-git checkout "$(git tag --list 'v*' --sort=-v:refname | head -1)"
-rm -f hyprdrive.so ~/.local/lib/hyprdrive/hyprdrive.so
-make all && make install
-omarchy restart shell
+hyprpm add https://github.com/dragosol/Hyprdrive hyprland-native
+hyprpm enable hyprdrive
+hyprpm reload
 ```
 
-Then log out and back in to load the new plugin (or, with your hands off the
-trackpad, `hyprctl plugin unload ~/.local/lib/hyprdrive/hyprdrive.so && hyprctl
-plugin load ~/.local/lib/hyprdrive/hyprdrive.so`). `omarchy restart shell` makes
-the Hyprdrive settings panel pick up rows a release added; the shell's own plugin
-reload keeps the old ones.
+hyprpm builds and loads only the `.so`. Tap-Super, the dock, the search and
+stacks all work from that alone. What hyprpm cannot install:
 
-After a Hyprland update the plugin may refuse to load with `[he] Version mismatch`.
-Rebuild from scratch: `make clean && make all && make install`.
+- **The Lua fragments.** Without them there are no 3-finger gestures and no
+  click-to-pick submap. You can bind them yourself with
+  `hl.plugin.hyprdrive.gesture{...}`, or run `make install` from a checkout
+  as well. The fragments find hyprpm's build in
+  `/var/cache/hyprpm/$USER/Hyprdrive/` and do not load it twice.
+- **The settings app.** It lives in `settings/`, which you can run from a
+  checkout as `settings/hyprdrive-settings`.
+- **The `hyprdrive-integration` CLI.**
 
-## Removal
+hyprpm also needs `hyprpm reload` in your autostart to load the plugin at
+login.
 
-From the checkout you installed from (for a marketplace install,
-`~/.config/omarchy/plugins/dragos.hyprdrive`):
+## Settings
 
-```bash
-make uninstall
-omarchy plugin remove dragos.hyprdrive   # marketplace installs only
+Every option has a row in the settings: one animation curve and speed for
+everything, per-animation motion blur, a trackpad gesture editor, dock and
+overview options, Mosaic, dock icons, and AC/battery performance profiles. The
+same keys are plain Lua in `~/.config/hypr/hyprdrive/` if you would rather edit
+files.
+
+- **Plain Hyprland: `hyprdrive-settings`**, a standalone Quickshell window
+  (needs `qs` 0.3). Run it, or bind it:
+
+  ```lua
+  hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
+  hl.bind("SUPER + SHIFT + COMMA", hl.plugin.hyprdrive.settings("pane dock"))
+  ```
+
+  `hyprdrive-settings --pane ID` opens one section, and `--icons APPID` opens
+  the icon picker for one app. Colours come from Hyprdrive's own palette, so
+  the window matches the dock and follows theme reloads. The app is new in
+  this branch; tell us what breaks.
+- **Omarchy:** the settings are a panel in Omarchy's bar instead
+  (`dragos.hyprdrive`), and `hyprdrive-settings` hands over to it.
+
+## Omarchy integration
+
+Hyprdrive decides once per session, and again on every config reload, whether
+this is an Omarchy desktop. On Omarchy it:
+
+- installs the bar panel instead of the standalone settings app
+- adds Omarchy's menu as a column in the search and launches terminal agents
+  through `omarchy-launch-tui`
+- takes its colours from the Omarchy theme's `colors.toml`
+- gives Mosaic Super+L
+
+Elsewhere none of that exists, and nothing under `~/.config/omarchy` is
+created.
+
+**Auto-detection** needs two things: an Omarchy install, and Omarchy's state
+directory `~/.local/state/omarchy/current`. Any one of these counts as an
+install:
+
+- `omarchy` is on `PATH`
+- `~/.local/share/omarchy/bin/omarchy` exists
+- `$OMARCHY_PATH` is set
+
+Either half on its own is not enough. A home directory carried over from an
+Omarchy machine, or a stray `omarchy` script, does not make a desktop Omarchy.
+
+**Overrides**, strongest first:
+
+| how | effect |
+| --- | --- |
+| `HYPRDRIVE_NO_OMARCHY=1` in Hyprland's environment | never Omarchy, whatever else says so |
+| `HYPRDRIVE_INTEGRATION=omarchy\|none\|auto` | per session (a test run, a nested instance) |
+| `plugin:hyprdrive:integration = "omarchy" \| "none" \| "auto"` | the standing preference, in your config |
+| auto | the detection above |
+
+To see the answer and why: `hyprctl hyprdrive-integration` asks the running
+plugin, and `hyprdrive-integration --why` works without a compositor (it is
+what `make install` asks). Force a plain install on a machine that has
+Omarchy files with `HYPRDRIVE_NO_OMARCHY=1 make install`.
+
+## Theming
+
+![Change the Omarchy theme and Hyprdrive follows](https://hyprdrive.shastasia.com/readme/themes.gif)
+
+Hyprdrive ships no colours of its own. Rounding, blur, shadows and the
+selection colour come from Hyprland's live values (`decoration:*`,
+`general:col.active_border`). The palette (background, text, accent, selection
+and so on) is resolved in this order:
+
+1. the `theme:*` keys, if you set them
+2. `theme:palette_file`: a colors.toml-style file, a pywal `colors.json` or
+   matugen JSON
+3. Omarchy's `colors.toml`, on Omarchy
+4. values derived from Hyprland's own
+
+Change your theme and reload, and Hyprdrive follows.
+
+## Configuration
+
+All keys are in **[docs/CONFIG.md](docs/CONFIG.md)**, which is generated from
+`Config.cpp`, so it is always complete. Everything lives under
+`plugin:hyprdrive:`, for example:
+
+```lua
+hl.config({ plugin = { hyprdrive = { hot_corner = { enabled = true }, dock = { autohide = false } } } })
 ```
 
-`make uninstall` removes the plugin (`~/.local/lib/hyprdrive`), the loader and the
-`require("hypr.hyprdrive")` line it added to `~/.config/hypr/hyprland.lua` (a backup
-is kept beside it), and a settings panel `make install` copied. The fragments in
-`~/.config/hypr/hyprdrive/` are moved aside rather than deleted, because they hold
-your own raw-snippet edits. Your saved state (`~/.local/state/hyprdrive`: favourites,
-stacks, Mosaic sizes) is kept; delete it by hand to start fresh. Log out and back in
-to unload the running plugin.
+The fragments in `~/.config/hypr/hyprdrive/` load in filename order. Each one
+has a machine-owned half, which is rewritten on reinstall, and a raw-snippet
+block below `BEGIN raw-snippet`, which is yours. Lua's last assignment wins, so
+a line there overrides the generated one above it.
 
-## The marketplace card
+**Dispatchers** (`hl.plugin.hyprdrive.<name>(arg)` in Lua,
+`hyprdrive:<name>` in hyprlang):
 
-`preview.png` is built with the marketplace publishing skill's generator, from
-the overview frame of the Hyprdrive film (`C00-v3t1` at 6.5 s, full 2880×1800) and the panel icon:
+| dispatcher | argument | what it does |
+| --- | --- | --- |
+| `overview` | `toggle`/`open`/`close` `[monitor\|all]`, `select`, `tab` | open, close, or commit the overview |
+| `navigate` | `left`, `right`, `up`, `down` | move the selection |
+| `window` | `select`, `close`, `click` | act on the overview window under the cursor |
+| `minimize` | `window`, `restore` | minimize into the dock, or restore |
+| `hotkey` | `overlay`, `1`-`10` (optionally `shift`/`ctrl`) | dock slot accelerators (unbound by default) |
+| `stack` | `pin`/`unpin`/`toggle`/`open <path>`, `view`, `sort`, `clear`, ... | dock stacks |
+| `focus` | `l`, `r`, `u`, `d` | Mosaic-aware focus by direction |
+| `settings` | `open`, `toggle`, `close`, `pane <id>`, `icons <app>` | open the settings |
+| `debug` | `frames`, `mem`, `gesture <script>`, ... | diagnostics and test hooks, see [docs/DEBUG.md](docs/DEBUG.md) |
 
-```bash
-make_preview.py --shot overview.png --icon omarchy-plugin/hyprdrive-icon.png \
-  --name Hypr --name2 drive --accent '#7aa2f7' \
-  --tagline 'Mission control,|a real dock and|Mosaic for Omarchy.' \
-  --features 'overview · dock|stacks · mosaic' --shot-width 980 --out preview.png
+```lua
+hl.bind("SUPER + TAB", hl.plugin.hyprdrive.overview("toggle all"))
+hl.bind("SUPER + H", hl.plugin.hyprdrive.minimize("window"))
 ```
-
-## Building from a checkout
-
-For development, on whatever is checked out:
-
-```bash
-make all
-make install
-```
-
-`make install` copies `hyprdrive.so` to `~/.local/lib/hyprdrive/`, lays fragments
-in `~/.config/hypr/hyprdrive/`, and adds `require("hypr.hyprdrive")` to
-`~/.config/hypr/hyprland.lua` if it is not already there.
-
-`hl.plugin.load` is parse-time only and a no-op on `hyprctl reload`, so the first
-session needs the explicit `hyprctl plugin load` (or a compositor restart). After
-that the fragment keeps it loaded across reboots.
-
-If the compositor has `hyprdrive.so` mapped, delete it before rebuilding:
-
-```bash
-rm -f hyprdrive.so ~/.local/lib/hyprdrive/hyprdrive.so
-make all && make install
-```
-
-An undefined symbol is not a link error (`-shared` never complains). `make all`
-runs `scripts/symcheck.sh` for that reason. Never ship a build whose symcheck
-failed.
 
 ## Network use
 
 Hyprdrive makes **no network requests by default.** Three features go online,
-and each is off until you turn it on. The two search tools send what you type to
-a third party:
+and each is off until you turn it on:
 
-| key | sends | to |
+| setting | sends | to |
 | --- | --- | --- |
 | `search:dictionary = true` | the word after `define` | `en.wiktionary.org` |
-| `search:translate = true` | the text after `tr` | `api.mymemory.translated.net`, or `search:translate_endpoint` |
+| `search:translate = true` | the text after `tr` | `api.mymemory.translated.net`, or your own `search:translate_endpoint` (e.g. LibreTranslate) |
+| settings -> Icons -> selfh.st | nothing you type; downloads the logo index once a day and the logos you pick | `cdn.jsdelivr.net` |
 
-Set `search:translate_endpoint` to a self-hosted
-[LibreTranslate](https://github.com/LibreTranslate/LibreTranslate) URL to keep
-translations on your own machine. Requests run off the compositor thread via
-`curl` and `jq`, with your text passed as an argument, never through a shell.
+The search tools run `curl` off the compositor thread. Your text is passed as
+an argument, never through a shell.
 
-```lua
-hl.config({ plugin = { hyprdrive = { search = { dictionary = true, translate = true } } } })
-```
+## Honest notes
 
-**selfh.st icons** (settings panel -> Icons, off by default) searches the
-[selfh.st/icons](https://selfh.st/icons) collection for a dock app's new icon.
-While it is on, the panel downloads the collection's index from
-`cdn.jsdelivr.net` once a day and searches it on your machine, so your search
-text is never sent. Previews of the matching logos load from the same CDN,
-which can therefore see which logos were shown. Picking one downloads that one
-SVG or PNG, refused if it is not a picture or an SVG points outside itself.
-Nothing about your apps is sent. The collection is CC BY 4.0.
+- **Hyprland 0.56.2 only.** Each Hyprland release changes the plugin ABI, and
+  a new one needs a rebuild at the least, maybe a port.
+- **Mosaic is experimental**, and so is the standalone settings app.
+- **hyprlang configs are second-class.** The plugin works, but the shipped
+  binds and gestures are Lua fragments.
+- **Trackpad features** were developed on one machine's touchpad. The headless
+  test harness drives gestures synthetically (`hyprdrive:debug gesture`,
+  [docs/DEBUG.md](docs/DEBUG.md)), so their logic is covered, but your
+  libinput settings may still feel different.
+- This is a compositor plugin. A bug in it can take the session down rather
+  than just an app. `make install` refuses to install a build whose symbol
+  check failed; please report crashes with the `coredumpctl` backtrace.
 
-## Configuration
+## Credits
 
-All keys: **[docs/CONFIG.md](docs/CONFIG.md)** (generated from `Config.cpp`).
+- **Vaxry** and the [hyprland-plugins](https://github.com/hyprwm/hyprland-plugins)
+  contributors. This repository is a fork of that tree, and Hyprland's plugin
+  API is what makes any of this possible (BSD-3-Clause, see `LICENSE`).
+- **yayuuu**, whose `scrolloverview` plugin Hyprdrive grew from. Old configs
+  that use the `scrolloverview` names still load for one release.
+- **dragos**: Hyprdrive itself, the dock, stacks, Mosaic and the Omarchy
+  integration.
 
-Fragments in `~/.config/hypr/hyprdrive/` load in filename order. Each has a
-machine-owned half and a raw-snippet block; hand edits go below `BEGIN
-raw-snippet` so they survive reinstall.
-
-```
-~/.config/hypr/hyprdrive/
-    00-plugin.lua     loads hyprdrive.so, defines hyprdrive_loaded()
-    10-theme.lua      documents inheritance; pins nothing
-    20-layout.lua     scale, layout, workspace gap; dock.hot_keys = false
-    25-rules.lua      float+center the Nautilus previewer
-    30-keybinds.lua   overview click submap; 3-finger swipe up
-```
-
-Lua's last assignment wins, so a line in the raw block overrides the generated
-one above it.
-
-### Dispatchers
-
-| dispatcher | argument | what it does |
-| --- | --- | --- |
-| `overview` | `toggle`/`on`/`off`/`select` | Open, close, or commit the overview |
-| `navigate` | `left`, `right`, `up`, `down` | Move the selection |
-| `window` | `select`, `close`, `click` | Act on the window under the cursor |
-| `minimize` | `window`, `restore` | Minimize into the dock, or restore |
-| `hotkey` | `overlay`, or `1`–`10` | Dock slot (unbound here; Super+digit is workspaces) |
-| `stack` | `pin`/`unpin`/`toggle`/`open` `<path>`, `view auto\|fan\|grid <path>`, `sort name\|added\|modified\|kind <path>`, `clear` | Pin and configure dock stacks |
-
-```lua
-hl.bind("SUPER + SHIFT + D", hl.plugin.hyprdrive.overview("toggle"))
-hl.bind("SUPER + H", hl.plugin.hyprdrive.minimize("window"))
-```
-
-Tap Super is not a bind (`tap_super`, default true). Three-finger swipe up on
-the trackpad is the same overview, registered as `hl.plugin.hyprdrive.gesture`
-so it follows the fingers; three-finger left/right stay workspace switching.
-
-## What this fork dropped
-
-- Upstream's own Quickshell settings app (and its schema, slideshow, and monitor
-  countdown). Settings live in the Omarchy panel above instead.
-- The matugen / illogical-impulse theme-sync path unit
-- Super+1..0 dock hotkeys, which collided with Omarchy workspaces
-
-Upstream Hyprdrive remains at `dragosol/Hyprdrive`.
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). The rules there are short
+and every one of them is a crash that already happened.
