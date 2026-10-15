@@ -3633,24 +3633,26 @@ void CScrollOverview::collectNavTargets(PHLMONITOR MONITOR, std::vector<SOvervie
     for (const auto& HIT : searchLayoutHere().hits)
         targets.push_back({HIT.box, EOverviewNavZone::Result, HIT.index, {}});
 
-    // Every workspace's tiles, filtered to the ones actually ON the monitor.
-    // Asking only images[viewportCurrentWorkspace] made the tiles unreachable:
-    // that index is the VIEWPORT's, and a tile's box already carries its
-    // workspace offset, so the honest test for "can the user see this" is
-    // whether the drawn box lands on the monitor -- the same test the render
-    // pass uses. Measured 2026-08-05: with the current-workspace filter, arrows
-    // produced a byte-identical frame on a desktop with two visible tiles.
+    // The tiles of the card IN VIEW only, and of those the ones actually ON the
+    // monitor (the drawn box, the same test the render pass uses).
     //
-    // ONCE PER WINDOW. With a query typed every workspace's main-grid list also
-    // carries the promoted matches (B2), so the same window came back once per
-    // desktop -- harmless to the pick, but it is the list the Tab entry and the
-    // phantom-selection check below read, and those must see each tile once.
+    // Not every workspace's tiles: the neighbouring cards peek in at the
+    // monitor's edges, so their tiles are on screen, and a keyboard walk that
+    // can land on them selects a window that is all but off-screen while the
+    // view stays put -- Enter then commits it (A4: from the strip, and after
+    // stepping onto an empty desktop, RIGHT put the ring on the previous
+    // desktop's last tile at x 0..125). The user's rule (2026-09-23) is that
+    // navigating windows stays in THIS desktop's card and walking off its end
+    // changes desktop (stepTileDesktop); every reader of this list -- the
+    // arrows from any zone, the Tab entry, firstNavTile, isNavTile -- has to
+    // hold to it, or each one re-opens the hole on its own. With a query the
+    // card's main-grid list already carries the promoted matches from every
+    // desktop (B2), so a filtered walk still reaches every match.
+    //
+    // ONCE PER WINDOW: a window must not come back twice from the grid list.
     std::unordered_set<const Desktop::View::CWindow*> seen;
-    for (const auto& IMAGE : images) {
-        if (!IMAGE || !IMAGE->pWorkspace)
-            continue;
-
-        for (const auto& WINDOW : overviewMainGridWindows(IMAGE->pWorkspace, MONITOR)) {
+    if (viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] && images[viewportCurrentWorkspace]->pWorkspace) {
+        for (const auto& WINDOW : overviewMainGridWindows(images[viewportCurrentWorkspace]->pWorkspace, MONITOR)) {
             if (!WINDOW || !seen.insert(WINDOW.get()).second)
                 continue;
             const CBox BOX = tileBox(WINDOW);
@@ -4157,14 +4159,11 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
     // because a target had been found. Confining the pick to this card is what
     // routes "off the end" through stepTileDesktop, which changes desktop and
     // lands on that desktop's first tile (or its last, going left).
-    if (g_search.nav.zone == EOverviewNavZone::Tile) {
-        std::unordered_set<const Desktop::View::CWindow*> here;
-        if (viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] && images[viewportCurrentWorkspace]->pWorkspace)
-            for (const auto& W : overviewMainGridWindows(images[viewportCurrentWorkspace]->pWorkspace, MONITOR))
-                if (W)
-                    here.insert(W.get());
-        std::erase_if(targets, [&](const SOverviewNavTarget& t) { return t.zone != EOverviewNavZone::Tile || !here.contains(t.window.get()); });
-    }
+    //
+    // The card part of that rule is collectNavTargets' (A4): it holds from the
+    // strip and the results too, and for firstNavTile below.
+    if (g_search.nav.zone == EOverviewNavZone::Tile)
+        std::erase_if(targets, [](const SOverviewNavTarget& t) { return t.zone != EOverviewNavZone::Tile; });
 
     const auto* const best = pickNavTarget(targets, current, g_search.nav.zone, LEFT, RIGHT, DOWN);
     if (!best) {
