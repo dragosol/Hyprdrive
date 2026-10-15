@@ -321,6 +321,49 @@ namespace {
         CProcess process(binary, args);
         process.runAsync();
     }
+
+    constexpr const char* NAUTILUS_NAME = "org.gnome.Nautilus";
+
+    bool onPath(const char* program) {
+        gchar* found = g_find_program_in_path(program);
+        g_free(found);
+        return found != nullptr;
+    }
+
+    // Nautilus can answer on the session bus: running (the name has an owner)
+    // or startable by the bus (an activatable name). Asked of the bus daemon
+    // itself, which answers at once; neither call starts anything.
+    bool nautilusOnBus() {
+        sd_bus* bus = userBus();
+        if (!bus)
+            return false;
+
+        bool            found = false;
+        sd_bus_error    error = SD_BUS_ERROR_NULL;
+        sd_bus_message* reply = nullptr;
+        int             owned = 0;
+        if (sd_bus_call_method(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", &error, &reply, "s", NAUTILUS_NAME) >= 0 && reply &&
+            sd_bus_message_read(reply, "b", &owned) > 0)
+            found = owned != 0;
+        if (reply)
+            reply = sd_bus_message_unref(reply);
+        sd_bus_error_free(&error);
+
+        if (!found && sd_bus_call_method(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListActivatableNames", &error, &reply, "") >= 0 && reply) {
+            char** names = nullptr;
+            if (sd_bus_message_read_strv(reply, &names) > 0 && names) {
+                for (char** n = names; *n; ++n) {
+                    found = found || std::string_view{*n} == NAUTILUS_NAME;
+                    free(*n);
+                }
+                free(names);
+            }
+        }
+        if (reply)
+            sd_bus_message_unref(reply);
+        sd_bus_error_free(&error);
+        return found;
+    }
 }
 
 // THE FILE MANAGER'S OWN MOUNTS (GvfsMount.hpp): an smb://, sftp:// or MTP
@@ -549,13 +592,31 @@ void activate(const std::string& uri) {
     // search + trash). One argv element so a volume label stays one URI.
     // Nautilus lives on: its own scope, not Hyprland's (Launch.hpp). The gio
     // mount helpers below are gone in a second and stay as they are.
-    std::string              binary = "nautilus";
+    //
+    // ...when there IS a Nautilus. A desktop with another file manager (plain
+    // Hyprland: Thunar, Dolphin, nemo) got a spawn of a binary that does not
+    // exist and nothing opened; it gets the desktop's own handler for the URI
+    // instead, which is that file manager (trash:/// included).
+    std::string              binary = onPath("nautilus") ? "nautilus" : "xdg-open";
     std::vector<std::string> args   = {uri};
     Launch::wrap(binary, args);
     spawn(binary, args);
 }
 
+bool emptyTrashAsksFirst() {
+    return nautilusOnBus();
+}
+
 void emptyTrash() {
+    // No Nautilus to ask (plain Hyprland, another file manager): glib's own
+    // `gio trash --empty`, the same trash:// Nautilus would empty. It asks
+    // nothing, so the dock asked first (emptyTrashAsksFirst, the menu's
+    // confirm rows) -- the user's click there is the confirmation.
+    if (!nautilusOnBus()) {
+        spawn("gio", {"trash", "--empty"});
+        return;
+    }
+
     sd_bus* bus = userBus();
     if (!bus)
         return;

@@ -3471,6 +3471,8 @@ enum class ERow : uint8_t {
     StackEmptyAsk,
     StackEmptyConfirm,
     StackEmptyCancel,
+    // Empty Trash with no Nautilus to show its dialog: the dock asks, in place.
+    EmptyTrashConfirm,
 };
 
 // OMARCHY-STYLE ROWS: a Nerd Font glyph column, the label, and a dim hint on the
@@ -3965,7 +3967,8 @@ void activateRow(PHLMONITOR monitor, const SItem& item, const SRow& row) {
         case ERow::StackOpen: Locations::activate(item.uri); return;
         case ERow::StackUnpin: Stacks::unpin(item.stackPath); return; // "Remove from Dock": the folder is untouched
 
-        case ERow::EmptyTrash: Locations::emptyTrash(); return;
+        case ERow::EmptyTrash:
+        case ERow::EmptyTrashConfirm: Locations::emptyTrash(); return;
         case ERow::Mount: Locations::mount(item.uri); return;
         case ERow::Unmount: Locations::unmount(item.uri, false); return;
         case ERow::Eject: Locations::unmount(item.uri, true); return;
@@ -5427,6 +5430,17 @@ bool menuClick(PHLMONITOR monitor, const Vector2D& point) {
             SRow{.kind = ERow::Separator},
             SRow{.kind = ERow::StackEmptyCancel, .label = "Cancel", .glyph = MenuGlyph::BACK},
             SRow{.kind = ERow::StackEmptyConfirm, .label = "Move to Trash", .glyph = MenuGlyph::TRASH, .danger = true},
+        };
+        return true;
+    }
+    // Empty Trash asks first when Nautilus will not: without it the empty is
+    // `gio trash --empty`, which deletes for good and asks nothing.
+    if (ROW->kind == ERow::EmptyTrash && !ROW->disabled && !Locations::emptyTrashAsksFirst()) {
+        g_menu->rows = {
+            SRow{.kind = ERow::InfoLine, .label = "Empty the Trash for good?", .glyph = MenuGlyph::TRASH},
+            SRow{.kind = ERow::Separator},
+            SRow{.kind = ERow::StackEmptyCancel, .label = "Cancel", .glyph = MenuGlyph::BACK},
+            SRow{.kind = ERow::EmptyTrashConfirm, .label = "Empty Trash", .glyph = MenuGlyph::TRASH, .danger = true},
         };
         return true;
     }
