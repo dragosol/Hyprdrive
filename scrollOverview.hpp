@@ -318,6 +318,7 @@ class CScrollOverview : public IOverview {
     bool         isNavTile(const PHLWINDOW& window) const;
     void         renderSearch(PHLMONITOR monitor, float renderScale);
     void   moveViewportWorkspace(bool up);
+    bool   stepDesktop(bool next) override;
     void   trackpadSwipeLayout(const PHLWORKSPACE target, const double delta);
     void   trackpadSwipeWorkspace(const double delta);
     void   finishWorkspaceScrollFollow();

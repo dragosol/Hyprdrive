@@ -1,6 +1,7 @@
 #include "OverviewInternal.hpp"
 #include "DockInput.hpp"
 #include "DockStacks.hpp"
+#include "DesktopSwitch.hpp"
 using namespace OvInternal; // opted in here rather than leaked from the header
 
 // For main.cpp's click dispatcher, which does not include OverviewInternal.hpp.
@@ -684,7 +685,10 @@ void CScrollOverview::onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& 
             if (!scrollStepAllowed(e.timeMs))
                 return;
 
-            if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE)
+            // Super+scroll (binds:scroll_desktops) is "next / previous desktop"
+            // everywhere: here the wheel never reaches the bind, so the
+            // overview does it, whatever its own scroll action is.
+            if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE || ScrollOverview::DesktopSwitch::overviewWheelSwitchesDesktops(e))
                 moveViewportWorkspace(e.delta > 0);
             else
                 moveScrollingColumnSelection(e.delta > 0);

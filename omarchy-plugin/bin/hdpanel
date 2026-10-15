@@ -152,6 +152,9 @@ KEY_META = [
     _k(PLUGIN + "dock:minimize_ms", "int", "animation", 400, min=0, max=1200),
     _k(PLUGIN + "dock:autohide_ms", "int", "animation", 200, min=0, max=800),
     _k(PLUGIN + "mission_control_reflow_ms", "int", "animation", 300, min=0, max=1000),
+    # Desktop switches by cause (DesktopSwitch.hpp): off = that kind is instant.
+    _k(PLUGIN + "animation:desktop_keyboard", "bool", "animation", True),
+    _k(PLUGIN + "animation:desktop_focus", "bool", "animation", True),
     # Motion blur
     _k(PLUGIN + "motion_blur:enabled", "bool", "blur", True),
     _k(PLUGIN + "layout_motion_blur", "int", "blur", 16, min=0, max=32),
@@ -177,11 +180,21 @@ KEY_META = [
     # presets plus whatever is set now (chord_options(), per dump).
     _k(PLUGIN + "mosaic:cycle_bind", "str", "mosaic", "auto"),
     _k(PLUGIN + "mosaic:focus_binds", "str", "mosaic", "auto"),
+    # Keybinds. `reload`: these change which binds exist, and binds only follow
+    # a parse -- 50-desktop-scroll.lua reads the two scroll keys at parse time.
+    _k(PLUGIN + "binds:scroll_desktops", "bool", "keybinds", True, reload=True),
+    _k(PLUGIN + "binds:scroll_desktops_mods", "str", "keybinds", "SUPER", reload=True),
+    _k(PLUGIN + "dock:hot_keys", "bool", "keybinds", False),
 ]
 
 # Groups a power profile neither saves nor applies. Mosaic rebinds Super+L and
-# can change the default layout; plugging in the charger must not do either.
-PROFILE_SKIP = {"mosaic"}
+# can change the default layout; plugging in the charger must not do either --
+# and the Keybinds section's keys are binds, which no power state should change.
+PROFILE_SKIP = {"mosaic", "keybinds"}
+
+SCROLL_DESKTOPS = PLUGIN + "binds:scroll_desktops"
+SCROLL_MODS = PLUGIN + "binds:scroll_desktops_mods"
+RELOAD_KEYS = {m["key"] for m in KEY_META if m.get("reload")}
 
 MOSAIC_ON = PLUGIN + "mosaic:enabled"
 MOSAIC_DEFAULT = PLUGIN + "mosaic:default"
@@ -936,15 +949,18 @@ def mosaic_after_write(store, before, binds_changed=False):
         eval_lua("hl.config({ general = { layout = %s } })" % lua_lit(prev))
 
 
-def commit_store(store, before):
-    """Save the store and 40-panel.lua, with Mosaic's side effects around it."""
+def commit_store(store, before, rebind=False):
+    """Save the store and 40-panel.lua, with Mosaic's side effects around it.
+
+    `rebind`: a key 50-desktop-scroll.lua reads changed (RELOAD_KEYS), which
+    only a parse turns into binds."""
     mosaic_before_write(store, before)
     save_store(store)
     old = _bind_lines(FRAGDIR / PANEL_FRAG)
     write_panel_fragment(store)
     # A chord changed while Mosaic stays on (cycle_bind / focus_binds) is a
     # bind change too, and binds only follow a parse.
-    mosaic_after_write(store, before, binds_changed=old != _bind_lines(FRAGDIR / PANEL_FRAG))
+    mosaic_after_write(store, before, binds_changed=rebind or old != _bind_lines(FRAGDIR / PANEL_FRAG))
 
 
 def _bind_lines(path):
@@ -1115,6 +1131,16 @@ def chord_options(key, current):
     """Mosaic's chord rows: Auto (the row's description says what it means on
     each desktop), the usual choices, None -- and whatever the config says now
     when it is something else, so a hand-set chord still shows as chosen."""
+    if key == SCROLL_MODS:
+        opts = [
+            {"value": "SUPER", "label": "Super"},
+            {"value": "SUPER + SHIFT", "label": "Super+Shift"},
+            {"value": "SUPER + CTRL", "label": "Super+Ctrl"},
+            {"value": "CTRL + ALT", "label": "Ctrl+Alt"},
+        ]
+        if current and current not in [o["value"] for o in opts]:
+            opts.append({"value": current, "label": current.title().replace(" ", "")})
+        return opts
     if key == MOSAIC_CYCLE:
         opts = [
             {"value": "auto", "label": "Auto"},
@@ -1134,6 +1160,84 @@ def chord_options(key, current):
     return opts
 
 
+# ---------------------------------------------------------------- Keybinds
+#
+# The Keybinds section lists hyprdrive's binds as Hyprland holds them NOW, so
+# it cannot claim a chord that is not bound or miss one a hand edit added.
+# `hyprctl binds -j` cannot say what a Lua bind does (every one is an opaque
+# `__lua` ref), so the plugin answers `hyprctl hyprdrive-binds -j` with every
+# bind that calls one of its dispatchers. The layout cycle is an exec bind
+# 40-panel.lua writes, found by its description.
+
+# Which Keybinds row a bind belongs to, by the dispatcher it calls.
+BIND_ROWS = {
+    "overview": "overview",
+    "window": "overview_select",
+    "navigate": "overview_select",
+    "desktop": "desktop",
+    "minimize": "minimize",
+    "settings": "settings",
+    "focus": "focus",
+    "hotkey": "hotkeys",
+}
+LAYOUT_CYCLE_DESC = "Cycle workspace layout"
+MOD_BITS = [(64, "SUPER"), (4, "CTRL"), (8, "ALT"), (1, "SHIFT"), (2, "CAPS"), (16, "MOD2"), (32, "MOD3"), (128, "MOD5")]
+
+
+def mods_text(mask):
+    try:
+        mask = int(mask)
+    except (TypeError, ValueError):
+        return ""
+    return " + ".join(name for bit, name in MOD_BITS if mask & bit)
+
+
+def chord_text(mods, key):
+    return (mods + " + " if mods else "") + str(key or "")
+
+
+def keybinds(live):
+    """{row id: [{"chord", "dispatcher", "arg", "submap", "description"}]}, plus
+    "overview" carrying the Super tap (not a bind: the plugin sees it itself)
+    while plugin:hyprdrive:tap_super is on."""
+    rows = {}
+
+    def add(row, entry):
+        rows.setdefault(row, []).append(entry)
+
+    if live.get(PLUGIN + "tap_super", 1) not in (0, "0", False, "false"):
+        add("overview", {"chord": "SUPER (tap)", "dispatcher": "overview", "arg": "toggle all", "submap": "", "description": "Tap Super alone"})
+    try:
+        ours = json.loads(hyprctl("hyprdrive-binds", "-j") or "[]")
+    except ValueError:
+        ours = []
+    for b in ours if isinstance(ours, list) else []:
+        if not isinstance(b, dict):
+            continue
+        name = str(b.get("dispatcher") or "")
+        add(BIND_ROWS.get(name, "other"), {
+            "chord": chord_text(str(b.get("mods") or ""), b.get("key")),
+            "dispatcher": name,
+            "arg": str(b.get("arg") or ""),
+            "submap": str(b.get("submap") or ""),
+            "description": str(b.get("description") or ""),
+        })
+    try:
+        every = json.loads(hyprctl("binds", "-j") or "[]")
+    except ValueError:
+        every = []
+    for b in every if isinstance(every, list) else []:
+        if isinstance(b, dict) and b.get("description") == LAYOUT_CYCLE_DESC:
+            add("layout_cycle", {
+                "chord": chord_text(mods_text(b.get("modmask")), b.get("key")),
+                "dispatcher": "exec",
+                "arg": "hyprdrive-layout-cycle",
+                "submap": str(b.get("submap") or ""),
+                "description": LAYOUT_CYCLE_DESC,
+            })
+    return rows
+
+
 def plugin_version():
     """The loaded plugin's version (`hyprctl plugin list`), for a native
     install with no manifest.json beside it."""
@@ -1151,7 +1255,7 @@ def dump():
     live = live_keys()
     # Hyprlang reports an empty string option as [[EMPTY]].
     mon_key = PLUGIN + "dock:monitor"
-    for k in (mon_key, MOSAIC_CYCLE, MOSAIC_FOCUS):
+    for k in (mon_key, MOSAIC_CYCLE, MOSAIC_FOCUS, SCROLL_MODS):
         if live.get(k) == "[[EMPTY]]":
             live[k] = ""
 
@@ -1160,6 +1264,8 @@ def dump():
             return dict(m, options=monitor_options(live.get(mon_key, "")))
         if m["key"] in (MOSAIC_CYCLE, MOSAIC_FOCUS):
             return dict(m, options=chord_options(m["key"], chord_setting(store, m["key"]) if live.get(m["key"]) is None else (live.get(m["key"]) or "auto")))
+        if m["key"] == SCROLL_MODS:
+            return dict(m, options=chord_options(SCROLL_MODS, live.get(SCROLL_MODS) or "SUPER"))
         return m
     meta = [with_options(m) for m in KEY_META]
     gestures = store.get("gestures")
@@ -1197,6 +1303,7 @@ def dump():
         "meta": meta,
         "actions": ACTIONS,
         "directions": DIRECTIONS,
+        "binds": keybinds(live),
     }
 
 
@@ -1232,7 +1339,7 @@ def set_keys(pairs, preview=False):
         store["keys"][key] = value
         if key == PLUGIN + "dock:corner_radius" and int(value) > 0:
             store["roundedRadius"] = int(value)
-    commit_store(store, before)
+    commit_store(store, before, rebind=any(key in RELOAD_KEYS for key, _ in coerced))
     if _NEEDS_RELOAD:
         # Animations back on with no snapshot to restore them from (off
         # Omarchy): 40-panel.lua no longer switches them off, so a re-parse
@@ -1274,7 +1381,7 @@ def reset_keys(store, group):
     owned = store.setdefault("keys", {})
     for key, _ in pairs:
         owned.pop(key, None)
-    commit_store(store, before)
+    commit_store(store, before, rebind=any(key in RELOAD_KEYS for key, _ in pairs))
 
 
 def cmd_reset(args):
@@ -1311,7 +1418,7 @@ def cmd_reset(args):
         owned.pop(key, None)
     if group == "dock":
         store["roundedRadius"] = 24
-    commit_store(store, before)
+    commit_store(store, before, rebind=any(key in RELOAD_KEYS for key, _ in pairs))
     if _NEEDS_RELOAD:
         hyprctl("reload")
     print(json.dumps({"ok": True, "group": group, "keys": {k: v for k, v in pairs}}))

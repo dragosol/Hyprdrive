@@ -97,6 +97,7 @@ using namespace Hyprutils::String;
 #include "FingerSwipe.hpp"
 #include "Spring.hpp"
 #include "HotCorner.hpp"
+#include "DesktopSwitch.hpp"
 #include "Ripple.hpp"
 
 // Methods
@@ -1052,6 +1053,7 @@ static int onFileResultsReady(int fd, uint32_t mask, void* data) {
 
 static CHyprSignalListener g_pRawKeyHook;
 static CHyprSignalListener g_pTapSuperButtonHook;
+static CHyprSignalListener g_pTapSuperAxisHook;
 static CHyprSignalListener g_pRenderPreHook;
 static CHyprSignalListener g_pMembOpenHook;
 static CHyprSignalListener g_pMembLateHook;
@@ -1305,6 +1307,9 @@ static void                registerRawKeyHooks() {
 
     // SUPER+click/drag (move or resize a window) must not count as a tap.
     g_pTapSuperButtonHook = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo& info) { g_tapSuperCandidate = false; });
+    // ...and neither must SUPER+scroll (binds:scroll_desktops, DesktopSwitch.hpp):
+    // letting go of SUPER after scrolling through desktops opened the overview.
+    g_pTapSuperAxisHook = Event::bus()->m_events.input.mouse.axis.listen([](IPointer::SAxisEvent, Event::SCallbackInfo&) { g_tapSuperCandidate = false; });
 }
 
 static SDispatchResult onNavigateDispatcher(std::string arg) {
@@ -1670,6 +1675,10 @@ static SDispatchResult onDebugDispatcher(std::string arg) {
     // `motion`: which animation:curve preset the engine is ACTUALLY using, and
     // the three curves at t = 0.25 / 0.5 -- a preset that reads as the house
     // one here is not reaching the animations.
+    // `desktop`: Super+scroll's and the per-cause animation toggles' state --
+    // what caused the last desktop switch, and whether it snapped.
+    if (TOPIC == "desktop")
+        return {.success = false, .error = ScrollOverview::DesktopSwitch::debugReport()};
     if (TOPIC == "motion") {
         using ScrollOverview::Motion::ERole;
         const auto E = [](ERole r, float t) { return ScrollOverview::Motion::ease(r, t); };
@@ -2449,6 +2458,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("debug", ::onDebugDispatcher);
     // Open the settings (SettingsApp.hpp): the Omarchy panel or the standalone app.
     ScrollOverview::Config::registerDispatcher("settings", ScrollOverview::SettingsApp::dispatch);
+    // Super+scroll's next / previous desktop (DesktopSwitch.hpp).
+    ScrollOverview::Config::registerDispatcher("desktop", ScrollOverview::DesktopSwitch::dispatch);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
     // The Omarchy-or-not answer, now that its key exists, and the hyprctl
@@ -2484,6 +2495,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::FingerSwipe::init();
     ScrollOverview::Spring::init();
     ScrollOverview::HotCorner::init();
+    ScrollOverview::DesktopSwitch::init();
     ScrollOverview::Ripple::init();
     ScrollOverview::FlightBlur::init();
 
@@ -2579,6 +2591,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     }
     g_pRawKeyHook.reset();
     g_pTapSuperButtonHook.reset();
+    g_pTapSuperAxisHook.reset();
     g_pRenderPreHook.reset();
     CursorShape::shutdown();
     ScrollOverview::FramePacing::shutdown();
@@ -2666,6 +2679,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // through it, and the spring timer must not fire into unloaded code.
     ScrollOverview::Spring::shutdown();
     ScrollOverview::HotCorner::shutdown();
+    ScrollOverview::DesktopSwitch::shutdown();
     ScrollOverview::DebugGesture::shutdown();
     ScrollOverview::FingerSwipe::shutdown();
 

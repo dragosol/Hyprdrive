@@ -4,6 +4,7 @@
 #   hyprdrive-settings                 open (or bring forward) the settings
 #   hyprdrive-settings --pane ID       ...on a section: overview dock icons
 #                                      animation blur gestures performance mosaic
+#                                      keybinds
 #   hyprdrive-settings --icons APPID   ...on Icons, with that dock app chosen
 #                                      (the dock's Get Info -> App Icon)
 #   hyprdrive-settings --toggle        close it if it is open, else open it

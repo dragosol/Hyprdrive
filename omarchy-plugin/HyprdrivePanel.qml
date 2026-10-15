@@ -203,8 +203,47 @@ Item {
     case "motionOn": return kn("plugin:hyprdrive:anim_scale") > 0.001
     case "blurOn": return kb("plugin:hyprdrive:motion_blur:enabled")
     case "mosaicOn": return kb("plugin:hyprdrive:mosaic:enabled")
+    case "scrollDesktopsOn": return kb("plugin:hyprdrive:binds:scroll_desktops")
     default: return true
     }
+  }
+
+  // Keybinds: a chord as hdpanel reports it ("SUPER + mouse_down", "SUPER (tap)")
+  // the way it reads on a keyboard ("Super+Scroll down", "Super (tap)").
+  function keyChordLabel(chord) {
+    var words = { SUPER: "Super", CTRL: "Ctrl", ALT: "Alt", SHIFT: "Shift", CAPS: "Caps", MOD2: "Mod2", MOD3: "Mod3", MOD5: "Mod5",
+                  mouse_down: "Scroll down", mouse_up: "Scroll up", mouse_left: "Scroll left", mouse_right: "Scroll right",
+                  "mouse:272": "Click", "mouse:273": "Right click", "mouse:274": "Middle click" }
+    var s = String(chord || ""), tail = ""
+    var m = /\s*\((.*)\)\s*$/.exec(s)
+    if (m) { tail = " (" + m[1] + ")"; s = s.slice(0, m.index) }
+    return s.split("+").map(function(p) {
+      p = p.trim()
+      if (words[p] !== undefined) return words[p]
+      var code = /^code:(\d+)$/.exec(p)
+      if (code && +code[1] >= 10 && +code[1] <= 19) return String((+code[1] - 9) % 10)
+      if (p.length > 1 && p === p.toUpperCase()) return p.charAt(0) + p.slice(1).toLowerCase()   // COMMA -> Comma
+      return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1)
+    }).join("+") + tail
+  }
+  // The chords a `bind` row's binds have right now (hdpanel dump `binds`), or
+  // "Not bound". A long family (the dock's thirty hotkeys) is cut short.
+  function bindChords(row) {
+    var list = (hd.binds || {})[row.bind] || []
+    var seen = {}, out = []
+    for (var i = 0; i < list.length; i++) {
+      var label = keyChordLabel(list[i].chord) + (list[i].submap ? " · overview" : "")
+      if (seen[label]) continue
+      seen[label] = true
+      out.push({ label: label, none: false })
+    }
+    var MAX = 6
+    if (out.length > MAX) {
+      var more = out.length - MAX
+      out = out.slice(0, MAX)
+      out.push({ label: "+" + more + " more", none: true })
+    }
+    return out.length ? out : [{ label: "Not bound", none: true }]
   }
 
   function formatValue(row, v) {
@@ -881,6 +920,33 @@ Item {
         font.pixelSize: Style.font.body
         elide: Text.ElideRight
       }
+      // A keybind row: the chords bound to it right now, as keycaps.
+      Flow {
+        width: parent.width
+        visible: sr.row.type === "bind"
+        spacing: Style.space(4)
+        Repeater {
+          model: sr.row.type === "bind" ? root.bindChords(sr.row) : []
+          delegate: Rectangle {
+            required property var modelData
+            radius: Style.space(5)
+            color: modelData.none ? "transparent" : root.tint(root.fg, 0.07)
+            border.width: 1
+            border.color: modelData.none ? root.hairline : root.tint(root.fg, 0.16)
+            implicitWidth: chordText.implicitWidth + Style.space(12)
+            implicitHeight: chordText.implicitHeight + Style.space(4)
+            Text {
+              id: chordText
+              anchors.centerIn: parent
+              textFormat: Text.PlainText
+              text: modelData.label
+              color: modelData.none ? root.dim : root.fg
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+      }
       Text {
         textFormat: Text.PlainText
         width: parent.width
@@ -908,6 +974,7 @@ Item {
         case "speed": return speedControl
         case "motion": return motionControl
         case "blur": return blurControl
+        case "bind": return bindControl
         }
         return null
       }
@@ -1008,6 +1075,35 @@ Item {
 
   // One motion-blur site: strength in eighths (0 = off) and, for the sites
   // that run on a clock, how the smear fades.
+  // A keybind's own controls: its chord (chordKey, a choice from hdpanel's
+  // meta) and its on/off (key). Either may be missing; a row with neither only
+  // shows what is bound.
+  Component {
+    id: bindControl
+    Row {
+      id: bindRow
+      spacing: Style.space(10)
+      property var row: parent ? parent.row : ({})
+      property bool rowLive: parent ? parent.live : true
+      DropButton {
+        visible: !!bindRow.row.chordKey
+        implicitWidth: Style.space(140)
+        anchors.verticalCenter: parent.verticalCenter
+        options: bindRow.row.chordKey ? (root.metaOptions[bindRow.row.chordKey] || []) : []
+        value: bindRow.row.chordKey ? String(root.k(bindRow.row.chordKey)) : ""
+        live: bindRow.rowLive
+        onPicked: function(v) { root.setKey(bindRow.row.chordKey, v) }
+      }
+      Switch {
+        visible: !!bindRow.row.key
+        anchors.verticalCenter: parent.verticalCenter
+        checked: bindRow.row.key ? root.kb(bindRow.row.key) : false
+        live: bindRow.rowLive
+        onToggled: root.setKey(bindRow.row.key, !root.kb(bindRow.row.key))
+      }
+    }
+  }
+
   Component {
     id: blurControl
     Row {

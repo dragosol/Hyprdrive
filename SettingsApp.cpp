@@ -7,6 +7,8 @@
 #include "Launch.hpp"
 #include "globals.hpp"
 
+#include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprutils/os/Process.hpp>
 
@@ -24,6 +26,8 @@
 namespace ScrollOverview::SettingsApp {
     namespace {
         SP<SHyprCtlCommand> g_hyprctl;
+        SP<SHyprCtlCommand> g_hyprctlBinds;
+        CHyprSignalListener g_preReload;
 
         bool executable(const std::string& path) {
             struct stat st {};
@@ -87,6 +91,50 @@ namespace ScrollOverview::SettingsApp {
         // answers (or it has no such panel); that is said in a notification
         // instead of an "ok" that opened nothing. The arguments are sh's "$@",
         // never part of the script: an app id is one argument whatever is in it.
+        // Hyprland's modifier bits, named as a bind is written (SUPER + ALT).
+        std::string modNames(uint32_t mask) {
+            static constexpr std::pair<uint32_t, const char*> NAMES[] = {
+                {HL_MODIFIER_META, "SUPER"}, {HL_MODIFIER_CTRL, "CTRL"}, {HL_MODIFIER_ALT, "ALT"}, {HL_MODIFIER_SHIFT, "SHIFT"},
+                {HL_MODIFIER_CAPS, "CAPS"},  {HL_MODIFIER_MOD2, "MOD2"}, {HL_MODIFIER_MOD3, "MOD3"}, {HL_MODIFIER_MOD5, "MOD5"},
+            };
+            std::string out;
+            for (const auto& [BIT, NAME] : NAMES)
+                if (mask & BIT)
+                    out += (out.empty() ? "" : " + ") + std::string{NAME};
+            return out;
+        }
+
+        // `hyprctl hyprdrive-binds [-j]`: every bind that calls a hyprdrive
+        // dispatcher, as Hyprland holds it right now -- what the settings'
+        // Keybinds pane lists. `hyprctl binds` cannot say it: under Lua each
+        // bind is an opaque `__lua` ref (Config::boundAction resolves ours).
+        std::string bindsReply(eHyprCtlOutputFormat format) {
+            std::string out = format == FORMAT_JSON ? "[" : "";
+            bool        first = true;
+            if (g_pKeybindManager) {
+                for (const auto& KB : g_pKeybindManager->m_keybinds) {
+                    if (!KB || KB->handler != "__lua")
+                        continue;
+                    const auto ACTION = Config::boundAction(KB->arg);
+                    if (!ACTION)
+                        continue;
+                    const std::string MODS = modNames(KB->modmask);
+                    const std::string KEY  = KB->key.empty() ? KB->displayKey : KB->key;
+                    if (format == FORMAT_JSON) {
+                        out += std::format(R"({}{{"mods": "{}", "key": "{}", "submap": "{}", "mouse": {}, "description": "{}", "dispatcher": "{}", "arg": "{}"}})", first ? "" : ",",
+                                           jsonEscape(MODS), jsonEscape(KEY), jsonEscape(KB->submap.name), KB->mouse ? "true" : "false", jsonEscape(KB->description),
+                                           jsonEscape(ACTION->first), jsonEscape(ACTION->second));
+                    } else
+                        out += std::format("{}{}{} -> hyprdrive:{} {}{}\n", MODS, MODS.empty() ? "" : " + ", KEY, ACTION->first, ACTION->second,
+                                           KB->submap.name.empty() ? "" : " (submap " + KB->submap.name + ")");
+                    first = false;
+                }
+            }
+            if (format == FORMAT_JSON)
+                out += "]";
+            return out;
+        }
+
         bool omarchyCall(std::vector<std::string> args) {
             static constexpr const char* SCRIPT =
                 R"(/usr/bin/qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive "$@" >/dev/null 2>&1 ||)"
@@ -203,11 +251,25 @@ namespace ScrollOverview::SettingsApp {
                                                                                        return themeReply(format);
                                                                                    },
                                                                                });
+        g_hyprctlBinds = HyprlandAPI::registerHyprCtlCommand(SCROLLOVERVIEW_HANDLE, SHyprCtlCommand{
+                                                                                        .name  = "hyprdrive-binds",
+                                                                                        .exact = true,
+                                                                                        .fn    = [](eHyprCtlOutputFormat format, std::string) -> std::string {
+                                                                                            return bindsReply(format);
+                                                                                        },
+                                                                                    });
+        // The Lua state the bind refs live in is rebuilt by every reload.
+        g_preReload = Event::bus()->m_events.config.preReload.listen([] { Config::forgetBindActions(); });
     }
 
     void shutdown() {
         if (g_hyprctl)
             HyprlandAPI::unregisterHyprCtlCommand(SCROLLOVERVIEW_HANDLE, g_hyprctl);
         g_hyprctl.reset();
+        if (g_hyprctlBinds)
+            HyprlandAPI::unregisterHyprCtlCommand(SCROLLOVERVIEW_HANDLE, g_hyprctlBinds);
+        g_hyprctlBinds.reset();
+        g_preReload.reset();
+        Config::forgetBindActions();
     }
 }

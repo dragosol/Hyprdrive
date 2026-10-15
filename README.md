@@ -30,6 +30,13 @@ fingers:
 - A workspace strip. Drag a tile onto a strip cell and the window moves there.
   Drop it on the empty cell and it gets a desktop of its own.
 
+**Super+scroll** walks the desktops one per wheel notch, empty ones included
+(`binds:scroll_desktops`, modifier `binds:scroll_desktops_mods`; it replaces
+whatever had that chord, such as Omarchy's "scroll active workspace"). Desktop
+changes from keys and from focus moving to another desktop can each be made
+instant (`animation:desktop_keyboard`, `animation:desktop_focus`). The settings'
+Keybinds section lists every hyprdrive bind as it is bound right now.
+
   ![Drag a window to a new desktop](https://hyprdrive.shastasia.com/readme/new-desktop.gif)
 
 - **Hold to swap:** drag a window over another one and hold it there. Let go
@@ -295,6 +302,7 @@ a line there overrides the generated one above it.
 | `hotkey` | `overlay`, `1`-`10` (optionally `shift`/`ctrl`) | dock slot accelerators (unbound by default) |
 | `stack` | `pin`/`unpin`/`toggle`/`open <path>`, `view`, `sort`, `clear`, ... | dock stacks |
 | `focus` | `l`, `r`, `u`, `d` | Mosaic-aware focus by direction |
+| `desktop` | `next`, `prev` | the next / previous desktop by number, empty ones included (Super+scroll, `binds:scroll_desktops`) |
 | `settings` | `open`, `toggle`, `close`, `pane <id>`, `icons <app>` | open the settings |
 | `debug` | `frames`, `mem`, `gesture <script>`, ... | diagnostics and test hooks, see [docs/DEBUG.md](docs/DEBUG.md) |
 

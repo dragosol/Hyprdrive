@@ -3334,6 +3334,12 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
     damage();
 }
 
+bool CScrollOverview::stepDesktop(bool next) {
+    const size_t BEFORE = viewportCurrentWorkspace;
+    moveViewportWorkspace(next);
+    return viewportCurrentWorkspace != BEFORE;
+}
+
 bool CScrollOverview::scrollStepAllowed(uint32_t timeMs) {
     const uint32_t DELAY = sc<uint32_t>(ScrollOverview::Config::getScrollEventDelay());
 

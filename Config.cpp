@@ -176,10 +176,10 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .name            = "debug",
             // `gesture .+`: the script is parsed by the topic itself
             // (DebugGestureScript.hpp), which reports a bad step precisely.
-            .argPattern      = std::regex{"^(frames|mem|motion|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
+            .argPattern      = std::regex{"^(frames|mem|motion|desktop|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
             .defaultArg      = "frames",
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: frames | mem | motion | scratchpad | type [text] | activate <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
+            .invalidArgError = "expected: frames | mem | motion | desktop | scratchpad | type [text] | activate <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "debug"); },
             .luaLegacy       = [](lua_State* L) {
                 ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.debug");
@@ -209,6 +209,16 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .luaLegacy       = [](lua_State* L) { return dispatcherFactoryLua(L, "settings"); },
         },
         {
+            // DesktopSwitch.hpp: Super+scroll's step to the next / previous
+            // desktop by number, empty ones included (50-desktop-scroll.lua).
+            .name            = "desktop",
+            .argPattern      = std::regex{"^(next|prev)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected next or prev",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "desktop"); },
+            .luaLegacy       = [](lua_State* L) { return dispatcherFactoryLua(L, "desktop"); },
+        },
+        {
             .name            = "window",
             .argPattern      = std::regex{"^(select|close|click)$"},
             .typeArgError    = "expected a string argument",
@@ -236,6 +246,15 @@ int runDispatcherNow(lua_State* L, const SDispatcher& dispatcher, const char* ar
     return 0;
 }
 
+// WHICH BINDS ARE OURS (the settings' Keybinds pane, `hyprctl hyprdrive-binds`).
+// Under Lua every bind is `__lua` with a registry ref, so `hyprctl binds` cannot
+// say what a bind does. Each action built here is a fresh Lua function; its
+// identity is remembered with the dispatcher and argument it calls, and a bind's
+// ref is looked up against them in the same Lua state. The state is rebuilt on
+// every reload (and every bind with it), so both are dropped at preReload.
+lua_State*                                                        g_bindLua = nullptr;
+std::unordered_map<const void*, std::pair<std::string, std::string>> g_bindActions;
+
 void pushDispatcherBindAction(lua_State* L, const char* name, const char* arg) {
     const std::string CODE = "return function() return hl.plugin." + std::string{ScrollOverview::Compat::NAME} + "._dispatch(\"" + std::string{name} + "\", \"" + std::string{arg} + "\") end";
 
@@ -244,6 +263,12 @@ void pushDispatcherBindAction(lua_State* L, const char* name, const char* arg) {
 
     if (lua_pcall(L, 0, 1, 0) != LUA_OK)
         lua_error(L);
+
+    if (g_bindLua != L) {
+        g_bindActions.clear();
+        g_bindLua = L;
+    }
+    g_bindActions[lua_topointer(L, -1)] = {name, arg};
 }
 
 int runDispatcherActionLua(lua_State* L) {
@@ -833,6 +858,21 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CStringValue>(KEY("animation:curve"),
                                     "the curve family for everything hyprdrive animates except the dock stacks: hyprdrive (the house curves), serpantinum (its window curve), serpantinum_glide, serpantinum_soft, serpantinum_intro, serpantinum_pop, swift, springy, linear",
                                     Hyprlang::STRING{"hyprdrive"}));
+    // DESKTOP SWITCHES (DesktopSwitch.hpp, user 2026-10-15). Super+scroll walks
+    // the desktops by number, empty ones included; 50-desktop-scroll.lua binds it
+    // (replacing whatever had <mods>+mouse_down/up) while this is on.
+    addKey(makeShared<CBoolValue>(KEY("binds:scroll_desktops"),
+                                  "<mods>+scroll wheel steps to the next / previous desktop on the focused monitor, empty ones included (one per notch, 1 to max(10, highest), no wrap)", true));
+    addKey(makeShared<CStringValue>(KEY("binds:scroll_desktops_mods"), "the modifiers for binds:scroll_desktops, e.g. SUPER or SUPER + ALT",
+                                    Hyprlang::STRING{"SUPER"}));
+    // Desktop switches by cause: off makes that kind of switch instant (no
+    // slide or fade), the other kind unaffected. A no-op while Hyprland's
+    // workspaces animation is off (Omarchy's default).
+    addKey(makeShared<CBoolValue>(KEY("animation:desktop_keyboard"),
+                                  "animate desktop switches made by a key or scroll bind (Super+1..0, Super+Tab, Super+scroll, move to desktop and follow)", true));
+    addKey(makeShared<CBoolValue>(KEY("animation:desktop_focus"),
+                                  "animate desktop switches made by focus moving to a window on another desktop (an app asking for focus, a dock click, a notification, focuswindow)",
+                                  true));
     // MOTION BLUR, PER ANIMATION (user, 2026-09-30). Each site smears a share
     // of its frame-to-frame motion (strength, 0..1; 0 = that site off) shaped
     // over the animation by `fade`: early (full at the start, gone by the
@@ -944,6 +984,27 @@ static void registerConfigValues() {
 
     for (size_t i = 0; i < g_modernValues.size() && i < g_legacyValues.size(); ++i)
         ScrollOverview::Compat::pairKey(g_modernValues[i]->name(), g_legacyValues[i]->name(), g_modernValues[i]->underlying());
+}
+
+void forgetBindActions() {
+    g_bindLua = nullptr;
+    g_bindActions.clear();
+}
+
+std::optional<std::pair<std::string, std::string>> boundAction(const std::string& luaRef) {
+    if (!g_bindLua || g_bindActions.empty() || luaRef.empty() || !std::ranges::all_of(luaRef, [](char c) { return std::isdigit(sc<unsigned char>(c)); }))
+        return std::nullopt;
+    int ref = 0;
+    try {
+        ref = std::stoi(luaRef);
+    } catch (...) { return std::nullopt; }
+    lua_rawgeti(g_bindLua, LUA_REGISTRYINDEX, ref);
+    const void* FN = lua_topointer(g_bindLua, -1);
+    lua_pop(g_bindLua, 1);
+    const auto IT = g_bindActions.find(FN);
+    if (!FN || IT == g_bindActions.end())
+        return std::nullopt;
+    return IT->second;
 }
 
 void registerConfig() {
@@ -1763,6 +1824,26 @@ int getDragMiniMs() {
 int getDragRecentreMs() {
     static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:drag_recentre_ms");
     return std::max<int>(0, sc<int>(*VAL));
+}
+
+bool getScrollDesktops() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:binds:scroll_desktops");
+    return *VAL != 0;
+}
+
+std::string getScrollDesktopsMods() {
+    auto mods = getValue<std::string>("plugin:hyprdrive:binds:scroll_desktops_mods");
+    return mods.empty() || mods == "[[EMPTY]]" ? std::string{"SUPER"} : mods;
+}
+
+bool getAnimateDesktopKeyboard() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:animation:desktop_keyboard");
+    return *VAL != 0;
+}
+
+bool getAnimateDesktopFocus() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:animation:desktop_focus");
+    return *VAL != 0;
 }
 
 bool getTapSuper() {

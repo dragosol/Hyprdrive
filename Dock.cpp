@@ -40,6 +40,7 @@
 #include "BuiltinIcons.hpp"
 #include "IconOverrides.hpp"
 #include "SettingsApp.hpp"
+#include "DesktopSwitch.hpp"
 #include "DockDrop.hpp"
 #include "DockStacks.hpp"
 #include "DockTilt.hpp"
@@ -2898,6 +2899,11 @@ void restoreDockSeat() {
 void activateWindow(const PHLWINDOW& window) {
     if (!window)
         return;
+
+    // A desktop switch from here is focus moving to a window on another
+    // desktop (animation:desktop_focus), not a key -- even when a hotkey bind
+    // got us here, which DesktopSwitch's classify() still calls a key.
+    ScrollOverview::DesktopSwitch::CFocusScope focusing;
 
     if (Minimize::isMinimized(window)) {
         Minimize::showOriginalWorkspace(window);

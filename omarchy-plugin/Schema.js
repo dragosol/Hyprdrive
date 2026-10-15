@@ -15,6 +15,9 @@
 //   gestures -- the trackpad map editor
 //   power    -- AC / battery profiles
 //   icons    -- per-app dock icons (bin/hdicons)
+//   bind     -- one of hyprdrive's keybinds: the chords bound to it right now
+//               (hdpanel dump's `binds`, by the row's `bind` id), with a switch
+//               (key) and/or a chord choice (chordKey) when it has them
 //
 // `when` names a condition (HyprdrivePanel.qml, rowEnabled) under which the
 // row applies; otherwise it is drawn dimmed and does not take input.
@@ -154,6 +157,15 @@ var sections = [
         { type: "speed", key: P + "anim_scale", label: "Speed", when: "motionOn",
           desc: "Scales every hyprdrive animation at once." }
       ]},
+      // Hyprland's own desktop slide, by what caused the switch. Off makes that
+      // kind instant; nothing changes while the compositor does not animate
+      // desktops at all (Omarchy's default) or with the overview open.
+      { title: "Desktop changes", rows: [
+        { type: "toggle", key: P + "animation:desktop_keyboard", label: "Animate desktop changes from keys",
+          desc: "Slide when a key or the scroll wheel changes the desktop: Super+1…0, Super+Tab, Super+scroll, moving a window along with you." },
+        { type: "toggle", key: P + "animation:desktop_focus", label: "Animate desktop changes when focus moves",
+          desc: "Slide when the desktop changes because a window elsewhere takes focus: a dock click, a notification, an app asking for attention." }
+      ]},
       { title: "Timing", rows: [
         { type: "slider", key: P + "open_speed", label: "Overview open", min: 0.5, max: 8, step: 0.1, fmt: "deciseconds" },
         { type: "slider", key: P + "close_speed", label: "Overview close", min: 0.5, max: 8, step: 0.1, fmt: "deciseconds" },
@@ -259,6 +271,48 @@ var sections = [
           desc: "Cycles the current desktop Dwindle → Scrolling → Mosaic. Auto is Super+L (on Omarchy in place of its two-way toggle)." },
         { type: "choice", key: P + "mosaic:focus_binds", label: "Focus keys", when: "mosaicOn",
           desc: "With the arrow keys, move focus by position on a Mosaic desktop and as usual elsewhere. Auto is Super+arrows on Omarchy and no keys on plain Hyprland." }
+      ]}
+    ]
+  },
+  {
+    // After Mosaic, so every section before it keeps its Alt+number.
+    // Every hyprdrive keybind, as Hyprland holds it right now: a `bind` row
+    // shows its chords from hdpanel (`hyprctl hyprdrive-binds`), so the list
+    // never claims a key that is not bound.
+    id: "keybinds", title: "Keybinds", icon: "\uf11c", group: "keybinds",
+    subtitle: "Hyprdrive's own keys, and what they are bound to right now.",
+    cards: [
+      { title: "Desktops", rows: [
+        { type: "bind", bind: "desktop", key: P + "binds:scroll_desktops", label: "Scroll through desktops",
+          desc: "Hold the modifier and turn the wheel: down for the next desktop, up for the previous one, empty ones included. One desktop per notch. In the overview it moves between the desktops there." },
+        { type: "choice", key: P + "binds:scroll_desktops_mods", label: "Scroll modifier", when: "scrollDesktopsOn",
+          desc: "Held with the wheel. Whatever these keys and the wheel did before is replaced while scrolling through desktops is on." }
+      ]},
+      { title: "Overview", rows: [
+        { type: "bind", bind: "overview", key: P + "tap_super", label: "Overview",
+          desc: "Tap Super alone to open or close it. A bind of your own to the overview is listed here too." },
+        { type: "bind", bind: "overview_select", label: "Pick a window in the overview",
+          desc: "Click a window, with or without Super held. Only while the overview is open." }
+      ]},
+      { title: "Windows", rows: [
+        { type: "bind", bind: "minimize", label: "Minimize",
+          desc: "Minimize the active window into the dock. Not bound by default: bind hl.plugin.hyprdrive.minimize() in your config, e.g. to Super+H." },
+        { type: "bind", bind: "settings", label: "Open these settings",
+          desc: "Not bound by default: bind hl.plugin.hyprdrive.settings() in your config, e.g. to Super+Comma." }
+      ]},
+      { title: "Mosaic", rows: [
+        { type: "bind", bind: "layout_cycle", chordKey: P + "mosaic:cycle_bind", label: "Mosaic layout cycle", when: "mosaicOn",
+          desc: "Dwindle → Scrolling → Mosaic on the current desktop, while Mosaic is on. Auto is Super+L." },
+        { type: "bind", bind: "focus", chordKey: P + "mosaic:focus_binds", label: "Mosaic-aware focus", when: "mosaicOn",
+          desc: "With the arrow keys, move focus by position on a Mosaic desktop and as usual elsewhere, while Mosaic is on. Auto is Super+arrows on Omarchy and no keys on plain Hyprland." }
+      ]},
+      { title: "Dock", rows: [
+        { type: "bind", bind: "hotkeys", key: P + "dock:hot_keys", label: "Dock hotkeys",
+          desc: "Super+1…0 open the dock's first ten apps instead of switching desktops. Off by default; the keys are your config's hl.plugin.hyprdrive.hotkey() binds." }
+      ]},
+      { title: "Other", rows: [
+        { type: "bind", bind: "other", label: "Other hyprdrive binds",
+          desc: "Anything else in your config that calls a hyprdrive dispatcher." }
       ]}
     ]
   }

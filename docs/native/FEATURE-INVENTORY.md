@@ -756,6 +756,11 @@ All of these are `Omarchy: no`.
   - Pass: `hyprdrive`. Clicking a tile with Super held selects it.
 - **O3. Super+W in the overview** (B9). **O4. Super+L and Super+arrows with Mosaic** (J3/J4).
 - **O5. Suggested in the README, not shipped:** Super+Shift+D overview, Super+H minimize.
+- **O6. Super+scroll through desktops** (added 2026-10-15, both variants). `config/hyprdrive/50-desktop-scroll.lua` binds `<binds:scroll_desktops_mods>+mouse_down/up` to `hl.plugin.hyprdrive.desktop("next"|"prev")` while `binds:scroll_desktops` is on, unbinding what had them (Omarchy's e+1/e-1). By number, empty desktops included, 1..max(10, highest), no wrap, one step per notch; in the overview it moves the desktop card.
+  - Code: DesktopSwitch.cpp, DesktopSwitchModel.hpp (host test scripts/desktop_switch_test.cpp), OverviewInput.cpp.
+  - Test: hold `KB down Super`, `PTR scroll 15` per notch (`scroll 3.75` x4 = one hi-res notch); `H h activeworkspace`; `H h hyprdrive-binds`.
+- **O7. Settings -> Keybinds** (section `keybinds`): every hyprdrive bind as Hyprland holds it (`hyprctl hyprdrive-binds -j`, hdpanel dump `binds`), with its switch / chord choice.
+- **L4. Desktop-change animation by cause** (`animation:desktop_keyboard`, `animation:desktop_focus`): a key/scroll bind's switch and a focus-driven one (focuswindow, xdg-activation, a dock click) can each be made instant. Hooks Animation::Workspace::startAnimation; no-op with the overview up or the workspaces leaf off. `HD 'debug("desktop")'` names the last cause.
 
 ## P. Sounds and misc
 

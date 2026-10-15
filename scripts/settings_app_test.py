@@ -157,5 +157,22 @@ rc, calls = launch(False, "--close")
 check("omarchy, no shell: close starts nothing",
       rc == 0 and not any(c.startswith("-n -p ") for c in calls), repr(calls))
 
+# ---------------------------------------------------------------- Keybinds
+meta = {m["key"]: m for m in na.KEY_META}
+check("keybinds: the scroll keys rebind (reload), in their own group",
+      all(meta[na.PLUGIN + k].get("reload") and meta[na.PLUGIN + k]["group"] == "keybinds" for k in ("binds:scroll_desktops", "binds:scroll_desktops_mods")))
+check("keybinds: power profiles never change binds", "keybinds" in na.PROFILE_SKIP and not na.profile_key(na.PLUGIN + "binds:scroll_desktops"))
+check("animation: the two desktop-change toggles, on by default",
+      all(meta[na.PLUGIN + "animation:" + k]["default"] is True and meta[na.PLUGIN + "animation:" + k]["group"] == "animation" for k in ("desktop_keyboard", "desktop_focus")))
+check("keybinds: modmask names", na.mods_text(64) == "SUPER" and na.mods_text(72) == "SUPER + ALT" and na.mods_text(0) == "")
+check("keybinds: chord text", na.chord_text("SUPER", "mouse_down") == "SUPER + mouse_down" and na.chord_text("", "mouse:272") == "mouse:272")
+opts = [o["value"] for o in na.chord_options(na.SCROLL_MODS, "CTRL + SUPER")]
+check("keybinds: scroll modifier choices keep a hand-set chord", opts[0] == "SUPER" and "CTRL + SUPER" in opts)
+# The Keybinds section's rows each name a known control and bind row.
+schema = (ROOT / "omarchy-plugin" / "Schema.js").read_text()
+check("schema: a keybinds section", 'id: "keybinds", title: "Keybinds"' in schema)
+check("schema: every bind row id is one hdpanel fills",
+      set(re.findall(r'bind: "(\w+)"', schema)) <= set(na.BIND_ROWS.values()) | {"overview", "layout_cycle", "other"})
+
 print("settings_app_test: %s" % ("OK" if not fails else "%d FAILED" % fails))
 sys.exit(1 if fails else 0)

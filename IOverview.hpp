@@ -135,6 +135,11 @@ class IOverview : public IOverviewFramePolicy, public IOverviewGeometry {
     // selection, which is also where X43's raise lives.
     virtual bool selectAndClose(const PHLWINDOW& window) = 0;
 
+    // The `desktop` dispatcher (Super+scroll, DesktopSwitch.hpp) with the
+    // overview up: the next / previous desktop card, as the wheel moves it.
+    // False at either end.
+    virtual bool stepDesktop(bool next) = 0;
+
     // Start a live window drag from a box that is ALREADY at mini scale -- a
     // dock preview cell. The window grows out of that box on the way out
     // instead of popping to full size for a frame, and from then on the gesture

@@ -293,6 +293,16 @@ std::string   getSearchTranslateEndpoint();
 std::string   getSearchTranslateTarget();
 int           getStripGap();
 bool          getTapSuper();
+// DesktopSwitch.hpp: Super+scroll and the per-cause desktop animations.
+bool          getScrollDesktops();
+std::string   getScrollDesktopsMods();
+bool          getAnimateDesktopKeyboard();
+bool          getAnimateDesktopFocus();
+// The hyprdrive dispatcher a Lua bind calls, from its registry ref (a
+// keybind's `arg` when its handler is `__lua`): {name, argument}, or nothing
+// for a bind that is not one of ours. forgetBindActions() at preReload.
+std::optional<std::pair<std::string, std::string>> boundAction(const std::string& luaRef);
+void                                               forgetBindActions();
 int           getTapSuperTimeoutMs();
 ::Config::CCssGapData getCssGapData(const std::string& name);
 int          getShadowEnabled();

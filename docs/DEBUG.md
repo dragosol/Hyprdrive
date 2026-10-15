@@ -20,6 +20,7 @@ From a hyprlang config: `hyprctl dispatch hyprdrive:debug frames`.
 | `frames` | why each monitor is repainting right now (cadence, open overview, previews) |
 | `mem` | what hyprdrive holds on the GPU, as far as it can count it |
 | `motion` | which `animation:curve` preset is in use, sampled |
+| `desktop` | Super+scroll and the per-cause desktop animations: the keys, what caused the last desktop switch and whether it snapped, the wheel's notch bank |
 | `scratchpad` | a click on the overview's Scratchpad cell |
 | `type [word]` | sets the open overview's search query (one word: the Lua pattern is `type \S+`) |
 | `press <evdev keycode>` | one key through the search's own press handler |

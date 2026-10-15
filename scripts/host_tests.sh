@@ -33,6 +33,8 @@
 #                     rpm and dpkg: every installed manager is asked in turn.
 #   icon_score_test   IconScore.hpp: the largest SVG design of an icon wins
 #                     (directory names only), as the icon index walks a theme.
+#   desktop_switch_test  DesktopSwitchModel.hpp: Super+scroll's step and clamp,
+#                     one step per wheel notch, and the desktop-switch cause.
 #
 # Anything that needs a running Hyprland is a GATE (scripts/gates/), not a host
 # test, and lives in scripts/suite.sh instead.
@@ -80,6 +82,7 @@ run finger_swipe_test scripts/finger_swipe_test.cpp
 run debug_gesture_test scripts/debug_gesture_test.cpp
 run debug_paths_test scripts/debug_paths_test.cpp
 run hot_corner_test scripts/hot_corner_test.cpp
+run desktop_switch_test scripts/desktop_switch_test.cpp
 run submap_borrow_test scripts/submap_borrow_test.cpp
 # shellcheck disable=SC2046
 run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-config --cflags --libs librsvg-2.0)
