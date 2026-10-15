@@ -1776,8 +1776,29 @@ inline void overviewTrimSectionsToFit(std::vector<SSearchSection>& sections, PHL
     // (user, 2026-09-23: "I never saw more than 8 rows in the results pane").
     const size_t MAX_ROWS = overviewResultsRowCap(monitor, gridTiles);
     for (auto& sec : sections) {
-        if (sec.rows.size() > MAX_ROWS)
-            sec.rows.resize(MAX_ROWS);
+        auto& top = g_search.nav.colTop[std::clamp(sec.column, 0, 2)];
+        if (sec.rows.size() <= MAX_ROWS) {
+            top = 0;
+            continue;
+        }
+
+        // THE SELECTION IS ALWAYS ON A DRAWN ROW. Cutting the list at MAX_ROWS
+        // left every row past it unreachable by keyboard and let a selection
+        // made elsewhere (BackSpace back onto the submenu just left) sit on a
+        // row that was never drawn. The window the column shows is MAX_ROWS
+        // long and slides just far enough to hold the selection; a column the
+        // selection is not in shows its top. "+N" still counts what is hidden.
+        const auto SEL = g_search.nav.selection >= 0 ? std::ranges::find(sec.rows, sc<size_t>(g_search.nav.selection)) : sec.rows.end();
+        if (SEL == sec.rows.end())
+            top = 0;
+        else if (const size_t P = sc<size_t>(SEL - sec.rows.begin()); P < top)
+            top = P;
+        else if (P >= top + MAX_ROWS)
+            top = P + 1 - MAX_ROWS;
+        top = std::min(top, sec.rows.size() - MAX_ROWS);
+
+        sec.rows.erase(sec.rows.begin() + sc<std::ptrdiff_t>(top + MAX_ROWS), sec.rows.end());
+        sec.rows.erase(sec.rows.begin(), sec.rows.begin() + sc<std::ptrdiff_t>(top));
     }
 }
 

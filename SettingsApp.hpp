@@ -51,7 +51,7 @@ namespace ScrollOverview::SettingsApp {
 
     // The `settings` dispatcher: open | toggle | close | pane <id> | icons <id>.
     // hl.plugin.hyprdrive.settings("pane dock"), or bind it:
-    //   hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
+    //   if hl.plugin.hyprdrive then hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings()) end
     SDispatchResult dispatch(std::string arg);
 
     // `hyprctl hyprdrive-theme` -- after registerConfig() (it reads keys).

@@ -25,8 +25,12 @@ the window matches the dock and overview and follows a theme reload.
 Open it from a key with the `settings` dispatcher, e.g. in hyprland.lua:
 
 ```lua
-hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
-hl.bind("SUPER + SHIFT + COMMA", hl.plugin.hyprdrive.settings("pane dock"))
+-- Guarded: if the plugin is unloaded or fails to load, hl.plugin.hyprdrive is
+-- nil, and an unguarded line would stop Hyprland registering ANY of your binds.
+if hl.plugin.hyprdrive then
+  hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
+  hl.bind("SUPER + SHIFT + COMMA", hl.plugin.hyprdrive.settings("pane dock"))
+end
 ```
 
 `make install` installs it when Integration says this is not Omarchy

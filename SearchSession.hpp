@@ -458,6 +458,16 @@ struct SSearchSession {
         // edit to the query resets it.
         int              selection = -1;
 
+        // D14's overflow, SCROLLED rather than cut off. The position, within
+        // each results column's full row list, of the first row that column
+        // draws while it holds more rows than the trim lets it show. Only
+        // overviewTrimSectionsToFit moves it, and only to keep the selection
+        // inside the drawn window: an arrow past the last drawn row, or a walk
+        // back up the menu onto a root row behind "+N" (System on Omarchy, the
+        // 10th root row), scrolls the column instead of highlighting a row
+        // nobody can see.
+        size_t           colTop[3] = {0, 0, 0};
+
         // User, 2026-08-06: "make the first search result the first thing that
         // is selected, rather than the desktops". Typing ARMS that, but the
         // results are not known at the keystroke -- the providers answer over the

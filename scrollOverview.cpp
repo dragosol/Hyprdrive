@@ -4010,6 +4010,36 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
     if (!LEFT && !RIGHT && !UP && !DOWN)
         return false;
 
+    // UP/DOWN WALK THE COLUMN'S FULL LIST, not just the rows drawn last frame.
+    // The trim (D14) shows a window of a long column; stepping past its last
+    // drawn row selects the next row and the trim scrolls the window onto it,
+    // so rows behind "+N" are reachable. The tool pane lays its rows out on
+    // its own and keeps the drawn-row walk below.
+    if (g_search.nav.zone == EOverviewNavZone::Result && (UP || DOWN) && g_search.nav.selection >= 0) {
+        const auto ROWS = overviewSearchRows();
+        if (!ROWS.empty() && ROWS[0].tool == 0) {
+            for (const auto& SEC : overviewSearchSections(ROWS)) {
+                const auto IT = std::ranges::find(SEC.rows, sc<size_t>(g_search.nav.selection));
+                if (IT == SEC.rows.end())
+                    continue;
+                const auto P = (IT - SEC.rows.begin()) + (UP ? -1 : 1);
+                g_search.nav.explicitSelection = true;
+                g_search.nav.intent            = ESearchIntent::Browsing;
+                if (P >= 0 && P < sc<std::ptrdiff_t>(SEC.rows.size()))
+                    g_search.nav.selection = sc<int>(SEC.rows[sc<size_t>(P)]);
+                else if (UP) {
+                    // Up off the top of the column returns focus to the search bar.
+                    g_search.nav.zone              = EOverviewNavZone::Search;
+                    g_search.nav.selection         = -1;
+                    g_search.nav.explicitSelection = false;
+                    g_search.nav.intent            = ESearchIntent::Typing;
+                }
+                damage();
+                return true;
+            }
+        }
+    }
+
     // 2D Navigation inside the Results zone
     if (g_search.nav.zone == EOverviewNavZone::Result && !searchLayoutHere().hits.empty()) {
         const SSearchRowHit* curHit = nullptr;

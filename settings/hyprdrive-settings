@@ -10,8 +10,9 @@
 #   hyprdrive-settings --close
 #
 # Also the `settings` dispatcher's target: hl.plugin.hyprdrive.settings() runs
-# this (SettingsApp.cpp), so a bind like
-#   hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
+# this (SettingsApp.cpp), so a bind like (guarded, so an unloaded plugin
+# cannot stop the rest of hyprland.lua's binds registering)
+#   if hl.plugin.hyprdrive then hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings()) end
 # opens it.
 #
 # ON OMARCHY the settings are the bar panel (dragos.hyprdrive in the Omarchy

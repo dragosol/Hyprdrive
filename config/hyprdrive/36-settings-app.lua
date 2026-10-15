@@ -19,9 +19,13 @@ hl.window_rule({
 })
 
 -- Open the settings from a key: not bound by default (every chord is somebody's),
--- e.g. in hyprland.lua or below the marker:
---   hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
---   hl.bind("SUPER + SHIFT + COMMA", hl.plugin.hyprdrive.settings("pane dock"))
+-- e.g. in hyprland.lua or below the marker. Guarded: with the plugin unloaded
+-- or failing to load hl.plugin.hyprdrive is nil, and an unguarded line errors
+-- and stops Hyprland registering the rest of your binds:
+--   if hl.plugin.hyprdrive then
+--     hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
+--     hl.bind("SUPER + SHIFT + COMMA", hl.plugin.hyprdrive.settings("pane dock"))
+--   end
 
 -- AC / BATTERY PROFILES with the settings closed. On Omarchy the bar panel
 -- watches the charger (Panel.qml) for as long as the bar runs; here nothing is
