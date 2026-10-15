@@ -947,6 +947,9 @@ bool overviewHandleSearchSpace();
 // is already open. True if the tap was consumed as that launch.
 bool overviewHandleShiftTap();
 bool overviewHandleCtrlTap();
+// ESC / BACKSPACE / Left in a submenu with nothing typed: up one level, the
+// keyboard left in the results. False when there is no submenu to leave.
+bool overviewMenuBack();
 
 namespace ScrollOverview {
     // The wallpaper caches kept between opens (scrollOverview.cpp).

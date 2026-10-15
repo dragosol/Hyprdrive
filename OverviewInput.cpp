@@ -889,7 +889,7 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
                 // results from anywhere, including mid-grid, which is the same
                 // "an arrow left the pane" the Tile walk above no longer does.
                 if (g_search.nav.zone != EOverviewNavZone::Result && g_search.nav.zone != EOverviewNavZone::Tile && g_search.nav.zone != EOverviewNavZone::Desktop &&
-                    (!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack())) {
+                    overviewSearchPaneUp()) {
                     if (!searchLayoutHere().hits.empty()) {
                         g_search.nav.zone              = EOverviewNavZone::Result;
                         g_search.nav.selection         = searchLayoutHere().hits[0].index;
@@ -943,7 +943,7 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
 
                 if (g_search.nav.zone == EOverviewNavZone::Desktop) {
                     const auto RESULTS = overviewSearchRows();
-                    if ((!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) && !RESULTS.empty()) {
+                    if (overviewSearchPaneUp() && !RESULTS.empty()) {
                         g_search.nav.zone              = EOverviewNavZone::Result;
                         g_search.nav.explicitSelection = true;
                         g_search.nav.intent            = ESearchIntent::Browsing;
@@ -978,7 +978,7 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
                             closeOnWindow = FIRST;
                     }
                     TileChrome::setHovered(closeOnWindow.lock(), false);
-                } else if (!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) {
+                } else if (overviewSearchPaneUp()) {
                     const auto RESULTS = overviewSearchRows();
                     if (!RESULTS.empty()) {
                         g_search.nav.zone              = EOverviewNavZone::Result;
@@ -996,8 +996,12 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
             }
             case XKB_KEY_Return:
             case XKB_KEY_KP_Enter: {
-                if ((!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) && g_search.nav.zone != EOverviewNavZone::Tile &&
-                    g_search.nav.zone != EOverviewNavZone::Desktop) {
+                // The root browse (nothing typed, no submenu) runs only a row the
+                // keyboard walked onto: Enter in the bare pill still means "back
+                // to the window", never "run the first menu row" (Lock, Shut Down).
+                const bool PICKABLE = !g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack() ||
+                    (g_search.query.active && g_search.nav.zone == EOverviewNavZone::Result);
+                if (PICKABLE && g_search.nav.zone != EOverviewNavZone::Tile && g_search.nav.zone != EOverviewNavZone::Desktop) {
                     const auto RESULTS = overviewSearchRows();
 
                     int launchIdx = -1;
