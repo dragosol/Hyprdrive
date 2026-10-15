@@ -82,10 +82,17 @@ namespace ScrollOverview::SettingsApp {
         }
 
         // The Omarchy shell's IPC for the dragos.hyprdrive panel (Panel.qml's
-        // IpcHandler). argv, no shell: an app id is one argument whatever is in it.
+        // IpcHandler), for an Omarchy install, which has no standalone app to
+        // fall back to. `qs ipc call` exits non-zero when no Omarchy shell
+        // answers (or it has no such panel); that is said in a notification
+        // instead of an "ok" that opened nothing. The arguments are sh's "$@",
+        // never part of the script: an app id is one argument whatever is in it.
         bool omarchyCall(std::vector<std::string> args) {
-            args.insert(args.begin(), {"-p", "/usr/share/omarchy/shell", "ipc", "call", "dragos.hyprdrive"});
-            Hyprutils::OS::CProcess("/usr/bin/qs", args).runAsync();
+            static constexpr const char* SCRIPT =
+                R"(/usr/bin/qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive "$@" >/dev/null 2>&1 ||)"
+                R"( exec hyprctl notify 3 8000 0 "Hyprdrive settings: the Omarchy shell did not answer, so its settings panel could not open")";
+            args.insert(args.begin(), {"-c", SCRIPT, "hyprdrive-settings"});
+            Hyprutils::OS::CProcess("/bin/sh", args).runAsync();
             return true;
         }
 
@@ -124,6 +131,14 @@ namespace ScrollOverview::SettingsApp {
         return {};
     }
 
+    // ON OMARCHY the launcher, when it is installed, is still the way in: it
+    // hands over to the panel and opens the standalone app itself when the
+    // panel does not answer (hyprdrive-settings, "ON OMARCHY"). Only without
+    // it is the panel called directly.
+    static bool viaPanelOnly() {
+        return Integration::omarchy() && launcher().empty();
+    }
+
     bool available() {
         if (Integration::omarchy())
             return true;
@@ -141,7 +156,7 @@ namespace ScrollOverview::SettingsApp {
     }
 
     bool open(std::string_view pane, std::string_view iconApp) {
-        if (Integration::omarchy()) {
+        if (viaPanelOnly()) {
             // The panel has no "open on section" call; Icons-with-an-app is the
             // one deep link it knows (Panel.qml `icons`).
             if (!iconApp.empty())
@@ -165,7 +180,7 @@ namespace ScrollOverview::SettingsApp {
         if (arg == "open")
             ok = open();
         else if (arg == "toggle" || arg == "close") {
-            if (Integration::omarchy())
+            if (viaPanelOnly())
                 ok = omarchyCall({arg});
             else
                 ok = nativeCall({"--" + arg});

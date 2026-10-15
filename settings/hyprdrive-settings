@@ -16,7 +16,10 @@
 #
 # ON OMARCHY the settings are the bar panel (dragos.hyprdrive in the Omarchy
 # shell), and this hands over to it: one settings surface per desktop. The
-# Integration rule decides (scripts/hyprdrive-integration).
+# Integration rule decides (scripts/hyprdrive-integration). When the panel does
+# not answer -- no Omarchy shell running, or one without the panel -- this
+# falls back to the standalone app below rather than exit 0 having opened
+# nothing (phase 3 N-omarchy).
 #
 # ONE INSTANCE. A running app is reached through its Quickshell IPC (target
 # hyprdrive-settings, shell.qml); only when nobody answers is a new `qs`
@@ -66,11 +69,15 @@ if [ -x "$CLI" ]; then desktop=$("$CLI" 2>/dev/null | head -1)
 elif command -v hyprdrive-integration >/dev/null 2>&1; then desktop=$(hyprdrive-integration 2>/dev/null | head -1)
 fi
 if [ "$desktop" = omarchy ]; then
+    # `qs ipc call` exits non-zero when no instance of that shell runs, or
+    # it has no such target.
     case $fn in
-        icons) exec qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive icons "$arg" ;;
-        pane) exec qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive open ;;
-        *) exec qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive "$fn" ;;
-    esac
+        icons) qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive icons "$arg" ;;
+        pane) qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive open ;;
+        *) qs -p /usr/share/omarchy/shell ipc call dragos.hyprdrive "$fn" ;;
+    esac >/dev/null 2>&1 && exit 0
+    [ -f "$QML" ] || { echo "hyprdrive-settings: the Omarchy shell's dragos.hyprdrive panel did not answer (is the shell running?)" >&2; exit 1; }
+    echo "hyprdrive-settings: the Omarchy panel did not answer; opening the standalone settings" >&2
 fi
 
 # --- the running app, if there is one ----------------------------------------
