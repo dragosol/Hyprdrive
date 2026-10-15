@@ -3573,6 +3573,18 @@ void CScrollOverview::syncFocusedSelection() {
     if (window->m_workspace && window->m_workspace->m_isSpecialWorkspace)
         return;
 
+    // ...nor CLOSE anything (B19). With a scratchpad toggled open over the
+    // overview its window takes focus, onWindowActive marks a rebuild, and the
+    // rebuild's syncSelectionToViewport re-selects this desktop's remembered
+    // tile and lands here -- and focusing a window off the special workspace
+    // makes Hyprland hide it again in the same frame: activespecial>>scratchpad
+    // straight back to activespecial>>, nothing ever drawn over the cards. The
+    // tile stays the selection; the scratchpad keeps focus until it is hidden
+    // or a selection is picked (close()).
+    if (const auto FOCUSED = Desktop::focusState()->window();
+        FOCUSED && pMonitor && pMonitor->m_activeSpecialWorkspace && FOCUSED->m_workspace == pMonitor->m_activeSpecialWorkspace)
+        return;
+
     const auto PREVIOUSWORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : PHLWORKSPACE{};
 
     Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
