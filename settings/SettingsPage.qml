@@ -37,7 +37,27 @@ Item {
   // (created already open, it would just appear).
   property bool shown: false
   readonly property bool isOpen: !!host && host.opened && shown
-  Component.onCompleted: Qt.callLater(function() { root.shown = true; root.resolveCtl() })
+  Component.onCompleted: Qt.callLater(function() { root.shown = true; root.resolveCtl(); keys.forceActiveFocus() })
+
+  // NATIVE. THE KEYBOARD STAYS WITH THE KEY HANDLER. Alt+1..8, Up/Down and
+  // type-to-search live on `keys`, which only hears what reaches it: the
+  // focused item or one of its children. In the panel the Omarchy shell hands
+  // focus to it; here nothing did -- shell.qml's `focus: true` on this page
+  // kept the window's focus on the page itself, above `keys`, so from the
+  // first frame no key did anything until the search field was used and left
+  // with Escape, the one path that called keys.forceActiveFocus() (phase 3
+  // N1, seen after a scrollbar drag). So focus is handed to `keys` once the
+  // page is up, and whenever it lands outside `keys`, or nowhere, it goes back.
+  function keysOwnFocus() {
+    var w = root.Window.window
+    if (!w) return
+    for (var it = w.activeFocusItem; it; it = it.parent) if (it === keys) return
+    keys.forceActiveFocus()
+  }
+  Connections {
+    target: root.Window.window
+    function onActiveFocusItemChanged() { Qt.callLater(root.keysOwnFocus) }
+  }
 
   // ------------------------------------------------------------------ theme
   // NATIVE. `theme` is `hyprctl hyprdrive-theme -j`, or {} until it answers
@@ -2374,6 +2394,8 @@ Item {
           clip: true
           ScrollBar.vertical: ScrollBar {
             policy: flick.contentHeight > flick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            // NATIVE. A drag on it is a pointer gesture, never a keyboard target.
+            focusPolicy: Qt.NoFocus
             contentItem: Rectangle { implicitWidth: ui.space(4); radius: 2; color: root.tint(root.fg, 0.25) }
           }
 
