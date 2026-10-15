@@ -10587,12 +10587,38 @@ static bool isGlobalPassthroughBindKey(std::string key) {
     return key.starts_with("xf86") || key == "print" || key == "sys_req";
 }
 
+// O5/B19: the same goes for the user's keyboard CHORDS (Super/Ctrl/Alt held).
+// The submap exists for its click binds only -- inside it the global
+// SUPER+mouse:272 drag bind cannot eat a click -- yet it also killed every
+// keyboard bind: the README's own SUPER+TAB overview toggle could open the
+// overview but never close it, SUPER+H never minimized, and a SUPER+S (or
+// Omarchy's SUPER+grave) scratchpad toggle was inert. A chord is never query
+// text, so the binds that were live when the overview opened stay live in it;
+// the keys the overview takes for itself (SUPER+W on a tile, Mosaic's
+// SUPER+arrows, a stack popup's keys) are cancelled at the key event, before
+// Hyprland matches any bind, exactly as they were.
+static constexpr uint32_t CHORD_MODS = HL_MODIFIER_META | HL_MODIFIER_CTRL | HL_MODIFIER_ALT;
+
+static bool isGlobalChordBind(const SKeybind& keybind) {
+    if (keybind.mouse || keybind.catchAll || keybind.key.empty() || keybind.key.starts_with("mouse") || (keybind.modmask & CHORD_MODS) == 0)
+        return false;
+
+    // A bind ON a modifier key (SUPER_L released, say) is not a chord the
+    // overview leaves alone: it is the tap the plugin itself reads.
+    std::string key = keybind.key;
+    std::ranges::transform(key, key.begin(), [](unsigned char c) { return sc<char>(std::tolower(c)); });
+    for (const std::string_view MOD : {"super", "control", "ctrl", "alt", "shift", "meta", "hyper"})
+        if (key.starts_with(MOD))
+            return false;
+    return true;
+}
+
 static void borrowGlobalPassthroughBinds(const std::string& fromSubmap) {
     if (!g_pKeybindManager)
         return;
 
     for (const auto& keybind : g_pKeybindManager->m_keybinds) {
-        if (!keybind || keybind->submapUniversal || keybind->submap.name != fromSubmap || !isGlobalPassthroughBindKey(keybind->key))
+        if (!keybind || keybind->submapUniversal || keybind->submap.name != fromSubmap || !(isGlobalPassthroughBindKey(keybind->key) || isGlobalChordBind(*keybind)))
             continue;
 
         keybind->submapUniversal = true;

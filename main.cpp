@@ -1204,7 +1204,12 @@ static void                registerRawKeyHooks() {
                 // Arrows/Tab/Return are left for CScrollOverview::onKeyboardKey.
                 // PRINT and the XF86 keys are the exception: they are desktop
                 // keys, not query keys, and Omarchy's binds must still see them.
-                if (overviewAcceptsSearch() && !isModifierKeycode(event.keycode) && !isGlobalPassthroughKeycode(event.keycode) &&
+                // So is a CHORD (Super/Ctrl/Alt held) the overview did not take
+                // above or in onKeyboardKey: it is never query text, the seat
+                // keyboard is nobody's while the overview is up, and the user's
+                // chord binds are borrowed into the submap for exactly this
+                // (O5/B19: SUPER+TAB, SUPER+H, a SUPER+S scratchpad were dead).
+                if (overviewAcceptsSearch() && g_heldGuardKeys.empty() && !isModifierKeycode(event.keycode) && !isGlobalPassthroughKeycode(event.keycode) &&
                     event.keycode != 15 && event.keycode != 28 && event.keycode != 96 &&
                     event.keycode != 103 && event.keycode != 105 && event.keycode != 106 &&
                     event.keycode != 108) {
