@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Synthesized pointer for the headless harness (wlr-virtual-pointer-v1).
 
-Usage: vptr.py XEXT YEXT move X Y | click [left|right|middle] | tap X Y [btn]
-                         | down [btn] | up [btn] | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms]]
+Usage: vptr.py XEXT YEXT move X Y | click [left|right|middle [N]] | tap X Y [btn]
+                         | down [btn] | up [btn] | scroll DY
+                         | drag X1 Y1 X2 Y2 [steps [hold_ms [btn]]]
+                         | path PAUSE_MS X1 Y1 X2 Y2 [...]
+
+`path` visits each point in turn on ONE device with no button, resting
+PAUSE_MS at each: a hand moving the same mouse there and back (a hot-corner
+round trip). Separate `move` calls are separate devices.
 
 X/Y are layout coordinates; XEXT/YEXT the layout bounding box (hl.sh passes
 it). Every call is a NEW virtual pointer device, which a toolkit client (Qt
@@ -62,10 +68,14 @@ def main(argv):
         move(args[0], args[1])
     elif cmd == "click":
         b = args[0] if args else "left"
-        button(b, True)
-        d.roundtrip()
-        time.sleep(0.05)
-        button(b, False)
+        for i in range(int(args[1]) if len(args) > 1 else 1):
+            if i:
+                time.sleep(0.3)
+            button(b, True)
+            d.roundtrip()
+            time.sleep(0.05)
+            button(b, False)
+            d.roundtrip()
     elif cmd == "tap":
         move(args[0], args[1])
         d.roundtrip()
@@ -92,6 +102,7 @@ def main(argv):
         # what the overview's hold-to-swap (hold_to_swap_ms) waits for. The
         # inner side runs under env -i, so it is an argument, not an env var.
         hold = float(args[5]) / 1000 if len(args) > 5 else 0.0
+        btn = args[6] if len(args) > 6 else "left"
         move(x1, y1)
         d.roundtrip()
         if os.environ.get("VPTR_HOVER", "1") == "1":
@@ -103,7 +114,7 @@ def main(argv):
             move(x1, y1)
             d.roundtrip()
             time.sleep(0.05)
-        button("left", True)
+        button(btn, True)
         for i in range(1, steps + 1):
             time.sleep(1 / 120)
             move(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
@@ -120,7 +131,14 @@ def main(argv):
                 d.roundtrip()
             move(x2, y2)
             d.roundtrip()
-        button("left", False)
+        button(btn, False)
+    elif cmd == "path":
+        pause = float(args[0]) / 1000
+        pts = list(map(float, args[1:]))
+        for i in range(0, len(pts) - 1, 2):
+            move(pts[i], pts[i + 1])
+            d.roundtrip()
+            time.sleep(pause)
     else:
         sys.exit(f"vptr: unknown command {cmd}")
     d.roundtrip()

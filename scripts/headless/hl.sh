@@ -45,9 +45,11 @@
 #   hl.sh type <text>                       type via the instance's own virtual keyboard
 #   hl.sh tap <Key>[+<Key>...]              e.g. tap Escape, tap Super+Tab (also down/up <Key>)
 #   hl.sh key <wtype args...>               wtype (new device per call; not for the overview)
-#   hl.sh ptr move X Y | click [left|right|middle] | tap X Y [btn] | down|up [btn]
-#             | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms]]
+#   hl.sh ptr move X Y | click [left|right|middle [N]] | tap X Y [btn] | down|up [btn]
+#             | scroll DY | drag X1 Y1 X2 Y2 [steps [hold_ms [btn]]]
+#             | path PAUSE_MS X1 Y1 X2 Y2 [...]
 #                                           pointer via wlr-virtual-pointer
+#                                           (path = moves on ONE device, no button)
 #                                           (tap = move+click on ONE device: what a Qt
 #                                           client window needs; see vptr.py)
 #   hl.sh warp X Y                          hl.dsp.cursor.move (compositor warp, no device)
