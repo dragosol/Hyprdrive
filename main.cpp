@@ -35,7 +35,6 @@
 #include <sys/eventfd.h>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
-#include <hyprland/src/managers/input/trackpad/gestures/CloseGesture.hpp>
 #include <hyprland/src/managers/input/trackpad/gestures/CursorZoomGesture.hpp>
 #include <hyprland/src/managers/input/trackpad/gestures/DispatcherGesture.hpp>
 #include <hyprland/src/managers/input/trackpad/gestures/FloatGesture.hpp>
@@ -1405,8 +1404,12 @@ static std::expected<void, std::string> applyTrackpadGesture(size_t fingerCount,
     if (action == "fullscreen_on" || action == "unfullscreen_or_close")
         return add(makeUnique<CFullscreenOrCloseGesture>(action == "fullscreen_on"));
 
+    // The guarded close, not Hyprland's: the native one closes on ANY end past
+    // 20% of its travel, a CANCELLED one included (a 4f swipe that loses a
+    // finger), and has no way back. This is the same close
+    // unfullscreen_or_close runs.
     if (action == "close")
-        return add(makeUnique<CCloseTrackpadGesture>());
+        return add(makeUnique<CGuardedCloseGesture>());
 
     if (action == "fullscreen" || action == "maximize")
         return add(makeUnique<CFullscreenTrackpadGesture>(action == "maximize" ? "maximize" : (arg.empty() ? "fullscreen" : arg)));
