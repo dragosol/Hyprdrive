@@ -1,6 +1,7 @@
 #include "AppSearch.hpp"
 #include "Integration.hpp"
 #include "Launch.hpp"
+#include "IconScore.hpp"
 
 #include "globals.hpp"
 
@@ -623,31 +624,8 @@ namespace AppSearch {
             return chain;
         }
 
-        // Higher is better. SVG wins outright: one file scales to any row
-        // height, so nothing has to be re-picked when the card transform
-        // changes. Otherwise prefer the largest raster, parsed out of the
-        // "256x256" style directory name.
-        int iconCandidateScore(const std::filesystem::path& path) {
-            if (path.extension() == ".svg")
-                return 100000;
-
-            if (path.extension() != ".png" && path.extension() != ".xpm")
-                return -1;
-
-            int        size = 0;
-            const auto PARENTS = path.parent_path().string();
-            for (size_t i = 0; i < PARENTS.size(); ++i) {
-                if (!std::isdigit(static_cast<unsigned char>(PARENTS[i])))
-                    continue;
-                int n = 0;
-                while (i < PARENTS.size() && std::isdigit(static_cast<unsigned char>(PARENTS[i])))
-                    n = (n * 10) + (PARENTS[i++] - '0');
-                size = std::max(size, n);
-            }
-
-            // A themeless location (pixmaps) still beats nothing.
-            return std::min(size, 4096);
-        }
+        // How good an icon file is, by its directory's size (IconScore.hpp).
+        using IconScore::iconCandidateScore;
 
         // Desktop Exec field codes. %% is a literal percent and must be handled
         // before the rest, or "%%f" would lose its f.
@@ -864,34 +842,66 @@ namespace AppSearch {
         std::error_code ec;
         const auto      ROOTS = iconRoots(theme);
 
+        const auto consider = [&index](const std::filesystem::path& PATH, size_t r) {
+            const int SCORE = iconCandidateScore(PATH);
+            // Negative means "not an icon file" -- the old loop could never
+            // pick one either, because it started bestScore at -1. Skipping
+            // here also keeps directories out of the index.
+            if (SCORE < 0)
+                return;
+
+            auto& SLOT = index[PATH.stem().string()];
+
+            // Roots are in priority order and the old code stopped at the
+            // first root that answered, so a later root must never override
+            // an earlier one -- only beat a sibling inside the same root.
+            if (SLOT.score < 0)
+                SLOT = SIconCandidate{PATH.string(), SCORE, r};
+            else if (SLOT.root == r && SCORE > SLOT.score) {
+                SLOT.path  = PATH.string();
+                SLOT.score = SCORE;
+            }
+        };
+
+        // A theme's SIZE directories may be symlinks into its parent theme:
+        // Papirus-Dark keeps its own 16x16..24x24 and links 32x32 and up to
+        // Papirus. The recursive walk does not follow links (a theme with a
+        // link back up would never end), so on its own it saw only the small
+        // sizes of the dark theme -- and those outrank every size of the
+        // parent, which is a later root. So the TOP level of each root is
+        // listed with links followed, and each directory under it walked once
+        // (by its real path: 16x16@2x -> 16x16 is the same tree, and the
+        // parent theme does not walk again what its child already linked).
+        std::unordered_set<std::string> walked;
         for (size_t r = 0; r < ROOTS.size(); ++r) {
             if (!std::filesystem::is_directory(ROOTS[r], ec))
                 continue;
 
-            for (auto it = std::filesystem::recursive_directory_iterator(ROOTS[r], std::filesystem::directory_options::skip_permission_denied, ec);
-                 it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+            std::vector<std::filesystem::path> tops;
+            for (auto it = std::filesystem::directory_iterator(ROOTS[r], std::filesystem::directory_options::skip_permission_denied, ec);
+                 it != std::filesystem::directory_iterator(); it.increment(ec)) {
                 if (ec)
                     break;
-
-                const auto& PATH  = it->path();
-                const int   SCORE = iconCandidateScore(PATH);
-                // Negative means "not an icon file" -- the old loop could never
-                // pick one either, because it started bestScore at -1. Skipping
-                // here also keeps directories out of the index.
-                if (SCORE < 0)
+                if (!it->is_directory(ec)) {
+                    consider(it->path(), r);
                     continue;
-
-                auto& SLOT = index[PATH.stem().string()];
-
-                // Roots are in priority order and the old code stopped at the
-                // first root that answered, so a later root must never override
-                // an earlier one -- only beat a sibling inside the same root.
-                if (SLOT.score < 0)
-                    SLOT = SIconCandidate{PATH.string(), SCORE, r};
-                else if (SLOT.root == r && SCORE > SLOT.score) {
-                    SLOT.path  = PATH.string();
-                    SLOT.score = SCORE;
                 }
+                const auto REAL = std::filesystem::canonical(it->path(), ec);
+                if (!ec && walked.insert(REAL.string()).second)
+                    tops.emplace_back(it->path());
+            }
+            // Sorted, so which alias of a tree is walked (and so which path an
+            // equal score keeps) does not depend on the directory's hash order.
+            std::ranges::sort(tops);
+
+            for (const auto& TOP : tops) {
+                for (auto it = std::filesystem::recursive_directory_iterator(TOP, std::filesystem::directory_options::skip_permission_denied, ec);
+                     it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                    if (ec)
+                        break;
+                    consider(it->path(), r);
+                }
+                ec.clear();
             }
         }
 
@@ -1554,6 +1564,13 @@ int main() {
     assert(iconCandidateScore("/usr/share/icons/hicolor/scalable/apps/kitty.svg") > iconCandidateScore("/usr/share/icons/hicolor/256x256/apps/kitty.png"));
     assert(iconCandidateScore("/usr/share/icons/hicolor/256x256/apps/kitty.png") > iconCandidateScore("/usr/share/icons/hicolor/48x48/apps/foot.png"));
     assert(iconCandidateScore("/usr/share/icons/hicolor/48x48/apps/x.txt") == -1);
+    // G6: a bigger SVG design beats a smaller one, scalable beats both, and
+    // digits elsewhere on the path are not a size.
+    assert(iconCandidateScore("/usr/share/icons/Papirus/64x64/mimetypes/text-x-generic.svg") > iconCandidateScore("/usr/share/icons/Papirus/16x16/mimetypes/text-x-generic.svg"));
+    assert(iconCandidateScore("/usr/share/icons/hicolor/scalable/apps/a.svg") > iconCandidateScore("/usr/share/icons/Papirus/64x64/apps/a.svg"));
+    assert(iconCandidateScore("/usr/share/icons/Papirus/16x16@2x/apps/a.svg") > iconCandidateScore("/usr/share/icons/Papirus/24x24/apps/a.svg"));
+    assert(iconCandidateScore("/home/u2048/.local/share/icons/T/16x16/apps/a.png") == 16);
+    assert(iconCandidateScore("/usr/share/pixmaps/a.png") == 0);
     assert(resolveIconPath("").empty());
     // An unknown name resolves to the generic tile, not to nothing.
     const auto GENERIC = resolveIconPath(GENERIC_ICON);
