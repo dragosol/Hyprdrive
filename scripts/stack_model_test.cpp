@@ -3,6 +3,7 @@
 #include "../StackModel.hpp"
 #include "../TextInputUtf8.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -98,6 +99,32 @@ int main() {
     seeded.seeded = true;
     check(!shouldSeed(true, seeded), "seeded -> no");
     check(!shouldSeed(true, v1), "existing v1 file -> no seed (user already has stacks)");
+
+    // Which folder the seed stacks: glib, then user-dirs.dirs, then ~/Downloads.
+    {
+        const std::string UD = "# written by xdg-user-dirs-update\n"
+                               "XDG_DESKTOP_DIR=\"$HOME/Desktop\"\n"
+                               "XDG_DOWNLOAD_DIR=\"$HOME/Hämtningar\"\n";
+        check(userDirsValue(UD, "XDG_DOWNLOAD_DIR", "/home/u") == std::optional<std::string>{"/home/u/Hämtningar"}, "user-dirs: $HOME expanded");
+        check(userDirsValue("XDG_DOWNLOAD_DIR=\"/data/dl/\"\n", "XDG_DOWNLOAD_DIR", "/home/u") == std::optional<std::string>{"/data/dl"}, "user-dirs: absolute, slash trimmed");
+        check(!userDirsValue("XDG_DOWNLOAD_DIR=\"$HOME/\"\n", "XDG_DOWNLOAD_DIR", "/home/u"), "user-dirs: $HOME/ = disabled");
+        check(!userDirsValue("XDG_DOWNLOAD_DIR=\"Downloads\"\n", "XDG_DOWNLOAD_DIR", "/home/u"), "user-dirs: relative rejected");
+        check(!userDirsValue("#XDG_DOWNLOAD_DIR=\"/x\"\nXDG_DOWNLOAD_DIRX=\"/y\"\n", "XDG_DOWNLOAD_DIR", "/home/u"), "user-dirs: comment / longer key ignored");
+        check(userDirsValue("XDG_DOWNLOAD_DIR=\"/a\"\nXDG_DOWNLOAD_DIR=\"/b \\\"q\\\"\"\n", "XDG_DOWNLOAD_DIR", "/h") == std::optional<std::string>{"/b \"q\""},
+              "user-dirs: last wins, escapes");
+        check(!userDirsValue("", "XDG_DOWNLOAD_DIR", "/h"), "user-dirs: empty file");
+
+        const auto ONLY = [](std::initializer_list<const char*> dirs) {
+            return [dirs](const std::string& p) { return std::ranges::any_of(dirs, [&](const char* d) { return p == d; }); };
+        };
+        check(downloadsSeed("/g/dl", UD, "/home/u", ONLY({"/g/dl", "/home/u/Hämtningar", "/home/u/Downloads"})) == "/g/dl", "seed: glib first");
+        check(downloadsSeed(nullptr, UD, "/home/u", ONLY({"/home/u/Hämtningar", "/home/u/Downloads"})) == "/home/u/Hämtningar", "seed: no glib -> user-dirs");
+        check(downloadsSeed("/g/gone", UD, "/home/u", ONLY({"/home/u/Hämtningar"})) == "/home/u/Hämtningar", "seed: glib dir missing -> user-dirs");
+        check(downloadsSeed(nullptr, "", "/home/u", ONLY({"/home/u/Downloads"})) == "/home/u/Downloads", "seed: no xdg-user-dirs -> ~/Downloads");
+        check(downloadsSeed(nullptr, UD, "/home/u", ONLY({"/home/u/Downloads"})) == "/home/u/Downloads", "seed: user-dirs dir missing -> ~/Downloads");
+        check(downloadsSeed(nullptr, "", "/home/u", ONLY({})).empty(), "seed: nothing exists -> no seed");
+        check(downloadsSeed(nullptr, "", "", ONLY({"/Downloads"})).empty(), "seed: no HOME -> no ~/Downloads guess");
+    }
 
     // Fan fit: pill top at 900, top limit (bar bottom) at 30, step 56, gap 10.
     // Top of an N-row fan = 900 - 10 - N*56; needs >= 30 + 56 (one step margin).

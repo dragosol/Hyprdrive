@@ -213,6 +213,58 @@ namespace ScrollOverview::StackModel {
         return !fileExists && !store.seeded;
     }
 
+    std::optional<std::string> userDirsValue(const std::string& text, const std::string& key, const std::string& home) {
+        std::optional<std::string> out;
+        std::istringstream         in{text};
+        std::string                line;
+        while (std::getline(in, line)) {
+            size_t at = line.find_first_not_of(" \t");
+            if (at == std::string::npos || line[at] == '#' || line.compare(at, key.size(), key) != 0)
+                continue;
+            at += key.size();
+            if (at >= line.size() || line[at] != '=' || at + 1 >= line.size() || line[at + 1] != '"')
+                continue;
+            std::string raw;
+            bool        closed = false;
+            for (size_t i = at + 2; i < line.size(); ++i) {
+                if (line[i] == '\\' && i + 1 < line.size()) {
+                    raw += line[++i];
+                    continue;
+                }
+                if (line[i] == '"') {
+                    closed = true;
+                    break;
+                }
+                raw += line[i];
+            }
+            if (!closed)
+                continue;
+            std::string path;
+            if (raw.starts_with("$HOME")) {
+                if (home.empty())
+                    continue;
+                const std::string REST = raw.substr(5);
+                if (!REST.empty() && REST[0] != '/')
+                    continue; // "$HOMEx": not the variable
+                path = home + REST;
+            } else if (raw.starts_with("/"))
+                path = raw;
+            else
+                continue; // the format allows nothing else
+            while (path.size() > 1 && path.back() == '/')
+                path.pop_back();
+            std::string h = home;
+            while (h.size() > 1 && h.back() == '/')
+                h.pop_back();
+            if (path == h) {
+                out.reset(); // KEY="$HOME/": disabled
+                continue;
+            }
+            out = path;
+        }
+        return out;
+    }
+
     bool fanFits(size_t rows, const SFanFit& fit) {
         const float TOP = fit.pillTopL - fit.gapL - static_cast<float>(rows) * fit.stepL;
         return TOP >= fit.topLimitL + fit.stepL;

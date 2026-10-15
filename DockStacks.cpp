@@ -153,7 +153,21 @@ namespace {
                 // written with it, so removing Downloads later keeps it removed.
                 g_storeState.seeded = true;
                 s.items.clear();
-                if (const char* DL = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD); DL && std::filesystem::is_directory(DL, ec)) {
+                // glib's answer, else user-dirs.dirs read fresh, else ~/Downloads:
+                // a system without xdg-user-dirs still gets its Downloads stack.
+                const char* const  HOMEENV = std::getenv("HOME");
+                const std::string  HOME    = HOMEENV && *HOMEENV ? HOMEENV : (g_get_home_dir() ? g_get_home_dir() : "");
+                const char* const  CFGENV  = std::getenv("XDG_CONFIG_HOME");
+                const std::string  UDPATH  = (CFGENV && *CFGENV ? std::string{CFGENV} : HOME + "/.config") + "/user-dirs.dirs";
+                std::string        udText;
+                if (std::ifstream ud{UDPATH}; ud) {
+                    std::stringstream b;
+                    b << ud.rdbuf();
+                    udText = b.str();
+                }
+                const auto DL = StackModel::downloadsSeed(g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD), udText, HOME,
+                                                          [&](const std::string& p) { return std::filesystem::is_directory(p, ec); });
+                if (!DL.empty()) {
                     s.items.emplace_back(Stacks::SStack{.path = canonical(DL)});
                     decorate(s.items.back());
                 }

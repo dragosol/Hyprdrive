@@ -69,6 +69,33 @@ namespace ScrollOverview::StackModel {
     // v2 file that already seeded -- does not.
     bool shouldSeed(bool fileExists, const SStore& store);
 
+    // The value of `key` (e.g. "XDG_DOWNLOAD_DIR") in the text of a
+    // user-dirs.dirs file, as xdg-user-dirs writes it: KEY="$HOME/rel" or
+    // KEY="/abs". $HOME is expanded with `home`; \" and \\ are unescaped. A key
+    // set to $HOME itself is xdg-user-dirs' "disabled", and answers nullopt like
+    // a missing or malformed one. The last assignment wins, as when sourced.
+    std::optional<std::string> userDirsValue(const std::string& text, const std::string& key, const std::string& home);
+
+    // WHICH folder the first-run seed stacks (dock stacks A), first hit that
+    // isDir() accepts:
+    //   1. glib's G_USER_DIRECTORY_DOWNLOAD (`glibDir`, may be null) -- needs
+    //      user-dirs.dirs, and glib caches its first read for the process;
+    //   2. XDG_DOWNLOAD_DIR from `userDirsText` (a fresh read of
+    //      ${XDG_CONFIG_HOME:-~/.config}/user-dirs.dirs), for a session that
+    //      started before xdg-user-dirs-update wrote it;
+    //   3. ~/Downloads, for a system without xdg-user-dirs at all.
+    // "" = nothing to seed.
+    template <typename IsDir>
+    std::string downloadsSeed(const char* glibDir, const std::string& userDirsText, const std::string& home, IsDir&& isDir) {
+        if (glibDir && *glibDir && isDir(std::string{glibDir}))
+            return glibDir;
+        if (const auto V = userDirsValue(userDirsText, "XDG_DOWNLOAD_DIR", home); V && isDir(*V))
+            return *V;
+        if (!home.empty() && isDir(home + "/Downloads"))
+            return home + "/Downloads";
+        return {};
+    }
+
     // ---- the fan's fit ----------------------------------------------------
     // All in LOGICAL px, y growing downward. The fan's top is
     // pillTopL - gapL - rows * stepL; it fits when that is at least one step
