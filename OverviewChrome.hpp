@@ -101,7 +101,11 @@ inline SOverviewCardRounding getOverviewCardRounding(PHLMONITOR monitor, float o
     };
 }
 
-inline void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F) {
+// cutoutCenter: a halo only, nothing inside the box (and nothing inside any of
+// alsoCut either) -- for a box with no opaque fill of its own, which would
+// otherwise show the shadow colour straight through.
+inline void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& workspaceBox, float overviewScale, bool cutoutCenter, float alpha = 1.F,
+                                          const std::vector<CBox>& alsoCut = {}) {
     if (!monitor)
         return;
 
@@ -131,6 +135,7 @@ inline void renderOverviewWorkspaceShadow(PHLMONITOR monitor, const CBox& worksp
         .color         = SHADOW.color,
         .alpha         = alpha,
         .ignoreWindow  = cutoutCenter,
+        .extraCutouts  = cutoutCenter ? alsoCut : std::vector<CBox>{},
     }));
 }
 

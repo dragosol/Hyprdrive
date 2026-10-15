@@ -4,6 +4,8 @@
 #include <hyprland/src/render/pass/Pass.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 
+#include <vector>
+
 class COverviewBlurPassElement : public IPassElement {
   public:
     struct SData {
@@ -103,6 +105,9 @@ class COverviewShadowPassElement : public IPassElement {
         Config::CGradientValueData color;
         float         alpha        = 1.F;
         bool          ignoreWindow = true;
+        // With ignoreWindow: more boxes the shadow must not land in, cut out
+        // with the same rounding as cutoutBox (a strip's neighbouring cells).
+        std::vector<CBox> extraCutouts;
     };
 
     COverviewShadowPassElement(const SData& data_);

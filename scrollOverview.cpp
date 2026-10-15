@@ -5756,6 +5756,19 @@ static std::string overviewMonitorLabel(const PHLMONITOR& monitor) {
     return NAME;
 }
 
+// THE SHADOWS OF ONE ROW OF STRIP CELLS, as halos, all before any cell's
+// content. A strip cell has no opaque fill (the plate shows through it), so a
+// shadow drawn under it in full -- cutoutCenter false, the way a card with its
+// wallpaper over it takes one -- filled an EMPTY cell solid with the shadow
+// colour. And each cell drew its own shadow just before its own minis, so cell
+// N's halo landed on top of cell N-1's previews wherever the range reached
+// across. Each halo is cut out of every cell in the row, so it only ever shows
+// on the plate around them.
+static void renderStripCellShadows(PHLMONITOR monitor, const std::vector<CBox>& cells, float renderScale, float fade) {
+    for (const auto& CELL : cells)
+        renderOverviewWorkspaceShadow(monitor, CELL, renderScale, true, fade, cells);
+}
+
 void CScrollOverview::renderAltStrips(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now, const SStripStyle& STYLE) {
     const float REVEAL = altStripsRevealValue();
     if (!monitor || REVEAL <= 0.01F)
@@ -5804,6 +5817,17 @@ void CScrollOverview::renderAltStrips(PHLMONITOR monitor, float renderScale, con
 
         const float MINIRENDERSCALE = renderScale * sc<float>(FIRSTCELL.height) / std::max(1.F, sc<float>(OTHERMON->m_size.y) * monitor->m_scale);
 
+        // Every cell's shadow before any cell's content (renderStripCellShadows).
+        std::vector<CBox> shadowCells;
+        for (size_t j = 0; j < CELLS.size() && j < OTHER->images.size(); ++j) {
+            if (CELLS[j].empty() || !OTHER->images[j] || !OTHER->images[j]->pWorkspace)
+                continue;
+            const auto CELL = getOverviewGlobalBox(CBox{CELLS[j].x, CELLS[j].y, CELLS[j].w, CELLS[j].h}, monitor, renderScale, OVERVIEW_CHROME_NO_PAN, 0.F, layout);
+            if (CELL.width > 1 && overviewBoxIntersectsMonitor(CELL, monitor))
+                shadowCells.push_back(CELL);
+        }
+        renderStripCellShadows(monitor, shadowCells, renderScale, FADE);
+
         for (size_t j = 0; j < CELLS.size() && j < OTHER->images.size(); ++j) {
             const auto& WIMG = OTHER->images[j];
             if (CELLS[j].empty() || !WIMG || !WIMG->pWorkspace)
@@ -5815,8 +5839,6 @@ void CScrollOverview::renderAltStrips(PHLMONITOR monitor, float renderScale, con
 
             const bool ATLEFT  = j == 0;
             const bool ATRIGHT = j + 1 == CELLS.size();
-
-            renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false, FADE);
 
             // The desktop's number, as every strip cell carries it.
             if (const auto NUMTEX = OverviewRender::text(std::to_string(WIMG->pWorkspace->m_id), ScrollOverview::Config::themeForeground().modifyA(0.20F),
@@ -5896,7 +5918,7 @@ void CScrollOverview::renderScratchpadCell(PHLMONITOR monitor, float renderScale
     // a numbered one -- shadow, fill, label under the previews, border last --
     // because the user's requirement is that it read as one of the strip's
     // cards, not as a panel that happens to sit beside them.
-    renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false, FADE);
+    renderStripCellShadows(monitor, {CELL}, renderScale, FADE);
 
     const bool HOT = isOverviewPointerOnMonitor(monitor) && scratchpadCellContains(lastMousePosLocal);
 
@@ -6294,7 +6316,8 @@ void CScrollOverview::renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, c
     const auto& wimg = images[workspaceIdx];
     const float FADE = STYLE.fade;
 
-    renderOverviewWorkspaceShadow(monitor, CELL, renderScale, false, FADE);
+    // The cell's shadow is NOT drawn here: renderStrip draws every cell's
+    // before any cell's content (renderStripCellShadows).
 
     const bool ATLEFT  = workspaceIdx == 0;
     const bool ATRIGHT = workspaceIdx + 1 == images.size();
@@ -6596,6 +6619,7 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
 
     renderStripPanel(monitor, renderScale, style);
 
+    std::vector<std::pair<size_t, CBox>> cells;
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
         if (!wimg || !wimg->pWorkspace)
@@ -6605,8 +6629,17 @@ void CScrollOverview::renderStrip(PHLMONITOR monitor, float renderScale, const T
         if (CELL.width <= 1 || !overviewBoxIntersectsMonitor(CELL, monitor))
             continue;
 
-        renderStripCell(monitor, workspaceIdx, CELL, DRAGGED, workspaceIdx == hoveredIdx, renderScale, now, style);
+        cells.emplace_back(workspaceIdx, CELL);
     }
+
+    std::vector<CBox> cellBoxes;
+    cellBoxes.reserve(cells.size());
+    for (const auto& [IDX, CELL] : cells)
+        cellBoxes.push_back(CELL);
+    renderStripCellShadows(monitor, cellBoxes, renderScale, FADE);
+
+    for (const auto& [IDX, CELL] : cells)
+        renderStripCell(monitor, IDX, CELL, DRAGGED, IDX == hoveredIdx, renderScale, now, style);
 
     renderScratchpadCell(monitor, renderScale, now, style);
     renderAltStrips(monitor, renderScale, now, style);
