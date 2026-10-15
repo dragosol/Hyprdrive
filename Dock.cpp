@@ -4561,7 +4561,13 @@ void hotkey(int number, bool shift, bool ctrl) {
     if (!MONITOR)
         return;
 
-    const auto LAYOUT = layout(MONITOR);
+    // The RESTING arrangement, not layout(): that is the slid one, and a dock
+    // that is fully away has no layout at all (no pill, no hit area -- see
+    // layout()). Autohide is the default, so every first press of a hotkey on
+    // a hidden dock found zero slots and did nothing; only a second press,
+    // after the first had revealed the dock, reached the app. A slot is an app
+    // whether or not the pill is on screen.
+    const auto LAYOUT = arranged(MONITOR->m_id, baseLayout(MONITOR));
     const int  INDEX  = number - 1;
     if (INDEX < 0 || INDEX >= sc<int>(LAYOUT.items.size()))
         return;
