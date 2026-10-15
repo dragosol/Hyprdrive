@@ -159,10 +159,17 @@ Mosaic sizes) is kept.
 ### With hyprpm
 
 ```bash
-hyprpm add https://github.com/dragosol/Hyprdrive hyprland-native
+hyprpm add https://github.com/dragosol/Hyprdrive origin/hyprland-native
 hyprpm enable hyprdrive
 hyprpm reload
 ```
+
+Write the branch as `origin/hyprland-native`. hyprpm's optional second
+argument is a git revision, not a branch: it clones the repository's default
+branch and then runs `git reset --hard <rev>`. In a fresh clone only the
+default branch exists locally, so a bare `hyprland-native` fails with "Could
+not check out revision". `hyprpm update` clones again and resets to the same
+revision, so `origin/hyprland-native` keeps following the branch.
 
 hyprpm builds and loads only the `.so`. Tap-Super, the dock, the search and
 stacks all work from that alone. What hyprpm cannot install:
