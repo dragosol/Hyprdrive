@@ -1213,7 +1213,12 @@ static void                registerRawKeyHooks() {
                 // Arrows/Tab/Return are left for CScrollOverview::onKeyboardKey.
                 // PRINT and the XF86 keys are the exception: they are desktop
                 // keys, not query keys, and Omarchy's binds must still see them.
-                if (overviewAcceptsSearch() && !isModifierKeycode(event.keycode) && !isGlobalPassthroughKeycode(event.keycode) &&
+                // So is a CHORD (Super/Ctrl/Alt held) the overview did not take
+                // above or in onKeyboardKey: it is never query text, the seat
+                // keyboard is nobody's while the overview is up, and the user's
+                // chord binds are borrowed into the submap for exactly this
+                // (O5/B19: SUPER+TAB, SUPER+H, a SUPER+S scratchpad were dead).
+                if (overviewAcceptsSearch() && g_heldGuardKeys.empty() && !isModifierKeycode(event.keycode) && !isGlobalPassthroughKeycode(event.keycode) &&
                     event.keycode != 15 && event.keycode != 28 && event.keycode != 96 &&
                     event.keycode != 103 && event.keycode != 105 && event.keycode != 106 &&
                     event.keycode != 108) {
@@ -2133,7 +2138,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pMembFloatHook = Event::bus()->m_events.window.floating.listen([](PHLWINDOW) { Membership::bump("window.floating"); });
     g_pMembTitleHook = Event::bus()->m_events.window.title.listen([](PHLWINDOW) { Membership::bump("window.title"); });
     g_pMembClassHook = Event::bus()->m_events.window.class_.listen([](PHLWINDOW) { Membership::bump("window.class"); });
-    g_pMembWsHook    = Event::bus()->m_events.window.moveToWorkspace.listen([](PHLWINDOW, PHLWORKSPACE) { Membership::bump("window.moveToWorkspace"); });
+    g_pMembWsHook    = Event::bus()->m_events.window.moveToWorkspace.listen([](PHLWINDOW w, PHLWORKSPACE ws) {
+        ScrollOverview::Minimize::onWindowMoved(w, ws); // B24: off the stash = not minimized
+        Membership::bump("window.moveToWorkspace");
+    });
     g_pMembFullHook  = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { Membership::bump("window.fullscreen"); });
 
     // The dock's keys as they stood BEFORE this reload parsed anything. See the
@@ -2623,6 +2631,11 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // is a call into unloaded code when that loop is destroyed.
     OvInternal::cancelPointerHandoff();
     ScrollOverview::Flight::abortAll("plugin-exit");
+    // Minimized windows sit on special:minimized, which is never shown: with
+    // the plugin gone nothing could bring them back (they stayed there until a
+    // reload re-adopted them). After every flight has been settled above, and
+    // before ConfigureHold::flush below, since the restore holds configures.
+    ScrollOverview::Minimize::restoreAllForUnload();
     // A flying window may hold the flight's blur transformer; its destructor is
     // this plugin's code, so it goes before the dlclose (Hyprland's own exit too).
     ScrollOverview::FlightBlur::shutdown();

@@ -50,6 +50,21 @@ void                   handoffMinimizedFocus(PHLWINDOW window);
 bool                   restore(PHLWINDOW window);
 std::vector<PHLWINDOW> minimized();
 
+// PLUGIN_EXIT. Every stashed window back on its own desktop, tiled or floating
+// as it was, without a workspace switch or a focus change -- an unloaded
+// plugin leaves nothing on special:minimized, which is never shown and which
+// nothing but this plugin can bring back (a reload re-adopts, a plain unload
+// stranded them). Call with no flight in the air (Flight::abortAll first).
+void                   restoreAllForUnload();
+
+// B24. A window that leaves the stash by any route other than restore() -- a
+// workspace move from a bind or hyprctl, a drag -- is no longer minimized, and
+// its ledger entry goes with it. Without this the entry outlived the stash:
+// the overview kept the window out of its grid (a minimized window is only
+// shown under a search filter) although it sat on a real desktop. Called from
+// the window.moveToWorkspace event, BEFORE membership is bumped.
+void                   onWindowMoved(PHLWINDOW window, PHLWORKSPACE workspace);
+
 // Y9/Y10. The desktop a stashed window came FROM. A minimized window's own
 // m_workspace is the stash, so nothing else can answer this -- the overview
 // needs it to place the window's tile, and the flight needs it to know which

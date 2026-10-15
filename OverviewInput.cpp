@@ -830,6 +830,13 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
         if ((KEYSYM == XKB_KEY_Return || KEYSYM == XKB_KEY_KP_Enter) && BASE_MODS != 0)
             return;
 
+        // Tab is the pane cycle only as a plain key (Shift+Tab included). A
+        // chord -- SUPER+TAB is the README's suggested overview toggle -- is the
+        // user's bind (borrowed into the submap, see borrowGlobalPassthroughBinds and SubmapBorrow.hpp);
+        // taking it as a plain Tab cycled panes instead of closing (O5).
+        if ((KEYSYM == XKB_KEY_Tab || KEYSYM == XKB_KEY_ISO_Left_Tab) && BASE_MODS != 0)
+            return;
+
         // SUPER+W CLOSES THE HIGHLIGHTED TILE (user, 2026-09-23).
         //
         // Not an override of Omarchy's own SUPER+W: that is a global bind with
@@ -837,20 +844,12 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
         // same key meaning the same thing, aimed at the window the OVERVIEW is
         // showing as selected rather than the one the compositor last focused.
         //
-        // "Selected" is whichever device last moved the ring: arrows set
-        // keyboardTile, and any pointer motion clears it (updateTileHover). So
-        // after the arrows it is the keyboard's tile; after the mouse it is the
-        // tile under the pointer; and over empty space it is nothing at all --
+        // "Selected" is whichever device last moved the ring (see
+        // selectedOverviewTile): over empty space it is nothing at all --
         // closing whatever closeOnWindow still pointed at would be a window
         // vanishing that the user was not looking at.
         if ((KEYSYM == XKB_KEY_w || KEYSYM == XKB_KEY_W) && MODS == HL_MODIFIER_META) {
-            PHLWINDOW target;
-            if (g_search.nav.keyboardTile && g_search.nav.zone == EOverviewNavZone::Tile)
-                target = getOverviewWindowToShow(closeOnWindow.lock());
-            else {
-                lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
-                target            = windowAtOverviewCursor();
-            }
+            const auto target = selectedOverviewTile();
 
             if (target && shouldShowOverviewWindow(target)) {
                 target->sendClose();
@@ -1004,10 +1003,8 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
                             closeOnWindow = W;
                             g_search.nav.pendingFocus.reset();
                         }
-                        for (const auto& overview : scrollOverviews()) {
-                            if (overview && overview.get() != this)
-                                overview->close();
-                        }
+                        // close() closes the other overviews first and keeps
+                        // the last word on focus for this one (C5).
                         close();
                         break;
                     }
@@ -1019,15 +1016,10 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
                     }
                 }
 
-                if (const auto TARGET = closeOnWindow.lock()) {
+                if (const auto TARGET = closeOnWindow.lock())
                     selectAndClose(TARGET);
-                } else {
-                    for (const auto& overview : scrollOverviews()) {
-                        if (overview && overview.get() != this)
-                            overview->close();
-                    }
+                else
                     close();
-                }
                 break;
             }
             default: return;

@@ -18,6 +18,7 @@
 #include "Placement.hpp"
 #include "BuiltinIcons.hpp"
 #include "WorkspacePlan.hpp"
+#include "SubmapBorrow.hpp"
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/config/shared/workspace/WorkspaceRuleManager.hpp>
 
@@ -1240,12 +1241,12 @@ bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
         }
     }
 
+    // close() closes every other overview first and keeps the last word for
+    // this one, whose selection is the focus the caller asked for. Closing the
+    // others from here first handed that last word to whichever of them ran
+    // first (its own close() closed this one mid-way, then finished) -- C5.
     if (workspaceIdx >= images.size()) {
         closeOnWindow = window;
-        for (const auto& overview : scrollOverviews()) {
-            if (overview && overview.get() != this)
-                overview->close();
-        }
         close();
         return true;
     }
@@ -1253,10 +1254,6 @@ bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
     if (!selectOverviewWindow(window, workspaceIdx, true))
         return false;
 
-    for (const auto& overview : scrollOverviews()) {
-        if (overview && overview.get() != this)
-            overview->close();
-    }
     close();
     return true;
 }
@@ -1795,17 +1792,17 @@ void CScrollOverview::performPrimaryClickAction() {
     // last focused window when it has one, through that monitor's own overview
     // (selectAndClose closes every overview, this one included); a desktop with
     // nothing to focus switches and closes with that overview closing LAST, so
-    // it is the one whose close decides where focus lands.
+    // it is the one whose close decides where focus lands. close() itself
+    // closes every OTHER overview first and runs its own teardown last (C5:
+    // closing the others from here first made THIS monitor's close -- the
+    // first of them -- close HIT's before finishing its own, so this monitor
+    // had the last word and focus never moved to the monitor picked).
     if (const auto HIT = altCellAt(lastMousePosLocal)) {
         const auto LAST = getOverviewWindowToShow(HIT->workspace->getLastFocusedWindow());
         if (LAST && LAST->m_workspace == HIT->workspace && shouldShowOverviewWindow(LAST) && HIT->overview->selectAndClose(LAST))
             return;
 
         HIT->overview->focusOverviewWorkspace(HIT->workspace, HIT->workspaceIdx);
-        for (const auto& overview : scrollOverviews()) {
-            if (overview && overview.get() != HIT->overview)
-                overview->close();
-        }
         HIT->overview->close();
         return;
     }
@@ -1833,20 +1830,39 @@ void CScrollOverview::selectHoveredWorkspace() {
     focusOverviewWorkspace(HOVEREDWORKSPACE, workspaceIdx);
 }
 
+// The tile the overview shows as selected: whichever device last moved the
+// ring. Arrows set keyboardTile and any pointer motion clears it
+// (updateTileHover), so after the arrows it is the keyboard's tile, after the
+// mouse the tile under the pointer, and over empty space nothing at all --
+// never closeOnWindow on its own, which the pointer hover does not update and
+// which still names the window focused when the overview opened.
+PHLWINDOW CScrollOverview::selectedOverviewTile(size_t* workspaceIdx) {
+    if (g_search.nav.keyboardTile && g_search.nav.zone == EOverviewNavZone::Tile)
+        return getOverviewWindowToShow(closeOnWindow.lock());
+
+    lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+    return windowAtOverviewCursor(workspaceIdx);
+}
+
+// `window select|close` acts on the overview window under the cursor (README)
+// -- or the keyboard's tile after the arrows -- from a mouse bind, a keyboard
+// bind and hyprctl alike. A5: the keyboard/hyprctl path used closeOnWindow, so
+// `window close` closed the window that was focused when the overview opened,
+// not the one hovered.
 bool CScrollOverview::windowDispatcherAction(const std::string& action) {
     const auto CURRENTKEYBIND = g_pKeybindManager ? g_pKeybindManager->m_currentKeybind : SP<SKeybind>{};
     const bool FROMMOUSEBIND  = CURRENTKEYBIND && CURRENTKEYBIND->key.starts_with("mouse:");
 
-    PHLWINDOW WINDOW;
+    // A mouse bind is the pointer's by definition, even right after the arrows.
     size_t    workspaceIdx = viewportCurrentWorkspace;
-
+    PHLWINDOW WINDOW;
     if (FROMMOUSEBIND) {
         lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
         WINDOW            = windowAtOverviewCursor(&workspaceIdx);
     } else
-        WINDOW = getOverviewWindowToShow(closeOnWindow.lock());
+        WINDOW = selectedOverviewTile(&workspaceIdx);
 
-    if (!WINDOW)
+    if (!WINDOW || !shouldShowOverviewWindow(WINDOW))
         return false;
 
     if (action == "select")
@@ -3558,6 +3574,18 @@ void CScrollOverview::syncFocusedSelection() {
     if (window->m_workspace && window->m_workspace->m_isSpecialWorkspace)
         return;
 
+    // ...nor CLOSE anything (B19). With a scratchpad toggled open over the
+    // overview its window takes focus, onWindowActive marks a rebuild, and the
+    // rebuild's syncSelectionToViewport re-selects this desktop's remembered
+    // tile and lands here -- and focusing a window off the special workspace
+    // makes Hyprland hide it again in the same frame: activespecial>>scratchpad
+    // straight back to activespecial>>, nothing ever drawn over the cards. The
+    // tile stays the selection; the scratchpad keeps focus until it is hidden
+    // or a selection is picked (close()).
+    if (const auto FOCUSED = Desktop::focusState()->window();
+        FOCUSED && pMonitor && pMonitor->m_activeSpecialWorkspace && FOCUSED->m_workspace == pMonitor->m_activeSpecialWorkspace)
+        return;
+
     const auto PREVIOUSWORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : PHLWORKSPACE{};
 
     Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
@@ -3618,24 +3646,26 @@ void CScrollOverview::collectNavTargets(PHLMONITOR MONITOR, std::vector<SOvervie
     for (const auto& HIT : searchLayoutHere().hits)
         targets.push_back({HIT.box, EOverviewNavZone::Result, HIT.index, {}});
 
-    // Every workspace's tiles, filtered to the ones actually ON the monitor.
-    // Asking only images[viewportCurrentWorkspace] made the tiles unreachable:
-    // that index is the VIEWPORT's, and a tile's box already carries its
-    // workspace offset, so the honest test for "can the user see this" is
-    // whether the drawn box lands on the monitor -- the same test the render
-    // pass uses. Measured 2026-08-05: with the current-workspace filter, arrows
-    // produced a byte-identical frame on a desktop with two visible tiles.
+    // The tiles of the card IN VIEW only, and of those the ones actually ON the
+    // monitor (the drawn box, the same test the render pass uses).
     //
-    // ONCE PER WINDOW. With a query typed every workspace's main-grid list also
-    // carries the promoted matches (B2), so the same window came back once per
-    // desktop -- harmless to the pick, but it is the list the Tab entry and the
-    // phantom-selection check below read, and those must see each tile once.
+    // Not every workspace's tiles: the neighbouring cards peek in at the
+    // monitor's edges, so their tiles are on screen, and a keyboard walk that
+    // can land on them selects a window that is all but off-screen while the
+    // view stays put -- Enter then commits it (A4: from the strip, and after
+    // stepping onto an empty desktop, RIGHT put the ring on the previous
+    // desktop's last tile at x 0..125). The user's rule (2026-09-23) is that
+    // navigating windows stays in THIS desktop's card and walking off its end
+    // changes desktop (stepTileDesktop); every reader of this list -- the
+    // arrows from any zone, the Tab entry, firstNavTile, isNavTile -- has to
+    // hold to it, or each one re-opens the hole on its own. With a query the
+    // card's main-grid list already carries the promoted matches from every
+    // desktop (B2), so a filtered walk still reaches every match.
+    //
+    // ONCE PER WINDOW: a window must not come back twice from the grid list.
     std::unordered_set<const Desktop::View::CWindow*> seen;
-    for (const auto& IMAGE : images) {
-        if (!IMAGE || !IMAGE->pWorkspace)
-            continue;
-
-        for (const auto& WINDOW : overviewMainGridWindows(IMAGE->pWorkspace, MONITOR)) {
+    if (viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] && images[viewportCurrentWorkspace]->pWorkspace) {
+        for (const auto& WINDOW : overviewMainGridWindows(images[viewportCurrentWorkspace]->pWorkspace, MONITOR)) {
             if (!WINDOW || !seen.insert(WINDOW.get()).second)
                 continue;
             const CBox BOX = tileBox(WINDOW);
@@ -4142,14 +4172,11 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
     // because a target had been found. Confining the pick to this card is what
     // routes "off the end" through stepTileDesktop, which changes desktop and
     // lands on that desktop's first tile (or its last, going left).
-    if (g_search.nav.zone == EOverviewNavZone::Tile) {
-        std::unordered_set<const Desktop::View::CWindow*> here;
-        if (viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] && images[viewportCurrentWorkspace]->pWorkspace)
-            for (const auto& W : overviewMainGridWindows(images[viewportCurrentWorkspace]->pWorkspace, MONITOR))
-                if (W)
-                    here.insert(W.get());
-        std::erase_if(targets, [&](const SOverviewNavTarget& t) { return t.zone != EOverviewNavZone::Tile || !here.contains(t.window.get()); });
-    }
+    //
+    // The card part of that rule is collectNavTargets' (A4): it holds from the
+    // strip and the results too, and for firstNavTile below.
+    if (g_search.nav.zone == EOverviewNavZone::Tile)
+        std::erase_if(targets, [](const SOverviewNavTarget& t) { return t.zone != EOverviewNavZone::Tile; });
 
     const auto* const best = pickNavTarget(targets, current, g_search.nav.zone, LEFT, RIGHT, DOWN);
     if (!best) {
@@ -4823,28 +4850,36 @@ void CScrollOverview::emitFullscreenVisibilityState(PHLWINDOW window, bool hideF
 
     window = getOverviewWindowToShow(window);
 
+    // Once per change: the close and the teardown after it both report the
+    // state the desktop is left in, and focus moving inside the overview
+    // re-reports the same 0.
+    const auto post = [this](bool fullscreen) {
+        if (postedFullscreenState == sc<int>(fullscreen))
+            return;
+        postedFullscreenState = sc<int>(fullscreen);
+        g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = fullscreen ? "1" : "0"});
+    };
+
     if (!validMapped(window) || !window->m_workspace || window->m_monitor != pMonitor) {
-        g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});
+        post(false);
         return;
     }
 
     if (!hideFullscreen || !Fullscreen::controller()->isFullscreen(window)) {
         Event::bus()->m_events.window.fullscreen.emit(window);
-
-        g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = Fullscreen::controller()->isFullscreen(window) ? "1" : "0"});
-
+        post(Fullscreen::controller()->isFullscreen(window));
         return;
     }
 
-    const auto SAVEDMODES = Fullscreen::controller()->getFullscreenModes(window);
-
-    Fullscreen::controller()->setFullscreenMode(window, Fullscreen::FSMODE_NONE, Fullscreen::FSMODE_NONE);
-
-    Event::bus()->m_events.window.fullscreen.emit(window);
-
-    g_pEventManager->postEvent(SHyprIPCEvent{.event = "fullscreen", .data = "0"});
-
-    Fullscreen::controller()->setFullscreenMode(window, SAVEDMODES.internal, SAVEDMODES.client);
+    // The overview covers a fullscreen window, so a bar that hides for one
+    // must show: tell it fullscreen>>0 -- and ONLY tell it (A13). This used to
+    // drop the window out of fullscreen with setFullscreenMode(NONE) and put it
+    // back around the post (the 0.56 port of upstream's raw-field swap), and
+    // setFullscreenMode posts its own events: the open read fullscreen>>0,
+    // fullscreen>>0, fullscreen>>1, so the last word a bar heard was 1 and it
+    // stayed hidden -- and the client was sent two configures for nothing. The
+    // window's fullscreen state is not the overview's to touch.
+    post(false);
 }
 
 void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode,
@@ -9643,6 +9678,25 @@ void CScrollOverview::close() {
             closeOnWindow = FOCUSEDWINDOW;
     }
 
+    // C1/C5: a desktop was picked (a strip cell, an alternate strip's cell, a
+    // card, keyboard navigation onto another desktop) rather than a window.
+    // Every one of those switched the monitor with changeWorkspace(..., noFocus)
+    // so the overview could keep the keyboard -- which left Hyprland's focus,
+    // and with it the seat keyboard restoreOverviewKeyboard hands back below,
+    // on the window of the desktop just left: typed text landed in a window
+    // nobody could see. Leaving for another desktop is a workspace switch, so
+    // focus follows it the way Hyprland's own switch would: the desktop's focus
+    // candidate (its last focused window), or -- an empty desktop -- no window
+    // at all, on this monitor (the `!closeOnWindow` branch below).
+    const auto ORIGINWORKSPACEID =
+        focusSyncedFromWorkspaceID != WORKSPACE_INVALID ? focusSyncedFromWorkspaceID : (pMonitor->m_activeWorkspace ? pMonitor->m_activeWorkspace->m_id : WORKSPACE_INVALID);
+    const bool LEFTFORDESKTOP = !closeOnWindow && SELECTEDWORKSPACE && !SELECTEDWORKSPACE->m_isSpecialWorkspace && SELECTEDWORKSPACE->m_id != ORIGINWORKSPACEID;
+    if (LEFTFORDESKTOP) {
+        const auto CANDIDATE = getOverviewWindowToShow(SELECTEDWORKSPACE->getFocusCandidate());
+        if (CANDIDATE && CANDIDATE->m_workspace == SELECTEDWORKSPACE && shouldShowOverviewWindow(CANDIDATE))
+            closeOnWindow = CANDIDATE;
+    }
+
     closeOnWindow = getOverviewWindowToShow(closeOnWindow.lock());
 
     // Y9 + the section 5 checklist: "Click / activate tile: focus + raise that
@@ -9730,6 +9784,15 @@ void CScrollOverview::close() {
 
         if (SELECTEDWORKSPACE && SELECTEDWORKSPACE != pMonitor->m_activeWorkspace)
             pMonitor->changeWorkspace(SELECTEDWORKSPACE, false, true, true);
+
+        // C1/C5, an empty desktop picked: nothing on it to focus, so the focus
+        // left on the previous desktop's window goes (Hyprland's own switch to
+        // an empty workspace does the same) and the monitor -- possibly another
+        // one, picked from an alternate strip -- becomes the focused one.
+        if (LEFTFORDESKTOP) {
+            Desktop::focusState()->rawMonitorFocus(pMonitor.lock());
+            Desktop::focusState()->rawWindowFocus(nullptr, Desktop::FOCUS_REASON_WORKSPACE_CHANGE);
+        }
     } else if (closeOnWindow == Desktop::focusState()->window() && closeOnWindow->m_workspace == pMonitor->m_activeWorkspace) {
         if (focusSyncedFromWorkspaceID != WORKSPACE_INVALID) {
             const auto ACTIVEIDX   = activeWorkspaceIndex();
@@ -10571,19 +10634,22 @@ void CScrollOverview::reopen() {
 // binds that were live when it opened are marked submap-universal, and those,
 // and only those, are unmarked on the way out. Read from the live bind table
 // rather than restated here, so Omarchy's own definitions stay the source.
+//
+// O5/B19: the user's keyboard CHORDS too (Super/Ctrl/Alt held) -- the README's
+// own SUPER+TAB toggle could open the overview and never close it. Which binds
+// qualify is SubmapBorrow.hpp's rule (host-tested).
 static std::vector<WP<SKeybind>> g_passthroughBinds;
 
-static bool isGlobalPassthroughBindKey(std::string key) {
-    std::ranges::transform(key, key.begin(), [](unsigned char c) { return sc<char>(std::tolower(c)); });
-    return key.starts_with("xf86") || key == "print" || key == "sys_req";
-}
+static_assert(ScrollOverview::SubmapBorrow::MOD_SHIFT == HL_MODIFIER_SHIFT && ScrollOverview::SubmapBorrow::MOD_CTRL == HL_MODIFIER_CTRL &&
+              ScrollOverview::SubmapBorrow::MOD_ALT == HL_MODIFIER_ALT && ScrollOverview::SubmapBorrow::MOD_META == HL_MODIFIER_META);
 
 static void borrowGlobalPassthroughBinds(const std::string& fromSubmap) {
     if (!g_pKeybindManager)
         return;
 
     for (const auto& keybind : g_pKeybindManager->m_keybinds) {
-        if (!keybind || keybind->submapUniversal || keybind->submap.name != fromSubmap || !isGlobalPassthroughBindKey(keybind->key))
+        if (!keybind || keybind->submapUniversal || keybind->submap.name != fromSubmap ||
+            !ScrollOverview::SubmapBorrow::borrows(keybind->key, keybind->modmask, keybind->mouse, keybind->catchAll))
             continue;
 
         keybind->submapUniversal = true;

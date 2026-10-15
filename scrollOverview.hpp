@@ -339,6 +339,7 @@ class CScrollOverview : public IOverview {
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
+    PHLWINDOW selectedOverviewTile(size_t* workspaceIdx = nullptr);
     CBox      tileBox(const PHLWINDOW& window) const;
     CBox      overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const;
     void      refreshWindows() override;
@@ -760,6 +761,9 @@ class CScrollOverview : public IOverview {
     // once the pointer leaves the surface -- the implicit grab a client expects.
     bool                             layerPointerGrab = false;
     bool                             emittingFullscreenVisibilityState = false;
+    // The fullscreen>> state this overview last posted (-1: none yet), so the
+    // close and the teardown that follows it do not both post the same value.
+    int                              postedFullscreenState = -1;
     bool                             inputConfigOverridden = false;
     bool                             realtimePreviewTimerArmed = false;
     bool                             realtimePreviewFrameQueued = false;
