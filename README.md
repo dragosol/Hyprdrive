@@ -198,8 +198,10 @@ files.
   (needs `qs` 0.3). Run it, or bind it:
 
   ```lua
-  hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
-  hl.bind("SUPER + SHIFT + COMMA", hl.plugin.hyprdrive.settings("pane dock"))
+  if hl.plugin.hyprdrive then
+    hl.bind("SUPER + COMMA", hl.plugin.hyprdrive.settings())
+    hl.bind("SUPER + SHIFT + COMMA", hl.plugin.hyprdrive.settings("pane dock"))
+  end
   ```
 
   `hyprdrive-settings --pane ID` opens one section, and `--icons APPID` opens
@@ -296,8 +298,12 @@ a line there overrides the generated one above it.
 | `debug` | `frames`, `mem`, `gesture <script>`, ... | diagnostics and test hooks, see [docs/DEBUG.md](docs/DEBUG.md) |
 
 ```lua
-hl.bind("SUPER + TAB", hl.plugin.hyprdrive.overview("toggle all"))
-hl.bind("SUPER + H", hl.plugin.hyprdrive.minimize("window"))
+-- Guarded: if the plugin is unloaded or fails to load, hl.plugin.hyprdrive is
+-- nil, and an unguarded line would stop Hyprland registering ANY of your binds.
+if hl.plugin.hyprdrive then
+  hl.bind("SUPER + TAB", hl.plugin.hyprdrive.overview("toggle all"))
+  hl.bind("SUPER + H", hl.plugin.hyprdrive.minimize("window"))
+end
 ```
 
 ## Network use
