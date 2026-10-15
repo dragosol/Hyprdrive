@@ -1611,6 +1611,9 @@ Item {
                       visible: hitArea.containsMouse
                       delay: 400
                       contentItem: Text { textFormat: Text.PlainText; text: modelData.label; color: root.fg; font.family: root.fontFamily; font.pixelSize: ui.font.caption }
+                      // The style's own background is white: the label (root.fg) vanished
+                      // into it. Drawn like the dropdown cards instead.
+                      background: Rectangle { radius: ui.space(6); color: root.mix(root.bg, root.fg, 0.07); border.width: 1; border.color: root.tint(root.fg, 0.14) }
                     }
                   }
                 }
