@@ -280,7 +280,8 @@ void setForeignInsert(int index);
 bool openMenu(PHLMONITOR monitor, const Vector2D& point);
 bool menuOpen();
 void closeMenu();
-// Dock stacks A: while Rename in Dock's field is up the menu owns the keyboard.
+// Dock stacks A: while Rename in Dock's field is up the menu owns the keyboard;
+// any other open menu takes only Escape (it closes).
 bool menuWantsKeyboard();
 bool menuHandleKey(uint32_t keycode); // a PRESS; true = claimed
 // Get Info's lookup poll: armed when the info view opens; removed on unload.

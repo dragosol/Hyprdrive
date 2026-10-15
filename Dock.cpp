@@ -2533,6 +2533,14 @@ struct STooltip {
 };
 STooltip g_tip;
 
+// No fade: the plate is simply not there on the next frame.
+void dropTooltip() {
+    g_tip.name.clear();
+    g_tip.subject.clear();
+    g_tip.peek.clear();
+    g_tip.out = false;
+}
+
 // "App · Title" INSIDE THE WINDOW (user, 2026-09-24: "a little tooltip inside
 // the window when I'm hovering the dock ... that way I know which terminal
 // window I'm chatting with ... centered at the top inside the app window. This
@@ -5279,6 +5287,7 @@ bool openMenu(PHLMONITOR monitor, const Vector2D& point) {
         return false;
 
     g_menu = SMenu{.monitor = monitor->m_id, .item = *ITEM, .anchor = ITEM->iconBox, .box = {}, .rows = buildRows(*ITEM, monitor)};
+    dropTooltip(); // the menu's first frame must not carry the name plate over its rows
     return true;
 }
 
@@ -5290,17 +5299,29 @@ void closeMenu() {
     g_menu.reset();
 }
 
+// Any open menu hears ESCAPE (it closes it, as every menu does); only the
+// Rename field takes the rest of the keyboard.
 bool menuWantsKeyboard() {
-    return g_menu && g_menu->editing;
+    return g_menu.has_value();
 }
 
 // The Rename field's keys. Enter saves (an unchanged or empty name restores the
 // folder's own), Esc cancels, and every other key belongs to the field while it
-// is up -- nothing typed at it reaches the window underneath.
+// is up -- nothing typed at it reaches the window underneath. Without the field,
+// Esc closes the menu and every other key goes where it was going.
 bool menuHandleKey(uint32_t keycode) {
     if (!menuWantsKeyboard())
         return false;
     auto& M = *g_menu;
+    if (!M.editing) {
+        if (keycode != 1) // ESC
+            return false;
+        for (const auto& MON : State::monitorState()->monitors())
+            if (MON && MON->m_id == M.monitor)
+                g_pHyprRenderer->damageMonitor(MON);
+        closeMenu();
+        return true;
+    }
     if (keycode == 28) { // ENTER
         const auto BASE = Stacks::labelFor(M.item.stackPath);
         Stacks::setLabel(M.item.stackPath, M.editText == BASE ? std::string{} : M.editText);
@@ -7350,7 +7371,14 @@ void render(PHLMONITOR monitor) {
 
     // An open stack's fan or pane covers where its tooltip would sit (user,
     // 2026-09-24): the popup already says what it is.
-    if (g_menu || Stacks::isOpen())
+    // A context menu takes the tooltip down AT ONCE, not on the fade: the plate
+    // sits exactly where the menu's rows open, and the fade-out only advances
+    // on repaints a still menu does not ask for -- so the old name stayed drawn
+    // over a row (Trash's Get Info, a drive's Unmount, a stack's Remove from
+    // Dock) for up to four seconds. openMenu drops it too; this keeps it down.
+    if (g_menu)
+        dropTooltip();
+    else if (Stacks::isOpen())
         renderTooltip(monitor, LAYOUT, CBox{}, "");
     else if (CELL)
         renderTooltip(monitor, LAYOUT, CELL->first, CELL->second->m_title, sc<float>(g_hover.drawn.y), tooltipSubject(CELL->second),
