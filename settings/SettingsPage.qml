@@ -2102,6 +2102,10 @@ Item {
           readonly property bool hot: sigArea.containsMouse || linksHover.hovered
           onHotChanged: if (hot) linksGrace.stop(); else linksGrace.restart()
           property bool revealed: false
+          // Revealed by this very arrival of the pointer: a click that comes
+          // with the arrival (a quick move-and-click) then keeps the links up
+          // instead of toggling them straight back off.
+          property bool hoverRevealed: false
           Timer { id: linksGrace; interval: 260; onTriggered: signature.revealed = false }
           onRevealedChanged: if (!revealed) linksGrace.stop()
 
@@ -2147,8 +2151,12 @@ Item {
             id: sigArea
             anchors.fill: parent
             hoverEnabled: true
-            onEntered: signature.revealed = true
-            onClicked: signature.revealed = !signature.revealed
+            onEntered: if (!signature.revealed) { signature.revealed = true; signature.hoverRevealed = true }
+            onExited: signature.hoverRevealed = false
+            onClicked: {
+              if (signature.hoverRevealed) signature.hoverRevealed = false
+              else signature.revealed = !signature.revealed
+            }
           }
 
           // The links card rises out of the signature.
