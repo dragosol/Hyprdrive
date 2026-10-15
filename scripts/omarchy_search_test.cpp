@@ -370,7 +370,16 @@ int main() {
             auto codex = OmarchySearch::searchAgents("/codex");
             CHECK(codex.size() == 1);
             CHECK(OmarchySearch::canBeDefaultAgent(codex.front()));
+            // D10: the write moves the inputs generation AT ONCE -- the caller
+            // re-reads the memoised rows on the next line to move the
+            // selection onto the agent's new slot, well inside the 250ms poll
+            // (and inside the same st_mtime second as any earlier write).
+            const auto GEN_BEFORE = OmarchySearch::searchInputsGeneration();
             CHECK(OmarchySearch::setDefaultAgent(codex.front()));
+            CHECK(OmarchySearch::searchInputsGeneration() != GEN_BEFORE);
+            const auto GEN_AGAIN = OmarchySearch::searchInputsGeneration();
+            CHECK(OmarchySearch::setDefaultAgent(codex.front()));
+            CHECK(OmarchySearch::searchInputsGeneration() != GEN_AGAIN);
             CHECK(slurpFile(HOME / ".config/hyprdrive/default-agent") == "codex\n");
             CHECK(!fs::exists(HOME / ".config/omarchy"));
             CHECK(OmarchySearch::isDefaultAgent(codex.front()));
@@ -404,6 +413,22 @@ int main() {
         OmarchySearch::setHost({});
         OmarchySearch::resetMenuRoute();
         fs::remove_all(DIR);
+    }
+
+    // D6a: fd prints a directory with a trailing slash; the row's name is the
+    // folder's own, its subtitle the parent -- never "" and the folder itself.
+    {
+        const auto DIRHIT = OmarchySearch::splitFoundPath("/home/u/Documents/");
+        CHECK(DIRHIT.name == "Documents");
+        CHECK(DIRHIT.dir == "/home/u");
+        CHECK(DIRHIT.path == "/home/u/Documents");
+        const auto FILEHIT = OmarchySearch::splitFoundPath("/home/u/Documents/hdtest-unique.txt");
+        CHECK(FILEHIT.name == "hdtest-unique.txt" && FILEHIT.dir == "/home/u/Documents" && FILEHIT.path == "/home/u/Documents/hdtest-unique.txt");
+        const auto TOP = OmarchySearch::splitFoundPath("/srv//");
+        CHECK(TOP.name == "srv" && TOP.dir == "/" && TOP.path == "/srv");
+        const auto BARE = OmarchySearch::splitFoundPath("notes.txt");
+        CHECK(BARE.name == "notes.txt" && BARE.dir.empty());
+        CHECK(OmarchySearch::splitFoundPath("/").name.empty()); // skipped by the worker
     }
 
     std::cout << "omarchy_search_test: " << s_testsPassed << " checks OK" << std::endl;

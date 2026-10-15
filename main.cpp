@@ -904,13 +904,13 @@ static bool handleSearchPress(uint32_t keycode) {
             return true;
         }
         resetCompose();
-        // If in Result zone and in a subroute, ESC goes back up to parent
-        if (g_search.nav.zone == EOverviewNavZone::Result && OmarchySearch::canNavigateMenuBack()) {
-            OmarchySearch::navigateMenuBack();
-            g_search.nav.selection = 0;
-            afterQueryEdit();
+        // In a submenu ESC goes back up to its parent. The route is the test,
+        // not the zone: the zone is where the keyboard happens to be, and
+        // afterQueryEdit() used to reset it to Tile on the way up, so a second
+        // ESC (or one after BACKSPACE went up) read as "empty query" and closed
+        // the overview instead of climbing on (D5a).
+        if (overviewMenuBack())
             return true;
-        }
         // X5, GNOME-style: the first ESC drops the filter, the next one leaves.
         if (!g_search.query.active && g_search.query.text.empty()) {
             for (const auto& overview : scrollOverviews())
@@ -940,13 +940,9 @@ static bool handleSearchPress(uint32_t keycode) {
             afterQueryEdit();
             return true;
         }
-        if (g_search.nav.zone == EOverviewNavZone::Result && g_search.query.text.empty()) {
-            if (OmarchySearch::navigateMenuBack()) {
-                g_search.nav.selection = 0;
-                afterQueryEdit();
-                return true;
-            }
-        }
+        // Up a level, the same step ESC takes (see there).
+        if (overviewMenuBack())
+            return true;
         if (!g_search.query.active && g_search.query.text.empty())
             return true;
         if (g_search.nav.zone == EOverviewNavZone::Result) {

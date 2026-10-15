@@ -99,6 +99,16 @@ bool setDefaultAgent(const SSearchItem& item);
 std::optional<SSearchItem> evaluateCalculator(const std::string& query);
 std::vector<SSearchItem> searchMenu(const std::string& query, size_t limit = 10);
 std::vector<SSearchItem> fileResults();
+
+// One line of fd's output, split into what a Files & Folders row shows. fd
+// prints a DIRECTORY with a trailing slash (`/home/u/Documents/`), and cutting
+// that at its last '/' gave an empty name and the folder itself as its parent:
+// every folder hit was an icon with no text (D6a). Trailing slashes go first;
+// `path` is what is opened, `name` the row's title, `dir` its subtitle.
+struct SFoundPath {
+    std::string path, dir, name;
+};
+SFoundPath splitFoundPath(std::string line);
 bool fileSearchBusy();
 
 // EVERYTHING THE ROW BUILDER READS THAT IS NOT THE QUERY, as one number.
@@ -110,8 +120,9 @@ bool fileSearchBusy();
 // of those files does. This is the key a caller memoises on.
 //
 // The filesystem half is re-read at most every 250ms, which is also the ceiling
-// on how long a `omarchy default agent ...` run in a terminal (or a Ctrl x2 in
-// the search field) takes to show up. The file-search worker's own generation
+// on how long a `omarchy default agent ...` run in a terminal takes to show up.
+// A Ctrl x2 in the search field writes the file from THIS process and moves the
+// generation at once (setDefaultAgent), so the selection can follow the agent. The file-search worker's own generation
 // is folded in unpolled, so an async result lands on the next frame.
 uint64_t searchInputsGeneration();
 void setResultsCallback(std::function<void()> cb);

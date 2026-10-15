@@ -522,19 +522,19 @@ inline std::vector<SSearchRow> overviewSearchRowsLive();
 // system are; which one is highlighted is navigation state and lives in
 // g_search.nav, which is exactly why it can be left out of the key.
 //
-// The empty-query browse path is deliberately NOT memoised: it is the only
-// caller of recentFiles(), which walks the user's directories and has no
-// generation to key on, and it is never on the per-frame path (renderSearch
-// asks for rows only once something is typed or a menu is open).
+// The empty-query browse (the pill focused with nothing typed) IS on the
+// per-frame path now, and it is the only caller of recentFiles(), which stats
+// the user's folder shortcuts and has no generation of its own to key on. So
+// that one answer is memoised too, but for a second at most: a folder made or
+// removed while the browse is up shows within that, and the stats are paid
+// once a second instead of once per frame per monitor.
 inline std::vector<SSearchRow> overviewSearchRows() {
     if (g_search.query.windowsOnly)
         return {};
 
     const std::string& Q           = g_search.query.text;
     const bool         MENU_BROWSE = OmarchySearch::canNavigateMenuBack();
-
-    if (Q.empty() && !MENU_BROWSE)
-        return overviewSearchRowsLive();
+    const bool         ROOT_BROWSE = Q.empty() && !MENU_BROWSE;
 
     struct SRowMemo {
         std::string query;
@@ -545,17 +545,21 @@ inline std::vector<SSearchRow> overviewSearchRows() {
         uint64_t    apps    = 0;
         bool        filled  = false;
 
-        std::vector<SSearchRow> rows;
+        std::chrono::steady_clock::time_point builtAt{};
+        std::vector<SSearchRow>               rows;
     };
 
     static SRowMemo MEMO;
+
+    const auto NOW   = std::chrono::steady_clock::now();
+    const bool FRESH = !ROOT_BROWSE || NOW - MEMO.builtAt < std::chrono::seconds(1);
 
     const auto     ROUTE   = OmarchySearch::menuCurrentRoute();
     const uint64_t INPUTS  = OmarchySearch::searchInputsGeneration();
     const uint64_t MEMBERS = Membership::generation();
     const uint64_t APPS    = AppSearch::inventoryGeneration();
 
-    if (MEMO.filled && MEMO.query == Q && MEMO.browse == MENU_BROWSE && MEMO.route == ROUTE && MEMO.inputs == INPUTS && MEMO.members == MEMBERS && MEMO.apps == APPS)
+    if (MEMO.filled && FRESH && MEMO.query == Q && MEMO.browse == MENU_BROWSE && MEMO.route == ROUTE && MEMO.inputs == INPUTS && MEMO.members == MEMBERS && MEMO.apps == APPS)
         return MEMO.rows;
 
     MEMO.query   = Q;
@@ -565,6 +569,7 @@ inline std::vector<SSearchRow> overviewSearchRows() {
     MEMO.members = MEMBERS;
     MEMO.apps    = APPS;
     MEMO.rows    = overviewSearchRowsLive();
+    MEMO.builtAt = NOW;
     MEMO.filled  = true;
 
     return MEMO.rows;
@@ -660,7 +665,13 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // ------------------------------------------------------------------------
     std::vector<SSearchRow> runningApps, menuRows, otherApps;
 
-    if (!Q.empty() && !MENU_BROWSE) {
+    // `/` starts an agent command (`/claude <prompt>`), so a `/` query is
+    // answered by the AI & Tools column alone. Fed to the app and menu
+    // matchers it found every .desktop file whose Exec is an absolute path --
+    // Boxes, Virtual Machine Manager, Rygel Preferences -- under a `/`.
+    const bool AGENT_COMMAND = OmarchySearch::isAgentQuery(Q);
+
+    if (!Q.empty() && !MENU_BROWSE && !AGENT_COMMAND) {
         for (const auto* E : AppSearch::search(Q, 6)) {
             SSearchRow row{E->name, "", E->icon, "", E, {}, std::nullopt, 0};
             if (overviewWindowForApp(*E))
@@ -677,8 +688,10 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // with space for fourteen rows still never showed more than eight
     // (user, 2026-09-23).
     const size_t MENU_LIMIT = (Q.empty() || MENU_BROWSE) ? 24 : OVERVIEW_RESULT_ROWS_ALONE;
-    for (const auto& item : OmarchySearch::searchMenu(Q, MENU_LIMIT))
-        menuRows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 0});
+    if (!AGENT_COMMAND) {
+        for (const auto& item : OmarchySearch::searchMenu(Q, MENU_LIMIT))
+            menuRows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 0});
+    }
 
     rows.insert(rows.end(), std::make_move_iterator(runningApps.begin()), std::make_move_iterator(runningApps.end()));
     rows.insert(rows.end(), std::make_move_iterator(otherApps.begin()), std::make_move_iterator(otherApps.end()));
@@ -826,6 +839,54 @@ inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry) {
     return best;
 }
 
+// THE RESULTS PANE IS UP: something is typed, a submenu is open, or the search
+// was focused with nothing typed yet (a click on the pill, or a menu walked back
+// to its root) -- which BROWSES: the menu's root, the folder shortcuts, the
+// agent help rows (FEATURE-INVENTORY D5/D6/D9). Every "are there results to
+// walk into" question asks this one, so the pane and the keys cannot disagree.
+inline bool overviewSearchPaneUp() {
+    return !g_search.query.text.empty() || g_search.query.active || OmarchySearch::canNavigateMenuBack();
+}
+
+// After ANY step through the menu tree -- a drill, the Back row, Esc, Backspace
+// or Left -- the keyboard stays in the results, so the next Esc/Backspace walks
+// up again instead of falling through to "empty query = close", and the
+// highlight is on the first child (never the Back row: a second Enter runs it)
+// -- or, on the way UP, on the submenu just left (`from`), so Enter goes back
+// down and a run of Esc never parks the highlight on Lock or Shut Down.
+// The walk up ends in the root browse, not in an empty pane: at the root the
+// search counts as focused-and-empty, which lists the menu's root.
+inline void overviewSettleMenuStep(const std::string& from = {}) {
+    if (!OmarchySearch::canNavigateMenuBack())
+        g_search.query.active = true;
+    g_search.nav.zone               = EOverviewNavZone::Result;
+    g_search.nav.explicitSelection  = true;
+    g_search.nav.selectFirstPending = false;
+    g_search.nav.intent             = ESearchIntent::Browsing;
+    g_search.nav.hoverIndex         = -1;
+
+    const auto NEXT = overviewSearchRows();
+    int        sel  = NEXT.empty() ? -1 : 0;
+    for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
+        if (NEXT[sc<size_t>(i)].column != 0)
+            continue;
+        if (NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == OmarchySearch::EItemKind::Back)
+            continue;
+        sel = i;
+        break;
+    }
+    if (!from.empty()) {
+        for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
+            if (NEXT[sc<size_t>(i)].column == 0 && NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == OmarchySearch::EItemKind::Menu &&
+                NEXT[sc<size_t>(i)].omarchy->id == from) {
+                sel = i;
+                break;
+            }
+        }
+    }
+    g_search.nav.selection = sel;
+}
+
 // Activating a result runs the corresponding app, Omarchy action, agent prompt,
 // calculator copy, or file open. Submenu navigation returns false so the overview
 // stays open while drilling down into the hierarchy. For an already-open app,
@@ -863,28 +924,19 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
     if (ROW.omarchy) {
         if (ROW.omarchy->kind == OmarchySearch::EItemKind::Menu || ROW.omarchy->kind == OmarchySearch::EItemKind::Back) {
             const bool DRILL = ROW.omarchy->kind == OmarchySearch::EItemKind::Menu;
+            const auto LEFT  = DRILL ? std::string{} : OmarchySearch::menuCurrentRoute();
             OmarchySearch::activate(*ROW.omarchy);
-            if (DRILL) {
+            if (DRILL && !g_search.query.text.empty()) {
+                // The drill clears the query the windows were filtered by, so
+                // the membership gate has to hear about it like any other edit:
+                // unbumped, every tile kept the "test tools" answer (hidden) for
+                // as long as the menu was open, and the window lists rebuilt on
+                // the empty-query edge were built from that stale answer -- a
+                // blank grid even after Esc walked back to the root (D5b).
                 g_search.query.text.clear();
-                g_search.query.active          = false;
-                g_search.nav.zone              = EOverviewNavZone::Result;
-                g_search.nav.explicitSelection = true;
-                g_search.nav.selectFirstPending = false;
-                g_search.nav.intent            = ESearchIntent::Browsing;
-                g_search.nav.hoverIndex        = -1;
+                Membership::bump("menu drill");
             }
-            // Skip the ‹ Back row so a second Enter launches the first child.
-            const auto NEXT = overviewSearchRows();
-            int        sel  = 0;
-            for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
-                if (NEXT[sc<size_t>(i)].column != 0)
-                    continue;
-                if (NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == OmarchySearch::EItemKind::Back)
-                    continue;
-                sel = i;
-                break;
-            }
-            g_search.nav.selection = sel;
+            overviewSettleMenuStep(LEFT);
             return false;
         }
         return OmarchySearch::activate(*ROW.omarchy);

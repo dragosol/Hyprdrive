@@ -174,44 +174,80 @@ namespace {
             return;
 
         // -re paces the INPUT, so both outputs run on the video's own clock.
-        std::vector<std::string> argv = {"ffmpeg",    "-hide_banner", "-loglevel", "error", "-nostdin", "-re",     "-i",  path,
-                                         "-map",      "0:v:0",        "-vf",       "scale=" + std::to_string(w) + ":" + std::to_string(h), "-f",
-                                         "rawvideo",  "-pix_fmt",     "rgba",      "pipe:1"};
-        if (AUDIO)
-            argv.insert(argv.end(), {"-map", "0:a:0", "-f", "pulse", "hyprdrive"});
+        // How long the run lasted, in seconds of wall clock (= of video, under
+        // -re); negative when ffmpeg could not even be started.
+        const auto PLAY = [&](bool withAudio) -> float {
+            std::vector<std::string> argv = {"ffmpeg",    "-hide_banner", "-loglevel", "error", "-nostdin", "-re",     "-i",  path,
+                                             "-map",      "0:v:0",        "-vf",       "scale=" + std::to_string(w) + ":" + std::to_string(h), "-f",
+                                             "rawvideo",  "-pix_fmt",     "rgba",      "pipe:1"};
+            if (withAudio)
+                argv.insert(argv.end(), {"-map", "0:a:0", "-f", "pulse", "hyprdrive"});
 
-        int         fd  = -1;
-        const pid_t PID = spawnPiped(argv, fd);
-        if (PID < 0) {
-            d->failed = true;
-            return;
-        }
-        d->fd  = fd;
-        d->pid = PID;
-        // stop() may have run between the quit check above and the spawn, when
-        // it had no pid to kill: then this thread kills its own child, or the
-        // read below would wait out the whole video with the compositor joined
-        // on it.
-        if (d->quit)
-            kill(-PID, SIGTERM);
+            int         fd  = -1;
+            const pid_t PID = spawnPiped(argv, fd);
+            if (PID < 0)
+                return -1.F;
+            const auto STARTED = clock::now();
+            d->fd  = fd;
+            d->pid = PID;
+            // stop() may have run between the quit check above and the spawn, when
+            // it had no pid to kill: then this thread kills its own child, or the
+            // read below would wait out the whole video with the compositor joined
+            // on it.
+            if (d->quit)
+                kill(-PID, SIGTERM);
 
-        const size_t         BYTES = sc<size_t>(w) * sc<size_t>(h) * 4;
-        std::vector<uint8_t> buf(BYTES);
-        size_t               have = 0;
-        while (!d->quit) {
-            const ssize_t N = read(fd, buf.data() + have, BYTES - have);
-            if (N < 0 && errno == EINTR)
-                continue;
-            if (N <= 0)
-                break;
-            have += sc<size_t>(N);
-            if (have == BYTES) {
-                std::lock_guard lk(d->mtx);
-                d->latest.swap(buf);
-                buf.resize(BYTES);
-                ++d->seq;
-                have = 0;
+            const size_t         BYTES = sc<size_t>(w) * sc<size_t>(h) * 4;
+            std::vector<uint8_t> buf(BYTES);
+            size_t               have = 0;
+            while (!d->quit) {
+                const ssize_t N = read(fd, buf.data() + have, BYTES - have);
+                if (N < 0 && errno == EINTR)
+                    continue;
+                if (N <= 0)
+                    break;
+                have += sc<size_t>(N);
+                if (have == BYTES) {
+                    std::lock_guard lk(d->mtx);
+                    d->latest.swap(buf);
+                    buf.resize(BYTES);
+                    ++d->seq;
+                    have = 0;
+                }
             }
+            return std::chrono::duration<float>(clock::now() - STARTED).count();
+        };
+
+        // NO SOUND SERVER WAS NO EGG. One ffmpeg writes both outputs, and when
+        // the pulse one cannot connect ("PulseAudio outdev: Cannot connect
+        // context" -- no PulseAudio/PipeWire reachable from this session) the
+        // whole process exits within its first frames. A video that plays
+        // silently beats a frame that flashes and folds, so a run with sound
+        // that ENDED EARLY -- well short of the file's own length; -re plays
+        // in real time -- plays the same file again, picture only (D17).
+        // Judged by the clock, not the exit status: the length is known, and
+        // the clock needs no wait on a child stopDecoder may be reaping at
+        // the same moment.
+        float duration = -1.F;
+        if (AUDIO) {
+            const auto LEN = firstLine({"ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path});
+            if (std::sscanf(LEN.c_str(), "%f", &duration) != 1)
+                duration = -1.F;
+        }
+
+        const float RAN = PLAY(AUDIO);
+        if (RAN < 0.F) {
+            d->failed = true;
+        } else if (AUDIO && !d->quit && (duration > 0.F ? RAN + 1.F < duration : RAN < 1.F)) {
+            // Withdrawn before the respawn, so stopDecoder never signals the
+            // group of a child that is gone.
+            const pid_t DEAD = d->pid.exchange(-1);
+            if (const int FD = d->fd.exchange(-1); FD >= 0)
+                close(FD);
+            if (DEAD > 0)
+                waitpid(DEAD, nullptr, 0); // its pipe hit EOF: it is exiting
+            if (!d->quit && PLAY(false) < 0.F)
+                d->failed = true;
         }
         d->ended = true;
     }

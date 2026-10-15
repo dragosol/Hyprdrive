@@ -3839,7 +3839,7 @@ bool CScrollOverview::tabAcrossMonitors() {
         const auto RESULTS = overviewSearchRows();
         g_search.nav.keyboardTile = false;
         TileChrome::setHovered(PHLWINDOW{}, false);
-        if ((!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) && !RESULTS.empty()) {
+        if (overviewSearchPaneUp() && !RESULTS.empty()) {
             g_search.nav.zone              = EOverviewNavZone::Result;
             g_search.nav.explicitSelection = true;
             g_search.nav.intent            = ESearchIntent::Browsing;
@@ -3859,7 +3859,7 @@ bool CScrollOverview::tabAcrossMonitors() {
     // NO RESULTS UP (user, 2026-09-27): "monitor 1 strip -> grid -> monitor 2
     // strip -> grid monitor 2" and round again -- search has nothing to offer,
     // so it is not a stop. Every strip is a stop; a grid with no tiles is not.
-    if (const auto RESULTS = overviewSearchRows(); !((!g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack()) && !RESULTS.empty())) {
+    if (const auto RESULTS = overviewSearchRows(); !(overviewSearchPaneUp() && !RESULTS.empty())) {
         const size_t STOPS = order.size() * 2;
         const size_t FROM  = g_search.nav.zone == EOverviewNavZone::Desktop ? self * 2 : g_search.nav.zone == EOverviewNavZone::Tile ? self * 2 + 1 : STOPS - 1;
         for (size_t step = 1; step <= STOPS; ++step) {
@@ -4083,12 +4083,8 @@ bool CScrollOverview::moveSelection(const std::string& direction) {
 
             if (LEFT) {
                 if (curHit->column == 0) {
-                    if (OmarchySearch::canNavigateMenuBack()) {
-                        OmarchySearch::navigateMenuBack();
-                        g_search.nav.selection = 0;
-                        damage();
+                    if (overviewMenuBack())
                         return true;
-                    }
                     return true;
                 }
 
@@ -6942,7 +6938,8 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
     const auto MONITOR = IN.monitor;
     out.monitorId      = MONITOR ? MONITOR->m_id : MONITOR_INVALID;
 
-    out.label = !IN.queried ? "Search, calculate or run" : (IN.emptyResult ? std::string(IN.query) + "    no matches" : std::string(IN.query));
+    out.placeholder = IN.query.empty();
+    out.label       = out.placeholder ? "Search, calculate or run" : (IN.emptyResult ? std::string(IN.query) + "    no matches" : std::string(IN.query));
 
     // The pill is laid out in the SAME logical space as the strip it sits above.
     // That placement is load-bearing and is NOT the part X22 changed: laid out
@@ -7734,7 +7731,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         return;
 
     texFade = FADE;
-    const CHyprColor FG = !L.queried ? ScrollOverview::Config::themeMutedText() : (L.emptyResult ? ScrollOverview::Config::themeUrgent() : ScrollOverview::Config::themeForeground());
+    const CHyprColor FG = L.placeholder ? ScrollOverview::Config::themeMutedText() : (L.emptyResult ? ScrollOverview::Config::themeUrgent() : ScrollOverview::Config::themeForeground());
 
     const int  FONTPX = std::max(1, sc<int>(std::round(OVERVIEW_PILL_TEXTPX * SCALE)));
     const auto NOW    = Time::steadyNow();
@@ -7821,7 +7818,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         return;
     }
 
-    const auto TEX = OverviewRender::text(L.label, FG, FONTPX, false, "", sc<int>(L.fieldW), L.queried ? 600 : 0);
+    const auto TEX = OverviewRender::text(L.label, FG, FONTPX, false, "", sc<int>(L.fieldW), L.placeholder ? 0 : 600);
     if (!TEX || !TEX->ok())
         return;
 
@@ -7871,9 +7868,10 @@ void CScrollOverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         return;
 
     // ---- ANIMATE: re-aim the search animations from this frame's results.
-    // Results exist once there is query text, or while browsing an Omarchy
-    // submenu after Enter (query is cleared so children are listed).
-    const bool QUERIED = !g_search.query.text.empty() || OmarchySearch::canNavigateMenuBack();
+    // Results exist once there is query text, while browsing a submenu after
+    // Enter (query is cleared so children are listed), or while the search is
+    // focused with nothing typed (the root browse; see overviewSearchPaneUp).
+    const bool QUERIED = overviewSearchPaneUp();
 
     const size_t MATCHES = !g_search.query.text.empty() ? matchingWindowCount() : 0;
     const auto   RESULTS = QUERIED ? overviewSearchRows() : std::vector<SSearchRow>{};
@@ -8089,6 +8087,26 @@ bool overviewHandleShiftTap() {
     for (const auto& overview : scrollOverviews()) {
         if (overview)
             overview->close();
+    }
+    return true;
+}
+
+bool overviewMenuBack() {
+    if (!g_search.query.text.empty())
+        return false;
+    const auto LEFT = OmarchySearch::menuCurrentRoute();
+    if (!OmarchySearch::navigateMenuBack())
+        return false;
+
+    // The query did not change (it is empty on both sides), so none of
+    // afterQueryEdit's work is owed -- and its reset of the zone and the
+    // selection is exactly what must NOT happen here.
+    overviewSettleMenuStep(LEFT);
+    for (const auto& overview : scrollOverviews()) {
+        if (!overview)
+            continue;
+        overview->damage();
+        overview->requestInputFrame();
     }
     return true;
 }
