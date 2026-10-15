@@ -35,7 +35,7 @@ Prefix: `plugin:hyprdrive:`
 | `drag_mini_scale` | float | `0.45` | 0.05 .. 1 | size of the drag proxy while it hovers another workspace, as a fraction of its tile size |
 | `drag_mini_ms` | int | `150` | >= 0 | ms for the drag proxy to shrink to, or grow back from, mini scale |
 | `drag_recentre_ms` | int | `160` | >= 0 | ms for the drag proxy's grab point to slide to its centre while over a drop target |
-| `wallpaper` | int | `0` | 0 .. 2 | wallpaper mode |
+| `wallpaper` | int | `0` | 0 .. 2 | wallpaper behind the cards: 0 blurred and dimmed, 1 black, 2 same as 0; the cards always show it |
 | `blur` | bool | `false` |  | blur the overview wallpaper |
 | `layout_motion_blur` | int | `16` | 0 .. 32 | motion blur samples while the layout moves or resizes a window -- a dwindle retile, the scrolling tape, a window opening (0 = off); never an interactive drag |
 | `live_layer_frost` | bool | `true` |  | evaluate dock/bar frost against the overview backdrop instead of the stale optimized blur FB |

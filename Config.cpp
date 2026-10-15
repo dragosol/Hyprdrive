@@ -630,7 +630,12 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CIntValue>(KEY("drag_recentre_ms"),
                                  "ms for the drag proxy's grab point to slide to its centre while over a drop target", 160,
                                  SIntValueOptions{.min = 0}));
-    addKey(makeShared<CIntValue>(KEY("wallpaper"), "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
+    // Upstream scrolloverview's modes were 0 global only, 1 per-workspace only,
+    // 2 both. Since E8-c (3933dd0) every card carries the wallpaper itself
+    // (cardWallpaperFB, rounded in the shader), so "global only" no longer
+    // exists and 2 renders exactly as 0: kept so an old config stays valid.
+    addKey(makeShared<CIntValue>(KEY("wallpaper"), "wallpaper behind the cards: 0 blurred and dimmed, 1 black, 2 same as 0; the cards always show it", 0,
+                                 SIntValueOptions{.min = 0, .max = 2}));
     addKey(makeShared<CBoolValue>(KEY("blur"), "blur the overview wallpaper", false));
 
     // OVERVIEW_CPP_SPEC §13.9. Defaults are the user's dumped Dash to Dock
