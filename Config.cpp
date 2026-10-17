@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
@@ -176,7 +177,7 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .name            = "debug",
             // `gesture .+`: the script is parsed by the topic itself
             // (DebugGestureScript.hpp), which reports a bad step precisely.
-            .argPattern      = std::regex{"^(frames|mem|motion|desktop|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
+            .argPattern      = std::regex{"^(frames|mem|motion|windows|glass|desktop|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
             .defaultArg      = "frames",
             .typeArgError    = "expected a string argument",
             .invalidArgError = "expected: frames | mem | motion | desktop | scratchpad | type [text] | activate <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
@@ -194,6 +195,15 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .invalidArgError = "expected one of: l, r, u, d",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "focus"); },
             .luaLegacy       = [](lua_State* L) { return dispatcherFactoryLua(L, "focus"); },
+        },
+        {
+            // Mosaic.cpp: swap by direction, mosaic-aware (Super+Shift+arrows).
+            .name            = "swap",
+            .argPattern      = std::regex{"^(l|r|u|d|left|right|up|down)$"},
+            .typeArgError    = "expected a string argument",
+            .invalidArgError = "expected one of: l, r, u, d",
+            .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "swap"); },
+            .luaLegacy       = [](lua_State* L) { return dispatcherFactoryLua(L, "swap"); },
         },
         {
             // SettingsApp.hpp: open the settings -- the Omarchy panel or the
@@ -519,11 +529,11 @@ static void registerConfigValuesFor() {
     // Fired once per boundary crossed, through CProcess::runAsync -- never a
     // fork on the compositor thread.
     //
-    // The default names Omarchy's keystroke click, so a machine that has one
-    // gets the detent tick with no config at all and reuses the sound its
-    // capacitive top row already plays rather than introducing a second one.
+    // The default names a keystroke-click helper in ~/.local/bin (the user's own
+    // capacitive-row click on the XPS): a machine that has one gets the detent
+    // tick with no config, and reuses that sound rather than adding a second.
     // The path is only spawned if it exists and is executable, so this is
-    // silent rather than noisy-on-stderr everywhere else. Set empty to disable.
+    // silent everywhere else. Set empty to disable.
     addKey(makeShared<CStringValue>(KEY("gesture_detent_sound"),
                                     "executable run once per workspace boundary crossed during the drag; empty = silent, missing file = silent",
                                     Hyprlang::STRING{"~/.local/bin/keystroke-click"}));
@@ -897,19 +907,20 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CStringValue>(KEY("dock:stack_icon_theme"),
                                     "dock stacks: icon theme for stacks and their files -- auto (the Omarchy theme's icons on Omarchy, else GTK's), omarchy (alias of auto) or gtk",
                                     Hyprlang::STRING{"auto"}));
-    addKey(makeShared<CStringValue>(KEY("dock:trash_icon"), "dock: the Trash's icon -- hyprdrive (its own artwork), omarchy or gtk", Hyprlang::STRING{"hyprdrive"}));
+    addKey(makeShared<CStringValue>(KEY("dock:trash_icon"), "dock: the Trash's icon -- hyprdrive (its own artwork), gtk, or omarchy (the Omarchy theme's; gtk elsewhere)", Hyprlang::STRING{"hyprdrive"}));
     addKey(makeShared<CStringValue>(KEY("dock:trash_style"), "dock: hyprdrive Trash glass -- auto (follows the theme), light, dark or clear",
                                     Hyprlang::STRING{"auto"}));
     addKey(makeShared<CStringValue>(KEY("dock:trash_papers"), "dock: what fills hyprdrive's full Trash -- white or color", Hyprlang::STRING{"white"}));
 
     addKey(makeShared<CColorValue>(KEY("dock:background_color"),
-                                   "hyprgnomedock: pill hue (alpha 0 = Omarchy terminal background, else misc:background_color; opacity is background_opacity)",
+                                   "hyprgnomedock: pill hue (alpha 0 = theme:background, else the palette file's background, else misc:background_color -- on Omarchy its theme's; opacity is background_opacity)",
                                    (Hyprlang::INT)0));
-    // -1 follows unfocused default-opacity (0.85), the same glass as idle windows.
+    // -1 follows unfocused windows: decoration:inactive_opacity (on Omarchy times
+    // its default-opacity 0.85), the same glass as idle windows.
     // A pin of 0.19 was Dash-to-Dock glass; without window blur that left
     // the pill almost invisible.
     addKey(makeShared<CFloatValue>(KEY("dock:background_opacity"),
-                                   "hyprgnomedock: pill alpha (-1 = Omarchy default-opacity)", -1.F,
+                                   "hyprgnomedock: pill alpha (-1 = follow unfocused windows: decoration:inactive_opacity, times Omarchy's default-opacity 0.85 on Omarchy)", -1.F,
                                    SFloatValueOptions{.min = -1.F, .max = 1.F}));
     // X29. The dock's frost is blur-my-shell's `[dash-to-dock]`, not the desktop's
     // window blur: sigma 30, brightness 0.60, live (static-blur false), and no
@@ -1110,6 +1121,10 @@ static uint64_t g_themeGeneration = 1;
 
 void invalidateThemeCache() {
     ++g_themeGeneration;
+}
+
+uint64_t themeGeneration() {
+    return g_themeGeneration;
 }
 
 // A plugin colour key's value when it is SET (alpha > 0), read through the
@@ -1596,12 +1611,156 @@ CHyprColor dockIndicatorColor() {
 }
 
 // Overview chrome (dock, search, strip, results) follows unfocused window
-// opacity from ~/.config/hypr/windows.lua (`0.985 override 0.85 override`).
-static float omarchyWindowOpacity() {
-    static constexpr float STOCK = 0.85F;
+// opacity. On Omarchy that is its default-opacity rule from
+// ~/.config/hypr/windows.lua (`0.985 override 0.85 override`) on top of
+// decoration:inactive_opacity. Off Omarchy there is no such rule (user,
+// 2026-10-15: native "still tries to adopt omarchy's opacity settings instead
+// of hyprland's"): Hyprland's own decoration:inactive_opacity, alone.
+static float chromeWindowOpacity() {
+    static constexpr float OMARCHY_DEFAULT_OPACITY = 0.85F;
     static auto& VAL      = valueRef<Hyprlang::FLOAT>("decoration:inactive_opacity");
     const float  INACTIVE = std::clamp(sc<float>(*VAL), 0.F, 1.F);
-    return std::clamp(STOCK * INACTIVE, 0.F, 1.F);
+    if (!ScrollOverview::Integration::omarchy())
+        return INACTIVE;
+    return std::clamp(OMARCHY_DEFAULT_OPACITY * INACTIVE, 0.F, 1.F);
+}
+
+// THE TERMINAL'S GLASS (user, 2026-10-16: the dock, search, results and strip
+// should be the same glass as Ghostty -- the blur was already Hyprland's, the
+// tint over it was not: 0.85 over the theme's darkest shade, where the terminal
+// is its background-opacity over its own background). Read from Ghostty's
+// config: `config` / `config.ghostty` in its config dir, every `config-file`
+// it includes (relative to the including file; a leading ? is optional), and a
+// `theme` for the background when none is set outright. Later lines win. Only
+// what Ghostty SETS is taken: no background-opacity line means no opinion.
+//
+// Re-read on the theme generation (a config reload), and otherwise at most
+// every THEME_POLL_MS when a file it read changed -- a theme switch that only
+// rewrites Ghostty's theme file (fedora's Serpantinum sync) is seen too.
+struct SGhosttyGlass {
+    std::optional<uint32_t> background; // 0xRRGGBB
+    std::optional<float>    opacity;
+};
+
+static std::optional<uint32_t> ghosttyHex(std::string v) {
+    if (!v.empty() && v.front() == '#')
+        v.erase(0, 1);
+    if (v.size() != 6 || !std::ranges::all_of(v, [](char c) { return std::isxdigit(sc<unsigned char>(c)) != 0; }))
+        return std::nullopt;
+    return sc<uint32_t>(std::stoul(v, nullptr, 16));
+}
+
+static std::string ghosttyUnquote(std::string v) {
+    while (!v.empty() && std::isspace(sc<unsigned char>(v.back())))
+        v.pop_back();
+    if (v.size() >= 2 && (v.front() == '"' || v.front() == '\'') && v.back() == v.front())
+        v = v.substr(1, v.size() - 2);
+    return v;
+}
+
+static std::string ghosttyPath(std::string v, const std::filesystem::path& base) {
+    if (!v.empty() && v.front() == '~')
+        if (const char* home = std::getenv("HOME"); home && *home)
+            v = std::string{home} + v.substr(1);
+    std::filesystem::path p{v};
+    return (p.is_absolute() ? p : base / p).string();
+}
+
+static void ghosttyRead(const std::string& path, int depth, SGhosttyGlass& out, std::optional<std::string>& theme, std::vector<std::pair<std::string, time_t>>& seen) {
+    struct stat st {};
+    if (depth > 6 || stat(path.c_str(), &st) != 0)
+        return;
+    seen.emplace_back(path, st.st_mtime);
+    std::ifstream in{path};
+    if (!in)
+        return;
+    std::vector<std::string> includes;
+    std::string              line;
+    while (std::getline(in, line)) {
+        const auto EQ = line.find('=');
+        if (EQ == std::string::npos)
+            continue;
+        std::string key = line.substr(0, EQ);
+        std::erase_if(key, [](char c) { return std::isspace(sc<unsigned char>(c)) != 0; });
+        if (key.empty() || key.front() == '#')
+            continue;
+        std::string val = line.substr(EQ + 1);
+        val.erase(0, std::min(val.find_first_not_of(" \t"), val.size()));
+        val = ghosttyUnquote(val);
+        if (key == "background") {
+            if (const auto HEX = ghosttyHex(val))
+                out.background = HEX;
+        } else if (key == "background-opacity") {
+            try {
+                out.opacity = std::clamp(std::stof(val), 0.F, 1.F);
+            } catch (...) {}
+        } else if (key == "theme")
+            theme = val;
+        else if (key == "config-file") {
+            if (!val.empty() && val.front() == '?')
+                val = ghosttyUnquote(val.substr(1));
+            includes.push_back(ghosttyPath(val, std::filesystem::path{path}.parent_path()));
+        }
+    }
+    // Ghostty loads a file's config-file includes after the file itself.
+    for (const auto& INC : includes)
+        ghosttyRead(INC, depth + 1, out, theme, seen);
+}
+
+static const SGhosttyGlass& ghosttyGlass() {
+    static SGhosttyGlass                               cached;
+    static std::vector<std::pair<std::string, time_t>> files; // what the last parse read, with mtimes
+    static Time::steady_tp                             checkedAt{};
+    static uint64_t                                    seenGeneration = 0;
+
+    const auto NOW = Time::steadyNow();
+    if (seenGeneration == g_themeGeneration && std::chrono::duration<float, std::milli>(NOW - checkedAt).count() < THEME_POLL_MS)
+        return cached;
+    const bool RELOADED = seenGeneration != g_themeGeneration;
+    checkedAt           = NOW;
+    seenGeneration      = g_themeGeneration;
+
+    if (!RELOADED && !files.empty() && std::ranges::all_of(files, [](const auto& f) {
+            struct stat st {};
+            return stat(f.first.c_str(), &st) == 0 && st.st_mtime == f.second;
+        }))
+        return cached;
+
+    const char* const CFG  = std::getenv("XDG_CONFIG_HOME");
+    const char* const HOME = std::getenv("HOME");
+    const std::filesystem::path DIR = (CFG && *CFG) ? std::filesystem::path{CFG} / "ghostty" :
+                                      (HOME && *HOME) ? std::filesystem::path{HOME} / ".config/ghostty" :
+                                                        std::filesystem::path{};
+    cached = {};
+    files.clear();
+    if (DIR.empty())
+        return cached;
+
+    std::optional<std::string> theme;
+    for (const char* NAME : {"config", "config.ghostty"})
+        ghosttyRead((DIR / NAME).string(), 0, cached, theme, files);
+
+    // A theme gives the background only where the config does not.
+    if (!cached.background && theme && !theme->empty()) {
+        // "light:A,dark:B": the dark one (the chrome is a dark-glass surface).
+        std::string name = *theme;
+        if (const auto DARK = name.find("dark:"); DARK != std::string::npos) {
+            name = name.substr(DARK + 5);
+            name = name.substr(0, name.find(','));
+        }
+        SGhosttyGlass                                      themed;
+        std::optional<std::string>                         ignored;
+        const std::filesystem::path                        P{name};
+        for (const auto& CAND : P.is_absolute() ? std::vector<std::string>{name} :
+                                                  std::vector<std::string>{(DIR / "themes" / name).string(), "/usr/share/ghostty/themes/" + name}) {
+            if (std::filesystem::exists(CAND)) {
+                ghosttyRead(CAND, 0, themed, ignored, files);
+                break;
+            }
+        }
+        cached.background = themed.background;
+    }
+    return cached;
 }
 
 CHyprColor dockBackgroundColor() {
@@ -1609,17 +1768,23 @@ CHyprColor dockBackgroundColor() {
     static auto& COLORVAL   = valueRef<Hyprlang::INT>("plugin:hyprdrive:dock:background_color");
     static auto& FALLBACK   = valueRef<Hyprlang::INT>("misc:background_color");
 
+    const auto& GLASS = ghosttyGlass();
+
     float OPACITY = sc<float>(*OPACITYVAL);
-    if (OPACITY < 0.F)
-        OPACITY = omarchyWindowOpacity();
-    else
+    if (OPACITY >= 0.F)
         OPACITY = std::clamp(OPACITY, 0.F, 1.F);
+    else if (GLASS.opacity)
+        OPACITY = *GLASS.opacity; // the terminal's glass
+    else
+        OPACITY = chromeWindowOpacity();
 
     const uint32_t ARGB = sc<uint32_t>(*COLORVAL);
     if ((ARGB >> 24) != 0)
         return colorFromArgb(ARGB).modifyA(OPACITY);
     if (const auto BG = THEME_KEY("background"))
         return BG->modifyA(OPACITY);
+    if (GLASS.background)
+        return colorFromArgb(*GLASS.background).modifyA(OPACITY); // the terminal's background
     if (const auto& P = palette(); P.valid && P.hasBg)
         return colorFromArgb(P.background).modifyA(OPACITY);
     return colorFromArgb(sc<uint32_t>(*FALLBACK)).modifyA(OPACITY);

@@ -343,10 +343,11 @@ int main() {
         CHECK(OmarchySearch::searchAgents("/grok hi").empty()); // exact, but not installed
         CHECK(OmarchySearch::searchAgents("/agent hi").empty()); // no default yet
 
-        // A usage record that says logged out hides the agent; none says nothing.
+        // Omarchy's usage records are NOT read off Omarchy (2026-10-15): a box
+        // that once had Omarchy keeps stale ones, which hid signed-in agents.
         fs::create_directories(DIR / "state/omarchy/agents/usage");
         std::ofstream(DIR / "state/omarchy/agents/usage/codex.json") << "{\"ready\": false}";
-        CHECK(names(OmarchySearch::promptAllAgents("x")) == (std::vector<std::string>{"Ask Claude"}));
+        CHECK(names(OmarchySearch::promptAllAgents("x")).size() == 2);
         fs::remove_all(DIR / "state");
 
         // No terminal anywhere: no agent rows (they could not open).

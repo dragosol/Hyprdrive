@@ -76,6 +76,22 @@ namespace ScrollOverview::FlightBlur {
             return b.w >= 1.0 && b.h >= 1.0;
         }
 
+        // debugReport: per site, motion that asked for a smear, what the
+        // setting left of it, and smears really handed to the renderer. The
+        // last site shape() was asked for names the drawBlurred right after it
+        // (every caller shapes, then draws); a transformer carries its own.
+        constexpr size_t SITE_N = std::size(SITES);
+        struct SSiteStat {
+            uint64_t asked = 0, smeared = 0, drawn = 0;
+            double   trailSum = 0.0, trailMax = 0.0; // smear length, logical px (the longest edge's travel)
+        };
+        std::array<SSiteStat, SITE_N> g_siteStat{};
+        size_t                         g_lastShaped = SITE_N; // none yet
+        void                           countDrawn(size_t site) {
+            if (site < SITE_N)
+                ++g_siteStat[site].drawn;
+        }
+
         // The renderer's own recipe (MotionBlurTransformer::amendTransformedRenderData):
         // `drawn` is the box it is about to composite, `cur` the geometry that box
         // was built around; the previous box is the same box, placed and scaled the
@@ -115,6 +131,7 @@ namespace ScrollOverview::FlightBlur {
                 if (!data || !m_armed || m_samples < 2 || !valid(m_prev) || !valid(m_cur))
                     return;
                 *data = motionFor(currentBox, m_prev, m_cur, m_samples, m_scale, m_maxSamples);
+                countDrawn(m_site);
             }
 
             // monitor-local LOGICAL, like the currentBox the renderer passes
@@ -123,12 +140,79 @@ namespace ScrollOverview::FlightBlur {
             int             m_samples    = 0;
             int             m_maxSamples = MotionSpacing::MAX_SAMPLES;
             float           m_scale      = 1.F; // the monitor's, for the spacing rule
+            size_t          m_site       = SITE_N; // debugReport
             Time::steady_tp m_fedAt   = {};
+            // What the last smear covered, GLOBAL logical (user, 2026-10-14:
+            // "leftovers from the motion blur glitching in and out of
+            // existence"). The next frame's damage -- or the one after the
+            // smear stops -- has to include it, or the trail stays painted in
+            // the buffers it was drawn into and flickers as they rotate.
+            CBox            m_trail;
+            bool            m_hasTrail = false;
         };
+
+        // Damage `reach` (global logical) AND whatever this window's smear
+        // covered last frame, then remember `reach` as the smear's cover.
+        void damageTrail(CFlightBlurTransformer* t, const CBox& reach) {
+            if (!t)
+                return;
+            g_pHyprRenderer->damageBox(reach.copy());
+            if (t->m_hasTrail)
+                g_pHyprRenderer->damageBox(t->m_trail.copy());
+            t->m_trail    = reach;
+            t->m_hasTrail = true;
+        }
+
+        // The smear stops: no trail this frame, so repaint where the last one was.
+        void disarm(CFlightBlurTransformer* t) {
+            if (!t)
+                return;
+            t->m_armed = false;
+            if (t->m_hasTrail) {
+                g_pHyprRenderer->damageBox(t->m_trail.copy());
+                t->m_hasTrail = false;
+            }
+        }
 
         // Nobody fed it for this long: the motion is over, take it off (the
         // window would otherwise keep rendering through an offscreen buffer).
         constexpr float STALE_MS = 150.F;
+
+        // THE SHUTTER IS A 60 Hz FRAME, WHATEVER THE REFRESH RATE (user,
+        // 2026-10-15: "motion blur isn't working at all for some of the
+        // intended purposes ... in native only" -- on fedora's 240 Hz monitor).
+        // A smear is the motion between the last frame and this one, and every
+        // strength was tuned on the XPS's 60 Hz panel. At 240 Hz a frame moves a
+        // quarter as far, so every smear came out a quarter as long: a swipe's
+        // was a few pixels, which reads as no blur at all. shape() stretches the
+        // smear back over a 60 Hz frame's worth of motion -- never shortens it
+        // (a slow or late frame keeps what it moved, as before) -- so 60 Hz is
+        // exactly what shipped. The factor is per monitor, measured at its
+        // render.pre (trackLayoutMotion, which every frame of every monitor
+        // runs) and floored at the monitor's own refresh interval so two
+        // back-to-back repaints do not read as a 1000 Hz frame.
+        constexpr float SHUTTER_MS  = 1000.F / 60.F;
+        constexpr float MAX_SHUTTER = 6.F;
+        float           g_shutter   = 1.F; // for the monitor being drawn now
+        struct SFrameSeen {
+            MONITORID       monitor = MONITOR_INVALID;
+            Time::steady_tp at{};
+        };
+        std::vector<SFrameSeen> g_frameSeen;
+
+        void beginFrame(const PHLMONITOR& monitor) {
+            const auto NOW = Time::steadyNow();
+            auto       it  = std::ranges::find_if(g_frameSeen, [&](const auto& e) { return e.monitor == monitor->m_id; });
+            if (it == g_frameSeen.end()) {
+                g_frameSeen.push_back({monitor->m_id, NOW});
+                g_shutter = 1.F;
+                return;
+            }
+            const float DT       = std::chrono::duration<float, std::milli>(NOW - it->at).count();
+            const float INTERVAL = 1000.F / std::max(monitor->m_refreshRate, 1.F);
+            it->at               = NOW;
+            g_shutter            = std::clamp(SHUTTER_MS / std::max(DT, INTERVAL), 1.F, MAX_SHUTTER);
+        }
 
         // The layout tracker's memory: where each moving window was drawn at
         // the last frame of its monitor.
@@ -206,6 +290,9 @@ namespace ScrollOverview::FlightBlur {
         }
 
         void detach(const PHLWINDOW& window) {
+            for (const auto& T : window->m_transformers)
+                if (auto* F = dynamic_cast<CFlightBlurTransformer*>(T.get()))
+                    disarm(F);
             std::erase_if(window->m_transformers, [](const auto& t) { return dynamic_cast<CFlightBlurTransformer*>(t.get()) != nullptr; });
             holdHyprlandBlur(window, false);
         }
@@ -339,6 +426,8 @@ namespace ScrollOverview::FlightBlur {
             .blur       = false, // see queueFrost: never Hyprland's combined blur
             .motionBlur = motionFor(drawn, PREV, CUR, N, SCALE),
         }));
+        countDrawn(g_lastShaped);
+        g_lastShaped = SITE_N;
         return true;
     }
 
@@ -350,7 +439,7 @@ namespace ScrollOverview::FlightBlur {
         auto*      t    = transformerOf(window);
         if (!WANT) {
             if (t)
-                t->m_armed = false;
+                disarm(t);
             return;
         }
         if (!t)
@@ -362,6 +451,7 @@ namespace ScrollOverview::FlightBlur {
         t->m_armed        = moved(prevBox, box);
         t->m_samples      = samples();
         t->m_maxSamples   = MotionSpacing::MAX_SAMPLES;
+        t->m_site         = sc<size_t>(ESite::MINIMIZE);
         t->m_scale        = SCALE;
         t->m_fedAt        = Time::steadyNow();
 
@@ -370,7 +460,10 @@ namespace ScrollOverview::FlightBlur {
         reach      = CBox{std::min(reach.x, t->m_cur.x), std::min(reach.y, t->m_cur.y), 0, 0};
         reach.w    = std::max(t->m_prev.x + t->m_prev.w, t->m_cur.x + t->m_cur.w) - reach.x;
         reach.h    = std::max(t->m_prev.y + t->m_prev.h, t->m_cur.y + t->m_cur.h) - reach.y;
-        g_pHyprRenderer->damageBox(reach.expand(MARGIN).translate(monitor->m_position));
+        if (t->m_armed)
+            damageTrail(t, reach.expand(MARGIN).translate(monitor->m_position));
+        else
+            disarm(t);
     }
 
     void sweep(const std::function<bool(const PHLWINDOW&)>& stillFlying) {
@@ -384,7 +477,7 @@ namespace ScrollOverview::FlightBlur {
             const float AGE = std::chrono::duration<float, std::milli>(NOW - T->m_fedAt).count();
             // Not fed this frame: no smear from here on, whatever it held.
             if (AGE > 20.F)
-                T->m_armed = false;
+                disarm(T);
             if (AGE > STALE_MS)
                 detach(window);
         }
@@ -393,7 +486,7 @@ namespace ScrollOverview::FlightBlur {
     void reset(const PHLWINDOW& window) {
         if (window)
             if (auto* T = transformerOf(window))
-                T->m_armed = false;
+                disarm(T);
     }
 
     namespace {
@@ -444,10 +537,43 @@ namespace ScrollOverview::FlightBlur {
     }
 
     CBox shape(ESite site, const CBox& prev, const CBox& cur, float progress) {
+        const auto I     = sc<size_t>(site);
+        const bool ASKED = moved(prev, cur);
+        g_lastShaped     = I;
+        if (I < SITE_N && ASKED)
+            ++g_siteStat[I].asked;
         const float KEEP = amount(site, progress);
         if (KEEP < 0.03F)
             return cur;
-        return CBox{cur.x + (prev.x - cur.x) * KEEP, cur.y + (prev.y - cur.y) * KEEP, cur.w + (prev.w - cur.w) * KEEP, cur.h + (prev.h - cur.h) * KEEP};
+        const auto AT = [&](float k) {
+            return CBox{cur.x + (prev.x - cur.x) * k, cur.y + (prev.y - cur.y) * k, cur.w + (prev.w - cur.w) * k, cur.h + (prev.h - cur.h) * k};
+        };
+        // Stretched to a 60 Hz frame (g_shutter). Past prev a size change is
+        // EXTRAPOLATED, and a fast shrink or grow could take the box to nothing
+        // or below -- never handed on: a zero box aborts the compositor. Such a
+        // frame keeps its own motion only.
+        CBox OUT = AT(KEEP * g_shutter);
+        if (OUT.w < std::max(1.0, cur.w * 0.25) || OUT.h < std::max(1.0, cur.h * 0.25))
+            OUT = AT(KEEP);
+        if (I < SITE_N && ASKED && moved(OUT, cur)) {
+            auto&        st    = g_siteStat[I];
+            const double TRAIL = std::max({std::abs(OUT.x - cur.x), std::abs(OUT.y - cur.y), std::abs(OUT.x + OUT.w - cur.x - cur.w), std::abs(OUT.y + OUT.h - cur.y - cur.h)});
+            ++st.smeared;
+            st.trailSum += TRAIL;
+            st.trailMax = std::max(st.trailMax, TRAIL);
+        }
+        return OUT;
+    }
+
+    std::string debugReport(bool reset) {
+        std::string out = std::format("hyprdrive blur: enabled={} layout_samples={} flight_samples={} shutter={:.2f} | site strength asked/smeared/drawn trail mean/max px:",
+                                      Config::getValue<int>("plugin:hyprdrive:motion_blur:enabled"), layoutSamples(), samples(), g_shutter);
+        for (size_t i = 0; i < SITE_N; ++i)
+            out += std::format(" {} {:.2f} {}/{}/{} trail {:.0f}/{:.0f}", SITES[i].name, amount(sc<ESite>(i), 0.F), g_siteStat[i].asked, g_siteStat[i].smeared, g_siteStat[i].drawn,
+                               g_siteStat[i].smeared ? g_siteStat[i].trailSum / g_siteStat[i].smeared : 0.0, g_siteStat[i].trailMax);
+        if (reset)
+            g_siteStat = {};
+        return out;
     }
 
     CBox fadeMotion(const CBox& prev, const CBox& cur, float progress) {
@@ -465,6 +591,7 @@ namespace ScrollOverview::FlightBlur {
     void trackLayoutMotion(PHLMONITOR monitor, const std::function<bool(const PHLWINDOW&)>& skip) {
         if (!monitor)
             return;
+        beginFrame(monitor);
         std::erase_if(g_lastLayoutBox, [](const auto& e) { return !e.window.lock(); });
         std::erase_if(g_modeSeen, [](const auto& e) { return !e.window.lock(); });
 
@@ -484,7 +611,7 @@ namespace ScrollOverview::FlightBlur {
             for (const auto& e : g_lastLayoutBox)
                 if (const auto W = e.window.lock())
                     if (auto* t = transformerOf(W))
-                        t->m_armed = false;
+                        disarm(t);
             g_lastLayoutBox.clear();
         }
         s_wasSwiping         = SWIPING;
@@ -546,7 +673,11 @@ namespace ScrollOverview::FlightBlur {
                 // An ordinary workspace moved by a trackpad swipe, fingers down
                 // or on the release.
                 const bool  SWIPED    = !WS->m_isSpecialWorkspace && !window->m_pinned && (SWIPING || (SWIPEHOME && WSOFFSET->isBeingAnimated()));
-                const bool  OFFSETS   = SLIDING || SWIPED;
+                // AN ORDINARY DESKTOP SWITCH (user, 2026-10-16): Hyprland's
+                // workspaces slide played by a bind, Super+scroll or a dock
+                // click -- the same offset a swipe moves, but on its clock.
+                const bool  SWITCHED  = !WS->m_isSpecialWorkspace && !window->m_pinned && !SWIPED && WSOFFSET->isBeingAnimated();
+                const bool  OFFSETS   = SLIDING || SWIPED || SWITCHED;
                 const auto* SPACE     = WS->m_space.get();
                 const bool  SCROLLING = SPACE && SPACE->algorithm() && dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(SPACE->algorithm()->m_tiled.get());
                 const bool  RESIZING  = window->sizeAnimation()->isBeingAnimated();
@@ -563,7 +694,7 @@ namespace ScrollOverview::FlightBlur {
                         // window (skip) feeds its own transformer: leave it.
                         if (!(skip && skip(window)))
                             if (auto* t = transformerOf(window))
-                                t->m_armed = false;
+                                disarm(t);
                     }
                     continue;
                 }
@@ -585,7 +716,7 @@ namespace ScrollOverview::FlightBlur {
                 // stayed streaked across the screen after it had stopped).
                 const auto DISARM = [&] {
                     if (auto* t = transformerOf(window))
-                        t->m_armed = false;
+                        disarm(t);
                 };
                 if (!valid(RAWPREV) || !valid(NOWBOX) || !moved(RAWPREV, NOWBOX)) {
                     DISARM();
@@ -619,8 +750,9 @@ namespace ScrollOverview::FlightBlur {
                 const float PCT  = SWIPED ? 0.F :
                                             std::max({MOVING ? window->positionAnimation()->getPercent() : 0.F, RESIZING ? window->sizeAnimation()->getPercent() : 0.F,
                                                       // Under the fingers there is no clock: like a swipe, 0.
-                                                      SLIDING && WSOFFSET->isBeingAnimated() ? WSOFFSET->getPercent() : 0.F});
+                                                      (SLIDING || SWITCHED) && WSOFFSET->isBeingAnimated() ? WSOFFSET->getPercent() : 0.F});
                 const ESite SITE = SWIPED                                          ? ESite::SWIPE :
+                    SWITCHED                                                       ? ESite::DESKTOP_SLIDE :
                     SLIDING                                                        ? ESite::SCRATCHPAD :
                     (SCROLLING && MOVING && !RESIZING && !OFFSETS)                 ? ESite::FLICK :
                                                                                      ESite::LAYOUT;
@@ -636,18 +768,20 @@ namespace ScrollOverview::FlightBlur {
                 t->m_prev    = PREV;
                 t->m_cur     = NOWBOX;
                 t->m_armed   = true;
-                // A swipe moves every window of two desktops at once, each
-                // drawn offscreen: a lower ceiling keeps it at frame rate. Under
-                // the spacing rule a ceiling only shortens the trail.
-                t->m_samples    = SWIPED ? std::min(N, 8) : N;
-                t->m_maxSamples = SWIPED ? 16 : MotionSpacing::MAX_SAMPLES;
+                // A swipe (or a switch's slide) moves every window of two
+                // desktops at once, each drawn offscreen: a lower ceiling keeps
+                // it at frame rate. Under the spacing rule a ceiling only
+                // shortens the trail.
+                t->m_samples    = (SWIPED || SWITCHED) ? std::min(N, 8) : N;
+                t->m_maxSamples = (SWIPED || SWITCHED) ? 16 : MotionSpacing::MAX_SAMPLES;
                 t->m_scale      = monitor->m_scale;
+                t->m_site       = sc<size_t>(SITE);
                 t->m_fedAt   = NOW;
 
                 CBox reach{std::min(PREV.x, NOWBOX.x), std::min(PREV.y, NOWBOX.y), 0, 0};
                 reach.w = std::max(PREV.x + PREV.w, NOWBOX.x + NOWBOX.w) - reach.x;
                 reach.h = std::max(PREV.y + PREV.h, NOWBOX.y + NOWBOX.h) - reach.y;
-                g_pHyprRenderer->damageBox(reach.expand(MARGIN).translate(monitor->m_position));
+                damageTrail(t, reach.expand(MARGIN).translate(monitor->m_position));
             }
         } else
             g_lastLayoutBox.clear();

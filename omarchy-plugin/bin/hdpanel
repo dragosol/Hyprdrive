@@ -29,6 +29,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 
 STATE = pathlib.Path(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))) / "hyprdrive"
 STORE = STATE / "panel.json"
@@ -85,6 +86,8 @@ BLUR_SITES = [
     ("search_pane", 0.5, "early"),
     ("drag", 1.0, "constant"),
     ("stack_pane", 1.0, "early"),
+    ("desktop_slide", 0.5, "early"),
+    ("wheel_pan", 0.25, "constant"),
 ]
 
 
@@ -190,7 +193,9 @@ KEY_META = [
     # a parse -- 50-desktop-scroll.lua reads the two scroll keys at parse time.
     _k(PLUGIN + "binds:scroll_desktops", "bool", "keybinds", True, reload=True),
     _k(PLUGIN + "binds:scroll_desktops_mods", "str", "keybinds", "SUPER", reload=True),
-    _k(PLUGIN + "dock:hot_keys", "bool", "keybinds", False),
+    # A key of the plugin's AND a set of binds: on, 40-panel.lua binds
+    # Super+1..0 to the dock (keybinds_lua), so it reloads like the two above.
+    _k(PLUGIN + "dock:hot_keys", "bool", "keybinds", False, reload=True),
 ]
 
 # Groups a power profile neither saves nor applies. Mosaic rebinds Super+L and
@@ -201,6 +206,15 @@ PROFILE_SKIP = {"mosaic", "keybinds"}
 SCROLL_DESKTOPS = PLUGIN + "binds:scroll_desktops"
 SCROLL_MODS = PLUGIN + "binds:scroll_desktops_mods"
 RELOAD_KEYS = {m["key"] for m in KEY_META if m.get("reload")}
+HOT_KEYS = PLUGIN + "dock:hot_keys"
+
+# The Keybinds section's own switches: binds that have no plugin key, kept in
+# panel.json under "binds" and written to 40-panel.lua (keybinds_lua).
+# id -> (default, chord, action Lua, description).
+BIND_SWITCHES = {
+    "minimize": (False, "SUPER + H", "hl.plugin.hyprdrive.minimize('window')", "Minimize window"),
+    "settings": (False, "SUPER + COMMA", "hl.plugin.hyprdrive.settings()", "Hyprdrive settings"),
+}
 
 MOSAIC_ON = PLUGIN + "mosaic:enabled"
 MOSAIC_DEFAULT = PLUGIN + "mosaic:default"
@@ -758,17 +772,72 @@ def write_panel_fragment(store):
     for k, v in keys.items():
         nest_set(tree, k, v)
     mosaic = mosaic_lua(store)
-    if tree or mosaic:
+    binds = keybinds_lua(store)
+    if tree or mosaic or binds:
         body.append("if hyprdrive_loaded and hyprdrive_loaded() then")
         if tree:
             body.append("    hl.config(%s)" % emit_table(tree, 4))
-        body.extend("    " + line if line else "" for line in mosaic)
+        body.extend("    " + line if line else "" for line in mosaic + binds)
         body.append("end")
     body.append("")
     FRAGDIR.mkdir(parents=True, exist_ok=True)
     path = FRAGDIR / PANEL_FRAG
     write_fragment(path, compose_fragment("\n".join(body), path))
     return path
+
+
+# ---------------------------------------------------------------- Keybinds
+#
+# The Keybinds section's switches that BIND something (Minimize, the
+# settings, the dock's Super+1..0). Every bind is written into 40-panel.lua,
+# inside hyprdrive_loaded() so a missing plugin binds nothing and unbinds
+# nothing, and each action is BUILT before its chord is unbound: if the plugin
+# cannot make it, the chord keeps whatever the config bound there. A bind is
+# parse-time, so a change reloads (commit_store sees the bind lines change);
+# turning one off is its absence, and the reload gives the chord back.
+
+def bind_switches(store):
+    owned = store.get("binds") or {}
+    return {k: bool(owned.get(k, spec[0])) for k, spec in BIND_SWITCHES.items()}
+
+
+def guarded_binds(binds):
+    """[(chord, action_lua, description)] -> Lua that binds all of them, or none.
+
+    The actions are made first (hl.plugin.hyprdrive.* raises when the plugin's
+    dispatcher is missing); only when every one exists are the chords unbound
+    -- a second bind of a chord does not replace the first -- and bound."""
+    lines = ["do"]
+    for i, (_, action, _) in enumerate(binds):
+        lines.append("    local ok%d, a%d = pcall(function() return %s end)" % (i, i, action))
+    lines.append("    if %s then" % " and ".join("ok%d" % i for i in range(len(binds))))
+    for chord, _, _ in binds:
+        lines.append("        hl.unbind(%s)" % lua_lit(chord))
+    for i, (chord, _, desc) in enumerate(binds):
+        lines.append("        hl.bind(%s, a%d, { description = %s })" % (lua_lit(chord), i, lua_lit(desc)))
+    lines.append("    end")
+    lines.append("end")
+    return lines
+
+
+def keybinds_lua(store):
+    lines = []
+    switches = bind_switches(store)
+    chords = bind_chords(store)
+    for bid, (_, _, action, desc) in BIND_SWITCHES.items():
+        chord = chords[bid]
+        if switches[bid]:
+            lines += ["", "-- Keybinds: %s (%s)." % (desc, chord)] + guarded_binds([(chord, action, desc)])
+    if bool((store.get("keys") or {}).get(HOT_KEYS, False)):
+        lines += [
+            "",
+            "-- Keybinds: dock hotkeys. Super+1..0 open or focus the dock's first",
+            "-- ten apps instead of what the config bound there.",
+        ] + guarded_binds([
+            ("SUPER + code:%d" % (n + 9), "hl.plugin.hyprdrive.hotkey('%d')" % n, "Dock app %d" % n)
+            for n in range(1, 11)
+        ])
+    return lines
 
 
 # ------------------------------------------------------------------ Mosaic
@@ -857,9 +926,10 @@ def mosaic_lua(store):
         if focus:
             lines += [
                 "",
-                "-- Mosaic: %s+arrows move focus by position on a mosaic desktop (its" % focus,
-                "-- bunched windows rarely share the edges Hyprland's movefocus looks",
-                "-- for) and fall through to movefocus everywhere else.",
+                "-- Mosaic: %s+arrows move focus, and %s+Shift+arrows swap windows," % (focus, focus),
+                "-- by position on a mosaic desktop (its bunched windows rarely share",
+                "-- the edges Hyprland's movefocus and swapwindow look for), and fall",
+                "-- through to them everywhere else.",
                 "-- plugin:hyprdrive:mosaic:focus_binds (auto = SUPER on Omarchy only).",
             ]
             body = []
@@ -869,6 +939,16 @@ def mosaic_lua(store):
                     "hl.unbind(%s)" % lua_lit(chord),
                     "hl.bind(%s, hl.plugin.hyprdrive.focus(%s), { description = %s })" % (lua_lit(chord), lua_lit(d), lua_lit("Focus on %s window" % word)),
                 ]
+            # The same keys with Shift swap (Omarchy's own descriptions), unless
+            # the focus modifier already has Shift in it.
+            if "SHIFT" not in focus.upper():
+                for arrow, d, desc in (("LEFT", "l", "Swap window to the left"), ("RIGHT", "r", "Swap window to the right"), ("UP", "u", "Swap window up"),
+                                       ("DOWN", "d", "Swap window down")):
+                    chord = "%s + SHIFT + %s" % (focus, arrow)
+                    body += [
+                        "hl.unbind(%s)" % lua_lit(chord),
+                        "hl.bind(%s, hl.plugin.hyprdrive.swap(%s), { description = %s })" % (lua_lit(chord), lua_lit(d), lua_lit(desc)),
+                    ]
             lines += guarded(auto_focus, body)
     if default:
         lines += [
@@ -1184,7 +1264,7 @@ def chord_options(key, current):
             {"value": "CTRL + ALT", "label": "Ctrl+Alt"},
         ]
         if current and current not in [o["value"] for o in opts]:
-            opts.append({"value": current, "label": current.title().replace(" ", "")})
+            opts.append({"value": current, "label": "Custom: " + current.title().replace(" ", "")})
         return opts
     if key == MOSAIC_CYCLE:
         opts = [
@@ -1201,7 +1281,7 @@ def chord_options(key, current):
             {"value": "none", "label": "None"},
         ]
     if current and current not in [o["value"] for o in opts]:
-        opts.insert(len(opts) - 1, {"value": current, "label": current.title().replace(" ", "")})
+        opts.insert(len(opts) - 1, {"value": current, "label": "Custom: " + current.title().replace(" ", "")})
     return opts
 
 
@@ -1223,6 +1303,7 @@ BIND_ROWS = {
     "minimize": "minimize",
     "settings": "settings",
     "focus": "focus",
+    "swap": "focus",
     "hotkey": "hotkeys",
 }
 LAYOUT_CYCLE_DESC = "Cycle workspace layout"
@@ -1281,6 +1362,386 @@ def keybinds(live):
                 "description": LAYOUT_CYCLE_DESC,
             })
     return rows
+
+
+# ------------------------------------------------------------ chord editor
+#
+# The Keybinds section's chords are editable from the panel: a row's chip
+# captures a key combination and lands here as `bind-set ID CHORD`. A chord is
+# spelled the way hl.bind takes it, "SUPER + SHIFT + K": the modifiers in one
+# fixed order, then one key -- an xkb key name, or code:N. parse_chord() also
+# takes the hyprlang spelling "SUPER SHIFT, K", "Super+Shift+K", and JSON
+# {"mods": ["SUPER", "SHIFT"], "key": "K"}.
+
+CHORD_MODS = ["SUPER", "CTRL", "ALT", "SHIFT"]
+CHORD_MOD_BITS = {"SUPER": 64, "CTRL": 4, "ALT": 8, "SHIFT": 1}
+MOD_ALIASES = {
+    "SUPER": "SUPER", "WIN": "SUPER", "META": "SUPER", "MOD4": "SUPER", "LOGO": "SUPER",
+    "CTRL": "CTRL", "CONTROL": "CTRL", "ALT": "ALT", "MOD1": "ALT", "SHIFT": "SHIFT",
+}
+CHORD_KEY_RE = re.compile(r"^(?:code:\d{1,3}|[A-Za-z0-9_]{1,40})$")
+# Keys that are modifiers themselves: a bind ON one is a tap, not a chord.
+MODIFIER_KEYS = {"SUPER_L", "SUPER_R", "CONTROL_L", "CONTROL_R", "ALT_L", "ALT_R", "SHIFT_L",
+                 "SHIFT_R", "META_L", "META_R", "HYPER_L", "HYPER_R", "ISO_LEVEL3_SHIFT", "CAPS_LOCK"}
+# Keys that may stand alone (no modifier): nothing types them.
+SOLO_KEY_RE = re.compile(r"^(?:F\d{1,2}|PRINT|PAUSE|MENU|SCROLL_LOCK|INSERT|XF86\w+)$", re.I)
+WHEEL_KEYS = {"MOUSE_DOWN": "mouse_down", "MOUSE_UP": "mouse_up"}
+# The number row: hyprctl reports Omarchy's code:10..19 binds with no key.
+DIGIT_CODES = {str(n % 10): 9 + n for n in range(1, 11)}
+
+
+def parse_mods(text):
+    """'SUPER + SHIFT' / 'super shift' / ['SUPER'] -> ['SUPER', 'SHIFT'] (fixed order)."""
+    parts = text if isinstance(text, list) else re.split(r"[\s+_]+", str(text or ""))
+    seen = set()
+    for p in parts:
+        p = str(p).strip().upper()
+        if not p:
+            continue
+        if p not in MOD_ALIASES:
+            raise ValueError("%s is not a modifier" % p)
+        seen.add(MOD_ALIASES[p])
+    return [m for m in CHORD_MODS if m in seen]
+
+
+def parse_chord(text, wheel=False):
+    """A chord in any accepted spelling -> (mods, key). ValueError says why not."""
+    text = str(text or "").strip()
+    if text.startswith("{"):
+        try:
+            d = json.loads(text)
+        except ValueError:
+            raise ValueError("bad JSON chord")
+        mods, key = parse_mods(list(d.get("mods") or [])), str(d.get("key") or "").strip()
+    elif "," in text:
+        head, key = text.rsplit(",", 1)
+        mods, key = parse_mods(head), key.strip()
+    else:
+        parts = [p.strip() for p in text.split("+")]
+        if any(not p for p in parts):
+            raise ValueError("empty part in %r" % text)
+        key = parts.pop() if parts else ""
+        mods = parse_mods(parts)
+    if not key:
+        raise ValueError("no key")
+    if key.upper() in WHEEL_KEYS:
+        if not wheel:
+            raise ValueError("mouse binds are not editable here")
+        return mods, WHEEL_KEYS[key.upper()]
+    if key.lower().startswith("mouse"):
+        raise ValueError("mouse binds are not editable here")
+    if not CHORD_KEY_RE.match(key):
+        raise ValueError("%r is not a key name" % key)
+    key = key.lower() if key.lower().startswith("code:") else key.upper()
+    if key in MOD_ALIASES or key in MODIFIER_KEYS:
+        raise ValueError("%s is a modifier; add a key to it" % key)
+    if key == "ESCAPE" and not mods:
+        raise ValueError("Escape on its own cannot be taken")
+    if not (set(mods) - {"SHIFT"}) and not SOLO_KEY_RE.match(key):
+        raise ValueError("a key without Super, Ctrl or Alt would stop it typing")
+    return mods, key
+
+
+def format_chord(mods, key):
+    return " + ".join(list(mods) + [key])
+
+
+def canon_chord(text, wheel=False):
+    return format_chord(*parse_chord(text, wheel))
+
+
+def chord_mask(mods):
+    return sum(CHORD_MOD_BITS[m] for m in mods)
+
+
+def _key_code(key):
+    k = str(key or "").lower()
+    if k.startswith("code:"):
+        try:
+            return int(k[5:])
+        except ValueError:
+            return None
+    return DIGIT_CODES.get(k)
+
+
+def bind_hits(b, mask, key):
+    """Does one `hyprctl binds -j` entry hold chord (mask, key)? Global binds
+    only: a submap's binds (the overview's) do not compete with a chord."""
+    if not isinstance(b, dict) or b.get("submap") or b.get("catch_all"):
+        return False
+    if int(b.get("modmask") or 0) != mask:
+        return False
+    k = str(key).lower()
+    bk = str(b.get("key") or "").lower()
+    code = _key_code(k)
+    if bk:
+        return bk == k or (code is not None and _key_code(bk) == code)
+    kc = int(b.get("keycode") or 0)
+    if kc:
+        return code is not None and kc == code
+    # hyprctl reports a code:N bind with an empty key and keycode 0 (Omarchy's
+    # Super+1..0): the number keys' are told apart by their description.
+    m = re.search(r"workspace (\d+)\b", str(b.get("description") or ""))
+    if m and code is not None and 10 <= code <= 19:
+        return int(m.group(1)) % 10 == (code - 9) % 10
+    return False
+
+
+def bind_label(b):
+    desc = str(b.get("description") or "").strip()
+    if desc:
+        return desc
+    d, a = str(b.get("dispatcher") or ""), str(b.get("arg") or "")
+    if d and d != "__lua":
+        return (d + " " + a).strip()
+    return "a bind in your config"
+
+
+def chord_owners(chords, binds, own):
+    """Who holds any of `chords` ([(mods, key)]) right now.
+
+    -> [{"kind": "hyprdrive" | "other", "id": row id or "", "description",
+         "chord"}]. `own(b)` names the Keybinds row a bind is hyprdrive's
+    (by its description), or None for someone else's."""
+    out, seen = [], set()
+    for mods, key in chords:
+        mask = chord_mask(mods)
+        for b in binds:
+            if not bind_hits(b, mask, key):
+                continue
+            rid = own(b)
+            label = bind_label(b)
+            ident = (rid or "", label, format_chord(mods, key))
+            if ident in seen:
+                continue
+            seen.add(ident)
+            out.append({"kind": "hyprdrive" if rid else "other", "id": rid or "",
+                        "description": label, "chord": format_chord(mods, key)})
+    return out
+
+
+CAPTURE_SUBMAP = "hyprdrive-capture"
+CAPTURE_SECONDS = 30
+CAPTURE_TOKEN = STATE / "capture.token"
+
+
+def current_submap():
+    out = hyprctl("submap")
+    return (out or "").strip()
+
+
+def capture_submap_lua():
+    # One bind: a NON-consuming Escape that leaves the submap, so Escape still
+    # reaches the panel (it cancels there) and a panel that died mid-capture
+    # cannot leave the desktop without its binds.
+    return ("hl.define_submap(%s, function() hl.bind('Escape', hl.dsp.submap('reset'), "
+            "{ non_consuming = true, description = 'Leave Hyprdrive key capture' }) end)" % lua_lit(CAPTURE_SUBMAP))
+
+
+def cmd_capture(args):
+    """capture on|off: while the panel captures a chord, Hyprland sits in an
+    (almost) empty submap, so Super+Q and friends reach the panel instead of
+    closing a window. A detached watchdog leaves it after CAPTURE_SECONDS
+    whatever happens to the panel."""
+    what = args[0] if args else ""
+    if what == "on":
+        try:
+            binds = json.loads(hyprctl("binds", "-j") or "[]")
+        except ValueError:
+            binds = []
+        defined = any(isinstance(b, dict) and b.get("submap") == CAPTURE_SUBMAP for b in binds)
+        ok = (defined or eval_lua(capture_submap_lua())) and eval_lua("hl.dispatch(hl.dsp.submap(%s))" % lua_lit(CAPTURE_SUBMAP))
+        if ok:
+            # The watchdog leaves only THIS capture's submap: a later capture
+            # rewrites the token, and its own watchdog takes over.
+            token = "%d.%d" % (os.getpid(), int(time.time() * 1000))
+            try:
+                STATE.mkdir(parents=True, exist_ok=True)
+                replace_file(CAPTURE_TOKEN, token)  # private, like every panel write
+                subprocess.Popen([sys.executable, os.path.abspath(__file__), "capture", "watchdog", token],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass
+        print(json.dumps({"ok": bool(ok), "submap": CAPTURE_SUBMAP if ok else ""}))
+        return 0
+    if what in ("off", "watchdog"):
+        if what == "watchdog":
+            time.sleep(CAPTURE_SECONDS)
+            try:
+                if CAPTURE_TOKEN.read_text() != (args[1] if len(args) > 1 else ""):
+                    return 0
+            except OSError:
+                return 0
+        try:
+            CAPTURE_TOKEN.unlink()
+        except OSError:
+            pass
+        left = False
+        if current_submap() == CAPTURE_SUBMAP:
+            left = eval_lua("hl.dispatch(hl.dsp.submap('reset'))")
+        if what == "off":
+            print(json.dumps({"ok": True, "left": bool(left)}))
+        return 0
+    raise SystemExit("hdpanel: capture on|off")
+
+
+# The Keybinds rows the panel edits. A switch row's chord (minimize, settings)
+# lives in panel.json "bindChords" (only when not the default); the others are
+# plugin keys: Mosaic's cycle chord, its focus modifiers, the scroll modifiers.
+CHORD_DEFAULTS = {bid: spec[1] for bid, spec in BIND_SWITCHES.items()}
+KEY_ROWS = {
+    "layout_cycle": (MOSAIC_CYCLE, "chord"),
+    "focus": (MOSAIC_FOCUS, "arrows"),
+    "desktop": (SCROLL_MODS, "wheel"),
+}
+# Which row a bind of ours is, by the description its fragment gave it.
+OWN_DESCS = {
+    "Minimize window": "minimize",
+    "Hyprdrive settings": "settings",
+    LAYOUT_CYCLE_DESC: "layout_cycle",
+    "Next desktop (empty ones too)": "desktop",
+    "Previous desktop (empty ones too)": "desktop",
+}
+ROW_NAMES = {
+    "minimize": "Minimize",
+    "settings": "Open these settings",
+    "layout_cycle": "Mosaic layout cycle",
+    "focus": "Mosaic-aware focus and swap",
+    "desktop": "Scroll through desktops",
+    "hotkeys": "Dock hotkeys",
+    "overview": "Overview",
+    "overview_select": "Pick a window in the overview",
+    "other": "a hyprdrive bind",
+}
+ARROWS = ["LEFT", "RIGHT", "UP", "DOWN"]
+
+
+def bind_chords(store):
+    """Each switch row's chord: the panel's choice, else the default."""
+    saved = store.get("bindChords") or {}
+    out = {}
+    for rid, d in CHORD_DEFAULTS.items():
+        try:
+            out[rid] = canon_chord(saved[rid]) if saved.get(rid) else d
+        except ValueError:
+            out[rid] = d
+    return out
+
+
+def own_row(store):
+    """-> own(bind): the Keybinds row a live bind is hyprdrive's, or None.
+
+    The plugin's own list (hyprctl hyprdrive-binds) first -- it knows every
+    bind that calls one of its dispatchers -- then the descriptions."""
+    ours = {}
+    try:
+        listed = json.loads(hyprctl("hyprdrive-binds", "-j") or "[]")
+    except ValueError:
+        listed = []
+    for b in listed if isinstance(listed, list) else []:
+        if not isinstance(b, dict) or b.get("submap"):
+            continue
+        try:
+            mask = chord_mask(parse_mods(str(b.get("mods") or "")))
+        except ValueError:
+            continue
+        ours[(mask, str(b.get("key") or "").lower())] = BIND_ROWS.get(str(b.get("dispatcher") or ""), "other")
+
+    def own(b):
+        hit = ours.get((int(b.get("modmask") or 0), str(b.get("key") or "").lower()))
+        if hit:
+            return hit
+        d = str(b.get("description") or "")
+        if d in OWN_DESCS:
+            return OWN_DESCS[d]
+        if re.match(r"Dock app \d+$", d):
+            return "hotkeys"
+        return None
+    return own
+
+
+def expand_chord(mods, key):
+    """A checked chord -> every chord it stands for: the wheel's two
+    directions, the four arrows (Mosaic's focus binds)."""
+    if key in ("mouse_down", "mouse_up"):
+        return [(mods, "mouse_down"), (mods, "mouse_up")]
+    if key == "ARROWS":
+        return [(mods, a) for a in ARROWS]
+    return [(mods, key)]
+
+
+def check_chord(store, rid, chord, binds=None):
+    """bind-check: who holds `chord` now, minus the row itself. A wheel chord
+    ("SUPER + ALT + mouse_down") checks both directions; "MODS + ARROWS" all
+    four arrows."""
+    mods, key = parse_chord(chord, wheel=True)
+    if key == "ARROWS" and not mods:
+        raise ValueError("the arrows need a modifier")
+    owners = chord_owners(expand_chord(mods, key), live_binds() if binds is None else binds, own_row(store))
+    mine = [o for o in owners if o["kind"] == "hyprdrive" and o["id"] == rid]
+    others = [o for o in owners if o not in mine]
+    for o in others:
+        if o["kind"] == "hyprdrive":
+            o["row"] = ROW_NAMES.get(o["id"], o["id"])
+    return {"ok": True, "chord": format_chord(mods, key), "self": bool(mine), "owners": others}
+
+
+def live_binds():
+    try:
+        out = json.loads(hyprctl("binds", "-j") or "[]")
+    except ValueError:
+        return []
+    return out if isinstance(out, list) else []
+
+
+def free_rows(store, ids):
+    """Turn hyprdrive's own rows off so a chord can move to another one.
+    -> the plugin keys that changed (already in the store)."""
+    keys = []
+    for rid in ids:
+        if rid in BIND_SWITCHES:
+            store.setdefault("binds", {})[rid] = False
+        elif rid == "layout_cycle":
+            keys.append((MOSAIC_CYCLE, "none"))
+        elif rid == "focus":
+            keys.append((MOSAIC_FOCUS, "none"))
+        elif rid == "desktop":
+            keys.append((SCROLL_DESKTOPS, False))
+        elif rid == "hotkeys":
+            keys.append((HOT_KEYS, False))
+    for k, v in keys:
+        store.setdefault("keys", {})[k] = v
+    return keys
+
+
+def key_row_value(rid, what):
+    """bind-set for a key row: the value to store, canonical."""
+    key, kind = KEY_ROWS[rid]
+    low = what.strip().lower()
+    if low == "default":
+        return next(m for m in KEY_META if m["key"] == key)["default"]
+    if kind != "wheel" and low in ("auto", "none"):
+        return low
+    if kind == "chord":
+        return canon_chord(what)
+    mods = parse_mods(what)
+    if not (set(mods) - {"SHIFT"}):
+        raise ValueError("hold Super, Ctrl or Alt")
+    return " + ".join(mods)
+
+
+def checked_form(rid, value):
+    """The chord bind-check looks at for a row's value, or None (auto/none)."""
+    if value in ("auto", "none"):
+        return None
+    if rid in KEY_ROWS:
+        kind = KEY_ROWS[rid][1]
+        if kind == "wheel":
+            return value + " + mouse_down"
+        if kind == "arrows":
+            return value + " + ARROWS"
+    return value
 
 
 def plugin_version():
@@ -1349,6 +1810,9 @@ def dump():
         "actions": ACTIONS,
         "directions": DIRECTIONS,
         "binds": keybinds(live),
+        "bindSwitches": bind_switches(store),
+        "bindChords": bind_chords(store),
+        "chordDefaults": CHORD_DEFAULTS,
     }
 
 
@@ -1402,6 +1866,38 @@ def cmd_set(args):
     return 0
 
 
+def cmd_seed(args):
+    """Install-time defaults: each KEY VALUE is stored only if the user has
+    not set that key already, and 40-panel.lua is rewritten -- no live apply,
+    so it works with no Hyprland running (a running one reloads the fragment).
+    The native installer seeds the search tools on (user, 2026-10-15:
+    "translation and dictionary ... make sure that works and is part of the
+    installation")."""
+    if len(args) < 2 or len(args) % 2 != 0:
+        raise SystemExit("hdpanel: seed KEY VALUE [KEY VALUE ...]")
+    store = load_store()
+    owned = store.setdefault("keys", {})
+    seeded = {}
+    for key, value in zip(args[0::2], args[1::2]):
+        meta = next((m for m in KEY_META if m["key"] == key), None)
+        if meta is None:
+            raise SystemExit("hdpanel: unknown key %s" % key)
+        if key not in owned:
+            owned[key] = coerce(meta, value)
+            seeded[key] = owned[key]
+    if seeded:
+        before = mosaic_state(store)
+        commit_store(store, before)
+        # A running Hyprland does not re-read the fragment by itself: apply
+        # live too, best effort (no Hyprland -- an install from a TTY -- is fine).
+        try:
+            apply_live_many(list(seeded.items()), store)
+        except Exception:
+            pass
+    print(json.dumps({"ok": True, "seeded": seeded}))
+    return 0
+
+
 def cmd_preview(args):
     if len(args) < 2 or len(args) % 2 != 0:
         raise SystemExit("hdpanel: preview KEY VALUE [KEY VALUE ...]")
@@ -1451,6 +1947,10 @@ def cmd_reset(args):
         print(json.dumps({"ok": True, "group": group}))
         return 0
     metas = [m for m in KEY_META if m.get("group") == group and default_of(m) is not None]
+    if group == "keybinds":
+        # The Keybinds section edits Mosaic's two chords too: its Restore
+        # defaults puts them back to "auto" with everything else it shows.
+        metas += [m for m in KEY_META if m["key"] in (MOSAIC_CYCLE, MOSAIC_FOCUS)]
     if not metas:
         raise SystemExit("hdpanel: nothing to reset in %s" % group)
     pairs = [(m["key"], coerce(m, default_of(m))) for m in metas]
@@ -1463,10 +1963,92 @@ def cmd_reset(args):
         owned.pop(key, None)
     if group == "dock":
         store["roundedRadius"] = 24
-    commit_store(store, before, rebind=any(key in RELOAD_KEYS for key, _ in pairs))
+    if group == "keybinds":
+        store.pop("binds", None)
+        store.pop("bindChords", None)
+    commit_store(store, before, rebind=True if group == "keybinds" else any(key in RELOAD_KEYS for key, _ in pairs))
     if _NEEDS_RELOAD:
         hyprctl("reload")
     print(json.dumps({"ok": True, "group": group, "keys": {k: v for k, v in pairs}}))
+    return 0
+
+
+def cmd_bind_set(args):
+    """bind-set ID on|off|default|CHORD [--replace]
+
+    ID is a switch row (minimize|settings: on/off, or a CHORD that also turns it on, kept in
+    panel.json "bindChords") or a key row -- layout_cycle (a CHORD, auto,
+    none), focus (MODIFIERS for the arrows, auto, none), desktop (the scroll
+    MODIFIERS). "default" puts the row's default back. A CHORD is "SUPER +
+    SHIFT + K", "SUPER SHIFT, K" or JSON {"mods": [...], "key": "K"}.
+
+    Like the switches, a chord is taken from whatever else had it: 40-panel.lua
+    (or 50-desktop-scroll.lua) unbinds it before binding. --replace also turns
+    off hyprdrive's OWN row that had it, so two rows never fight over one."""
+    replace = "--replace" in args
+    args = [a for a in args if a != "--replace"]
+    ids = list(BIND_SWITCHES) + list(KEY_ROWS)
+    if len(args) != 2 or args[0] not in ids:
+        raise SystemExit("hdpanel: bind-set %s on|off|default|CHORD [--replace]" % "|".join(ids))
+    rid, what = args
+    store = load_store()
+    before = mosaic_state(store)
+    out = {"ok": True, "bind": rid}
+    if rid in BIND_SWITCHES and what.lower() in ("on", "off"):
+        store.setdefault("binds", {})[rid] = what.lower() == "on"
+        out["on"] = what.lower() == "on"
+        commit_store(store, before, rebind=True)
+        print(json.dumps(out))
+        return 0
+    try:
+        if rid in BIND_SWITCHES:
+            value = CHORD_DEFAULTS[rid] if what.lower() == "default" else canon_chord(what)
+        else:
+            value = key_row_value(rid, what)
+        form = checked_form(rid, value)
+        found = check_chord(store, rid, form) if form else {"owners": []}
+    except ValueError as e:
+        raise SystemExit("hdpanel: %s" % e)
+    out["took"] = sorted({o["description"] for o in found["owners"] if o["kind"] == "other"})
+    mine = sorted({o["id"] for o in found["owners"] if o["kind"] == "hyprdrive"})
+    changed = []
+    if replace and mine:
+        changed = free_rows(store, mine)
+        out["freed"] = mine
+    elif mine:
+        out["shared"] = mine
+    if rid in BIND_SWITCHES:
+        saved = store.setdefault("bindChords", {})
+        if value == CHORD_DEFAULTS[rid]:
+            saved.pop(rid, None)
+        else:
+            saved[rid] = value
+        store.setdefault("binds", {})[rid] = True
+        out.update(on=True, chord=value)
+    else:
+        key = KEY_ROWS[rid][0]
+        changed.append((key, value))
+        store.setdefault("keys", {})[key] = value
+        out["value"] = value
+    if changed and not apply_live_many(changed, store):
+        raise SystemExit("hdpanel: live apply failed")
+    commit_store(store, before, rebind=True)
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_bind_check(args):
+    """bind-check CHORD [ID]: who holds CHORD right now (hyprctl binds), as
+    JSON -- {"chord", "self", "owners": [{"kind", "id", "row", "description"}]}.
+    "MODS + mouse_down" checks the wheel, "MODS + ARROWS" the four arrows. A
+    chord that does not parse answers {"ok": false, "error"}, never exits
+    non-zero: the panel reads the answer either way."""
+    if not args:
+        raise SystemExit("hdpanel: bind-check CHORD [ID]")
+    try:
+        print(json.dumps(check_chord(load_store(), args[1] if len(args) > 1 else "", args[0])))
+    except ValueError as e:
+        print(json.dumps({"ok": False, "error": str(e)}))
     return 0
 
 
@@ -1573,19 +2155,23 @@ def cmd_profile_mode(args):
 
 def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
-        print("hdpanel dump|set|preview|reset GROUP|gestures-set|profile-save|profile-apply|profile-mode")
+        print("hdpanel dump|set|preview|reset GROUP|bind-set ID on|off|default|CHORD [--replace]|bind-check CHORD [ID]|capture on|off|gestures-set|profile-save|profile-apply|profile-mode")
         return 0
     cmd = argv[1]
     args = argv[2:]
     fn = {
         "dump": cmd_dump,
         "set": cmd_set,
+        "seed": cmd_seed,
         "preview": cmd_preview,
         "gestures-set": cmd_gestures_set,
         "profile-save": cmd_profile_save,
         "profile-apply": cmd_profile_apply,
         "profile-mode": cmd_profile_mode,
         "reset": cmd_reset,
+        "bind-set": cmd_bind_set,
+        "bind-check": cmd_bind_check,
+        "capture": cmd_capture,
         "profile-auto": cmd_profile_auto,
     }.get(cmd)
     if not fn:

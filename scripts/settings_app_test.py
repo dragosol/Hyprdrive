@@ -15,9 +15,11 @@ without a compositor (native port B1, A18-A20). Part of `make check`.
   - the hyprdrive-settings launcher on Omarchy: the panel when the Omarchy
     shell answers, the standalone app when it does not.
 """
+import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -173,6 +175,191 @@ schema = (ROOT / "omarchy-plugin" / "Schema.js").read_text()
 check("schema: a keybinds section", 'id: "keybinds", title: "Keybinds"' in schema)
 check("schema: every bind row id is one hdpanel fills",
       set(re.findall(r'bind: "(\w+)"', schema)) <= set(na.BIND_ROWS.values()) | {"overview", "layout_cycle", "other"})
+
+# The switches that BIND (the panel used to show these rows with nothing to
+# press: "Not bound by default: bind ... in your config").
+check("keybinds: every toggle row is an hdpanel bind switch",
+      set(re.findall(r'toggle: "(\w+)"', schema)) == set(na.BIND_SWITCHES))
+check("keybinds: bind switches off by default -> no binds", na.keybinds_lua({}) == [])
+txt = "\n".join(na.keybinds_lua({"binds": {"minimize": True, "settings": True}}))
+check("keybinds: minimize on = guarded unbind-then-bind of Super+H",
+      "pcall(function() return hl.plugin.hyprdrive.minimize('window') end)" in txt
+      and "hl.unbind('SUPER + H')" in txt and "hl.bind('SUPER + H', a0, { description = 'Minimize window' })" in txt)
+check("keybinds: settings on = Super+Comma", "hl.bind('SUPER + COMMA', a0, { description = 'Hyprdrive settings' })" in txt)
+txt = "\n".join(na.keybinds_lua({"keys": {na.HOT_KEYS: True}}))
+check("keybinds: dock hotkeys on = Super+1..0 to hotkey()",
+      "hl.unbind('SUPER + code:10')" in txt and "hl.plugin.hyprdrive.hotkey('10')" in txt and txt.count("hl.bind(") == 10)
+check("keybinds: dock hotkeys rebind (reload)", meta[na.HOT_KEYS].get("reload") is True)
+with tempfile.TemporaryDirectory() as d:
+    na.FRAGDIR = pathlib.Path(d)
+    na.STORE = pathlib.Path(d) / "panel.json"
+    reloads = []
+    na.hyprctl = lambda *a: reloads.append(a) or ""
+    na.cmd_bind_set(["minimize", "on"])
+    frag = (pathlib.Path(d) / na.PANEL_FRAG).read_text()
+    check("bind-set minimize on: 40-panel.lua binds it under hyprdrive_loaded(), reloads",
+          "if hyprdrive_loaded and hyprdrive_loaded() then" in frag and "hl.bind('SUPER + H'" in frag and ("reload",) in reloads)
+    check("bind-set: the dump reports it", na.bind_switches(na.load_store()) == {"minimize": True, "settings": False})
+    reloads.clear()
+    na.cmd_bind_set(["minimize", "off"])
+    check("bind-set minimize off: gone, and reloads",
+          "SUPER + H" not in (pathlib.Path(d) / na.PANEL_FRAG).read_text() and ("reload",) in reloads)
+
+# ------------------------------------------------------- the chord editor
+# Settings -> Keybinds edits chords: click a key, press the new one (the QML),
+# which lands as `hdpanel bind-set ID CHORD`; `bind-check` says who holds a
+# chord; `capture on|off` parks Hyprland in an almost empty submap meanwhile.
+for text, want in [("SUPER SHIFT, K", "SUPER + SHIFT + K"), ("super+alt+j", "SUPER + ALT + J"),
+                   ('{"mods": ["ctrl", "super"], "key": "comma"}', "SUPER + CTRL + COMMA"),
+                   ("SUPER + code:20", "SUPER + code:20"), ("F9", "F9")]:
+    try:
+        got = na.canon_chord(text)
+    except ValueError as e:
+        got = str(e)
+    check("chord %r -> %r" % (text, want), got == want, got)
+for text in ("K", "SHIFT + K", "SUPER", "SUPER + mouse:272", "SUPER + K'", "Escape"):
+    try:
+        na.canon_chord(text)
+        check("chord %r refused" % text, False)
+    except ValueError:
+        check("chord %r refused" % text, True)
+
+
+def bnd(mask, key, desc, submap=""):
+    return {"modmask": mask, "key": key, "keycode": 0, "submap": submap, "description": desc,
+            "dispatcher": "__lua", "arg": "", "mouse": key.startswith("mouse"), "catch_all": False}
+
+
+BINDS = [bnd(64, "K", "Keybindings"), bnd(64, "comma", "Dismiss notification"), bnd(64, "", "Switch to workspace 3"),
+         bnd(64, "H", "Minimize window"), bnd(64, "mouse_down", "Next desktop (empty ones too)"),
+         bnd(64, "mouse_up", "Previous desktop (empty ones too)"), bnd(72, "LEFT", "Move left"),
+         bnd(64, "L", "Cycle workspace layout"), bnd(64, "R", "x", submap="hyprdrive")]
+OURS = [{"mods": "SUPER", "key": "H", "dispatcher": "minimize", "submap": ""},
+        {"mods": "SUPER", "key": "mouse_down", "dispatcher": "desktop", "submap": ""}]
+SUBMAP = ["default"]
+CALLS = []
+
+
+def fake_hyprctl(*a):
+    CALLS.append(a)
+    if a[:2] == ("binds", "-j"):
+        return json.dumps(BINDS)
+    if a[:2] == ("hyprdrive-binds", "-j"):
+        return json.dumps(OURS)
+    if a == ("submap",):
+        return SUBMAP[0] + "\n"
+    return ""
+
+
+def fake_eval(code):
+    CALLS.append(("eval", code))
+    SUBMAP[0] = "default" if "submap('reset')" in code else (na.CAPTURE_SUBMAP if "hl.dsp.submap(" in code else SUBMAP[0])
+    return True
+
+
+def answer(fn, args):
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn(args)
+    return json.loads(buf.getvalue())
+
+
+na.hyprctl = fake_hyprctl
+na.eval_lua = fake_eval
+na.apply_live_many = lambda pairs, store=None: True
+c = na.check_chord({}, "settings", "SUPER + K")
+check("bind-check: someone else's bind", [o["description"] for o in c["owners"]] == ["Keybindings"], c)
+c = na.check_chord({}, "settings", "SUPER + COMMA")
+check("bind-check: key names match case-insensitively", len(c["owners"]) == 1, c)
+c = na.check_chord({}, "settings", "SUPER + 3")
+check("bind-check: Super+3 hits a keyless code:12 workspace bind", len(c["owners"]) == 1, c)
+c = na.check_chord({}, "settings", "SUPER + H")
+check("bind-check: hyprdrive's own row (hyprdrive-binds), named",
+      c["owners"] == [{"kind": "hyprdrive", "id": "minimize", "description": "Minimize window",
+                       "chord": "SUPER + H", "row": "Minimize"}], c)
+check("bind-check: the row itself is self", na.check_chord({}, "minimize", "SUPER + H")["self"])
+check("bind-check: the layout cycle by its description", na.check_chord({}, "settings", "SUPER + L")["owners"][0]["id"] == "layout_cycle")
+c = na.check_chord({}, "focus", "SUPER + ALT + ARROWS")
+check("bind-check: MODS + ARROWS checks all four arrows", [o["description"] for o in c["owners"]] == ["Move left"], c)
+c = na.check_chord({}, "desktop", "SUPER + mouse_down")
+check("bind-check: the scroll row's own wheel is self, both directions", c["self"] and not c["owners"], c)
+check("bind-check: a submap bind does not count", not na.check_chord({}, "settings", "SUPER + R")["owners"])
+check("bind-check: a bad chord answers ok=false", answer(na.cmd_bind_check, ["K"])["ok"] is False)
+with tempfile.TemporaryDirectory() as d:
+    na.FRAGDIR = pathlib.Path(d)
+    na.STATE = pathlib.Path(d)
+    na.STORE = pathlib.Path(d) / "panel.json"
+    na.CAPTURE_TOKEN = pathlib.Path(d) / "capture.token"
+    frag = lambda: (pathlib.Path(d) / na.PANEL_FRAG).read_text()
+    CALLS.clear()
+    a = answer(na.cmd_bind_set, ["settings", "SUPER SHIFT, S"])
+    st = na.load_store()
+    check("bind-set CHORD: stored, row on, reloads", st["bindChords"]["settings"] == "SUPER + SHIFT + S"
+          and st["binds"]["settings"] is True and ("reload",) in CALLS, st)
+    check("bind-set CHORD: 40-panel.lua binds it, action before unbind",
+          "hl.bind('SUPER + SHIFT + S', a0, { description = 'Hyprdrive settings' })" in frag()
+          and frag().index("hl.plugin.hyprdrive.settings()") < frag().index("hl.unbind('SUPER + SHIFT + S')"))
+    a = answer(na.cmd_bind_set, ["settings", "SUPER + K"])
+    check("bind-set over a config bind takes it and says so", a["took"] == ["Keybindings"] and "hl.unbind('SUPER + K')" in frag(), a)
+    answer(na.cmd_bind_set, ["settings", "off"])
+    check("bind-set off keeps the chord", na.load_store()["bindChords"]["settings"] == "SUPER + K" and "description = 'Hyprdrive settings'" not in frag())
+    answer(na.cmd_bind_set, ["minimize", "on"])
+    a = answer(na.cmd_bind_set, ["settings", "SUPER + H", "--replace"])
+    st = na.load_store()
+    check("--replace turns hyprdrive's own owner off", a.get("freed") == ["minimize"] and st["binds"]["minimize"] is False
+          and "hl.bind('SUPER + H', a0, { description = 'Hyprdrive settings' })" in frag(), a)
+    a = answer(na.cmd_bind_set, ["layout_cycle", "SUPER ALT, M"])
+    check("bind-set layout_cycle CHORD = the cycle_bind key", na.load_store()["keys"][na.MOSAIC_CYCLE] == "SUPER + ALT + M", a)
+    answer(na.cmd_bind_set, ["focus", "super ctrl"])
+    check("bind-set focus MODS", na.load_store()["keys"][na.MOSAIC_FOCUS] == "SUPER + CTRL")
+    answer(na.cmd_bind_set, ["desktop", "alt super"])
+    check("bind-set desktop MODS = the scroll modifiers", na.load_store()["keys"][na.SCROLL_MODS] == "SUPER + ALT")
+    answer(na.cmd_bind_set, ["layout_cycle", "none"])
+    check("bind-set layout_cycle none", na.load_store()["keys"][na.MOSAIC_CYCLE] == "none")
+    for bad in (["desktop", "SHIFT"], ["layout_cycle", "K"], ["hotkeys", "on"]):
+        try:
+            answer(na.cmd_bind_set, bad)
+            check("bind-set %r refused" % (bad,), False)
+        except SystemExit:
+            check("bind-set %r refused" % (bad,), True)
+    CALLS.clear()
+    na.cmd_reset(["keybinds"])
+    st = na.load_store()
+    check("reset keybinds: chords, switches and Mosaic's chords back", "bindChords" not in st and "binds" not in st
+          and not any(k in st.get("keys", {}) for k in (na.MOSAIC_CYCLE, na.MOSAIC_FOCUS, na.SCROLL_MODS))
+          and na.bind_chords(st) == na.CHORD_DEFAULTS and ("reload",) in CALLS, st)
+    popen = []
+    real_popen = subprocess.Popen
+    subprocess.Popen = lambda *a, **k: popen.append(a[0])
+    a = answer(na.cmd_capture, ["on"])
+    subprocess.Popen = real_popen
+    check("capture on: defines + enters the capture submap, starts its watchdog",
+          a["ok"] and SUBMAP[0] == na.CAPTURE_SUBMAP and popen and popen[0][-2] == "watchdog"
+          and any(c[0] == "eval" and "non_consuming = true" in c[1] for c in CALLS))
+    a = answer(na.cmd_capture, ["off"])
+    check("capture off: back to default", a["left"] and SUBMAP[0] == "default")
+
+# Model.js: a Qt key event -> the same chord hdpanel parses (node, if any).
+node = shutil.which("node")
+if node:
+    js = r"""
+const fs = require("fs"), vm = require("vm"); const c = {}; vm.createContext(c);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8").replace(".pragma library", ""), c);
+const M = 0x10000000, S = 0x02000000, A = 0x08000000;
+console.log(JSON.stringify([c.chordFromEvent(M, 0x4b, 45).chord, c.chordFromEvent(M | S, 0x21, 10).chord,
+  c.chordFromEvent(M | A, 0x2c, 59).chord, c.chordFromEvent(0, 0x4b, 45).chord, c.chordPretty("SUPER + COMMA"),
+  c.heldMods(0, 0x01000022, true)]));
+"""
+    r = subprocess.run([node, "-e", js, str(ROOT / "omarchy-plugin" / "Model.js")], capture_output=True, text=True)
+    try:
+        o = json.loads(r.stdout)
+    except ValueError:
+        o = None
+    check("Model.js: key events -> chords hdpanel accepts",
+          o == ["SUPER + K", "SUPER + SHIFT + 1", "SUPER + ALT + COMMA", "", "Super + Comma", ["SUPER"]]
+          and all(na.canon_chord(x) == x for x in o[:3]), o or r.stderr)
 
 print("settings_app_test: %s" % ("OK" if not fails else "%d FAILED" % fails))
 sys.exit(1 if fails else 0)

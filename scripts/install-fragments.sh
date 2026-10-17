@@ -156,6 +156,17 @@ if [ "$DESKTOP" != omarchy ]; then
     sed "s|^Exec=hyprdrive-settings\$|Exec=$PREFIX/bin/hyprdrive-settings|" "$ROOT/settings/hyprdrive-settings.desktop" \
         > "$PREFIX/share/applications/hyprdrive-settings.desktop"
     echo "settings app: $PREFIX/bin/hyprdrive-settings (QML in $SHARE)"
+    # The search tools (`define`, `tr`) come switched ON with the native
+    # install -- unless already set either way (hdpanel seed never overrides).
+    # They need curl and jq.
+    if "$LIBDIR/hdpanel" seed plugin:hyprdrive:search:dictionary true plugin:hyprdrive:search:translate true >/dev/null 2>&1; then
+        echo "search tools: Dictionary + Translate on (Settings > Overview > Search)"
+    else
+        echo "search tools: could not seed defaults (hdpanel seed failed)" >&2
+    fi
+    for t in curl jq; do
+        command -v "$t" >/dev/null 2>&1 || echo "search tools: needs $t (define/translate)" >&2
+    done
     command -v qs >/dev/null 2>&1 || echo "settings app: needs Quickshell 0.3 (qs) to run" >&2
     exit 0
 fi

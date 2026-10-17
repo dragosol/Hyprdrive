@@ -301,7 +301,7 @@ class CScrollOverview : public IOverview {
     void         renderStrip(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now);
     void         renderStripPanel(PHLMONITOR monitor, float renderScale, const SStripStyle& style);
     void         renderStripCellRect(const CBox& cell, const CHyprColor& color, bool largeLeft, bool largeRight, const SStripStyle& style) const;
-    void         renderStripCellBorder(PHLMONITOR monitor, const CBox& cell, bool largeLeft, bool largeRight, const SStripStyle& style) const;
+    void         renderStripCellBorder(PHLMONITOR monitor, const CBox& cell, bool largeLeft, bool largeRight, const SStripStyle& style, float mix = 1.F) const;
     void         renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, const CBox& cell, const PHLWINDOW& dragged, bool hovered, float renderScale,
                                  const Time::steady_tp& now, const SStripStyle& style);
     void         collectNavTargets(PHLMONITOR monitor, std::vector<SOverviewNavTarget>& targets) const;
@@ -893,6 +893,7 @@ class CScrollOverview : public IOverview {
     CHyprSignalListener             keyboardKeyHook;
     CHyprSignalListener             workspaceCreatedHook;
     CHyprSignalListener             workspaceRemovedHook;
+    CHyprSignalListener             workspaceActiveHook; // keyPanAt
 
     bool                             swipe = false;
 
@@ -928,6 +929,15 @@ class CScrollOverview : public IOverview {
     size_t                           keyBadgeWorkspace = 0;
     Time::steady_tp                  keyBadgeBornAt;
     bool                             keyBadgeLive      = false;
+    // When a key or scroll BIND last switched this monitor's desktop while the
+    // overview was up (Super+1..0, Super+Tab, the desktop dispatcher on a key):
+    // the card pans like an arrow walk's and wears the same keyboard blur.
+    Time::steady_tp                  keyPanAt;
+    // The same for the mouse WHEEL (user, 2026-10-16): the overview's own
+    // wheel stepping a card, or Super+scroll through the desktop dispatcher.
+    // Its own blur site (wheel_pan); a trackpad pan follows the fingers and
+    // stays sharp.
+    Time::steady_tp                  wheelPanAt;
     void                             popKeyboardBadge(size_t workspaceIdx);
     size_t                           badgeWorkspace() const;
     Time::steady_tp                  badgeBornAt() const;

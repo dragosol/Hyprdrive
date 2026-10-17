@@ -1,3 +1,5 @@
+#include <hyprland/src/managers/KeybindManager.hpp>
+#include "Integration.hpp"
 #include "OverviewInternal.hpp"
 #include "DockInput.hpp"
 #include "DockStacks.hpp"
@@ -688,9 +690,10 @@ void CScrollOverview::onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& 
             // Super+scroll (binds:scroll_desktops) is "next / previous desktop"
             // everywhere: here the wheel never reaches the bind, so the
             // overview does it, whatever its own scroll action is.
-            if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE || ScrollOverview::DesktopSwitch::overviewWheelSwitchesDesktops(e))
+            if (ACTION == ScrollOverview::Config::EScrollAction::WORKSPACE || ScrollOverview::DesktopSwitch::overviewWheelSwitchesDesktops(e)) {
+                wheelPanAt = Time::steadyNow();
                 moveViewportWorkspace(e.delta > 0);
-            else
+            } else
                 moveScrollingColumnSelection(e.delta > 0);
 
             return;
@@ -813,6 +816,39 @@ void CScrollOverview::onWorkspaceLifecycle(PHLWORKSPACEREF) {
         damage();
 }
 
+// THE OVERVIEW'S CLOSE CHORD (user, 2026-10-15: native must take Hyprland's
+// settings, not Omarchy's). On Omarchy it is SUPER+W, Omarchy's own close.
+// Off Omarchy it is whatever the user's own close binds are -- a global
+// killactive/closewindow, or a Lua bind whose description says it closes a
+// window ("Close all windows" is not one) -- and SUPER+W only when the user has
+// no close bind and SUPER+W is not theirs for something else.
+static bool isOverviewCloseChord(xkb_keysym_t keysym, uint32_t mods) {
+    const bool SUPERW = (keysym == XKB_KEY_w || keysym == XKB_KEY_W) && mods == HL_MODIFIER_META;
+    if (ScrollOverview::Integration::omarchy() || !g_pKeybindManager)
+        return SUPERW;
+    const auto LOWER = [](std::string t) {
+        std::ranges::transform(t, t.begin(), [](unsigned char c) { return std::tolower(c); });
+        return t;
+    };
+    bool anyClose = false, superWTaken = false;
+    const xkb_keysym_t WANT = xkb_keysym_to_lower(keysym);
+    for (const auto& k : g_pKeybindManager->m_keybinds) {
+        if (!k || !k->enabled || k->mouse || k->release || !k->submap.name.empty() || k->key.empty())
+            continue;
+        const xkb_keysym_t SYM  = xkb_keysym_to_lower(xkb_keysym_from_name(k->key.c_str(), XKB_KEYSYM_CASE_INSENSITIVE));
+        const auto         DESC = LOWER(k->description);
+        const bool CLOSE = k->handler == "killactive" || k->handler == "closewindow" ||
+            (k->handler == "__lua" && DESC.find("close") != std::string::npos && DESC.find("window") != std::string::npos && DESC.find("all") == std::string::npos);
+        if (CLOSE) {
+            anyClose = true;
+            if (k->modmask == mods && SYM == WANT)
+                return true;
+        } else if (k->modmask == HL_MODIFIER_META && SYM == XKB_KEY_w)
+            superWTaken = true;
+    }
+    return !anyClose && !superWTaken && SUPERW;
+}
+
 void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
         if (closing || event.state != WL_KEYBOARD_KEY_STATE_PRESSED || activeScrollOverview().get() != this)
             return;
@@ -849,7 +885,8 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
         if ((KEYSYM == XKB_KEY_Tab || KEYSYM == XKB_KEY_ISO_Left_Tab) && BASE_MODS != 0)
             return;
 
-        // SUPER+W CLOSES THE HIGHLIGHTED TILE (user, 2026-09-23).
+        // SUPER+W CLOSES THE HIGHLIGHTED TILE (user, 2026-09-23) -- on native,
+        // the user's own close chord (isOverviewCloseChord).
         //
         // Not an override of Omarchy's own SUPER+W: that is a global bind with
         // no submap, so it does not fire while the overview holds one. It is the
@@ -860,7 +897,7 @@ void CScrollOverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallback
         // selectedOverviewTile): over empty space it is nothing at all --
         // closing whatever closeOnWindow still pointed at would be a window
         // vanishing that the user was not looking at.
-        if ((KEYSYM == XKB_KEY_w || KEYSYM == XKB_KEY_W) && MODS == HL_MODIFIER_META) {
+        if (isOverviewCloseChord(KEYSYM, MODS)) {
             const auto target = selectedOverviewTile();
 
             if (target && shouldShowOverviewWindow(target)) {

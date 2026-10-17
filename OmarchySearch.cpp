@@ -640,9 +640,9 @@ static bool agentReady(const SAgentDef& AG) {
     const auto BIN = agentBinary(AG);
     if (BIN.empty() || resolveCached(BIN).empty())
         return false;
-    const auto& USAGE = usageRecords();
-    if (USAGE.present.contains(agentUsageId(AG)) && !USAGE.ready.contains(agentUsageId(AG)))
-        return false;
+    // Omarchy's agents usage records are NOT read here (user, 2026-10-15:
+    // native takes nothing from Omarchy): a box that once had Omarchy keeps
+    // stale ones, which hid agents that were in fact signed in.
     return agentTerminal().ok();
 }
 
@@ -2278,6 +2278,10 @@ std::vector<SSearchItem> recentFiles() {
     };
 
     for (const auto& rel : CANDIDATES) {
+        // Omarchy's config folder only on Omarchy: a box that once had it keeps
+        // the folder (user, 2026-10-15: native takes nothing from Omarchy).
+        if (rel == ".config/omarchy" && !omarchyMode())
+            continue;
         std::string full = std::string(home) + "/" + rel;
         if (fs::exists(full)) {
             SSearchItem it;

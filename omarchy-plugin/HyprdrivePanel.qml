@@ -230,6 +230,26 @@ Item {
   }
   // The chords a `bind` row's binds have right now (hdpanel dump `binds`), or
   // "Not bound". A long family (the dock's thirty hotkeys) is cut short.
+  // A `bind` row's switch: a plugin key (row.key), or one of hdpanel's own
+  // bind switches (row.toggle: panel.json "binds", dump `bindSwitches`), which
+  // writes the bind into 40-panel.lua. On asks first when the row has a
+  // `confirm`, since it takes a chord from whatever had it; off never asks.
+  function bindOn(row) {
+    if (row.key) return kb(row.key)
+    var p = pending["bind:" + row.toggle]
+    if (p !== undefined) return p
+    return Model.asBool((hd.bindSwitches || {})[row.toggle])
+  }
+  function toggleBind(row) {
+    var next = !bindOn(row)
+    var apply = function(on) {
+      if (row.key) { setKey(row.key, on); return }
+      remember("bind:" + row.toggle, on)
+      runCtl(["bind-set", row.toggle, on ? "on" : "off"], true)
+    }
+    if (next && row.confirm) askConfirm(row.confirm, function() { apply(true) })
+    else apply(next)
+  }
   function bindChords(row) {
     var list = (hd.binds || {})[row.bind] || []
     var seen = {}, out = []
@@ -246,6 +266,183 @@ Item {
       out.push({ label: "+" + more + " more", none: true })
     }
     return out.length ? out : [{ label: "Not bound", none: true }]
+  }
+
+  // ---------------------------------------------------------- chord editor
+  // Click a chord and it listens: the next key combination becomes the
+  // row's chord. A `bind` row with `chordEdit` (Minimize, the settings) has
+  // its chord as a keycap button; a chord dropdown with `custom` (Mosaic's
+  // cycle key, its focus modifiers, the scroll modifiers) ends in Custom...,
+  // which listens the same way -- for a whole chord ("chord"), or for the
+  // modifiers held while an arrow is pressed ("arrows") or the wheel turns
+  // ("wheel"). While it listens hdpanel parks Hyprland in an empty submap
+  // (`capture on`), so Super+Q and the rest reach this page instead of
+  // closing a window; Escape cancels (and leaves that submap by itself, even
+  // if this page is gone), Backspace or Delete unbinds. A chord someone else
+  // holds asks first (bind-check): Replace takes it.
+  property var capture: null       // { id, label, mode: "chord" | "wheel" | "arrows", current, apply(v, replace), unbind() }
+  property var captureHeld: []
+  property string captureError: ""
+  property string captureWanted: "off"
+  property string captureHave: "off"
+  property var chordCheck: null
+  readonly property string customValue: "__custom__"
+  // The plugin key behind a chord dropdown -> its hdpanel bind-set row.
+  readonly property var keyRows: ({ "plugin:hyprdrive:mosaic:cycle_bind": "layout_cycle",
+                                    "plugin:hyprdrive:mosaic:focus_binds": "focus",
+                                    "plugin:hyprdrive:binds:scroll_desktops_mods": "desktop" })
+
+  function bindSetChord(row) {
+    var p = pending["chord:" + row.toggle]
+    if (p !== undefined) return p
+    return hd.bindChords ? (hd.bindChords[row.toggle] || "") : ""
+  }
+  function chordSpecFor(row) {
+    return {
+      id: row.bind, label: row.label, mode: "chord", current: bindSetChord(row),
+      apply: function(chord, replace) {
+        remember("chord:" + row.toggle, chord)
+        remember("bind:" + row.toggle, true)
+        runCtl(["bind-set", row.toggle, chord].concat(replace ? ["--replace"] : []), true)
+      },
+      unbind: function() {
+        remember("bind:" + row.toggle, false)
+        runCtl(["bind-set", row.toggle, "off"], true)
+      }
+    }
+  }
+  function keySpecFor(row, key) {
+    var rid = keyRows[key]
+    return {
+      id: rid, label: row.label, mode: row.custom || "chord", current: String(k(key)),
+      apply: function(v, replace) {
+        remember(key, v)
+        runCtl(["bind-set", rid, v].concat(replace ? ["--replace"] : []), true)
+      },
+      unbind: function() {
+        if (rid === "desktop") setKey("plugin:hyprdrive:binds:scroll_desktops", false)
+        else { remember(key, "none"); runCtl(["bind-set", rid, "none"], true) }
+      }
+    }
+  }
+  // A chord dropdown: hdpanel's choices (a hand-set one already reads
+  // "Custom: ..."), then Custom... to capture a new one.
+  function customOptions(row, key) {
+    var opts = (metaOptions[key] || []).slice()
+    var note = row.custom === "wheel" ? "Hold the keys and scroll" : row.custom === "arrows" ? "Hold the keys and press an arrow" : "Press the new keys"
+    opts.push({ value: customValue, label: "Custom…", note: note })
+    return opts
+  }
+  function pickChoice(row, key, v) {
+    if (v === customValue) startCapture(keySpecFor(row, key))
+    else if (keyRows[key]) { remember(key, v); runCtl(["bind-set", keyRows[key], v], true) }
+    else setKey(key, v)
+  }
+
+  function startCapture(spec) {
+    if (menuLayer.owner) menuLayer.close()
+    if (confirmLayer.open || ctlPath === "") return
+    captureError = ""
+    captureHeld = []
+    capture = spec
+    keys.forceActiveFocus()
+    captureTimeout.restart()
+    setCaptureSubmap("on")
+  }
+  function endCapture() {
+    capture = null
+    captureHeld = []
+    captureError = ""
+    captureTimeout.stop()
+    setCaptureSubmap("off")
+  }
+  function setCaptureSubmap(state) { captureWanted = state; pumpCapture() }
+  function pumpCapture() {
+    if (ctlPath === "" || captureProc.running || captureWanted === captureHave) return
+    captureHave = captureWanted
+    captureProc.command = [ctlPath, "capture", captureWanted]
+    captureProc.running = true
+  }
+  function strongMods(mods) { return mods.filter(function(m) { return m !== "SHIFT" }) }
+  function captureKey(e) {
+    var bare = (e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier)) === 0
+    if (bare && e.key === Qt.Key_Escape) { endCapture(); return }
+    if (bare && (e.key === Qt.Key_Backspace || e.key === Qt.Key_Delete)) {
+      var s = capture
+      endCapture()
+      askUnbind(s)
+      return
+    }
+    captureHeld = Model.heldMods(e.modifiers, e.key, true)
+    if (capture.mode === "wheel" || capture.mode === "arrows") {
+      if (Model.isModifierKey(e.key)) return
+      var arrow = e.key === Qt.Key_Left || e.key === Qt.Key_Right || e.key === Qt.Key_Up || e.key === Qt.Key_Down
+      if (capture.mode === "arrows" && !arrow) { captureError = "Hold the modifiers and press an arrow key"; return }
+      if (!strongMods(captureHeld).length) { captureError = "Hold Super, Ctrl or Alt with it"; return }
+      commitCapture(captureHeld.join(" + "))
+      return
+    }
+    var r = Model.chordFromEvent(e.modifiers, e.key, e.nativeScanCode)
+    if (r.error) captureError = r.error
+    else if (r.chord) commitCapture(r.chord)
+  }
+  function captureRelease(e) { captureHeld = Model.heldMods(e.modifiers, e.key, false) }
+  function captureWheel(modifiers) {
+    if (!capture || capture.mode !== "wheel") return
+    var mods = Model.modsFromQt(modifiers)
+    if (!strongMods(mods).length) { captureError = "Hold Super, Ctrl or Alt while you scroll"; return }
+    commitCapture(mods.join(" + "))
+  }
+  function shownChord(spec, value) {
+    if (spec.mode === "wheel") return Model.chordPretty(value) + " + Scroll"
+    if (spec.mode === "arrows") return Model.chordPretty(value) + " + Arrows"
+    return Model.chordPretty(value)
+  }
+  function commitCapture(value) {
+    var spec = capture
+    endCapture()
+    if (value === spec.current) { showToast(spec.label + " is already " + shownChord(spec, value)); return }
+    chordCheck = { spec: spec, value: value }
+    var form = spec.mode === "wheel" ? value + " + mouse_down" : spec.mode === "arrows" ? value + " + ARROWS" : value
+    checkProc.command = [ctlPath, "bind-check", form, spec.id]
+    checkProc.running = true
+  }
+  function chordChecked(answer) {
+    var job = chordCheck
+    chordCheck = null
+    if (!job) return
+    var spec = job.spec, value = job.value, shown = shownChord(spec, value)
+    if (!answer || answer.ok === false) {
+      showToast(answer && answer.error ? "Can't use " + shown + ": " + answer.error : "Could not check " + shown)
+      return
+    }
+    var owners = answer.owners || [], ours = [], theirs = []
+    for (var i = 0; i < owners.length; i++) {
+      var o = owners[i]
+      var name = "“" + (o.kind === "hyprdrive" ? (o.row || o.id) : o.description) + "”"
+      var list = o.kind === "hyprdrive" ? ours : theirs
+      if (list.indexOf(name) < 0) list.push(name)
+    }
+    if (!ours.length && !theirs.length) {
+      spec.apply(value, false)
+      showToast(spec.label + " is now " + shown)
+      return
+    }
+    var body = []
+    if (ours.length) body.push("Hyprdrive's " + ours.join(", ") + " uses it. Replace turns that off.")
+    if (theirs.length) body.push("Your config binds it to " + theirs.join(", ") + ". Replace unbinds that while "
+                                 + spec.label + " has the key, and gives it back when you change it again.")
+    askConfirm({ title: shown + " is taken", body: body.join("\n\n"), allow: "Replace", glyph: "\uf11c" },
+               function() {
+                 spec.apply(value, true)
+                 showToast(spec.label + " is now " + shown)
+               })
+  }
+  function askUnbind(spec) {
+    askConfirm({ title: "Unbind " + spec.label + "?",
+                 body: spec.label + " will have no shortcut until you set one. Its key goes back to whatever your config binds there.",
+                 allow: "Unbind", danger: true, glyph: "\uf11c" },
+               function() { spec.unbind(); showToast(spec.label + " unbound") })
   }
 
   function formatValue(row, v) {
@@ -461,7 +658,36 @@ Item {
 
   Timer { id: toastTimer; interval: 2200; onTriggered: root.toastText = "" }
 
-  onIsOpenChanged: if (isOpen) resolveCtl()
+  // The chord editor's two hdpanel calls: the capture submap, and who holds
+  // a chord. Their own processes: neither may wait behind queued writes.
+  Process {
+    id: captureProc
+    onRunningChanged: if (!running) root.pumpCapture()
+  }
+  Process {
+    id: checkProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = null
+        try { parsed = JSON.parse(String(text || "")) } catch (e) {}
+        root.chordChecked(parsed)
+      }
+    }
+  }
+  // Nothing pressed: stop listening (hdpanel's watchdog leaves the submap at
+  // 30 s whatever happens here).
+  Timer {
+    id: captureTimeout
+    interval: 20000
+    onTriggered: if (root.capture) { root.endCapture(); root.showToast("Nothing pressed: kept the old key") }
+  }
+  Component.onDestruction: if (captureHave === "on" && ctlPath !== "") Quickshell.execDetached([ctlPath, "capture", "off"])
+
+  onIsOpenChanged: {
+    if (isOpen) resolveCtl()
+    else if (capture) endCapture()
+  }
 
   // ============================================================== controls
 
@@ -812,6 +1038,145 @@ Item {
   // A dropdown button; the list opens in the panel-wide overlay (menuLayer),
   // so a card's clip never cuts it off. `kind` "curve" draws each option's
   // curve beside its name.
+  // One key of a chord, drawn as a keycap.
+  component Keycap: Rectangle {
+    id: kc
+    property string label: ""
+    property bool lit: true
+    property bool hot: false
+    implicitHeight: Style.space(20)
+    implicitWidth: Math.max(implicitHeight, kcText.implicitWidth + Style.space(12))
+    radius: Style.space(5)
+    color: hot ? root.tint(root.accent, 0.22) : root.mix(root.bg, root.fg, 0.11)
+    border.width: 1
+    border.color: hot ? root.tint(root.accent, 0.7) : root.tint(root.fg, 0.16)
+    // The keycap's lower lip.
+    Rectangle {
+      anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+      anchors.margins: 1
+      height: Style.space(2)
+      radius: kc.radius
+      color: root.tint(root.bg, 0.35)
+    }
+    Text {
+      id: kcText
+      textFormat: Text.PlainText
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: -Style.space(0.5)
+      text: kc.label
+      color: kc.hot ? root.accent : (kc.lit ? root.fg : root.dim)
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.weight: Font.DemiBold
+    }
+  }
+
+  // A chord as keycaps on a button that captures a new one (`capturing`
+  // while it listens, showing the modifiers `held`).
+  component ChordChip: Rectangle {
+    id: cc
+    property var parts: []
+    property string text: ""
+    property bool bound: true
+    property bool editable: false
+    property bool capturing: false
+    property var held: []
+    property bool live: true
+    signal activated()
+    readonly property bool hover: editable && ccArea.containsMouse
+    implicitHeight: Style.space(30)
+    implicitWidth: Math.max(Style.space(64), ccRow.implicitWidth + Style.space(16) + (editable && !capturing ? Style.space(20) : 0))
+    radius: Style.space(8)
+    opacity: live ? 1 : 0.4
+    color: capturing ? root.tint(root.accent, 0.12) : (hover ? root.tint(root.fg, 0.08) : root.raised)
+    border.width: 1
+    border.color: capturing ? root.accent : (hover ? root.tint(root.fg, 0.22) : root.hairline)
+    Behavior on color { ColorAnimation { duration: root.quick } }
+    Behavior on implicitWidth { NumberAnimation { duration: root.calm; easing.type: Easing.OutCubic } }
+    // Listening: a soft accent glow that breathes.
+    Rectangle {
+      anchors.fill: parent
+      anchors.margins: -Style.space(3)
+      radius: cc.radius + Style.space(3)
+      color: "transparent"
+      border.width: Style.space(2)
+      border.color: root.tint(root.accent, 0.35)
+      visible: cc.capturing
+      SequentialAnimation on opacity {
+        running: cc.capturing
+        loops: Animation.Infinite
+        NumberAnimation { from: 0.2; to: 1; duration: 700; easing.type: Easing.InOutSine }
+        NumberAnimation { from: 1; to: 0.2; duration: 700; easing.type: Easing.InOutSine }
+      }
+    }
+    Row {
+      id: ccRow
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(4)
+      readonly property var shown: cc.capturing ? Model.chordParts(cc.held.join(" + ")) : (cc.text === "" ? cc.parts : [])
+      Text {
+        textFormat: Text.PlainText
+        visible: cc.capturing ? cc.held.length === 0 : cc.text !== ""
+        anchors.verticalCenter: parent.verticalCenter
+        text: cc.capturing ? "Press keys…" : cc.text
+        color: cc.capturing ? root.accent : (cc.bound ? root.fg : root.dim)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+      Repeater {
+        model: ccRow.shown
+        Row {
+          required property var modelData
+          required property int index
+          spacing: Style.space(4)
+          anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+          Text {
+            textFormat: Text.PlainText
+            visible: index > 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: "+"
+            color: root.faint
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Keycap { label: modelData; lit: cc.bound; hot: cc.capturing; anchors.verticalCenter: parent.verticalCenter }
+        }
+      }
+      Text {
+        textFormat: Text.PlainText
+        visible: cc.capturing && cc.held.length > 0
+        anchors.verticalCenter: parent.verticalCenter
+        text: "+ …"
+        color: root.accent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+    // The pencil: this chip is a button.
+    Text {
+      textFormat: Text.PlainText
+      visible: cc.editable && !cc.capturing
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(9)
+      anchors.verticalCenter: parent.verticalCenter
+      text: "\uf040"
+      color: cc.hover ? root.accent : root.faint
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      Behavior on color { ColorAnimation { duration: root.quick } }
+    }
+    MouseArea {
+      id: ccArea
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: cc.editable && cc.live
+      cursorShape: Qt.PointingHandCursor
+      onClicked: cc.activated()
+    }
+  }
+
   component DropButton: Rectangle {
     id: db
     property var options: []
@@ -925,7 +1290,8 @@ Item {
       // A keybind row: the chords bound to it right now, as keycaps.
       Flow {
         width: parent.width
-        visible: sr.row.type === "bind"
+        // A chordEdit row shows its chord on its button instead.
+        visible: sr.row.type === "bind" && !sr.row.chordEdit
         spacing: Style.space(4)
         Repeater {
           model: sr.row.type === "bind" ? root.bindChords(sr.row) : []
@@ -1031,14 +1397,35 @@ Item {
     }
   }
 
+  // A choice: segments, or -- a chord dropdown with `custom` -- a dropdown
+  // that ends in Custom... (the chord editor).
   Component {
     id: choiceControl
-    Segmented {
+    Item {
+      id: choiceItem
       property var row: parent ? parent.row : ({})
-      options: root.metaOptions[row.key] || []
-      value: String(root.k(row.key))
-      live: parent ? parent.live : true
-      onPicked: function(v) { root.setKey(row.key, v) }
+      property bool live: parent ? parent.live : true
+      readonly property bool capturing: root.capture !== null && root.capture.id === root.keyRows[row.key]
+      implicitWidth: row.custom ? choiceDrop.implicitWidth : choiceSeg.implicitWidth
+      implicitHeight: row.custom ? choiceDrop.implicitHeight : choiceSeg.implicitHeight
+      Segmented {
+        id: choiceSeg
+        visible: !choiceItem.row.custom
+        options: choiceItem.row.custom ? [] : (root.metaOptions[choiceItem.row.key] || [])
+        value: String(root.k(choiceItem.row.key))
+        live: choiceItem.live
+        onPicked: function(v) { root.setKey(choiceItem.row.key, v) }
+      }
+      DropButton {
+        id: choiceDrop
+        visible: !!choiceItem.row.custom
+        implicitWidth: Style.space(176)
+        options: choiceItem.row.custom ? root.customOptions(choiceItem.row, choiceItem.row.key) : []
+        value: String(root.k(choiceItem.row.key))
+        live: choiceItem.live
+        border.color: choiceItem.capturing ? root.accent : (menuLayer.owner === choiceDrop ? root.tint(root.accent, 0.8) : root.hairline)
+        onPicked: function(v) { root.pickChoice(choiceItem.row, choiceItem.row.key, v) }
+      }
     }
   }
 
@@ -1077,8 +1464,10 @@ Item {
 
   // One motion-blur site: strength in eighths (0 = off) and, for the sites
   // that run on a clock, how the smear fades.
-  // A keybind's own controls: its chord (chordKey, a choice from hdpanel's
-  // meta) and its on/off (key). Either may be missing; a row with neither only
+  // A keybind's own controls: its chord (chordKey, a dropdown of hdpanel's
+  // choices; with `custom`, ending in Custom...), its chord as a keycap
+  // button (`chordEdit`: click it, press the new keys) and its on/off (key,
+  // or toggle: an hdpanel bind switch, bindOn). A row with none of them only
   // shows what is bound.
   Component {
     id: bindControl
@@ -1087,21 +1476,38 @@ Item {
       spacing: Style.space(10)
       property var row: parent ? parent.row : ({})
       property bool rowLive: parent ? parent.live : true
+      readonly property bool capturing: root.capture !== null && root.capture.id === (row.chordKey ? root.keyRows[row.chordKey] : row.bind)
       DropButton {
+        id: bindDrop
         visible: !!bindRow.row.chordKey
-        implicitWidth: Style.space(140)
+        implicitWidth: Style.space(bindRow.row.custom ? 176 : 140)
         anchors.verticalCenter: parent.verticalCenter
-        options: bindRow.row.chordKey ? (root.metaOptions[bindRow.row.chordKey] || []) : []
+        options: !bindRow.row.chordKey ? [] : bindRow.row.custom ? root.customOptions(bindRow.row, bindRow.row.chordKey) : (root.metaOptions[bindRow.row.chordKey] || [])
         value: bindRow.row.chordKey ? String(root.k(bindRow.row.chordKey)) : ""
         live: bindRow.rowLive
-        onPicked: function(v) { root.setKey(bindRow.row.chordKey, v) }
+        border.color: bindRow.capturing ? root.accent : (menuLayer.owner === bindDrop ? root.tint(root.accent, 0.8) : root.hairline)
+        onPicked: function(v) { root.pickChoice(bindRow.row, bindRow.row.chordKey, v) }
+      }
+      ChordChip {
+        visible: !!bindRow.row.chordEdit
+        anchors.verticalCenter: parent.verticalCenter
+        editable: true
+        live: bindRow.rowLive
+        capturing: bindRow.capturing
+        held: root.captureHeld
+        bound: root.bindOn(bindRow.row)
+        parts: Model.chordParts(root.bindSetChord(bindRow.row))
+        onActivated: {
+          if (bindRow.capturing) root.endCapture()
+          else root.startCapture(root.chordSpecFor(bindRow.row))
+        }
       }
       Switch {
-        visible: !!bindRow.row.key
+        visible: !!bindRow.row.key || !!bindRow.row.toggle
         anchors.verticalCenter: parent.verticalCenter
-        checked: bindRow.row.key ? root.kb(bindRow.row.key) : false
+        checked: root.bindOn(bindRow.row)
         live: bindRow.rowLive
-        onToggled: root.setKey(bindRow.row.key, !root.kb(bindRow.row.key))
+        onToggled: root.toggleBind(bindRow.row)
       }
     }
   }
@@ -1704,7 +2110,12 @@ Item {
       anchors.fill: parent
       focus: true
       Keys.priority: Keys.BeforeItem
+      // Capturing a chord: every key is the chord's (or Escape / Backspace).
+      Keys.onReleased: function(e) {
+        if (root.capture) { root.captureRelease(e); e.accepted = true }
+      }
       Keys.onPressed: function(e) {
+        if (root.capture) { root.captureKey(e); e.accepted = true; return }
         var typing = searchField.activeFocus
         // The confirm owns the keyboard while it is up: Escape cancels,
         // Enter allows, and nothing else reaches the page behind it.
@@ -2484,6 +2895,79 @@ Item {
         }
       }
 
+      // ---------------------------------------------------- capturing a chord
+      // While a chord listens: the page takes no clicks (a click cancels), the
+      // wheel is Custom...'s capture for the scroll modifiers, and a card
+      // along the bottom says what is being set and how to get out.
+      Item {
+        id: captureLayer
+        anchors.fill: parent
+        z: 45
+        visible: root.capture !== null
+        MouseArea {
+          anchors.fill: parent
+          acceptedButtons: Qt.AllButtons
+          onClicked: root.endCapture()
+          onWheel: function(w) { root.captureWheel(w.modifiers); w.accepted = true }
+        }
+        Rectangle {
+          id: captureCard
+          anchors.horizontalCenter: parent.horizontalCenter
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: Style.space(18)
+          width: Math.min(parent.width - Style.space(40), Math.max(Style.space(380), captureCol.implicitWidth + Style.space(36)))
+          height: captureCol.implicitHeight + Style.space(26)
+          radius: Style.space(14)
+          color: root.mix(root.bg, root.fg, 0.08)
+          border.width: 1
+          border.color: root.tint(root.accent, 0.6)
+          opacity: root.capture !== null ? 1 : 0
+          Behavior on opacity { NumberAnimation { duration: root.calm; easing.type: Easing.OutCubic } }
+          MouseArea { anchors.fill: parent; onWheel: function(w) { root.captureWheel(w.modifiers); w.accepted = true } }
+          Column {
+            id: captureCol
+            anchors.centerIn: parent
+            spacing: Style.space(6)
+            Text {
+              textFormat: Text.PlainText
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: !root.capture ? ""
+                    : root.capture.mode === "wheel" ? "Hold the modifiers for " + root.capture.label + " and scroll (or press Enter)"
+                    : root.capture.mode === "arrows" ? "Hold the modifiers for " + root.capture.label + " and press an arrow"
+                    : "Press the new keys for " + root.capture.label
+              color: root.fg
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.weight: Font.DemiBold
+            }
+            // What is held right now, as keycaps.
+            Row {
+              anchors.horizontalCenter: parent.horizontalCenter
+              spacing: Style.space(4)
+              visible: root.captureHeld.length > 0
+              Repeater {
+                model: Model.chordParts(root.captureHeld.join(" + "))
+                Row {
+                  required property var modelData
+                  required property int index
+                  spacing: Style.space(4)
+                  Text { textFormat: Text.PlainText; visible: index > 0; text: "+"; color: root.faint; font.family: root.fontFamily; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter }
+                  Keycap { label: modelData; hot: true }
+                }
+              }
+            }
+            Text {
+              textFormat: Text.PlainText
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: root.captureError !== "" ? root.captureError : "Esc cancels  ·  Backspace unbinds  ·  your other shortcuts pause meanwhile"
+              color: root.captureError !== "" ? root.urgent : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+      }
+
       // ------------------------------------------------------ the dropdowns
       Item {
         id: menuLayer
@@ -2545,7 +3029,7 @@ Item {
                   required property var modelData
                   readonly property bool sel: modelData.value === menuLayer.value
                   width: menuList.width
-                  height: menuLayer.kind === "curve" ? Style.space(46) : Style.space(32)
+                  height: menuLayer.kind === "curve" ? Style.space(46) : (modelData.note ? Style.space(42) : Style.space(32))
                   radius: Style.space(7)
                   color: optArea.containsMouse ? root.tint(root.accent, 0.18) : (sel ? root.tint(root.fg, 0.06) : "transparent")
                   Behavior on color { ColorAnimation { duration: root.quick } }
@@ -2698,7 +3182,7 @@ Item {
               anchors.right: parent.right
               spacing: Style.space(8)
               GhostButton { label: confirmLayer.shown.cancel || "Cancel"; onActivated: confirmLayer.cancel() }
-              GhostButton { label: confirmLayer.shown.allow || "Allow"; emphasis: true; onActivated: confirmLayer.allow() }
+              GhostButton { label: confirmLayer.shown.allow || "Allow"; emphasis: true; danger: !!confirmLayer.shown.danger; onActivated: confirmLayer.allow() }
             }
           }
         }

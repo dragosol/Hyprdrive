@@ -17,7 +17,16 @@
 //   icons    -- per-app dock icons (bin/hdicons)
 //   bind     -- one of hyprdrive's keybinds: the chords bound to it right now
 //               (hdpanel dump's `binds`, by the row's `bind` id), with a switch
-//               (key) and/or a chord choice (chordKey) when it has them
+//               (key, or toggle: an hdpanel bind switch -- `bind-set`) and/or
+//               a chord choice (chordKey) when it has them; `confirm` asks
+//               before on, since on takes the chord from whatever had it.
+//               `chordEdit`: the row's chord is a keycap button -- click it,
+//               press the new keys (hdpanel bind-set ID CHORD)
+//
+// A chord dropdown (a `choice`, or a bind row's chordKey) with `custom` ends
+// in Custom..., which captures a new one: "chord" a whole chord, "arrows" the
+// modifiers held with an arrow key, "wheel" the modifiers held while the
+// wheel turns.
 //
 // `when` names a condition (HyprdrivePanel.qml, rowEnabled) under which the
 // row applies; otherwise it is drawn dimmed and does not take input.
@@ -67,7 +76,7 @@ var sections = [
         { type: "toggle", key: P + "search:dictionary", label: "Dictionary",
           desc: "Type “define” and a word to look it up on Wiktionary." },
         { type: "toggle", key: P + "search:translate", label: "Translate",
-          desc: "Type “tr” and some text to translate it (needs a LibreTranslate endpoint)." }
+          desc: "Type “tr” and some text to translate it (the free MyMemory service, or your own LibreTranslate server)." }
       ]},
       { title: "Easter egg", rows: [
         { type: "toggle", key: P + "search:easter_egg", label: "Easter egg",
@@ -196,8 +205,12 @@ var sections = [
       ]},
       { title: "Desktops", rows: [
         { type: "blur", when: "blurOn", site: "swipe", label: "Trackpad swipe", clock: false },
+        { type: "blur", when: "blurOn", site: "desktop_slide", label: "Desktop switch", clock: true,
+          desc: "Switching desktops outside the overview: a key, Super+scroll, a dock click." },
         { type: "blur", when: "blurOn", site: "desktop_switch", label: "Keyboard switch", clock: false,
-          desc: "Switching desktops by keyboard in the overview." }
+          desc: "Switching desktops by keyboard in the overview." },
+        { type: "blur", when: "blurOn", site: "wheel_pan", label: "Wheel switch", clock: false,
+          desc: "Switching desktops with the mouse wheel or Super+scroll in the overview." }
       ]},
       { title: "Overview", rows: [
         { type: "blur", when: "blurOn", site: "overview", label: "Open & close", clock: true,
@@ -269,9 +282,9 @@ var sections = [
       // Omarchy's Super+arrows there and nothing on plain Hyprland, where the
       // arrows are the user's own.
       { title: "Keys", rows: [
-        { type: "choice", key: P + "mosaic:cycle_bind", label: "Cycle key", when: "mosaicOn",
+        { type: "choice", key: P + "mosaic:cycle_bind", label: "Cycle key", when: "mosaicOn", custom: "chord",
           desc: "Cycles the current desktop Dwindle → Scrolling → Mosaic. Auto is Super+L (on Omarchy in place of its two-way toggle)." },
-        { type: "choice", key: P + "mosaic:focus_binds", label: "Focus keys", when: "mosaicOn",
+        { type: "choice", key: P + "mosaic:focus_binds", label: "Focus keys", when: "mosaicOn", custom: "arrows",
           desc: "With the arrow keys, move focus by position on a Mosaic desktop and as usual elsewhere. Auto is Super+arrows on Omarchy and no keys on plain Hyprland." }
       ]}
     ]
@@ -282,12 +295,12 @@ var sections = [
     // shows its chords from hdpanel (`hyprctl hyprdrive-binds`), so the list
     // never claims a key that is not bound.
     id: "keybinds", title: "Keybinds", icon: "\uf11c", group: "keybinds",
-    subtitle: "Hyprdrive's own keys, and what they are bound to right now.",
+    subtitle: "Hyprdrive's own keys, and what they are bound to right now. Click a key with a pencil, or pick Custom…, to change it.",
     cards: [
       { title: "Desktops", rows: [
         { type: "bind", bind: "desktop", key: P + "binds:scroll_desktops", label: "Scroll through desktops",
           desc: "Hold the modifier and turn the wheel: down for the next desktop, up for the previous one, empty ones included. One desktop per notch. In the overview it moves between the desktops there." },
-        { type: "choice", key: P + "binds:scroll_desktops_mods", label: "Scroll modifier", when: "scrollDesktopsOn",
+        { type: "choice", key: P + "binds:scroll_desktops_mods", label: "Scroll modifier", when: "scrollDesktopsOn", custom: "wheel",
           desc: "Held with the wheel. Whatever these keys and the wheel did before is replaced while scrolling through desktops is on." }
       ]},
       { title: "Overview", rows: [
@@ -297,20 +310,23 @@ var sections = [
           desc: "Click a window, with or without Super held. Only while the overview is open." }
       ]},
       { title: "Windows", rows: [
-        { type: "bind", bind: "minimize", label: "Minimize",
-          desc: "Minimize the active window into the dock. Not bound by default: bind hl.plugin.hyprdrive.minimize() in your config, e.g. to Super+H." },
-        { type: "bind", bind: "settings", label: "Open these settings",
-          desc: "Not bound by default: bind hl.plugin.hyprdrive.settings() in your config, e.g. to Super+Comma." }
+        { type: "bind", bind: "minimize", toggle: "minimize", label: "Minimize", chordEdit: true,
+          desc: "Minimizes the active window into the dock. Takes its key (Super+H unless you change it) from anything else bound to it; off gives it back.",
+          confirm: { title: "Take a key to minimize?", body: "Its key will minimize the active window, replacing whatever that key does now. Turning this off gives it back.", allow: "Allow", glyph: "\uf11c" } },
+        { type: "bind", bind: "settings", toggle: "settings", label: "Open these settings", chordEdit: true,
+          desc: "Opens these settings. Takes its key (Super+Comma unless you change it) from anything else bound to it; off gives it back.",
+          confirm: { title: "Take a key for the settings?", body: "Its key will open the Hyprdrive settings, replacing whatever that key does now. Turning this off gives it back.", allow: "Allow", glyph: "\uf11c" } }
       ]},
       { title: "Mosaic", rows: [
-        { type: "bind", bind: "layout_cycle", chordKey: P + "mosaic:cycle_bind", label: "Mosaic layout cycle", when: "mosaicOn",
+        { type: "bind", bind: "layout_cycle", chordKey: P + "mosaic:cycle_bind", custom: "chord", label: "Mosaic layout cycle", when: "mosaicOn",
           desc: "Dwindle → Scrolling → Mosaic on the current desktop, while Mosaic is on. Auto is Super+L." },
-        { type: "bind", bind: "focus", chordKey: P + "mosaic:focus_binds", label: "Mosaic-aware focus", when: "mosaicOn",
-          desc: "With the arrow keys, move focus by position on a Mosaic desktop and as usual elsewhere, while Mosaic is on. Auto is Super+arrows on Omarchy and no keys on plain Hyprland." }
+        { type: "bind", bind: "focus", chordKey: P + "mosaic:focus_binds", custom: "arrows", label: "Mosaic-aware focus and swap", when: "mosaicOn",
+          desc: "With the arrow keys, move focus by position on a Mosaic desktop and as usual elsewhere; add Shift to swap windows the same way. While Mosaic is on. Auto is Super+arrows on Omarchy and no keys on plain Hyprland." }
       ]},
       { title: "Dock", rows: [
         { type: "bind", bind: "hotkeys", key: P + "dock:hot_keys", label: "Dock hotkeys",
-          desc: "Super+1…0 open the dock's first ten apps instead of switching desktops. Off by default; the keys are your config's hl.plugin.hyprdrive.hotkey() binds." }
+          desc: "Super+1…0 open or focus the dock's first ten apps instead of switching desktops. Off by default; off gives the keys back.",
+          confirm: { title: "Use Super+1…0 for the dock?", body: "Super+1…0 will open the dock's apps instead of switching desktops. Turning this off gives them back to desktop switching.", allow: "Allow", glyph: "\uf11c" } }
       ]},
       { title: "Other", rows: [
         { type: "bind", bind: "other", label: "Other hyprdrive binds",

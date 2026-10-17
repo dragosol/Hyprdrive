@@ -10,11 +10,11 @@
 -- held as a modifier, so a bind fires on every SUPER+<key> shortcut too.
 -- Disable with: plugin:hyprdrive:tap_super = false
 --
--- SUPER+SPACE stays the Omarchy menu. A tap (press and release, no other key)
--- is not a chord, so the two do not fight.
+-- SUPER+SPACE stays whatever you bound it to (the Omarchy menu on Omarchy). A
+-- tap (press and release, no other key) is not a chord, so the two do not fight.
 --
--- SUPER+1..0 stay Omarchy workspace focus. This fork does not rebind them to
--- dock slots.
+-- SUPER+1..0 stay your workspace binds. This fork does not rebind them to dock
+-- slots unless Settings > Keybinds turns Dock hotkeys on.
 
 -- While the overview is open the plugin enters this submap (it does so only
 -- because these binds exist). Inside it the global SUPER+mouse:272 window.drag

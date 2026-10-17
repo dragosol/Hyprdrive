@@ -12,8 +12,8 @@ if hyprdrive_loaded and hyprdrive_loaded() then
                 layout        = "horizontal",
                 workspace_gap = 40,
                 dock = {
-                    -- Super+1..0 stay Omarchy workspace focus. The plugin still
-                    -- has the hotkey dispatcher; this fork does not steal the keys.
+                    -- Super+1..0 stay your workspace binds. The plugin still has
+                    -- the hotkey dispatcher; Settings > Keybinds can hand them over.
                     hot_keys = false,
                 },
             },
