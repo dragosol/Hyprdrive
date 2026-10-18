@@ -1,9 +1,21 @@
 # Hyprdrive
 
-A mission-control overview, a full dock with stacks, and Mosaic, a hybrid
-layout, for [Hyprland](https://hyprland.org) 0.56. This branch
-(`hyprland-native`) runs on plain Hyprland. On [Omarchy](https://omarchy.org/)
-it notices Omarchy and integrates with it.
+Hyprdrive is a [Hyprland](https://hyprland.org) plugin that brings the best
+parts of other desktops to Hyprland: a macOS- and GNOME-style overview of every
+window, type-to-search, and a dock with live previews, all following your own
+theme.
+
+![Hyprdrive on native Hyprland: the overview, search, the dock and Mosaic](docs/media/hyprdrive-native.gif)
+
+**Early access** for plain Hyprland 0.56, on any distro: download the
+[latest release](https://github.com/dragosol/Hyprdrive/releases/latest) and
+follow [Install](#install) below. It is in continuous development, so expect
+regular updates; feedback and bug reports are welcome in the
+[issues](https://github.com/dragosol/Hyprdrive/issues).
+
+This branch (`hyprland-native`) runs on plain Hyprland and adds Mosaic, a
+hybrid layout, alongside the overview, a full dock with stacks and search. On
+[Omarchy](https://omarchy.org/) it notices Omarchy and integrates with it.
 
 ![Tap Super: every window on every desktop, in one overview](https://hyprdrive.shastasia.com/readme/overview.gif)
 
