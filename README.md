@@ -17,8 +17,6 @@ This branch (`hyprland-native`) runs on plain Hyprland and adds Mosaic, a
 hybrid layout, alongside the overview, a full dock with stacks and search. On
 [Omarchy](https://omarchy.org/) it notices Omarchy and integrates with it.
 
-![Tap Super: every window on every desktop, in one overview](https://hyprdrive.shastasia.com/readme/overview.gif)
-
 [Website](https://hyprdrive.shastasia.com) ·
 [Demo film on YouTube](https://www.youtube.com/watch?v=RRkIViQvAOY) ·
 [All config keys](docs/CONFIG.md)
@@ -29,69 +27,116 @@ hybrid layout, alongside the overview, a full dock with stacks and search. On
 
 ## What it does
 
-**Overview.** Tap Super (press and release, no other key), or swipe up with 3
-fingers:
+### Overview
+
+Tap Super (press and release, no other key), or swipe up with 3 fingers:
+
+![Tap Super: every window on every desktop, in one overview](https://hyprdrive.shastasia.com/readme/overview.gif)
 
 - A mission-control grid of real, compositor-rendered windows. On a trackpad it
-  follows your fingers, and reversing mid-swipe undoes it.
-- Type to search: installed apps, open windows, files and GNOME search
-  providers, all in one list.
+  follows your fingers, and reversing mid-swipe undoes it. Hover a tile to lift
+  it, click to go there, or close it with its X.
+- **Search, calculate or run:** just start typing. Installed apps, open windows,
+  files and GNOME search providers come up in one list, sums are worked out as
+  you type, and a command can be run straight from the field.
 
   ![Just start typing: apps, windows and files in one search](https://hyprdrive.shastasia.com/readme/search.gif)
 
-- A workspace strip. Drag a tile onto a strip cell and the window moves there.
-  Drop it on the empty cell and it gets a desktop of its own.
-
-**Super+scroll** walks the desktops one per wheel notch, empty ones included
-(`binds:scroll_desktops`, modifier `binds:scroll_desktops_mods`; it replaces
-whatever had that chord, such as Omarchy's "scroll active workspace"). Desktop
-changes from keys and from focus moving to another desktop can each be made
-instant (`animation:desktop_keyboard`, `animation:desktop_focus`). The settings'
-Keybinds section lists every hyprdrive bind as it is bound right now.
+- A **workspace strip**. Drag a tile onto a strip cell and the window moves
+  there. Drop it on the empty cell and it gets a desktop of its own.
 
   ![Drag a window to a new desktop](https://hyprdrive.shastasia.com/readme/new-desktop.gif)
 
 - **Hold to swap:** drag a window over another one and hold it there. Let go
   and the two trade places (`drag:hold_to_swap`, on by default).
-- You can step through workspaces with the scroll wheel, a trackpad swipe
-  (with magnetic detents and a name pill on the card the swipe is settling on)
-  or the keyboard.
+- Step through desktops with the scroll wheel, a trackpad swipe (with magnetic
+  detents and a name pill on the card the swipe is settling on) or the
+  keyboard.
 - Several monitors act as one. The overview opens and closes on all of them,
   and Tab walks from the search to each monitor's grid.
 - On a scrolling-layout desktop, the 3-finger swipe first scrolls that
   desktop's windows, then carries on into the next or previous desktop past
   either end.
+- **Hot corner** (off by default): rest the pointer in a screen corner to open
+  the overview, and again to close it. Pick the corner and the delay; an
+  optional ripple runs across the screen.
 
-**Dock:**
+### Desktops
 
-- Dash-to-Dock behaviour, counted over the desktop you are on: launch, focus,
-  cycle, whole-app minimize/restore, favourites, running dots, badges and
-  autohide.
-- Minimize and restore fly into the icon, motion-blurred. Hover an icon to see
-  live window previews.
+- **Super+scroll** walks the desktops one per wheel notch, empty ones included
+  (`binds:scroll_desktops`, modifier `binds:scroll_desktops_mods`; it replaces
+  whatever had that chord, such as Omarchy's "scroll active workspace").
+- **Push a window to the next desktop:** drag a window, file or folder to the
+  left or right edge of the screen and hold it there (`drag:spring_edges`).
+  Keep holding to keep going.
+- Desktop changes made by a key and those made by focus moving to another
+  desktop can each be made instant (`animation:desktop_keyboard`,
+  `animation:desktop_focus`).
+
+### Dock
+
+- **Dash-to-Dock behaviour**, counted over the desktop you are on: launch,
+  focus, cycle, whole-app minimize and restore, favourites, running dots,
+  notification badges and autohide. It can stay on one monitor, list only the
+  current desktop's apps, and make tiled windows shorten to clear it when it
+  does not hide.
+- **Live previews:** hover an icon to see its windows live. Several windows
+  arrange in rows inside one rounded panel whose corners match your window
+  rounding. Click a preview to go to that window.
+- **Minimize and restore** fly into the icon and back out, motion-blurred.
+- **Right-click** an app for its windows, its desktop actions and moving its
+  windows to another desktop.
 - **Stacks**, in the macOS style. A pinned folder shows its newest files as a
   pile. Click it and they fan out, or they open in a searchable grid when a fan
   would not fit. Space previews the hovered item through GNOME Sushi. Drop
   files onto a stack to move them in, or onto Trash. Drag files out of a fan
   into any app. A download in progress shows a progress bar. Downloads is
-  pinned on first run.
+  pinned on first run. The fan can stand in a straight column instead of an
+  arc (`dock:stack_fan_straight`, off by default).
 
   ![A Downloads stack fanning out, with a Space preview](https://hyprdrive.shastasia.com/readme/stacks.gif)
 
-**Mosaic** (experimental, off by default) is a third layout beside Dwindle
-and Scrolling, after GNOME's planned Mosaic. Each window keeps its own size,
-and the windows gather in a cluster in the middle of the screen. Opening a
-window never resizes the others. When they no longer fit, the desktop tiles
-them in Dwindle style, and it goes back to the mosaic once they fit again.
-Turn it on with `mosaic:enabled`; Super+L then cycles Dwindle -> Scrolling ->
-Mosaic (`hyprdrive-layout-cycle`), and each desktop keeps its layout across a
-reload or a reboot. Pick another chord with `mosaic:cycle_bind` (e.g.
-`"SUPER + M"`, or `"none"` to keep a Super+L of your own). It is best on large
-displays, and it is the part of Hyprdrive most likely to have rough edges.
+- **Spring-loaded apps:** hold a dragged file over a running app or one of its
+  previews, and the app comes forward for the drop (`drag:spring_dock`).
+- **Mounted drives** and network shares (SMB, SFTP, NFS, WebDAV) as dock items,
+  in the order you choose (off by default), and a Trash that shows when it has
+  something in it.
+- **Pulse busy apps** (off by default): an app's running dots pulse while it,
+  with the processes it started, uses more CPU than a threshold you set
+  (`dock:cpu_pulse`, `dock:cpu_pulse_threshold`).
+- **Your own icons:** give any app on the dock a different icon, from your icon
+  theme, a file, or the selfh.st logo collection.
+- **Feel:** icons tilt toward the pointer and lean into a press, urgent apps
+  wiggle, and the frosted glass follows Hyprland's blur settings.
+- **Genie minimize** is in, but broken for now: it is forced off and marked
+  Broken in the settings.
 
-**Hot corner** (off by default): rest the pointer in a screen corner to open
-the overview, and again to close it. An optional ripple runs across the
-screen.
+### Mosaic
+
+**Mosaic** (experimental, on by default) is a third layout beside Dwindle
+and Scrolling, after GNOME's planned Mosaic. Each window keeps its own size,
+and the windows gather in one tight cluster in the middle of the screen, with
+no holes between them. Opening a window never resizes the others. When they no
+longer fit, the desktop tiles them in Dwindle style, and it goes back to the
+mosaic once they fit again. Each app's size is remembered.
+
+- **Rearrange by dragging:** Super+drag a window and drop it. It lands on the
+  side of the cluster you dropped it on, or in the middle when the others can
+  close around it, and the other windows hold still until you let go.
+- **Keyboard:** set `mosaic:focus_binds` to a modifier (for example `SUPER`)
+  for Mosaic-aware focus on the arrow keys; adding Shift swaps the focused
+  window with its neighbour in that direction.
+- **Switching:** Super+L cycles a desktop through Dwindle -> Scrolling ->
+  Mosaic (`hyprdrive-layout-cycle`), and each desktop keeps its layout across a
+  reload or a reboot. Desktops start in your usual layout; set `mosaic:default`
+  to start new ones in Mosaic. Pick another chord with `mosaic:cycle_bind`
+  (e.g. `"SUPER + M"`, or `"none"` to keep a Super+L of your own), or turn
+  Mosaic off with `mosaic:enabled = false` or in the settings.
+
+It is best on large displays, and it is the part of Hyprdrive most likely to
+have rough edges.
+
+### Gestures and search tools
 
 **Gestures:** the 3-finger up and down swipes are installed by `make install`.
 Any other gesture can be bound with `hl.plugin.hyprdrive.gesture{...}`: the
@@ -110,6 +155,10 @@ libinput's behaviour.
 
 **Search tools** (opt-in, see [Network use](#network-use)): `define <word>`
 looks a word up in a dictionary, and `tr <lang> <text>` translates.
+
+**Motion and animation:** one curve and one speed drive everything Hyprdrive
+animates, and motion blur can be set per animation (window moves, desktop
+switches, the overview, the dock) or turned off.
 
 ## Requirements
 
@@ -210,7 +259,9 @@ login.
 
 Every option has a row in the settings: one animation curve and speed for
 everything, per-animation motion blur, a trackpad gesture editor, dock and
-overview options, Mosaic, dock icons, and AC/battery performance profiles. The
+overview options, Mosaic, dock icons, a Keybinds section that shows every
+Hyprdrive bind as it is bound right now (and lets you change it), and
+AC/battery performance profiles. The
 same keys are plain Lua in `~/.config/hypr/hyprdrive/` if you would rather edit
 files.
 
@@ -285,6 +336,11 @@ and so on) is resolved in this order:
 3. Omarchy's `colors.toml`, on Omarchy
 4. values derived from Hyprland's own
 
+The glass of the dock, the search and the strip is tinted with
+`dock:background_color` / `dock:background_opacity` if you set them, otherwise
+with your theme's background, otherwise with your Ghostty terminal's background
+and opacity.
+
 Change your theme and reload, and Hyprdrive follows.
 
 ## Configuration
@@ -314,6 +370,8 @@ a line there overrides the generated one above it.
 | `hotkey` | `overlay`, `1`-`10` (optionally `shift`/`ctrl`) | dock slot accelerators (unbound by default) |
 | `stack` | `pin`/`unpin`/`toggle`/`open <path>`, `view`, `sort`, `clear`, ... | dock stacks |
 | `focus` | `l`, `r`, `u`, `d` | Mosaic-aware focus by direction |
+| `swap` | `l`, `r`, `u`, `d` | Mosaic-aware swap with the neighbour in that direction (Hyprland's own swap elsewhere) |
+| `gesture` | a gesture spec | bind a trackpad gesture to a Hyprdrive action (see Gestures) |
 | `desktop` | `next`, `prev` | the next / previous desktop by number, empty ones included (Super+scroll, `binds:scroll_desktops`) |
 | `settings` | `open`, `toggle`, `close`, `pane <id>`, `icons <app>` | open the settings |
 | `debug` | `frames`, `mem`, `gesture <script>`, ... | diagnostics and test hooks, see [docs/DEBUG.md](docs/DEBUG.md) |
@@ -329,8 +387,10 @@ end
 
 ## Network use
 
-Hyprdrive makes **no network requests by default.** Three features go online,
-and each is off until you turn it on:
+Hyprdrive only goes online for the three features below. The native install
+switches the two search tools on, but they send nothing until you type
+`define` or `tr`; the icon download only runs when you open it in the settings.
+Turn the search tools off in Settings > Overview > Search.
 
 | setting | sends | to |
 | --- | --- | --- |
@@ -346,6 +406,8 @@ an argument, never through a shell.
 - **Hyprland 0.56.2 only.** Each Hyprland release changes the plugin ABI, and
   a new one needs a rebuild at the least, maybe a port.
 - **Mosaic is experimental**, and so is the standalone settings app.
+- **Genie minimize is broken** for now, so it stays off whatever the setting
+  says.
 - **hyprlang configs are second-class.** The plugin works, but the shipped
   binds and gestures are Lua fragments.
 - **Trackpad features** were developed on one machine's touchpad. The headless

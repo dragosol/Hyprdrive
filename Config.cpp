@@ -611,7 +611,7 @@ static void registerConfigValuesFor() {
     // MOSAIC (Mosaic.hpp). The layout itself is always registered; these two are
     // the panel's: enabled puts it on Super+L's cycle, default makes it the
     // layout of desktops with none of their own.
-    addKey(makeShared<CBoolValue>(KEY("mosaic:enabled"), "mosaic: Super+L cycles Dwindle -> Scrolling -> Mosaic (the panel asks before turning it on)", false));
+    addKey(makeShared<CBoolValue>(KEY("mosaic:enabled"), "mosaic: Super+L cycles Dwindle -> Scrolling -> Mosaic (on by default; the panel asks before turning it back on)", true));
     addKey(makeShared<CBoolValue>(KEY("mosaic:default"), "mosaic: new desktops use the Mosaic layout (needs mosaic:enabled)", false));
     // The chords Mosaic takes while it is on (audit A20). hdpanel reads these
     // when it writes 40-panel.lua; the plugin only holds them, so they can be

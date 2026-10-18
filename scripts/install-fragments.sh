@@ -164,6 +164,14 @@ if [ "$DESKTOP" != omarchy ]; then
     else
         echo "search tools: could not seed defaults (hdpanel seed failed)" >&2
     fi
+    # Mosaic comes ON with the native install too (user, 2026-10-18): Super+L
+    # cycles Dwindle -> Scrolling -> Mosaic. Desktops keep their own layout
+    # until you switch one; mosaic:default (new desktops in Mosaic) stays off.
+    if "$LIBDIR/hdpanel" seed plugin:hyprdrive:mosaic:enabled true >/dev/null 2>&1; then
+        echo "mosaic: on (Super+L cycles Dwindle -> Scrolling -> Mosaic; Settings > Mosaic)"
+    else
+        echo "mosaic: could not seed the default (hdpanel seed failed)" >&2
+    fi
     for t in curl jq; do
         command -v "$t" >/dev/null 2>&1 || echo "search tools: needs $t (define/translate)" >&2
     done
