@@ -29,6 +29,8 @@
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/render/gl/GLTexture.hpp>
 #include "Dock.hpp"
+#include "CpuPulse.hpp"
+#include "Genie.hpp"
 #include "Motion.hpp"
 #include "ConfigureHold.hpp"
 
@@ -2337,7 +2339,12 @@ void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& it
     const float CX    = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) / 2.F;
     const float TOP   = sc<float>(item.iconBox.y) + sc<float>(item.iconBox.height) + DOT_MARGIN_B * SCALE;
 
-    const CHyprColor DOTCOL = dotColor;
+    // dock:cpu_pulse (CpuPulse.hpp): a busy app's dots breathe -- they grow
+    // about their own centres and dim as they do, once per PERIOD.
+    const float PULSE = CpuPulse::anyBusy() ? CpuPulse::pulseFor(itemWindows(item)) : 0.F;
+    const float GROW  = 1.F + 0.45F * PULSE;
+    CHyprColor  DOTCOL = dotColor;
+    DOTCOL.a *= 1.F - 0.4F * PULSE;
 
     // Z12 (user, 2026-08-07, overrides X31's measured single dot): one dot per
     // WINDOW. Row one keeps today's exact position and grows outward from the
@@ -2364,12 +2371,14 @@ void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& it
         const float SPAN = sc<float>(n) * SIZE + sc<float>(n - 1) * GAP;
         for (size_t i = 0; i < n; ++i) {
             CRectPassElement::SRectData dot;
-            dot.box   = CBox{std::round(CX - SPAN / 2.F + sc<float>(i) * (SIZE + GAP)), std::round(top), std::round(SIZE), std::round(SIZE)};
+            const float                 D   = SIZE * GROW;
+            const float                 MIDX = CX - SPAN / 2.F + sc<float>(i) * (SIZE + GAP) + SIZE / 2.F, MIDY = top + SIZE / 2.F;
+            dot.box   = CBox{std::round(MIDX - D / 2.F), std::round(MIDY - D / 2.F), std::round(D), std::round(D)};
             dot.color = DOTCOL;
             // `border-radius: 5px` on a 5px box: a circle. Truncated, not
             // rounded -- a radius even slightly OVER half the box collapses the
             // circle into a diamond (seen on screen 2026-08-03).
-            dot.round         = sc<int>(SIZE / 2.F);
+            dot.round         = sc<int>(D / 2.F);
             dot.roundingPower = 2.F;
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(dot));
         }
@@ -2620,6 +2629,9 @@ void renderWindowPeek(PHLMONITOR monitor, float alpha) {
         // the same path as the window (FlightBlur, the minimize blur's samples
         // and half-duration fade). No size gate -- it follows the window all the
         // way into the icon and fades out with it.
+        // A genie flight is no box for a label to ride (Genie.hpp).
+        if (FLIGHT && Genie::enabled())
+            continue;
         if (FLIGHT) {
             const CBox& B     = FLIGHT->box;
             const CBox  PLATE = OverviewRender::labelPillBox(monitor, TEXT, 0.0, 0.0, S);
@@ -5808,6 +5820,8 @@ const char* needsFramesReason(PHLMONITOR monitor, const SLayout& layout, const S
         return "flight";
     // The pill's and the preview rings' border fade (BorderFade.hpp): a
     // pointer resting on the pill emits no motion to repaint it.
+    if (CpuPulse::anyBusy())
+        return "cpu-pulse";
     if (BorderFade::animatingOn(monitor))
         return "border-fade";
     if (panelNeedsFramesOn(monitor))

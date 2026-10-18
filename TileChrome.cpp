@@ -23,6 +23,9 @@
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #undef private
+#include <hyprland/src/render/gl/GLTexture.hpp>
+
+#include <cairo/cairo.h>
 
 namespace ScrollOverview::TileChrome {
 
@@ -95,7 +98,45 @@ constexpr float CLOSE_SLOP  = 8.F;
 constexpr float CAPTION_GAP = 6.F;
 constexpr float CAPTION_H   = 40.F;
 
-constexpr const char* CLOSE_ICON = "window-close-symbolic";
+// THE X IS DRAWN HERE, not taken from the icon theme (user, 2026-10-17: the
+// grid's close button was a blank light disc). window-close-symbolic is light
+// artwork in a light-on-dark theme, and this pass cannot recolour a texture, so
+// on the light disc the X vanished. Two round-capped strokes in the host's
+// button grey, rasterised once per pixel size.
+constexpr float CLOSE_X_REACH  = 0.30F; // each stroke spans 0.30 .. 0.70 of the glyph box
+constexpr float CLOSE_X_STROKE = 0.11F; // of the glyph box
+constexpr float CLOSE_X_RGB[3] = {63.F / 255.F, 63.F / 255.F, 70.F / 255.F};
+
+static SP<Render::ITexture> closeGlyph(int px) {
+    static std::unordered_map<int, SP<Render::ITexture>> s_cache;
+    if (px < 4)
+        return nullptr;
+    if (const auto IT = s_cache.find(px); IT != s_cache.end())
+        return IT->second;
+    if (s_cache.size() > 16)
+        s_cache.clear();
+
+    cairo_surface_t* const SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
+    cairo_t* const         CR   = cairo_create(SURF);
+    cairo_set_antialias(CR, CAIRO_ANTIALIAS_BEST);
+    cairo_set_line_cap(CR, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_width(CR, std::max(1.5, px * double{CLOSE_X_STROKE}));
+    cairo_set_source_rgba(CR, CLOSE_X_RGB[0], CLOSE_X_RGB[1], CLOSE_X_RGB[2], 1.0);
+    const double LO = px * double{CLOSE_X_REACH}, HI = px * (1.0 - double{CLOSE_X_REACH});
+    cairo_move_to(CR, LO, LO);
+    cairo_line_to(CR, HI, HI);
+    cairo_move_to(CR, HI, LO);
+    cairo_line_to(CR, LO, HI);
+    cairo_stroke(CR);
+    cairo_surface_flush(SURF);
+
+    SP<Render::ITexture> tex = makeShared<Render::GL::CGLTexture>(DRM_FORMAT_ARGB8888, cairo_image_surface_get_data(SURF),
+                                                                  sc<uint32_t>(cairo_image_surface_get_stride(SURF)), Vector2D{sc<double>(px), sc<double>(px)});
+    cairo_destroy(CR);
+    cairo_surface_destroy(SURF);
+    s_cache[px] = tex;
+    return tex;
+}
 
 struct SEase {
     float           from  = 0.F;
@@ -544,8 +585,8 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
     disc.roundingPower = 2.F;
     g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(disc));
 
-    if (const auto GLYPH = OverviewRender::appIcon(CLOSE_ICON)) {
-        const float SIDE = sc<float>(BUTTON.w) * CLOSE_GLYPH;
+    const float SIDE = std::round(sc<float>(BUTTON.w) * CLOSE_GLYPH);
+    if (const auto GLYPH = closeGlyph(sc<int>(SIDE))) {
 
         CTexPassElement::SRenderData x;
         x.tex = GLYPH;

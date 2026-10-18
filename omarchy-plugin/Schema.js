@@ -129,7 +129,15 @@ var sections = [
           desc: "Icons lean toward the pointer in 3D, and spring flat when it leaves." },
         { type: "toggle", key: P + "dock:press_tilt", label: "Press tilt",
           desc: "A pressed icon leans in toward the click, with light on its face." },
-        { type: "toggle", key: P + "dock:dance_urgent", label: "Wiggle urgent apps" }
+        { type: "toggle", key: P + "dock:dance_urgent", label: "Wiggle urgent apps" },
+        { type: "toggle", key: P + "dock:stack_fan_straight", label: "Straight stack fan",
+          desc: "Stacks fan their files out in a straight column instead of an arc." },
+        { type: "toggle", key: P + "dock:minimize_genie", label: "Genie minimize", when: "broken", broken: true,
+          desc: "Windows pour into their dock icon when minimized, and back out when restored. Not working yet, so it stays off." },
+        { type: "toggle", key: P + "dock:cpu_pulse", label: "Pulse busy apps",
+          desc: "A running app's dots pulse while it is using a lot of CPU, counting the processes it started." },
+        { type: "slider", key: P + "dock:cpu_pulse_threshold", label: "Busy above", min: 5, max: 800, step: 5, unit: "%", when: "cpuPulseOn",
+          desc: "CPU use, in percent of one core, that counts as busy. 200 is two cores flat out." }
       ]},
       { title: "Frost", rows: [
         { type: "slider", key: P + "dock:blur_size", label: "Blur size", min: -1, max: 32, step: 1, fmt: "follow",

@@ -902,6 +902,14 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CStringValue>(KEY("dock:stack_motion"),
                                     "dock stacks: the fan's motion -- serpantinum (OutQuint travel, OutBack pop, 40 ms stagger) or extension (dock-stacks' 140 ms ease-out-quad)",
                                     Hyprlang::STRING{"serpantinum"}));
+    addKey(makeShared<CBoolValue>(KEY("dock:minimize_genie"),
+                                  "dock: BROKEN, forced off -- windows minimize into their icon (and restore out of it) with a genie warp instead of flying there as a shrinking box", false));
+    addKey(makeShared<CBoolValue>(KEY("dock:cpu_pulse"),
+                                  "dock: a running app's dots pulse while it (with its child processes) uses more CPU than dock:cpu_pulse_threshold", false));
+    addKey(makeShared<CIntValue>(KEY("dock:cpu_pulse_threshold"), "dock: CPU use, in % of one core, above which an app's dots pulse (200 = two cores)", 60,
+                                 SIntValueOptions{.min = 5, .max = 800}));
+    addKey(makeShared<CBoolValue>(KEY("dock:stack_fan_straight"),
+                                  "dock stacks: fan the files out in a straight column instead of the arc (no sideways drift, no tilt)", false));
     addKey(makeShared<CBoolValue>(KEY("dock:builtin_icons"),
                                   "dock stacks: hyprdrive's own empty-stack artwork (false = the folder icon)", true));
     addKey(makeShared<CStringValue>(KEY("dock:stack_icon_theme"),

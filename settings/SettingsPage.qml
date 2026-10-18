@@ -292,6 +292,8 @@ Item {
     case "dockOn": return kb("plugin:hyprdrive:dock:enabled")
     case "mountsOn": return kb("plugin:hyprdrive:dock:enabled") && kb("plugin:hyprdrive:dock:show_mounts")
     case "springOn": return kb("plugin:hyprdrive:drag:spring_dock") || kb("plugin:hyprdrive:drag:spring_edges")
+    case "cpuPulseOn": return kb("plugin:hyprdrive:dock:cpu_pulse")
+    case "broken": return false // a feature that is in but not working: shown, never switchable
     case "hotCornerOn": return kb("plugin:hyprdrive:hot_corner:enabled")
     case "swapOn": return kb("plugin:hyprdrive:drag:hold_to_swap")
     case "isolateOvApplies": return !kb("plugin:hyprdrive:dock:isolate_workspaces")
@@ -1424,16 +1426,45 @@ Item {
       anchors.rightMargin: ui.space(20)
       anchors.verticalCenter: parent.verticalCenter
       spacing: ui.space(3)
-      opacity: sr.live ? 1 : 0.45
+      // A broken row (Schema `broken`) is not faded with the rest: its red
+      // label has to read. Its control stays disabled (`when: "broken"`).
+      opacity: sr.live || !!sr.row.broken ? 1 : 0.45
       Behavior on opacity { NumberAnimation { duration: root.calm } }
-      Text {
-        textFormat: Text.PlainText
+      Row {
         width: parent.width
-        text: sr.row.label || ""
-        color: root.fg
-        font.family: root.fontFamily
-        font.pixelSize: ui.font.body
-        elide: Text.ElideRight
+        spacing: ui.space(8)
+        Text {
+          id: rowTitle
+          textFormat: Text.PlainText
+          width: Math.min(implicitWidth, parent.width - (brokenTag.visible ? brokenTag.width + parent.spacing : 0))
+          text: sr.row.label || ""
+          color: root.fg
+          font.family: root.fontFamily
+          font.pixelSize: ui.font.body
+          elide: Text.ElideRight
+        }
+        // In, but not working: says so in red beside its name (Schema `broken`).
+        Rectangle {
+          id: brokenTag
+          visible: !!sr.row.broken
+          anchors.verticalCenter: rowTitle.verticalCenter
+          width: brokenText.implicitWidth + ui.space(12)
+          height: ui.space(18)
+          radius: ui.space(9)
+          color: Qt.rgba(0.89, 0.25, 0.25, 0.16)
+          border.width: 1
+          border.color: Qt.rgba(0.89, 0.25, 0.25, 0.55)
+          Text {
+            id: brokenText
+            textFormat: Text.PlainText
+            anchors.centerIn: parent
+            text: "Broken"
+            color: "#e5484d"
+            font.family: root.fontFamily
+            font.pixelSize: ui.font.caption
+            font.weight: Font.DemiBold
+          }
+        }
       }
       // A keybind row: the chords bound to it right now, as keycaps.
       Flow {

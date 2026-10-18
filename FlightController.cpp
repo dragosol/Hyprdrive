@@ -32,6 +32,7 @@
 #include "Config.hpp"
 #include "Dock.hpp"
 #include "FlightBlur.hpp"
+#include "Genie.hpp"
 #include "ConfigureHold.hpp"
 #include "IOverview.hpp"
 #include "Minimize.hpp"
@@ -960,6 +961,14 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             // The minimize blur setting (strength and fade, FlightBlur::shape), by the flight's own clock.
             const CBox PREVBOX = FlightBlur::shape(FlightBlur::ESite::MINIMIZE, lerpBox(START, it->from, it->lastE.value_or(E)), box, T);
             it->lastE          = E;
+            // GENIE (Genie.hpp): the window stands where it lands, full size and
+            // opaque, and the genie pours it out of the icon over it.
+            const bool GENIE = Genie::enabled();
+            if (GENIE) {
+                Genie::driveReal(monitor, WINDOW, it->from, START, 1.F - E);
+                box   = it->from;
+                alpha = 1.F;
+            }
 
             WINDOW->m_realPosition->m_Value = Vector2D{box.x / SCALE + monitor->m_position.x, box.y / SCALE + monitor->m_position.y};
             WINDOW->m_realSize->m_Value     = Vector2D{std::max(4.0, box.width / SCALE), std::max(4.0, box.height / SCALE)};
@@ -976,8 +985,10 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             // landing (landingSanity) and on a reversal.
             WINDOW->m_animatingIn = true;
             WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(alpha);
-            // Motion blur rides the real window's next draw (FlightBlur.hpp).
-            FlightBlur::recordDriven(monitor, WINDOW, PREVBOX, box);
+            // Motion blur rides the real window's next draw (FlightBlur.hpp) --
+            // not under a genie, whose window does not move.
+            if (!GENIE)
+                FlightBlur::recordDriven(monitor, WINDOW, PREVBOX, box);
 
             if (it->phase == EFlightPhase::Armed)
                 transition(*it, EFlightPhase::Flying, "first-frame");
@@ -1012,6 +1023,18 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             zdbg("draw r=%d box=%f,%f %fx%f a=%f bc=%02x%02x%02x\n", (int)it->isRestore(), box.x, box.y, box.width, box.height, alpha, GC.empty() ? 0 : sc<int>(GC[0].r * 255.F),
                  GC.empty() ? 0 : sc<int>(GC[0].g * 255.F), GC.empty() ? 0 : sc<int>(GC[0].b * 255.F));
         }
+        // GENIE (Genie.hpp): the proxy is drawn whole at the window's own box
+        // and poured into the icon (or out of it, restoring) by the genie.
+        if (Genie::enabled()) {
+            const CBox  WINBOX  = it->isRestore() ? it->from : it->start.value_or(it->from);
+            const CBox  ICONBOX = it->isRestore() ? it->start.value_or(ITEM->iconBox) : ITEM->iconBox;
+            const float G       = it->isRestore() ? 1.F - E : E;
+            // The surface alone: a border would be cut into the strips' edges.
+            Genie::drawProxy(monitor, WINDOW, WINBOX, ICONBOX, G, [&] { ScrollOverview::Dock::drawFlightSurface(monitor, WINDOW, WINBOX, 1.F, now, false); });
+            ++it;
+            continue;
+        }
+
         // Z16 (user): "shadows and the thin window outline do not stay on the
         // window as it maximizes". The proxy is a bare surface; a real window
         // carries Hyprland's shadow and border. Same shadow pass the overview
@@ -1038,6 +1061,9 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             drawProxy(ownsPass);
         ++it;
     }
+
+    // A landed or aborted genie must not leave its window drawn through the genie.
+    Genie::sweep([](const PHLWINDOW& w) { return find(w) != g_flights.end(); });
 
     // A landed / aborted / reversed-into-proxy flight must not leave its window
     // rendering through the blur transformer.
@@ -1093,6 +1119,8 @@ void abortAll(const std::string& reason) {
     // next, and this runs between frames with no next one promised.
     while (!g_flights.empty())
         completeAndErase(g_flights.begin(), nullptr, reason.c_str());
+    // No frame is promised to sweep them (Genie::sweep).
+    Genie::shutdown();
 }
 
 }

@@ -360,9 +360,23 @@ namespace {
     constexpr float FAN_ICON     = 40.F;  // px, unscaled
     constexpr float FAN_ROW_H    = 52.F;
     constexpr float FAN_STEP     = 56.F;  // row height + 4 px gap, the reference's 64/68 ratio
-    constexpr float FAN_SHIFT_K  = 2.5F;  // xShift = K * i^POW, straight from the reference
-    constexpr float FAN_SHIFT_P  = 1.8F;
-    constexpr float FAN_TILT_DEG = 2.5F;  // per row, clockwise
+    constexpr float FAN_ARC_SHIFT_K  = 2.5F; // xShift = K * i^POW, straight from the reference
+    constexpr float FAN_SHIFT_P      = 1.8F;
+    constexpr float FAN_ARC_TILT_DEG = 2.5F; // per row, clockwise
+    // dock:stack_fan_straight (Reddit, r/hyprland: "ability to change stacks
+    // from arched to straight"): no sideways drift and no tilt, so the rows
+    // stand in a straight column over the icon. Read through a handle -- these
+    // run per row per frame.
+    bool fanStraight() {
+        static auto& VAL = ScrollOverview::Config::valueRef<Hyprlang::INT>("plugin:hyprdrive:dock:stack_fan_straight");
+        return *VAL != 0;
+    }
+    float fanShiftK() {
+        return fanStraight() ? 0.F : FAN_ARC_SHIFT_K;
+    }
+    float fanTiltDeg() {
+        return fanStraight() ? 0.F : FAN_ARC_TILT_DEG;
+    }
     constexpr float FAN_PAD_X    = 10.F;
     constexpr float FAN_RADIUS   = 10.F;
     constexpr float FAN_GAP      = 10.F;  // between the dock pill and the first row
@@ -875,7 +889,7 @@ namespace {
             // paint flies its icon on from there.
             const float  G  = std::max(U, 0.F);
             const size_t SI = MORE ? SLOTS : sc<size_t>(std::clamp(std::round(G), 0.F, TOPSLOT)); // its slot, for the opening's stagger and its throw
-            const float  SHIFT = FAN_SHIFT_K * std::pow(G, FAN_SHIFT_P) * SCALE;
+            const float  SHIFT = fanShiftK() * std::pow(G, FAN_SHIFT_P) * SCALE;
 
             // The row's own eased progress on the ONE timeline (fanRowEase):
             // the stagger and the reversal both come from there.
@@ -940,7 +954,7 @@ namespace {
             }
             // ...and it turns as it flies: from up to 40 degrees off its final
             // tilt, settling onto it. A scrolling row turns with its slot.
-            const float TILT  = FAN_TILT_DEG * G * 3.14159265F / 180.F;
+            const float TILT  = fanTiltDeg() * G * 3.14159265F / 180.F;
             const float THROW = fanMotion().serp ? rowJitter(p, SI, 3) * 40.F * 3.14159265F / 180.F : 0.F;
             const float RROT  = TILT + THROW * (1.F - EZ.spin);
             // Where this row's label ends up once settled and turned: its far
@@ -976,8 +990,8 @@ namespace {
         if (SCROLLS) {
             const double ICONW = FAN_ICON * SCALE;
             for (size_t k = 0; k <= SLOTS; ++k) { // the "more" row's slot too
-                const double TILT  = FAN_TILT_DEG * sc<double>(k) * 3.14159265 / 180.0;
-                const double C1X   = CX + FAN_SHIFT_K * std::pow(sc<double>(k), FAN_SHIFT_P) * SCALE;
+                const double TILT  = fanTiltDeg() * sc<double>(k) * 3.14159265 / 180.0;
+                const double C1X   = CX + fanShiftK() * std::pow(sc<double>(k), FAN_SHIFT_P) * SCALE;
                 const double REACH = (ICONW / 2.0 + 8.0 * SCALE + p.maxLabelW + 20.0 * SCALE) * HOVER_SCALE;
                 minLeft            = std::min(minLeft, C1X - REACH * std::cos(TILT) - FAN_ROW_H * SCALE / 2.0 * std::sin(TILT));
             }
@@ -1177,7 +1191,7 @@ namespace {
     }
 
     // THE FAN'S REAL HEIGHT (2026-09-24: the top rows' labels ran off the
-    // screen). Each row turns about its icon by FAN_TILT_DEG per row, so the
+    // screen). Each row turns about its icon by fanTiltDeg() per row, so the
     // far (left) end of its label rises by width x sin(angle) -- 30 degrees by
     // the 12th row. How many rows, in order, fit under `roomL` (logical px
     // above the fan's base) when each label is as long as its name makes it?
@@ -1190,7 +1204,7 @@ namespace {
         constexpr float MARGIN = 8.F;
         size_t          n      = 0;
         for (size_t i = 0; i < names.size(); ++i) {
-            const float TILT = FAN_TILT_DEG * sc<float>(i) * 3.14159265F / 180.F;
+            const float TILT = fanTiltDeg() * sc<float>(i) * 3.14159265F / 180.F;
             const float UP   = FAN_STEP * sc<float>(i + 1) + labelSpanL(names[i]) * std::sin(TILT) + FAN_ROW_H * 0.15F;
             if (UP + MARGIN > roomL)
                 break;
@@ -2821,7 +2835,7 @@ namespace ScrollOverview::Stacks {
             const auto&  P  = *g_popup;
             const size_t SL = fanRows(P);
             const auto   centre = [&](float g) {
-                return Vector2D{FANCX + FAN_SHIFT_K * std::pow(std::max(g, 0.F), FAN_SHIFT_P) * SCALE, FANBASE - FAN_STEP * SCALE * (g + 1.F) + FAN_ROW_H * SCALE / 2.F};
+                return Vector2D{FANCX + fanShiftK() * std::pow(std::max(g, 0.F), FAN_SHIFT_P) * SCALE, FANBASE - FAN_STEP * SCALE * (g + 1.F) + FAN_ROW_H * SCALE / 2.F};
             };
             std::vector<Vector2D> pts;
             const float           G0 = -0.3F, G1 = sc<float>(SL) - 1.F + 0.3F;

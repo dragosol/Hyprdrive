@@ -80,6 +80,8 @@ using namespace Hyprutils::String;
 #include "Motion.hpp"
 #include "ConfigureHold.hpp"
 #include "SizeAck.hpp"
+#include "CpuPulse.hpp"
+#include "Genie.hpp"
 #include "DockRoom.hpp"
 #include "Scratchpad.hpp"
 #include <hyprland/src/layout/target/Target.hpp>
@@ -2501,6 +2503,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // The "mosaic" layout (Mosaic.hpp). Registered whether or not the panel has
     // enabled it: a desktop whose saved layout is mosaic must find it at login.
     ScrollOverview::Mosaic::registerLayout(SCROLLOVERVIEW_HANDLE);
+    // dock:cpu_pulse's sampler (CpuPulse.hpp): idle unless the option is on.
+    ScrollOverview::CpuPulse::init();
     // The animation:curve preset onto Hyprland's named house beziers -- only
     // now that the key exists (Config.hpp: an earlier read aborts Hyprland).
     ScrollOverview::Motion::sync();
@@ -2669,6 +2673,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // A flying window may hold the flight's blur transformer; its destructor is
     // this plugin's code, so it goes before the dlclose (Hyprland's own exit too).
     ScrollOverview::FlightBlur::shutdown();
+    // No window may keep a transformer whose code is about to be unmapped.
+    ScrollOverview::Genie::shutdown();
     ScrollOverview::FlightBlur::detachAll();
     OverviewRender::stopIconWarmer();
     // Nothing may stay held once the hook goes with the plugin.
@@ -2699,6 +2705,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // Before the gesture teardown below: a swipe the plugin is driving ends
     // through it, and the spring timer must not fire into unloaded code.
     ScrollOverview::Spring::shutdown();
+    ScrollOverview::CpuPulse::shutdown();
     ScrollOverview::HotCorner::shutdown();
     ScrollOverview::DesktopSwitch::shutdown();
     ScrollOverview::DebugGesture::shutdown();
