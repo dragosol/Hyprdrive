@@ -17,6 +17,7 @@
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/state/ViewState.hpp>
+#include <hyprland/src/desktop/state/ViewHitTester.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/layout/supplementary/DragController.hpp>
@@ -1079,10 +1080,23 @@ namespace ScrollOverview::Mosaic {
         // reaches past the window into the gap, where the hit test finds no
         // window -- so every window of the visible desktops is asked, the
         // focused one first (floating windows overlap).
+        //
+        // A zone COVERED by a floating window is not a zone (user, 2026-10-19:
+        // "floating windows over tiled/scrolling/mosaic windows don't let me
+        // click in the floating window"). The zones are geometry, not hit tests,
+        // so a tiled window's edge and its reach into the gap went on claiming
+        // presses inside a floating window drawn over them. The window really
+        // under the pointer, border grab area included, decides: a floating one
+        // that is not `w` hides w's zone, and gets its own corners when asked.
         std::pair<PHLWINDOW, Layout::eRectCorner> cornerTarget(const Vector2D& p, bool superHeld) {
-            const auto TRY = [&](const PHLWINDOW& w) -> Layout::eRectCorner {
+            const auto TOP =
+                Desktop::viewState()->hitTest().windowAt(p, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+            const bool TOPFLOATS = TOP && TOP->layoutTarget() && TOP->layoutTarget()->floating();
+            const auto TRY       = [&](const PHLWINDOW& w) -> Layout::eRectCorner {
                 if (!w || !w->m_isMapped || w->isHidden() || !w->m_workspace || !w->m_workspace->isVisible() || Fullscreen::controller()->isFullscreen(w) ||
                     (w->m_isX11 && w->isX11OverrideRedirect()) || !w->layoutTarget())
+                    return Layout::CORNER_NONE;
+                if (TOPFLOATS && TOP != w)
                     return Layout::CORNER_NONE;
                 // Without Super only a TILED window of a mosaic desktop has corners.
                 if (!superHeld && (w->layoutTarget()->floating() || !onMosaic(w)))
