@@ -3588,6 +3588,24 @@ void CScrollOverview::syncSelectionToViewport() {
         Desktop::focusState()->fullWindowFocus(nullptr, Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
 }
 
+// The FULLSCREEN window covering a TILED `window` on its desktop, if any (user,
+// 2026-10-19: Zen picked under a fullscreen Overwatch). Hyprland draws only
+// floating windows over a fullscreen one, so focusing `window` takes the cover
+// out of fullscreen (misc:on_focus_under_fullscreen 1/2) -- and a Wine game puts
+// itself straight back 15 ms later, steals the focus with it, and then ignores
+// the mouse. Browsing leaves such a window a SELECTION, and picking it (close())
+// minimizes the cover first -- still fullscreen, back from the dock as it was.
+// Mode 0 means "the cover keeps the focus", which Hyprland does without a fight.
+static PHLWINDOW fullscreenCoverOf(const PHLWINDOW& window) {
+    if (!window || window->m_isFloating || !window->m_workspace || ScrollOverview::Config::getValue<int>("misc:on_focus_under_fullscreen") == 0)
+        return nullptr;
+    const auto COVER = Fullscreen::controller()->getFullscreenWindow(window->m_workspace);
+    if (!COVER || COVER == window || Fullscreen::controller()->getFullscreenModes(COVER).internal != Fullscreen::FSMODE_FULLSCREEN ||
+        ScrollOverview::Minimize::isMinimized(COVER))
+        return nullptr;
+    return COVER;
+}
+
 void CScrollOverview::syncFocusedSelection() {
     const auto window = getOverviewWindowToShow(closeOnWindow.lock());
     if (!shouldShowOverviewWindow(window))
@@ -3619,6 +3637,10 @@ void CScrollOverview::syncFocusedSelection() {
     // or a selection is picked (close()).
     if (const auto FOCUSED = Desktop::focusState()->window();
         FOCUSED && pMonitor && pMonitor->m_activeSpecialWorkspace && FOCUSED->m_workspace == pMonitor->m_activeSpecialWorkspace)
+        return;
+
+    // ...nor take a fullscreen window out of fullscreen (fullscreenCoverOf).
+    if (fullscreenCoverOf(window))
         return;
 
     const auto PREVIOUSWORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : PHLWORKSPACE{};
@@ -9848,6 +9870,11 @@ void CScrollOverview::close() {
     // a fourth answer.
     if (closeOnWindow && ScrollOverview::Minimize::isMinimized(closeOnWindow.lock()))
         ScrollOverview::Minimize::restore(closeOnWindow.lock());
+
+    // The pick is a tiled window a fullscreen one covers: the cover goes to the
+    // dock, still fullscreen, before the pick is focused (fullscreenCoverOf).
+    if (const auto COVER = fullscreenCoverOf(closeOnWindow.lock()))
+        ScrollOverview::Minimize::minimize(COVER, false);
 
     // X43: focus and stacking are two different things. fullWindowFocus() only
     // makes a window active -- it never restacks -- so a selected floating

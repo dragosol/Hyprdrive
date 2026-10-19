@@ -744,6 +744,77 @@ namespace AppSearch {
                 return false;
             return want.size() == STEM.size() || want[STEM.size()] == '-';
         }
+
+        // PROTON GAMES (user, 2026-10-19: Overwatch in the dock as an unknown
+        // icon named "steam_app_2357570"). Steam runs a Proton game as X11 class
+        // `steam_app_<appid>`, and the shortcut it writes says nothing of that
+        // class -- no StartupWMClass, just `Exec=steam steam://rungameid/<appid>`
+        // and `Icon=steam_icon_<appid>`. The app id is the one link between them.
+        std::string steamAppId(const std::string& wmClass) {
+            static constexpr std::string_view PREFIX = "steam_app_";
+            if (!wmClass.starts_with(PREFIX) || wmClass.size() == PREFIX.size())
+                return {};
+            const auto ID = wmClass.substr(PREFIX.size());
+            return std::ranges::all_of(ID, [](char c) { return c >= '0' && c <= '9'; }) ? ID : std::string{};
+        }
+
+        bool steamExecLaunches(const std::string& exec, const std::string& appId) {
+            const std::string KEY = "rungameid/" + appId;
+            for (size_t at = exec.find(KEY); at != std::string::npos; at = exec.find(KEY, at + 1)) {
+                const size_t END = at + KEY.size();
+                if (END == exec.size() || !std::isdigit(sc<unsigned char>(exec[END])))
+                    return true; // rungameid/2357570, never rungameid/23575701
+            }
+            return false;
+        }
+
+        // `"key"<tabs>"value"` -- one line of Valve's KeyValues text.
+        std::string vdfValue(const std::string& line, std::string_view key) {
+            const auto K = line.find("\"" + std::string{key} + "\"");
+            if (K == std::string::npos)
+                return {};
+            const auto A = line.find('"', K + key.size() + 2);
+            const auto B = A == std::string::npos ? std::string::npos : line.find('"', A + 1);
+            return B == std::string::npos ? std::string{} : line.substr(A + 1, B - A - 1);
+        }
+
+        // A game with no Steam shortcut: the name its appmanifest gives, from any
+        // Steam library (native, the ~/.steam link, Flatpak, and every
+        // libraryfolders.vdf path). Asked by the dock while it draws, so the
+        // answer is kept -- a miss for 30 s, in case the game is mid-install.
+        std::string steamManifestName(const std::string& appId) {
+            struct SKnown {
+                std::string                           name;
+                std::chrono::steady_clock::time_point at;
+            };
+            static std::unordered_map<std::string, SKnown> known;
+            const auto                                     NOW = std::chrono::steady_clock::now();
+            if (const auto IT = known.find(appId); IT != known.end() && (!IT->second.name.empty() || NOW - IT->second.at < std::chrono::seconds(30)))
+                return IT->second.name;
+
+            std::vector<std::filesystem::path> libraries;
+            if (const char* HOME = std::getenv("HOME"); HOME && *HOME) {
+                for (const std::string_view ROOT : {"/.local/share/Steam", "/.steam/steam", "/.var/app/com.valvesoftware.Steam/.local/share/Steam"}) {
+                    const std::filesystem::path STEAMAPPS = std::filesystem::path{std::string{HOME} + std::string{ROOT}} / "steamapps";
+                    libraries.push_back(STEAMAPPS);
+                    std::ifstream vdf(STEAMAPPS / "libraryfolders.vdf");
+                    for (std::string line; std::getline(vdf, line);)
+                        if (const auto PATH = vdfValue(line, "path"); !PATH.empty())
+                            libraries.push_back(std::filesystem::path{PATH} / "steamapps");
+                }
+            }
+
+            std::string name;
+            for (const auto& LIB : libraries) {
+                std::ifstream acf(LIB / ("appmanifest_" + appId + ".acf"));
+                for (std::string line; name.empty() && std::getline(acf, line);)
+                    name = vdfValue(line, "name");
+                if (!name.empty())
+                    break;
+            }
+            known[appId] = {name, NOW};
+            return name;
+        }
     }
 
     const std::vector<SEntry>& inventory() {
@@ -1295,6 +1366,23 @@ namespace AppSearch {
             }
         }
 
+        // A Proton game: the Steam shortcut that launches its app id. Steam
+        // leaves the old one behind when a game is renamed ("Overwatch 2" next
+        // to "Overwatch", same id), so the NEWEST shortcut file speaks for it.
+        if (const auto APPID = steamAppId(WANT); found == std::string::npos && !APPID.empty()) {
+            std::filesystem::file_time_type newest{};
+            for (size_t i = 0; i < INV.size(); ++i) {
+                if (!steamExecLaunches(INV[i].exec, APPID))
+                    continue;
+                std::error_code ec;
+                const auto      WHEN = std::filesystem::last_write_time(INV[i].path, ec);
+                if (found == std::string::npos || (!ec && WHEN > newest)) {
+                    found  = i;
+                    newest = ec ? newest : WHEN;
+                }
+            }
+        }
+
         // A LOOSER second pass, only when nothing above claimed the class (user,
         // 2026-10-13: LocalSend had no dock icon). Flutter and Electron apps
         // name their window after a reverse-DNS id the desktop file never
@@ -1345,12 +1433,20 @@ namespace AppSearch {
 
     std::string appNameForClass(const std::string& wmClass) {
         const auto IDX = entryIndexForClass(wmClass);
-        return IDX == std::string::npos ? "" : inventory()[IDX].name;
+        if (IDX != std::string::npos)
+            return inventory()[IDX].name;
+        // A Proton game with no Steam shortcut still has a name in its manifest.
+        const auto APPID = steamAppId(lower(wmClass));
+        return APPID.empty() ? "" : steamManifestName(APPID);
     }
 
     std::string iconForClass(const std::string& wmClass) {
         const auto IDX = entryIndexForClass(wmClass);
-        return IDX == std::string::npos ? "" : inventory()[IDX].icon;
+        if (IDX != std::string::npos)
+            return inventory()[IDX].icon;
+        // ...and Steam installs its icon under this name either way.
+        const auto APPID = steamAppId(lower(wmClass));
+        return APPID.empty() ? "" : "steam_icon_" + APPID;
     }
 
     std::string idForClass(const std::string& wmClass) {
