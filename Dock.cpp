@@ -92,6 +92,7 @@
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
+#include <hyprland/src/protocols/PointerConstraints.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/BorderPassElement.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
@@ -2182,6 +2183,16 @@ void updateAutohide(PHLMONITOR monitor, const STally& tally) {
     // no icon to fly to -- the target lookup failed and the flight was dropped
     // on its first frame, which is why it teleported. The dock now comes out for
     // the flight and slides away after it.
+    //
+    // A pointer lock (a game) parks the cursor on its lock point and snaps it
+    // back after every motion. A point low on the screen sits over the pill,
+    // and every pointer rule above read it as "on the dock": closing the
+    // overview onto the game brought the sliding pill straight back out (X77),
+    // the hover hook then took the seat from the game and cancelled its motion,
+    // and the game lost the mouse until focus moved (user, 2026-10-19:
+    // Overwatch). Under a lock only the overlay or a flight hold the dock out.
+    if (pointerHeldByClient())
+        want = false;
     want = want || overlayHoldsDock() || Flight::anyOn(monitor);
 
     if (want == R.shown) {
@@ -2929,6 +2940,18 @@ void restoreDockSeat() {
         surf = WINDOW->wlSurface()->resource();
     if (g_pSeatManager && surf)
         g_pSeatManager->setKeyboardFocus(surf);
+
+    // A LOCKED pointer gets its pointer focus back too. Hyprland's locked path
+    // only warps the cursor to the lock point and returns -- it never enters
+    // the surface again -- and relative motion goes to the pointer focus, so a
+    // game the dock took the seat from stayed deaf to the mouse while its keys
+    // worked (user, 2026-10-19). Anything unlocked needs nothing here: the
+    // next motion enters whatever is under the cursor.
+    if (const auto HLSURF = g_pSeatManager && surf ? Desktop::View::CWLSurface::fromResource(surf) : nullptr;
+        HLSURF && HLSURF->constraint() && HLSURF->constraint()->isActive() && g_pSeatManager->m_state.pointerFocus != surf) {
+        const auto BOX = HLSURF->getSurfaceBoxGlobal();
+        g_pSeatManager->setPointerFocus(surf, BOX.has_value() ? HLSURF->constraint()->logicPositionHint() - BOX->pos() : Vector2D{});
+    }
 }
 
 // Go to a window on the desktop it belongs to. Preview clicks and "show me
@@ -4383,8 +4406,9 @@ void feedPointerMotion(const Vector2D& delta) {
         const auto BOX = MONITOR->logicalBox();
 
         // Pressure does not carry: leave the barrier, or the monitor, and the
-        // push starts again from zero.
-        if (!BOX.containsPoint(POINT) || POINT.y < BOX.y + BOX.h - EDGE_BAND)
+        // push starts again from zero. Nor does a locked pointer press: a game's
+        // mouse pushing down is aiming, not reaching for the dock.
+        if (pointerHeldByClient() || !BOX.containsPoint(POINT) || POINT.y < BOX.y + BOX.h - EDGE_BAND)
             R.pressure = 0.F;
         else
             R.pressure += sc<float>(std::max(0.0, delta.y)); // only DOWNWARD motion presses a bottom edge
@@ -7131,6 +7155,13 @@ void releasePointerFocus() {
         g_dockSeatDoLaterSeq = 0;
     }
     restoreDockSeat();
+}
+
+// isConstrained, not "any active constraint" (HotCorner's test): it is the
+// FOCUSED surface's lock, the one Hyprland enforces on this motion. The
+// overview releases every lock while it is up, so this is false there.
+bool pointerHeldByClient() {
+    return g_pInputManager && g_pInputManager->isConstrained();
 }
 
 // Z2. A CLICK on a preview goes to that window. The panel floats ABOVE the pill,

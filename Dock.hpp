@@ -159,6 +159,11 @@ bool    occupiesPointer(PHLMONITOR monitor, const Vector2D& point);
 void    syncPointerFocus(PHLMONITOR monitor, const Vector2D& point);
 void    releasePointerFocus();
 
+// A window holds an ACTIVE pointer lock or confinement (a game, Moonlight).
+// The cursor is then the window's, parked on the lock's point, and never "on
+// the dock" -- not even when that point lies over the pill.
+bool    pointerHeldByClient();
+
 // X24. A click inside the pill, in the same monitor-local RENDER px as
 // pillContains. An icon min/maxes the app's window on THIS desktop: restore
 // if it is hidden, minimize if it is visible. A window only on another

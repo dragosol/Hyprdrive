@@ -2245,12 +2245,19 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         ScrollOverview::DockDrop::onPointerMove(HIT ? HIT->first : PHLMONITOR{}, HIT ? HIT->second : Vector2D{});
         // A fan item pulled out becomes a real drag (DockDrop::startFileDrag).
         ScrollOverview::Stacks::onPointerMove();
+        // A pointer lock (a game) owns the cursor wherever its lock point sits.
+        // Taking the seat here, or cancelling this motion, skips Hyprland's own
+        // lock code -- the game lost the mouse whenever its lock point lay over
+        // the pill (Dock::pointerHeldByClient, user 2026-10-19).
+        const bool LOCKED = ScrollOverview::Dock::pointerHeldByClient();
         // Mosaic's corner resize: the resize cursor over a grabbable corner.
-        ScrollOverview::Mosaic::onMove(!HIT || ScrollOverview::Dock::occupiesPointer(HIT->first, HIT->second) || g_pSessionLockManager->isSessionLocked());
+        ScrollOverview::Mosaic::onMove(!HIT || LOCKED || ScrollOverview::Dock::occupiesPointer(HIT->first, HIT->second) || g_pSessionLockManager->isSessionLocked());
 
-        if (!HIT) {
+        if (!HIT || LOCKED) {
             ScrollOverview::Dock::releasePointerFocus();
             setDockCursor(false);
+            if (HIT)
+                ScrollOverview::Dock::damageIfChanged(HIT->first); // a pill that is out slides away
             return;
         }
         const auto& [MONITOR, LOCAL] = *HIT;
@@ -2392,7 +2399,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             return;
 
         const auto HIT = monitorUnderCursor();
-        if (!HIT)
+        if (!HIT || ScrollOverview::Dock::pointerHeldByClient()) // a game's wheel is the game's
             return;
         const auto& [MONITOR, LOCAL] = *HIT;
 
