@@ -79,6 +79,7 @@ using namespace Hyprutils::String;
 #include "FlightBlur.hpp"
 #include "Motion.hpp"
 #include "ConfigureHold.hpp"
+#include "XGeometry.hpp"
 #include "SizeAck.hpp"
 #include "CpuPulse.hpp"
 #include "Genie.hpp"
@@ -227,6 +228,7 @@ static void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e) {
         return;
     rc<origOnMouseMoved>(g_pScrollMouseMovedHook->m_original)(thisptr, e);
     ScrollOverview::Dock::feedPointerMotion(e.delta);
+    ScrollOverview::XGeometry::check();
 }
 
 // The click gestures need to know a press is the TOUCHPAD's while they judge
@@ -2686,6 +2688,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     OverviewRender::stopIconWarmer();
     // Nothing may stay held once the hook goes with the plugin.
     ScrollOverview::ConfigureHold::flush();
+    ScrollOverview::XGeometry::shutdown();
     ScrollOverview::DockRoom::shutdown();
     ScrollOverview::Dock::releasePointerFocus();
     // Outlives every overview on purpose (Window.cpp), so it is freed here.

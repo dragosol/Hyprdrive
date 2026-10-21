@@ -22,7 +22,7 @@ CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build \
 # fontconfig: Fonts.cpp asks it which family "monospace" is and whether an icon
 # font covers the UI glyphs. Hyprland's pango already loads it; linking it
 # names the dependency instead of leaning on the host's.
-LDLIBS   := $(shell pkg-config --libs libsystemd gio-2.0 gio-unix-2.0 fontconfig)
+LDLIBS   := $(shell pkg-config --libs libsystemd gio-2.0 gio-unix-2.0 fontconfig xcb)
 endif
 
 ifeq ($(CXX),g++)
