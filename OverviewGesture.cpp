@@ -77,7 +77,8 @@ void COverviewGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
         // Super-tap and the dock button reset the search session; swipe-open
         // was the remaining door, so a query survived close and came back.
         resetSearchSession();
-        SearchProviders::warm();
+        // No SearchProviders::warm() here: see X54 in main.cpp. The first
+        // keystroke starts cold providers; an open never launches GTK apps.
         OmarchySearch::init();
 
         for (const auto& MONITOR : State::monitorState()->monitors()) {

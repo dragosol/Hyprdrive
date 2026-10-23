@@ -609,15 +609,18 @@ static SDispatchResult onOverviewDispatcher(std::string arg) {
         Prof::pending = true;
     }
 
-    // X54. Search providers are D-Bus activated and go cold again after well
-    // under a minute of idle, so without this the first keystroke waits on a
-    // GTK app starting: median settle 1085ms cold vs 342ms warmed (9 samples
-    // each, 45s idle between). Launching them here overlaps the open animation
-    // and the reach for the keyboard. Costs a respawn per open-after-idle;
-    // that is the price of the results being up when the user looks at them.
-    // Off Omarchy warm() is a no-op: it would spawn every GNOME app that ships
-    // a provider (SearchProviders.hpp, setActivation).
-    SearchProviders::warm();
+    // X54, reversed. Search providers are D-Bus activated and go cold again
+    // after well under a minute of idle. Warming them here (StartServiceByName
+    // on every provider) cut a cold first search from ~1085ms to ~342ms, but
+    // it cold-started Nautilus, GNOME Software, gvfs, the portal and Sushi on
+    // EVERY open -- most of which never search -- and did it during the open
+    // animation. On a 16 GB laptop under memory pressure each of those GTK
+    // starts allocates GPU buffers through compaction and stalled the
+    // compositor 0.3-1.4 s (measured 2026-10-23). The first keystroke's own
+    // GetInitialResultSet auto-starts a cold provider instead: app rows are
+    // in-memory and stay instant, provider rows land when the provider is up.
+    // Off Omarchy nothing is auto-started at all (SearchProviders.hpp,
+    // setActivation): only providers that are already running answer.
     OmarchySearch::init();
 
     for (const auto& monitor : MONITORS) {
