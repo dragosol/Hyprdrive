@@ -1,3 +1,4 @@
+#include <cmath>
 #include "Config.hpp"
 #include "FlightBlur.hpp"
 
@@ -1406,13 +1407,48 @@ CHyprColor themeSelection() {
     return highlightColor().modifyA(0.35F);
 }
 
+// WCAG contrast between two opaque colours (1 = identical, 21 = black/white).
+static float contrastRatio(const CHyprColor& a, const CHyprColor& b) {
+    const auto LIN = [](float c) { return c <= 0.04045F ? c / 12.92F : std::pow((c + 0.055F) / 1.055F, 2.4F); };
+    const auto L   = [&](const CHyprColor& c) { return (0.2126F * LIN(c.r)) + (0.7152F * LIN(c.g)) + (0.0722F * LIN(c.b)); };
+    const float LA = L(a), LB = L(b);
+    return (std::max(LA, LB) + 0.05F) / (std::min(LA, LB) + 0.05F);
+}
+
+// THE SELECTED ROW HAS TO STAND OUT (user, 2026-10-24: "the search results
+// selection ... is nearly indistinguishable from the search results
+// background"). A theme's `selection` is made for selected TEXT -- bright text
+// on it says what is selected -- so it is often a shade off the background
+// (Omarchy's grey themes: #343d41 on #101315, 1.7:1). It was taken whenever its
+// LUMA differed by 0.10; now it must reach SELECTED_MIN contrast against the
+// plate, which is translucent over blur on screen and so reads weaker still.
+// Short of that, the accent is mixed into the plate until the mix does; a theme
+// whose accent is itself near the plate gets a foreground wash.
+static constexpr float SELECTED_MIN = 1.9F;
+
 CHyprColor themeSelectedFill() {
     const auto BG  = plateBackground();
     const auto SEL = themeSelection();
-    if (lumaDelta(SEL, BG) >= 0.10F)
+    if (contrastRatio(SEL, BG) >= SELECTED_MIN)
         return SEL.modifyA(0.92F);
+    const auto ACCENT = themeAccent();
+    for (const float T : {0.45F, 0.6F, 0.75F, 0.9F})
+        if (const auto MIX = mixColor(BG, ACCENT, T); contrastRatio(MIX, BG) >= SELECTED_MIN)
+            return MIX.modifyA(0.92F);
     const auto FG = themeForeground();
-    return CHyprColor{FG.r, FG.g, FG.b, 0.18F};
+    return CHyprColor{FG.r, FG.g, FG.b, 0.26F};
+}
+
+// A ring around the selected row when its fill alone is quiet (under 3:1
+// against the plate): the accent, or whichever of accent and foreground reads
+// on the plate. Alpha 0 = no ring.
+CHyprColor themeSelectedRing() {
+    const auto BG   = plateBackground();
+    const auto FILL = themeSelectedFill();
+    const auto SOLID = FILL.a >= 0.6F ? FILL.modifyA(1.F) : mixColor(BG, FILL.modifyA(1.F), FILL.a);
+    if (contrastRatio(SOLID, BG) >= 3.F)
+        return CHyprColor{0.F, 0.F, 0.F, 0.F};
+    return readableOn(BG, {themeAccent(), themeForeground()}).modifyA(0.9F);
 }
 
 CHyprColor themeSelectedText() {

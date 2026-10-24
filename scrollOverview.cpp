@@ -7604,10 +7604,25 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
             if (E.selected) {
                 CRectPassElement::SRectData sel;
                 sel.box           = ROW;
-                sel.color         = ACCENT.modifyA(0.22F * FADE);
+                // The same selected-row fill (and ring) as the search results:
+                // the accent at 22% vanished on themes with a grey accent.
+                const auto SELFILL = ScrollOverview::Config::themeSelectedFill();
+                sel.color         = SELFILL.modifyA(SELFILL.a * FADE);
                 sel.round         = roundFor(ROW);
                 sel.roundingPower = POWER;
                 g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(sel));
+                // A quiet fill (a theme whose colours sit close together) gets
+                // a ring too, so the selection is never a guess.
+                if (const auto RING = ScrollOverview::Config::themeSelectedRing(); RING.a > 0.F && ROW.width >= 4 && ROW.height >= 4) {
+                    CBorderPassElement::SBorderData ring;
+                    ring.box = ROW.copy().round();
+                    ring.grad1.reset(RING);
+                    ring.a             = FADE;
+                    ring.borderSize    = std::max(1, sc<int>(std::round(1.5F * SCALE)));
+                    ring.round         = roundFor(ROW);
+                    ring.roundingPower = POWER;
+                    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(ring));
+                }
             }
 
             if (E.status) {
@@ -7687,6 +7702,18 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
                 sel.round         = roundFor(ROW);
                 sel.roundingPower = POWER;
                 g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(sel));
+                // A quiet fill (a theme whose colours sit close together) gets
+                // a ring too, so the selection is never a guess.
+                if (const auto RING = ScrollOverview::Config::themeSelectedRing(); RING.a > 0.F && ROW.width >= 4 && ROW.height >= 4) {
+                    CBorderPassElement::SBorderData ring;
+                    ring.box = ROW.copy().round();
+                    ring.grad1.reset(RING);
+                    ring.a             = FADE * CARD.alpha;
+                    ring.borderSize    = std::max(1, sc<int>(std::round(1.5F * SCALE)));
+                    ring.round         = roundFor(ROW);
+                    ring.roundingPower = POWER;
+                    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(ring));
+                }
             }
 
             const float ROWPAD     = std::round(6.F * SCALE);

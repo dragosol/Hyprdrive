@@ -221,6 +221,7 @@ CHyprColor    themeAccent();
 CHyprColor    themeHeading();
 CHyprColor    themeSelection();
 CHyprColor    themeSelectedFill();
+CHyprColor    themeSelectedRing(); // a ring for the selected row when its fill is quiet; alpha 0 = none
 CHyprColor    themeSelectedText();
 CHyprColor    themeUrgent();
 
