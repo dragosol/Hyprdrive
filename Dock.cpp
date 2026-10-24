@@ -2350,12 +2350,18 @@ void renderRunningDot(PHLMONITOR monitor, const SLayout& layout, const SItem& it
     const float CX    = sc<float>(item.iconBox.x) + sc<float>(item.iconBox.width) / 2.F;
     const float TOP   = sc<float>(item.iconBox.y) + sc<float>(item.iconBox.height) + DOT_MARGIN_B * SCALE;
 
-    // dock:cpu_pulse (CpuPulse.hpp): a busy app's dots breathe -- they grow
-    // about their own centres and dim as they do, once per PERIOD.
-    const float PULSE = CpuPulse::anyBusy() ? CpuPulse::pulseFor(itemWindows(item)) : 0.F;
-    const float GROW  = 1.F + 0.45F * PULSE;
+    // dock:cpu_pulse (CpuPulse.hpp): a busy app's dots breathe in COLOUR --
+    // from their own to dock:cpu_pulse_color (red) and back, once per PERIOD,
+    // at their own size (user, 2026-10-24: the request meant a colour pulse,
+    // not dots that grow).
+    const float PULSE  = CpuPulse::anyBusy() ? CpuPulse::pulseFor(itemWindows(item)) : 0.F;
+    const float GROW   = 1.F;
     CHyprColor  DOTCOL = dotColor;
-    DOTCOL.a *= 1.F - 0.4F * PULSE;
+    if (PULSE > 0.F) {
+        const CHyprColor TO = Config::cpuPulseColor();
+        DOTCOL              = CHyprColor{dotColor.r + (TO.r - dotColor.r) * PULSE, dotColor.g + (TO.g - dotColor.g) * PULSE, dotColor.b + (TO.b - dotColor.b) * PULSE,
+                                         dotColor.a + (TO.a - dotColor.a) * PULSE};
+    }
 
     // Z12 (user, 2026-08-07, overrides X31's measured single dot): one dot per
     // WINDOW. Row one keeps today's exact position and grows outward from the

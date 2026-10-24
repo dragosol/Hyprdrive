@@ -179,6 +179,7 @@ std::string   getGestureDetentSound();
 //   themeRounding()         decoration:rounding (0 is squared, and is valid)
 //   themeRoundingPower()    decoration:rounding_power
 //   dockIndicatorColor()    dock:indicator_color, else highlightColor()
+//   cpuPulseColor()         dock:cpu_pulse_color (red unless set)
 //   dockBackgroundColor()   the terminal's glass: dock:background_color, else
 //                           theme:background, else Ghostty's background (its
 //                           config + includes + theme), else the palette
@@ -210,6 +211,7 @@ float         themeRoundingPower();
 const std::string& themeFontFamily();
 const std::string& glyphFontSetting();
 CHyprColor    dockIndicatorColor();
+CHyprColor    cpuPulseColor(); // dock:cpu_pulse_color, what a busy app's dots pulse to
 CHyprColor    dockBackgroundColor();
 int           dockCornerRadius();
 bool          isLightTheme();

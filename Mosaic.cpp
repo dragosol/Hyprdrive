@@ -311,22 +311,155 @@ namespace ScrollOverview::Mosaic {
         }
 
         void newTarget(SP<Layout::ITarget> target) override {
+            // A Super+drag let go is the same window put down, not one arriving:
+            // the tiles keep their hold (m_tiledHold) through it.
+            const bool DROP = droppingNow();
             m_dragHold.reset();
-            m_tiledHold = false;
+            if (!DROP)
+                m_tiledHold = false;
             forgetArrangement();
             arriveWithNatural(target, true);
+            placeInTiles(target, std::nullopt, DROP);
             placeDropped(target, std::nullopt);
             recalculate();
         }
 
         void movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D> focalPoint = std::nullopt) override {
+            const bool DROP = droppingNow();
             m_dragHold.reset();
             if (indexOf(target) < 0) {
                 forgetArrangement();
                 arriveWithNatural(target, false);
+                placeInTiles(target, focalPoint, DROP);
                 placeDropped(target, focalPoint);
             }
             recalculate();
+        }
+
+        // Hyprland is putting down a window a Super+drag carried.
+        static bool droppingNow() {
+            return g_layoutManager && g_layoutManager->dragController()->wasDraggingWindow();
+        }
+
+        // THE TILES TAKE A WINDOW AS DWINDLE DOES (user, 2026-10-23: "when
+        // mosaic goes to dwindle (hybrid) it should behave exactly like
+        // dwindle ... I can't swap positions of all windows with super+drag").
+        // DwindleAlgorithm::addTarget, with the user's dwindle options: the tile
+        // it splits (OPENINGON) and which half it takes. A window let go after a
+        // Super+drag splits the tile under the pointer, on the half the pointer
+        // is in -- it used to split the newest tile wherever it was dropped. A
+        // window moved by direction splits the tile at its focal point; a new
+        // window splits the focused one (use_active_for_splits) on the side
+        // force_split says. preselect and smart_split as dwindle has them.
+        // Only while the tiles stand: in the mosaic the packer places everyone.
+        void placeInTiles(const SP<Layout::ITarget>& target, std::optional<Vector2D> focal, bool drop) {
+            const long long PICKED = std::exchange(m_dragLeaf, -1);
+            if (m_tree.empty())
+                return;
+            const int  I    = indexOf(target);
+            const auto AREA = tilesArea();
+            if (I < 0 || !AREA)
+                return;
+            const auto      O     = treeOpts();
+            const Vector2D  MOUSE = g_pInputManager->getMouseCoordsInternal();
+            const Vector2D  AT    = focal.value_or(MOUSE);
+            long long       near  = -1;
+            if (PICKED >= 0 && m_tree.has(PICKED)) {
+                // THE DRAG HOLD kept every other tile where it was, and this
+                // window's own tile empty. Let go over that hole (or nowhere
+                // else): it goes back into its own tile, sizes and all.
+                if (drop) {
+                    near = m_tree.leafAt(MOUSE.x, MOUSE.y, *AREA, O);
+                    if (near == PICKED || near < 0) {
+                        m_entries[sc<size_t>(I)].id = PICKED;
+                        return;
+                    }
+                }
+                m_tree.remove(PICKED);
+            }
+
+            static auto PUSEACTIVE  = CConfigValue<::Config::INTEGER>("dwindle:use_active_for_splits");
+            static auto PFORCESPLIT = CConfigValue<::Config::INTEGER>("dwindle:force_split");
+            static auto PSMARTSPLIT = CConfigValue<::Config::INTEGER>("dwindle:smart_split");
+            static auto PPRECISE    = CConfigValue<::Config::INTEGER>("dwindle:precise_mouse_move");
+            static auto PPERMANENT  = CConfigValue<::Config::INTEGER>("dwindle:permanent_direction_override");
+
+            if (near < 0) {
+                if (focal || drop)
+                    near = m_tree.leafAt(AT.x, AT.y, *AREA, O);
+                else if (*PUSEACTIVE) {
+                    // The focused window, if it is a tile here and not this one.
+                    if (const auto F = Desktop::focusState()->window(); F && F != target->window())
+                        for (const auto& E : m_entries)
+                            if (const auto T = E.target.lock(); T && T->window() == F && m_tree.has(E.id))
+                                near = E.id;
+                    if (near < 0)
+                        near = m_tree.leafAt(MOUSE.x, MOUSE.y, *AREA, O);
+                } else
+                    near = m_tree.leafAt(MOUSE.x, MOUSE.y, *AREA, O);
+            }
+
+            const MosaicPack::SRect BOX    = m_tree.cellOf(near, *AREA, O).value_or(*AREA);
+            bool                    first  = false;
+            int                     orient = -1;
+            if (m_overrideDir != Math::DIRECTION_DEFAULT) {
+                orient = m_overrideDir == Math::DIRECTION_UP || m_overrideDir == Math::DIRECTION_DOWN ? 1 : 0;
+                first  = m_overrideDir == Math::DIRECTION_UP || m_overrideDir == Math::DIRECTION_LEFT;
+                if (!*PPERMANENT)
+                    m_overrideDir = Math::DIRECTION_DEFAULT;
+            } else if (*PSMARTSPLIT || (*PPRECISE && drop)) {
+                const double DX = AT.x - (BOX.x + BOX.w / 2.0), DY = AT.y - (BOX.y + BOX.h / 2.0);
+                if (BOX.w > 0 && std::abs(DX) > 1e-9 && std::abs(DY / DX) < BOX.h / BOX.w) {
+                    orient = 0;
+                    first  = DX <= 0;
+                } else {
+                    orient = 1;
+                    first  = DY <= 0;
+                }
+            } else if (*PFORCESPLIT == 0 || focal || drop) {
+                static auto PMULT = CConfigValue<::Config::FLOAT>("dwindle:split_width_multiplier");
+                const bool  SIDE  = BOX.w > BOX.h * *PMULT;
+                first             = SIDE ? AT.x < BOX.x + BOX.w / 2.0 : AT.y < BOX.y + BOX.h / 2.0;
+            } else
+                first = *PFORCESPLIT == 1;
+
+            // The split takes the two windows' mosaic areas (the tiles look
+            // like the mosaic, CDwindleTree::buildWeighted), where dwindle halves.
+            const auto AREAOF = [&](long long id) {
+                for (const auto& E : m_entries)
+                    if (E.id == id)
+                        return std::max(0.0, E.natural.x * E.natural.y);
+                return 0.0;
+            };
+            const double WN = AREAOF(m_entries[sc<size_t>(I)].id), WO = AREAOF(near);
+            const double SHARE =
+                WN + WO > 0 ? std::clamp(WN / (WN + WO), MosaicPack::CDwindleTree::WEIGHT_MIN, 1.0 - MosaicPack::CDwindleTree::WEIGHT_MIN) : 0.5;
+            m_tree.insertAt(m_entries[sc<size_t>(I)].id, near, first, SHARE, orient, *AREA, O);
+        }
+
+        // The tiles' space, and the dwindle options they follow.
+        std::optional<MosaicPack::SRect> tilesArea() const {
+            const auto A = area();
+            if (!A)
+                return std::nullopt;
+            return MosaicPack::SRect{A->x, A->y, A->w, A->h};
+        }
+        static MosaicPack::STreeOpts treeOpts() {
+            static auto PPRESERVE   = CConfigValue<::Config::INTEGER>("dwindle:preserve_split");
+            static auto PSMARTSPLIT = CConfigValue<::Config::INTEGER>("dwindle:smart_split");
+            static auto PPRECISE    = CConfigValue<::Config::INTEGER>("dwindle:precise_mouse_move");
+            static auto PMULT       = CConfigValue<::Config::FLOAT>("dwindle:split_width_multiplier");
+            return MosaicPack::STreeOpts{.preserve = *PPRESERVE || *PSMARTSPLIT || *PPRECISE, .widthMult = std::max(0.01, sc<double>(*PMULT))};
+        }
+        long long idOf(const SP<Layout::ITarget>& t) const {
+            const int I = indexOf(t);
+            return I < 0 ? -1 : m_entries[sc<size_t>(I)].id;
+        }
+        SP<Layout::ITarget> targetOfId(long long id) const {
+            for (const auto& E : m_entries)
+                if (E.id == id)
+                    return E.target.lock();
+            return nullptr;
         }
 
         // DROP TO REARRANGE (MosaicPack::PackHint). A Super+drag floats the
@@ -388,12 +521,18 @@ namespace ScrollOverview::Mosaic {
                 setDim(false, *m_resize);
                 m_resize.reset();
             }
-            m_tiledHold = false;
+            // Pulled out by a Super+drag: not a window leaving -- the tiles keep
+            // their hold, and its tile waits for it (placeInTiles).
+            const bool DRAGGED = target && g_layoutManager && g_layoutManager->dragController()->target() == target;
+            if (!DRAGGED)
+                m_tiledHold = false;
             forgetArrangement();
             leftMosaic(target);
+            if (DRAGGED)
+                m_dragLeaf = m_tree.empty() ? -1 : idOf(target);
             std::erase_if(m_entries, [&](const SMosaicEntry& e) { return !e.target || e.target.lock() == target; });
             // Pulled out by a drag: the others hold still until it is let go.
-            if (target && g_layoutManager && g_layoutManager->dragController()->target() == target) {
+            if (DRAGGED) {
                 m_dragHold = target;
                 return;
             }
@@ -409,6 +548,7 @@ namespace ScrollOverview::Mosaic {
             if (m_dragHold.expired())
                 return;
             m_dragHold.reset();
+            m_dragLeaf = -1; // let go elsewhere: its tile goes (syncTree)
             recalculate();
         }
         // Still in the air over this desktop?
@@ -431,14 +571,40 @@ namespace ScrollOverview::Mosaic {
         // letting go there tiles, keeping sizes as well as it can. Letting go
         // anywhere else applies the limit's arrangement.
         //
-        // In the TILES the same freeze holds during a drag; letting go (or a
-        // keyboard step) moves the window's dwindle split, and gives it that
-        // size in the mosaic too -- so shrinking windows in the tiles is the
-        // way back to the mosaic once everyone fits again.
+        // In the TILES it is dwindle's resize, live (2026-10-23); letting go
+        // lets the window's mosaic size shrink toward its tile -- so shrinking
+        // windows in the tiles is the way back to the mosaic once everyone
+        // fits again.
         void resizeTarget(const Vector2D& delta, SP<Layout::ITarget> target, Layout::eRectCorner corner = Layout::CORNER_NONE) override {
             const int I = indexOf(target);
             if (I < 0)
                 return;
+            // IN THE TILES, DWINDLE'S RESIZE (user, 2026-10-23: "behave exactly
+            // like dwindle"): live, the splits DwindleAlgorithm::resizeTarget
+            // moves (dwindle:smart_resizing or not), every tile following.
+            // Letting go still lets the window's mosaic size shrink toward its
+            // tile (finishResize).
+            if (!m_tree.empty() && !m_asMosaic) {
+                if (!m_resize || m_resize->target.lock() != target)
+                    beginResize(target, corner);
+                const auto AREA = tilesArea();
+                if (!m_resize || !AREA)
+                    return;
+                static auto PSMART = CConfigValue<::Config::INTEGER>("dwindle:smart_resizing");
+                const MosaicPack::CDwindleTree::SEdges EDGES{
+                    .left = Layout::edgeLeft(corner), .right = Layout::edgeRight(corner), .top = Layout::edgeTop(corner), .bottom = Layout::edgeBottom(corner)};
+                m_tree.resizeDwindle(m_entries[sc<size_t>(I)].id, delta.x, delta.y, EDGES, *PSMART != 0, *AREA, treeOpts());
+                layoutTiles();
+                // A drag snaps every tile, as dwindle does (no animation
+                // chasing the pointer).
+                if (g_layoutManager && g_layoutManager->dragController()->target() == target)
+                    for (const auto& E : m_entries)
+                        if (const auto T = E.target.lock())
+                            T->warpPositionSize();
+                if (corner == Layout::CORNER_NONE)
+                    finishResize();
+                return;
+            }
             // The window grows toward the corner being dragged: a left or top
             // corner pulled outward is a BIGGER window, not a smaller one. No
             // corner (a keyboard resizeactive): the delta is the size change.
@@ -497,12 +663,14 @@ namespace ScrollOverview::Mosaic {
                 // Shrinking a tile is the way out of the tiles; growing one no
                 // longer locks the desktop in them.
                 if (I >= 0) {
-                    auto& n = m_entries[sc<size_t>(I)].natural;
-                    n       = Vector2D{std::max(MIN_SIDE, std::min(n.x, SESSION.shown.x)), std::max(MIN_SIDE, std::min(n.y, SESSION.shown.y))};
+                    // The splits already moved, live (resizeTarget); the size
+                    // the tile ended at is the one the mosaic may shrink to.
+                    const auto     T     = SESSION.target.lock();
+                    const Vector2D SHOWN = T ? T->position().size() : SESSION.shown;
+                    auto&          n     = m_entries[sc<size_t>(I)].natural;
+                    n                    = Vector2D{std::max(MIN_SIDE, std::min(n.x, SHOWN.x)), std::max(MIN_SIDE, std::min(n.y, SHOWN.y))};
                     // A tile's size is the tiles', not the app's.
                     m_entries[sc<size_t>(I)].trusted = false;
-                    if (const auto AREA = area())
-                        m_tree.resize(m_entries[sc<size_t>(I)].id, SESSION.shown.x, SESSION.shown.y, MosaicPack::SRect{AREA->x, AREA->y, AREA->w, AREA->h});
                 }
                 if (m_tiledHold && fits())
                     m_tiledHold = false;
@@ -553,8 +721,9 @@ namespace ScrollOverview::Mosaic {
             if (dragHoldLive())
                 return;
 
-            // Mid-resize, the frozen arrangement stands, whatever asked.
-            if (m_resize) {
+            // Mid-resize in the mosaic, the frozen arrangement stands, whatever
+            // asked. (A tile resizes live: the tiles below lay it out.)
+            if (m_resize && !m_resize->tiled) {
                 applyResize();
                 return;
             }
@@ -604,14 +773,18 @@ namespace ScrollOverview::Mosaic {
             // CDwindleTree), each split where the user left it. Plain cells, so Hyprland insets them by gaps_in exactly
             // as it does dwindle's. They never touch `natural`: the mosaic that
             // comes back has every window as it was.
-            syncTree();
-            const auto CELLS = m_tree.layout(AREAR);
             trace(std::format("tiles n={} hold={}", m_entries.size(), m_tiledHold));
-            for (const auto& [ID, R] : CELLS)
-                for (const auto& E : m_entries)
-                    if (E.id == ID)
-                        if (const auto T = E.target.lock())
-                            T->setPositionGlobal(Layout::STargetBox{.logicalBox = CBox{R.x, R.y, R.w, R.h}, .visualBox = {}});
+            layoutTiles();
+        }
+
+        void layoutTiles() {
+            const auto AREA = tilesArea();
+            if (!AREA)
+                return;
+            syncTree();
+            for (const auto& [ID, R] : m_tree.layout(*AREA, treeOpts()))
+                if (const auto T = targetOfId(ID))
+                    T->setPositionGlobal(Layout::STargetBox{.logicalBox = CBox{R.x, R.y, R.w, R.h}, .visualBox = {}});
         }
 
         // The desktop the mosaic lays out in.
@@ -687,6 +860,12 @@ namespace ScrollOverview::Mosaic {
         SP<Layout::ITarget> getNextCandidate(SP<Layout::ITarget> old) override {
             if (m_entries.empty())
                 return nullptr;
+            // In the tiles, dwindle's: the tile nearest where the old one was.
+            if (const auto AREA = tilesArea(); AREA && !m_tree.empty() && old) {
+                const auto M = old->position().middle();
+                if (const auto T = targetOfId(m_tree.leafAt(M.x, M.y, *AREA, treeOpts(), idOf(old))); T && T != old)
+                    return T;
+            }
             const int I = indexOf(old);
             if (I < 0)
                 return m_entries.back().target.lock();
@@ -709,6 +888,37 @@ namespace ScrollOverview::Mosaic {
             const int I = indexOf(t);
             if (I < 0 || !t)
                 return;
+            // IN THE TILES, DWINDLE'S MOVE: the window leaves its tile and splits
+            // the one at its focal point that way -- past the edge, the monitor
+            // there (binds:window_direction_monitor_fallback) -- and lands on
+            // the far side of a lone sibling it moves straight at.
+            if (const auto AREA = tilesArea(); AREA && !m_tree.empty() && m_tree.has(m_entries[sc<size_t>(I)].id)) {
+                static auto PFALLBACK = CConfigValue<::Config::INTEGER>("binds:window_direction_monitor_fallback");
+                const auto  FOCAL     = focalPointForDir(t, dir);
+                const auto  WSMON     = workspace() ? workspace()->m_monitor.lock() : PHLMONITOR{};
+                const auto  FOCALMON  = State::monitorState()->query().vec(FOCAL.value_or(t->position().middle())).run();
+                if (FOCALMON != WSMON) {
+                    if (*PFALLBACK && FOCALMON && FOCALMON->m_activeWorkspace) {
+                        if (t->window())
+                            t->window()->setAnimationsToMove();
+                        t->assignToSpace(FOCALMON->m_activeWorkspace->m_space, FOCAL);
+                    }
+                    return;
+                }
+                const long long ID = m_entries[sc<size_t>(I)].id;
+                if (m_tree.towardLoneSibling(ID, sc<int>(dir), *AREA, treeOpts()))
+                    m_overrideDir = dir;
+                if (t->window())
+                    t->window()->setAnimationsToMove();
+                const Vector2D ORIGIN = t->position().middle();
+                m_tree.remove(ID);
+                placeInTiles(t, FOCAL.value_or(ORIGIN), false);
+                recalculate();
+                if (silent)
+                    if (const auto BACK = targetOfId(m_tree.leafAt(ORIGIN.x, ORIGIN.y, *AREA, treeOpts())); BACK && BACK->window())
+                        Desktop::focusState()->fullWindowFocus(BACK->window(), Desktop::FOCUS_REASON_KEYBIND);
+                return;
+            }
             const CBox FROM = t->position();
             const auto C0   = FROM.middle();
             int        best = -1;
@@ -751,6 +961,93 @@ namespace ScrollOverview::Mosaic {
             return std::string{"mosaic"};
         }
 
+        // DWINDLE'S LAYOUTMSGS in the tiles: togglesplit, swapsplit,
+        // rotatesplit [angle], movetoroot [window] [unstable], preselect <dir>,
+        // splitratio <delta> [exact]. In the mosaic there are no splits: the
+        // split ones do nothing (no error popup for a bind pressed there);
+        // preselect is kept for the tiles.
+        ::Config::ErrorResult layoutMsg(const std::string_view& sv) override {
+            std::vector<std::string> args;
+            {
+                std::istringstream in{std::string{sv}};
+                for (std::string w; in >> w;)
+                    args.push_back(w);
+            }
+            const auto ARG = [&](size_t i) { return i < args.size() ? args[i] : std::string{}; };
+            using ::Config::eConfigErrorCode;
+            using ::Config::eConfigErrorLevel;
+            const std::string CMD = ARG(0);
+
+            if (CMD == "preselect") {
+                const std::string D = ARG(1);
+                if (D.empty())
+                    return ::Config::configError("No direction for preselect", eConfigErrorLevel::ERROR, eConfigErrorCode::INVALID_ARGUMENT);
+                switch (D.front()) {
+                    case 'u':
+                    case 't': m_overrideDir = Math::DIRECTION_UP; break;
+                    case 'd':
+                    case 'b': m_overrideDir = Math::DIRECTION_DOWN; break;
+                    case 'r': m_overrideDir = Math::DIRECTION_RIGHT; break;
+                    case 'l': m_overrideDir = Math::DIRECTION_LEFT; break;
+                    default: m_overrideDir = Math::DIRECTION_DEFAULT; break;
+                }
+                return {};
+            }
+            const bool KNOWN = CMD == "togglesplit" || CMD == "swapsplit" || CMD == "rotatesplit" || CMD == "movetoroot" || CMD == "splitratio";
+            if (!KNOWN)
+                return ::Config::configError(std::format("Unknown mosaic layoutmsg: {}", sv), eConfigErrorLevel::ERROR, eConfigErrorCode::INVALID_ARGUMENT);
+            const auto AREA = tilesArea();
+            if (m_tree.empty() || !AREA)
+                return {};
+
+            long long id = -1;
+            if (const auto F = Desktop::focusState()->window())
+                for (const auto& E : m_entries)
+                    if (const auto T = E.target.lock(); T && T->window() == F)
+                        id = E.id;
+            const auto O = treeOpts();
+            if (const auto F = Desktop::focusState()->window(); F && Fullscreen::controller()->isFullscreen(F) && CMD != "splitratio")
+                return ::Config::configError(std::format("can't {} in the current workspace", CMD), eConfigErrorLevel::WARNING, eConfigErrorCode::INVALID_STATE);
+
+            if (CMD == "togglesplit") {
+                if (id >= 0 && !m_tree.toggleSplit(id, *AREA, O))
+                    return ::Config::configError("can't togglesplit in the current workspace", eConfigErrorLevel::WARNING, eConfigErrorCode::INVALID_STATE);
+            } else if (CMD == "swapsplit") {
+                if (id >= 0 && !m_tree.swapSplit(id))
+                    return ::Config::configError("can't swapsplit in the current workspace", eConfigErrorLevel::WARNING, eConfigErrorCode::INVALID_STATE);
+            } else if (CMD == "rotatesplit") {
+                int angle = 90;
+                if (!ARG(1).empty()) {
+                    try {
+                        angle = std::stoi(ARG(1));
+                    } catch (...) { return ::Config::configError("Invalid angle argument", eConfigErrorLevel::ERROR, eConfigErrorCode::INVALID_ARGUMENT); }
+                }
+                if (id >= 0)
+                    m_tree.rotateSplit(id, angle, *AREA, O);
+            } else if (CMD == "movetoroot") {
+                long long which = id;
+                if (!ARG(1).empty())
+                    if (const auto W = Desktop::viewState()->query().selector(ARG(1)).runWindow())
+                        for (const auto& E : m_entries)
+                            if (const auto T = E.target.lock(); T && T->window() == W)
+                                which = E.id;
+                if (!m_tree.moveToRoot(which, ARG(2).empty() || ARG(2) != "unstable"))
+                    return ::Config::configError("can't movetoroot in the current workspace", eConfigErrorLevel::WARNING, eConfigErrorCode::INVALID_STATE);
+            } else if (CMD == "splitratio") {
+                const std::string R = ARG(1);
+                if (R.empty())
+                    return ::Config::configError("splitratio requires an arg", eConfigErrorLevel::ERROR, eConfigErrorCode::INVALID_ARGUMENT);
+                double value = 0;
+                try {
+                    value = std::stod(R);
+                } catch (...) { return ::Config::configError(std::format("failed to parse \"{}\" as a delta", R), eConfigErrorLevel::ERROR, eConfigErrorCode::INVALID_ARGUMENT); }
+                if (id < 0 || !m_tree.splitRatio(id, value, ARG(2).starts_with("exact")))
+                    return ::Config::configError("cannot alter split ratio on no / single node", eConfigErrorLevel::WARNING, eConfigErrorCode::INVALID_STATE);
+            }
+            recalculate();
+            return {};
+        }
+
       private:
         static constexpr double MIN_SIDE  = 120.0;
 
@@ -778,6 +1075,8 @@ namespace ScrollOverview::Mosaic {
         }
         MosaicPack::CDwindleTree  m_tree;              // the tiles; empty while the mosaic stands
         long long                 m_nextId = 0;
+        long long                 m_dragLeaf = -1;     // the tile a Super+drag picked its window out of
+        Math::eDirection          m_overrideDir = Math::DIRECTION_DEFAULT; // dwindle's preselect
 
         // TRACE: every window's mosaic size at each arrangement decision.
         void traceEntries(const char* what) const {
@@ -899,14 +1198,6 @@ namespace ScrollOverview::Mosaic {
                 sizes.push_back({0, 0, box.w, box.h});
             }
             const MosaicPack::SRect AREAR{AREA->x, AREA->y, AREA->w, AREA->h};
-            if (m_resize->tiled) {
-                // In the tiles: the window follows the pointer, kept on the
-                // desktop; the others hold still until the drag ends.
-                m_resize->shown = Vector2D{std::clamp(m_resize->requested.x, MIN_SIDE, AREA->w), std::clamp(m_resize->requested.y, MIN_SIDE, AREA->h)};
-                trace(std::format("step tiled requested={}x{}", m_resize->requested.x, m_resize->requested.y));
-                applyResize();
-                return;
-            }
             const auto LIMIT = MosaicPack::limitFor(sizes, idx, m_resize->requested.x, m_resize->requested.y, AREAR, innerGap(), MIN_SIDE, looseArea());
             m_resize->shown  = Vector2D{LIMIT.w, LIMIT.h};
             const bool PAST  = !LIMIT.reached && (m_resize->requested.x > LIMIT.w + PUSH_PAST || m_resize->requested.y > LIMIT.h + PUSH_PAST);
@@ -1223,8 +1514,13 @@ namespace ScrollOverview::Mosaic {
     // The window that way from `from` on its mosaic desktop: its centre lies
     // that way, nearest along the direction and closest across it. Null off a
     // mosaic desktop, or with nothing that way.
+    // In the TILES the windows share edges, as in dwindle: Hyprland's own
+    // movefocus/swapwindow are dwindle's, so the mosaic's centre rule stands
+    // aside there (user, 2026-10-23: the tiles "should behave exactly like
+    // dwindle").
     static PHLWINDOW mosaicNeighbour(const PHLWINDOW& from, Math::eDirection dir) {
-        if (!from || !onMosaic(from) || !from->m_workspace)
+        if (!from || !from->m_workspace ||
+            !std::ranges::any_of(g_instances, [&](const CMosaicAlgorithm* a) { return a->holds(from) && a->arrangedAsMosaic(); }))
             return nullptr;
         const Vector2D D  = dir == Math::DIRECTION_RIGHT ? Vector2D{1, 0} : dir == Math::DIRECTION_LEFT ? Vector2D{-1, 0} : dir == Math::DIRECTION_UP ? Vector2D{0, -1} : Vector2D{0, 1};
         const auto     C0 = from->middle();

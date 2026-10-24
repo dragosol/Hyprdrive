@@ -101,9 +101,10 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
 - **Mounted drives** and network shares (SMB, SFTP, NFS, WebDAV) as dock items,
   in the order you choose (off by default), and a Trash that shows when it has
   something in it.
-- **Pulse busy apps** (off by default): an app's running dots pulse while it,
-  with the processes it started, uses more CPU than a threshold you set
-  (`dock:cpu_pulse`, `dock:cpu_pulse_threshold`).
+- **Pulse busy apps** (off by default): an app's running dots pulse red while
+  it, with the processes it started, uses more CPU than a threshold you set.
+  Pick the colour in the settings (`dock:cpu_pulse`, `dock:cpu_pulse_threshold`,
+  `dock:cpu_pulse_color`).
 - **Your own icons:** give any app on the dock a different icon, from your icon
   theme, a file, or the selfh.st logo collection.
 - **Feel:** icons tilt toward the pointer and lean into a press, urgent apps
@@ -215,7 +216,12 @@ find the `.so` there.
 `hyprctl plugin load` above (or a log-out and back in). From then on the
 fragment loads it at every login.
 
-**Updating:** `git pull`, then `make install` again, then log out and back in.
+**Updating:** run `hyprdrive update`. It looks up the newest release, asks
+before changing anything, then checks that release out in your checkout,
+runs `make install` and reloads the plugin. The settings show **Update
+available!** beside the version when there is one; clicking it runs the same
+update in your terminal. `hyprdrive update --check` only reports. By hand:
+`git pull`, then `make install` again, then log out and back in.
 After a Hyprland update the plugin may refuse to load with
 `[he] Version mismatch`. Rebuild from scratch with `make clean && make install`.
 
@@ -387,7 +393,7 @@ end
 
 ## Network use
 
-Hyprdrive only goes online for the three features below. The native install
+Hyprdrive only goes online for the four features below. The native install
 switches the two search tools on, but they send nothing until you type
 `define` or `tr`; the icon download only runs when you open it in the settings.
 Turn the search tools off in Settings > Overview > Search.
@@ -397,6 +403,10 @@ Turn the search tools off in Settings > Overview > Search.
 | `search:dictionary = true` | the word after `define` | `en.wiktionary.org` |
 | `search:translate = true` | the text after `tr` | `api.mymemory.translated.net`, or your own `search:translate_endpoint` (e.g. LibreTranslate) |
 | settings -> Icons -> selfh.st | nothing you type; downloads the logo index once a day and the logos you pick | `cdn.jsdelivr.net` |
+| the settings' update check (on; `hyprdrive update --never-check` turns it off) | nothing about you; asks for the latest release at most every 6 hours, only while the settings are open | `api.github.com` |
+
+`hyprdrive update` also fetches the repository with `git` when you install
+an update. The update check follows no redirects and caps every response.
 
 The search tools run `curl` off the compositor thread. Your text is passed as
 an argument, never through a shell.

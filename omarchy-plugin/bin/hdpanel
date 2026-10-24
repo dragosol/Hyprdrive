@@ -138,6 +138,7 @@ KEY_META = [
     _k(PLUGIN + "dock:minimize_genie", "bool", "dock", False),
     _k(PLUGIN + "dock:cpu_pulse", "bool", "dock", False),
     _k(PLUGIN + "dock:cpu_pulse_threshold", "int", "dock", 60, min=5, max=800),
+    _k(PLUGIN + "dock:cpu_pulse_color", "color", "dock", "rgba(ff3b30ff)"),
     _k(PLUGIN + "drag:spring_dock", "bool", "dock", True),
     _k(PLUGIN + "drag:spring_edges", "bool", "dock", True),
     _k(PLUGIN + "drag:spring_delay_ms", "int", "dock", 1500, min=500, max=4000),
@@ -1173,6 +1174,24 @@ def write_gesture_fragment(gestures):
     return path
 
 
+COLOR_RE = re.compile(r"^(?:#|rgba?\(|0x)?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?\)?$")
+
+
+def color_lit(value, key=""):
+    """A colour key's value as Hyprland's "rgba(rrggbbaa)": from "#rrggbb",
+    "#rrggbbaa", "rgb(rrggbb)", "rgba(rrggbbaa)", or the ARGB integer
+    getoption answers with."""
+    if isinstance(value, bool):
+        raise SystemExit("hdpanel: %s needs a colour" % key)
+    if isinstance(value, int) or (isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip())):
+        argb = int(value) & 0xFFFFFFFF
+        return "rgba(%06x%02x)" % (argb & 0xFFFFFF, argb >> 24)
+    m = COLOR_RE.match(str(value).strip())
+    if not m:
+        raise SystemExit("hdpanel: %s needs a colour like #ff3b30 or rgba(ff3b30ff)" % key)
+    return "rgba(%s%s)" % (m.group(1).lower(), (m.group(2) or "ff").lower())
+
+
 def coerce(meta, value):
     kind = meta["kind"]
     if kind == "bool":
@@ -1183,12 +1202,17 @@ def coerce(meta, value):
         return int(float(value))
     if kind == "float":
         return float(value)
+    if kind == "color":
+        return color_lit(value, meta["key"])
     if kind == "enum":
         v = str(value)
         if meta.get("options") and v not in [o["value"] for o in meta["options"]]:
             raise SystemExit("hdpanel: %s must be one of %s" % (meta["key"], ", ".join(o["value"] for o in meta["options"])))
         return v
     return str(value)
+
+
+COLOR_KEYS = {m["key"] for m in KEY_META if m["kind"] == "color"}
 
 
 def live_keys():
@@ -1221,6 +1245,8 @@ def live_keys():
                 if k in d:
                     out[d["option"]] = d[k]
                     break
+            if d["option"] in COLOR_KEYS and isinstance(out.get(d["option"]), int):
+                out[d["option"]] = color_lit(out[d["option"]])
     if not out:  # a Hyprland without --batch: the slow path
         for meta in KEY_META:
             v = getoption(meta["key"])

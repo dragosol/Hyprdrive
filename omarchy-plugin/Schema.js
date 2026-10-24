@@ -137,7 +137,10 @@ var sections = [
         { type: "toggle", key: P + "dock:cpu_pulse", label: "Pulse busy apps",
           desc: "A running app's dots pulse while it is using a lot of CPU, counting the processes it started." },
         { type: "slider", key: P + "dock:cpu_pulse_threshold", label: "Busy above", min: 5, max: 800, step: 5, unit: "%", when: "cpuPulseOn",
-          desc: "CPU use, in percent of one core, that counts as busy. 200 is two cores flat out." }
+          desc: "CPU use, in percent of one core, that counts as busy. 200 is two cores flat out." },
+        { type: "color", key: P + "dock:cpu_pulse_color", label: "Pulse colour", when: "cpuPulseOn",
+          desc: "The colour a busy app's dots pulse to.",
+          swatches: ["rgba(ff3b30ff)", "rgba(ff9500ff)", "rgba(ffcc00ff)", "rgba(34c759ff)", "rgba(32ade6ff)", "rgba(007affff)", "rgba(af52deff)", "rgba(ff2d55ff)", "rgba(ffffffff)"] }
       ]},
       { title: "Frost", rows: [
         { type: "slider", key: P + "dock:blur_size", label: "Blur size", min: -1, max: 32, step: 1, fmt: "follow",

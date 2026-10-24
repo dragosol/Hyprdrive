@@ -1872,9 +1872,11 @@ static SDispatchResult onGestureDispatcher(std::string arg) {
 // the minimize engine is driven and tested until its icons can call it.
 static SDispatchResult onMinimizeDispatcher(std::string arg) {
     if (arg == "restore") {
+        // Nothing minimized is nothing to do, not an error: a bind's error is
+        // Lua's "runtime error" toast.
         const auto MINIMIZED = ScrollOverview::Minimize::minimized();
         if (MINIMIZED.empty())
-            return {.success = false, .error = "nothing is minimized"};
+            return {};
 
         // X54: back out through the DOCK, so it flies from its icon instead of
         // reappearing. The dock owns the animation because it owns the target.
@@ -1882,11 +1884,31 @@ static SDispatchResult onMinimizeDispatcher(std::string arg) {
         return {};
     }
 
-    const auto WINDOW = Desktop::focusState()->window();
-    if (!WINDOW)
-        return {.success = false, .error = "no focused window"};
+    // SUPER+H AGAIN (r/omarchy, 2026-10-24: "if I press Super+H again while in
+    // the same workspace, I get a runtime error in Lua. It would be fantastic if
+    // we could restore a minimized window to its original position using
+    // Win+H"). With no window of this desktop focused -- the one just minimized
+    // took the focus with it -- the same chord brings back the window most
+    // recently minimized FROM this desktop, flying out of the dock to where it
+    // was. Windows minimized from other desktops stay in the dock, and with
+    // nothing to minimize or restore the press does nothing, quietly: the old
+    // "no focused window" error was the Lua runtime error.
+    const auto MONITOR = Desktop::focusState()->monitor();
+    const auto WINDOW  = Desktop::focusState()->window();
+    if (WINDOW && WINDOW->m_workspace && !ScrollOverview::Minimize::isStash(WINDOW->m_workspace)) {
+        ScrollOverview::Dock::minimizeWithFlight(MONITOR, WINDOW);
+        return {};
+    }
 
-    ScrollOverview::Dock::minimizeWithFlight(Desktop::focusState()->monitor(), WINDOW);
+    const auto HERE = MONITOR ? (MONITOR->m_activeSpecialWorkspace ? MONITOR->m_activeSpecialWorkspace : MONITOR->m_activeWorkspace) : PHLWORKSPACE{};
+    if (!HERE)
+        return {};
+    const auto MINIMIZED = ScrollOverview::Minimize::minimized();
+    for (auto it = MINIMIZED.rbegin(); it != MINIMIZED.rend(); ++it)
+        if (*it && ScrollOverview::Minimize::originalWorkspace(*it) == HERE->m_id) {
+            ScrollOverview::Dock::restoreWithFlight(MONITOR, *it);
+            return {};
+        }
     return {};
 }
 

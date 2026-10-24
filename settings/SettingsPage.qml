@@ -186,6 +186,12 @@ Item {
     var fb = fallback !== undefined ? fallback : defaults[key]
     return Model.keyOf(hd, key, fb)
   }
+  function rgbaColor(v) {
+    var m = /([0-9a-fA-F]{6})([0-9a-fA-F]{2})?/.exec(String(v || ""))
+    if (!m) return "transparent"
+    var n = parseInt(m[1], 16)
+    return Qt.rgba(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, m[2] ? parseInt(m[2], 16) / 255 : 1)
+  }
   function kb(key) { return Model.asBool(k(key)) }
   function kn(key) { return Model.asNumber(k(key), Model.asNumber(defaults[key], 0)) }
 
@@ -699,6 +705,83 @@ Item {
     gestureDirty = false
     showToast("Gesture map applied")
   }
+
+
+  // --------------------------------------------------------------- updates
+  // `hyprdrive update` (omarchy-plugin/bin/hyprdrive, beside hdpanel). Asked
+  // once per open; it answers from its own 6-hour cache, and asks GitHub only
+  // when that ran out (or never, after `hyprdrive update --never-check`).
+  property var upd: null
+  property bool updOpen: false
+  readonly property string updPath: ctlPath === "" ? "" : ctlPath.replace(/[^\/]*$/, "hyprdrive")
+  readonly property bool updAvailable: !!(upd && upd.available)
+  readonly property bool updOmarchy: !!(upd && upd.flavor === "omarchy")
+  readonly property string updInstalled: upd && upd.installed ? upd.installed : ""
+  readonly property string updLatest: upd && upd.latest && upd.latest.version ? upd.latest.version : ""
+  readonly property string updReleaseUrl: upd && upd.latest && upd.latest.url ? upd.latest.url : (upd && upd.installUrl ? upd.installUrl : "")
+  readonly property var updApproved: upd && upd.marketplace && upd.marketplace.approved ? upd.marketplace.approved : null
+  readonly property var updPending: upd && upd.marketplace && upd.marketplace.pending ? upd.marketplace.pending : null
+  readonly property bool updApprovedNewer: !!(upd && upd.approvedNewer)
+  readonly property bool updLatestNewer: updLatest !== "" && Model.versionNewer(updLatest, updInstalled)
+  readonly property string updPendingUrl: updPending && updPending.url ? updPending.url : ""
+  readonly property string updStatusText: {
+    var t = "You have v" + updInstalled + "."
+    if (updPending && updPending.version && updPending.version === updLatest)
+      t += " v" + updLatest + " is waiting for marketplace approval."
+    else if (updPending)
+      t += " An update is waiting for marketplace approval."
+    if (updApproved && updApproved.version)
+      t += updApprovedNewer ? " The marketplace has approved v" + updApproved.version + ": update to it with the command below."
+                            : " The newest version the marketplace has approved is v" + updApproved.version + "."
+    else
+      t += " No newer version is approved on the marketplace yet."
+    if (updLatestNewer)
+      t += " Or install v" + updLatest + " straight from GitHub without waiting for the marketplace."
+    return t
+  }
+  onUpdPathChanged: {
+    if (updPath === "" || upd !== null || updCheckProc.running) return
+    // Set here, not bound: the binding may not have caught up with updPath yet.
+    updCheckProc.command = [updPath, "update", "--check", "--json"]
+    updCheckProc.running = true
+  }
+
+  function updateClicked() {
+    if (updOmarchy) { updOpen = !updOpen; return }
+    updateInTerminal([], upd && upd.installUrl ? upd.installUrl : updReleaseUrl)
+  }
+  // The update itself runs in the user's terminal, where it asks before
+  // touching anything; no terminal (exit 3) or no script: the instructions.
+  function updateInTerminal(args, fallbackUrl) {
+    updRunProc.fallbackUrl = fallbackUrl || ""
+    updRunProc.command = [updPath, "update", "--terminal"].concat(args)
+    updRunProc.running = true
+  }
+  function copyText(t) {
+    copyProc.command = ["wl-copy", "--", t]
+    copyProc.running = true
+    showToast("Copied: " + t)
+  }
+
+  Process {
+    id: updCheckProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var d = null
+        try { d = JSON.parse(String(text || "")) } catch (e) { d = null }
+        root.upd = d
+      }
+    }
+  }
+  Process {
+    id: updRunProc
+    property string fallbackUrl: ""
+    onExited: function(exitCode) {
+      if (exitCode !== 0 && updRunProc.fallbackUrl !== "") Qt.openUrlExternally(updRunProc.fallbackUrl)
+    }
+  }
+  Process { id: copyProc }
 
   // --------------------------------------------------------------- processes
   Process {
@@ -1522,6 +1605,7 @@ Item {
         case "motion": return motionControl
         case "blur": return blurControl
         case "bind": return bindControl
+        case "color": return colorControl
         }
         return null
       }
@@ -1543,6 +1627,41 @@ Item {
         sourceComponent: sr.row.type === "curve" ? curveControl : sr.row.type === "gestures" ? gestureEditor : sr.row.type === "power" ? powerControl : sr.row.type === "icons" ? iconEditor : null
         property var row: sr.row
         property bool live: sr.live
+      }
+    }
+  }
+
+  // A colour (Schema `type: "color"`): a row of swatches, each "rgba(rrggbbaa)"
+  // as hdpanel writes it. No text field on purpose -- nothing here reads the
+  // clipboard.
+  Component {
+    id: colorControl
+    Row {
+      id: colorRow
+      property var row: parent ? parent.row : ({})
+      property bool live: parent ? parent.live : true
+      readonly property string current: String(root.k(row.key) || "").toLowerCase()
+      spacing: ui.space(6)
+      Repeater {
+        model: colorRow.row.swatches || []
+        Rectangle {
+          required property string modelData
+          readonly property bool chosen: modelData.toLowerCase() === colorRow.current
+          width: ui.space(18); height: width; radius: width / 2
+          color: root.rgbaColor(modelData)
+          border.width: chosen ? 2 : 1
+          border.color: chosen ? root.fg : root.tint(root.fg, 0.25)
+          scale: swatchMouse.containsMouse || chosen ? 1.15 : 1
+          Behavior on scale { NumberAnimation { duration: root.calm; easing.type: Easing.OutCubic } }
+          MouseArea {
+            id: swatchMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: colorRow.live
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.setKey(colorRow.row.key, modelData)
+          }
+        }
       }
     }
   }
@@ -2358,7 +2477,7 @@ Item {
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.margins: ui.space(20)
-          height: ui.space(56)
+          height: Math.max(ui.space(56), brandCol.implicitHeight)
 
           Rectangle {
             id: markTile
@@ -2388,6 +2507,7 @@ Item {
             MultiEffect { anchors.fill: markImg; source: markImg; colorization: 1.0; colorizationColor: root.bg }
           }
           Column {
+            id: brandCol
             anchors.left: markTile.right
             anchors.leftMargin: ui.space(12)
             anchors.verticalCenter: parent.verticalCenter
@@ -2404,21 +2524,165 @@ Item {
               font.weight: Font.Bold
               font.letterSpacing: -0.3
             }
+            Flow {
+              width: brand.width - markTile.width - ui.space(12)
+              spacing: ui.space(6)
+              Rectangle {
+                width: verText.implicitWidth + ui.space(12)
+                height: ui.space(18)
+                radius: ui.space(9)
+                color: root.tint(root.accent, 0.16)
+                visible: verText.text !== ""
+                Text {
+                  textFormat: Text.PlainText
+                  id: verText
+                  anchors.centerIn: parent
+                  text: root.hd.version ? "v" + root.hd.version : ""
+                  color: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: ui.font.caption
+                }
+              }
+              // UPDATE AVAILABLE (user, 2026-10-24): `hyprdrive update --check`
+              // says a newer release is out. Native: a click runs the update in
+              // the user's terminal (it asks y/n first), or opens the install
+              // instructions when no terminal is found. Omarchy: a click opens
+              // the card below -- the marketplace's side of it.
+              Rectangle {
+                id: updPill
+                visible: root.updAvailable
+                width: updText.implicitWidth + ui.space(14)
+                height: ui.space(18)
+                radius: ui.space(9)
+                color: updMouse.containsMouse ? root.accent : root.tint(root.accent, 0.28)
+                border.width: 1
+                border.color: root.accent
+                Behavior on color { ColorAnimation { duration: root.calm } }
+                Text {
+                  id: updText
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: "Update available!"
+                  color: updMouse.containsMouse ? root.bg : root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: ui.font.caption
+                  font.weight: Font.DemiBold
+                }
+                MouseArea {
+                  id: updMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.updateClicked()
+                }
+              }
+            }
+          }
+        }
+
+
+        // THE UPDATE CARD (Omarchy, user 2026-10-24): which version the
+        // marketplace approved, whether the newest one is still waiting for it,
+        // the command for the approved one, or the newest straight from GitHub.
+        Rectangle {
+          id: updCard
+          anchors.top: brand.bottom
+          anchors.topMargin: root.updOpen ? ui.space(10) : 0
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: ui.space(14)
+          anchors.rightMargin: ui.space(14)
+          height: root.updOpen ? updCol.implicitHeight + ui.space(20) : 0
+          clip: true
+          radius: ui.space(10)
+          color: root.tint(root.accent, 0.10)
+          border.width: root.updOpen ? 1 : 0
+          border.color: root.tint(root.accent, 0.35)
+          Behavior on height { NumberAnimation { duration: root.calm; easing.type: Easing.OutCubic } }
+          Column {
+            id: updCol
+            x: ui.space(10); y: ui.space(10)
+            width: parent.width - ui.space(20)
+            spacing: ui.space(6)
+            Text {
+              width: parent.width
+              wrapMode: Text.Wrap
+              textFormat: Text.PlainText
+              text: root.updLatest !== "" ? ("v" + root.updLatest + " is out") : "An update is out"
+              color: root.fg
+              font.family: root.fontFamily
+              font.pixelSize: ui.font.body
+              font.weight: Font.Bold
+            }
+            Text {
+              width: parent.width
+              wrapMode: Text.Wrap
+              textFormat: Text.PlainText
+              text: root.updStatusText
+              color: root.tint(root.fg, 0.75)
+              font.family: root.fontFamily
+              font.pixelSize: ui.font.caption
+              lineHeight: 1.15
+            }
+            Text {
+              visible: root.updPendingUrl !== ""
+              textFormat: Text.PlainText
+              text: "See the marketplace request \u2197"
+              color: root.accent
+              font.family: root.fontFamily
+              font.pixelSize: ui.font.caption
+              MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Qt.openUrlExternally(root.updPendingUrl) }
+            }
+            // The approved version: its command, to copy.
             Rectangle {
-              width: verText.implicitWidth + ui.space(12)
-              height: ui.space(18)
-              radius: ui.space(9)
-              color: root.tint(root.accent, 0.16)
-              visible: verText.text !== ""
+              visible: root.updApprovedNewer
+              width: parent.width
+              height: ui.space(26)
+              radius: ui.space(6)
+              color: root.tint(root.fg, 0.06)
               Text {
+                anchors.right: copyBtn.left
+                anchors.rightMargin: ui.space(6)
+                // Shrinks to fit the row rather than eliding: the command is read.
+                fontSizeMode: Text.HorizontalFit
+                minimumPixelSize: 8
+                height: parent.height
+                verticalAlignment: Text.AlignVCenter
+                anchors.left: parent.left
+                anchors.leftMargin: ui.space(8)
+                anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
-                id: verText
-                anchors.centerIn: parent
-                text: root.hd.version ? "v" + root.hd.version : ""
-                color: root.accent
-                font.family: root.fontFamily
+                text: "hyprdrive update --approved"
+                color: root.fg
+                font.family: "monospace"
                 font.pixelSize: ui.font.caption
               }
+              Rectangle {
+                id: copyBtn
+                anchors.right: parent.right
+                anchors.rightMargin: ui.space(3)
+                anchors.verticalCenter: parent.verticalCenter
+                width: copyText.implicitWidth + ui.space(12); height: ui.space(20); radius: ui.space(5)
+                color: copyMouse.containsMouse ? root.accent : root.tint(root.accent, 0.22)
+                Text { id: copyText; anchors.centerIn: parent; textFormat: Text.PlainText; text: "Copy"
+                       color: copyMouse.containsMouse ? root.bg : root.accent; font.family: root.fontFamily; font.pixelSize: ui.font.caption }
+                MouseArea { id: copyMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.copyText("hyprdrive update --approved") }
+              }
+            }
+            // Or the newest, now.
+            Rectangle {
+              visible: root.updLatestNewer
+              width: parent.width
+              height: ui.space(28)
+              radius: ui.space(8)
+              color: ghMouse.containsMouse ? root.accent : root.tint(root.accent, 0.22)
+              Text { anchors.centerIn: parent; textFormat: Text.PlainText
+                     text: "Install v" + root.updLatest + " from GitHub now"
+                     color: ghMouse.containsMouse ? root.bg : root.accent
+                     font.family: root.fontFamily; font.pixelSize: ui.font.caption; font.weight: Font.DemiBold }
+              MouseArea { id: ghMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                          onClicked: root.updateInTerminal(["--github"], root.updReleaseUrl) }
             }
           }
         }
@@ -2426,7 +2690,7 @@ Item {
         // Find a setting.
         Rectangle {
           id: searchBox
-          anchors.top: brand.bottom
+          anchors.top: updCard.bottom
           anchors.topMargin: ui.space(14)
           anchors.left: parent.left
           anchors.right: parent.right

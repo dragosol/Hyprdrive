@@ -108,6 +108,24 @@ fi
 install -Dm755 "$INTEGRATION_CLI" "$PREFIX/bin/hyprdrive-integration"
 echo "cli: $PREFIX/bin/hyprdrive-integration"
 
+# `hyprdrive update` (omarchy-plugin/bin/hyprdrive): on PATH, and beside hdpanel
+# in lib/ where the settings app finds it. It reads what was installed, and from
+# where, in install.json -- the version, this checkout, PREFIX.
+install -Dm755 "$ROOT/omarchy-plugin/bin/hyprdrive" "$LIBDIR/hyprdrive"
+rm -f "$PREFIX/bin/hyprdrive"
+ln -s ../lib/hyprdrive/hyprdrive "$PREFIX/bin/hyprdrive"
+python3 - "$ROOT" "$PREFIX" <<'PY'
+import json, os, pathlib, sys
+root, prefix = sys.argv[1:3]
+state = pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state") / "hyprdrive"
+state.mkdir(parents=True, exist_ok=True)
+version = json.loads((pathlib.Path(root) / "manifest.json").read_text()).get("version", "")
+tmp = state / "install.json.tmp"
+tmp.write_text(json.dumps({"version": version, "source": root, "prefix": prefix}) + "\n")
+tmp.replace(state / "install.json")
+PY
+echo "cli: $PREFIX/bin/hyprdrive (hyprdrive update)"
+
 PLUGIN_SRC=$ROOT/omarchy-plugin
 PLUGIN_DEST=$CONFIG/omarchy/plugins/dragos.hyprdrive
 # THE PANEL IS AN OMARCHY SHELL PLUGIN: it imports qs.Commons/qs.Ui from the
@@ -219,6 +237,7 @@ PY
     install -Dm644 "$PLUGIN_SRC/hyprdrive-icon.png" "$PLUGIN_DEST/hyprdrive-icon.png"
     install -Dm755 "$PLUGIN_SRC/bin/hdpanel" "$PLUGIN_DEST/bin/hdpanel"
     install -Dm755 "$PLUGIN_SRC/bin/hdicons" "$PLUGIN_DEST/bin/hdicons"
+    install -Dm755 "$PLUGIN_SRC/bin/hyprdrive" "$PLUGIN_DEST/bin/hyprdrive"
     # Super+L's layout cycle while the panel's Mosaic switch is on; 40-panel.lua
     # binds it by this path (hdpanel's LAYOUT_CYCLE, beside hdpanel itself).
     install -Dm755 "$PLUGIN_SRC/bin/hd-layout-cycle" "$PLUGIN_DEST/bin/hd-layout-cycle"

@@ -908,6 +908,11 @@ static void registerConfigValuesFor() {
                                   "dock: a running app's dots pulse while it (with its child processes) uses more CPU than dock:cpu_pulse_threshold", false));
     addKey(makeShared<CIntValue>(KEY("dock:cpu_pulse_threshold"), "dock: CPU use, in % of one core, above which an app's dots pulse (200 = two cores)", 60,
                                  SIntValueOptions{.min = 5, .max = 800}));
+    // The pulse is a COLOUR (user, 2026-10-24: the Reddit request "might have
+    // meant a color pulsing, not that the dots grow"): the dots breathe from
+    // their own colour to this one and back. Default red.
+    addKey(makeShared<CColorValue>(KEY("dock:cpu_pulse_color"), "dock: the colour a busy app's dots pulse to (dock:cpu_pulse)",
+                                   (Hyprlang::INT)0xFFFF3B30));
     addKey(makeShared<CBoolValue>(KEY("dock:stack_fan_straight"),
                                   "dock stacks: fan the files out in a straight column instead of the arc (no sideways drift, no tilt)", false));
     addKey(makeShared<CBoolValue>(KEY("dock:builtin_icons"),
@@ -1608,6 +1613,11 @@ const std::string& glyphFontSetting() {
             value = "auto";
     }
     return value;
+}
+
+CHyprColor cpuPulseColor() {
+    static auto& VAL = valueRef<Hyprlang::INT>("plugin:hyprdrive:dock:cpu_pulse_color");
+    return colorFromArgb(sc<uint32_t>(*VAL));
 }
 
 CHyprColor dockIndicatorColor() {

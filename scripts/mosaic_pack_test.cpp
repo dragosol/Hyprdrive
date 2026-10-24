@@ -278,6 +278,67 @@ int main() {
         expect(std::abs(CELLS(t)[2].h - 300) <= 1, "the second of a pair moves the split from its side");
         expect(COVERS(CELLS(t)), "still covers the area after resizes");
     }
+    // DWINDLE PARITY (user, 2026-10-23): what Hyprland's DwindleAlgorithm does
+    // with the same moves, on a 1600x900 area.
+    {
+        const SRect     A{0, 0, 1600, 900};
+        const STreeOpts KEEP{.preserve = true};
+        const auto      AT = [&](const CDwindleTree& t, long long id, const STreeOpts& o) { return *t.cellOf(id, A, o); };
+        // A drop splits the tile under the pointer, on the pointer's half.
+        CDwindleTree t;
+        t.buildBalanced({1, 2});
+        long long under = t.leafAt(1300, 200, A);
+        expect(under == 2, "the pointer over the right tile finds it");
+        // 2's tile is 800x900, taller than wide: dwindle splits it one over the other.
+        t.insertAt(3, under, true, 0.5, -1, A);
+        expect(AT(t, 3, {}).x == 800 && AT(t, 3, {}).y == 0 && AT(t, 3, {}).h == 450 && AT(t, 2, {}).y == 450, "dropped on the top half of 2: above it");
+        // The tile a window was picked out of, its window put back, is unchanged.
+        t.remove(3);
+        expect(AT(t, 2, {}).x == 800 && AT(t, 2, {}).w == 800, "picked out again: its sibling has the space back");
+        // swapwindow: the windows trade tiles, the tiles stay.
+        t.buildWeighted({1, 2, 3}, {4, 1, 1});
+        const SRect BIG = AT(t, 1, {}), SMALL = AT(t, 3, {});
+        t.swapIds(1, 3);
+        expect(AT(t, 3, {}).w == BIG.w && AT(t, 3, {}).h == BIG.h && AT(t, 1, {}).y == SMALL.y, "the big tile and a small one trade windows");
+        // preserve_split: a split keeps its direction when its space changes shape.
+        CDwindleTree p;
+        p.buildBalanced({1, 2});
+        (void)p.layout(A, KEEP);                       // fixed side by side
+        const SRect TALL{0, 0, 600, 900};
+        const auto  C = p.layout(TALL, KEEP);
+        expect(C[0].second.w == 300 && C[0].second.h == 900, "preserve_split: still side by side in a tall space");
+        const auto D = p.layout(TALL, {});
+        expect(D[0].second.w == 600 && D[0].second.h == 450, "without it: across the longer side");
+        // togglesplit flips it, kept.
+        p.toggleSplit(1, A, KEEP);
+        expect(AT(p, 1, KEEP).w == 1600 && AT(p, 1, KEEP).h == 450, "togglesplit: one over the other");
+        p.swapSplit(1);
+        expect(AT(p, 1, KEEP).y == 450, "swapsplit: the two trade sides");
+        // smart_resizing: dragging a tile's right edge moves only the split to its right.
+        CDwindleTree r;
+        r.buildBalanced({1, 2, 3}); // 1 | (2 over 3)
+        r.resizeDwindle(1, 100, 0, {.right = true}, true, A, KEEP);
+        expect(AT(r, 1, KEEP).w == 900 && AT(r, 2, KEEP).x == 900, "smart resize: the right edge grows the left tile by the pointer's travel");
+        const SRect TWO = AT(r, 2, KEEP);
+        r.resizeDwindle(3, 0, -60, {.top = true}, true, A, KEEP);
+        expect(AT(r, 3, KEEP).h == 450 + 60 && AT(r, 2, KEEP).h == TWO.h - 60 && AT(r, 1, KEEP).w == 900, "smart resize: a top edge moves the split above, nothing else");
+        // Not smart: the parent and the first ancestor across, both axes.
+        r.resizeDwindle(2, -100, 40, {}, false, A, KEEP);
+        expect(AT(r, 1, KEEP).w == 800 && AT(r, 2, KEEP).h == TWO.h - 60 + 40, "plain resize: both axes move");
+        // movetoroot: the tile becomes a child of the root.
+        CDwindleTree m;
+        m.buildBalanced({1, 2, 3}); // 1 | (2 over 3)
+        expect(m.moveToRoot(3, true) && AT(m, 3, {}).h == 900, "movetoroot: 3 now spans the height");
+        // moving straight at a lone sibling lands on its far side (dwindle's override).
+        CDwindleTree s;
+        s.buildBalanced({1, 2});
+        expect(s.towardLoneSibling(2, 3, A) && !s.towardLoneSibling(2, 1, A) && s.towardLoneSibling(1, 1, A), "toward a lone sibling: left from the right tile");
+        // splitratio in dwindle's 0..2 units.
+        s.splitRatio(1, 1.5, true);
+        expect(AT(s, 1, {}).w == 1200, "splitratio 1.5 exact: the first tile takes three quarters");
+        s.splitRatio(1, 5, false);
+        expect(AT(s, 1, {}).w == 1520, "splitratio is clamped like dwindle's (0.1..1.9)");
+    }
     // THE CALCULATED LIMIT: others never shrink; the resized window stops where
     // the fast fit test finds no arrangement -- and pack() can place the limit.
     {

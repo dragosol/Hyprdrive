@@ -31,8 +31,8 @@ PANEL=$CONFIG/omarchy/plugins/dragos.hyprdrive
 
 if [ -d "$LIBDIR" ]; then rm -rf "$LIBDIR"; echo "removed $LIBDIR"; fi
 if [ -f "$CLI" ]; then rm -f "$CLI"; echo "removed $CLI"; fi
-for f in "$PREFIX/bin/hyprdrive-settings" "$PREFIX/bin/hyprdrive-layout-cycle" "$PREFIX/share/applications/hyprdrive-settings.desktop"; do
-    if [ -f "$f" ]; then rm -f "$f"; echo "removed $f"; fi
+for f in "$PREFIX/bin/hyprdrive" "$PREFIX/bin/hyprdrive-settings" "$PREFIX/bin/hyprdrive-layout-cycle" "$PREFIX/share/applications/hyprdrive-settings.desktop"; do
+    if [ -f "$f" ] || [ -L "$f" ]; then rm -f "$f"; echo "removed $f"; fi
 done
 if [ -d "$PREFIX/share/hyprdrive/settings" ]; then
     rm -rf "$PREFIX/share/hyprdrive/settings"
