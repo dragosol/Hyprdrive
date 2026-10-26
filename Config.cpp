@@ -621,6 +621,11 @@ static void registerConfigValuesFor() {
                                     "mosaic: the infinite canvas grows horizontal (a strip; swipe or Super+scroll pans it, then switches desktops) or all (a grid; hold "
                                     "Super and the pointer's place on the screen is the view's place on the canvas)",
                                     Hyprlang::STRING{"horizontal"}));
+    addKey(makeShared<CStringValue>(KEY("mosaic:canvas_super_move"),
+                                    "mosaic: holding Super and moving the pointer on the infinite canvas pans it (pan; all directions only: the pointer's place on "
+                                    "the screen is the view's place on the canvas) or zooms out to show every window (zoom; hovering one focuses it, letting go of "
+                                    "Super zooms back in on it)",
+                                    Hyprlang::STRING{"pan"}));
     // The chords Mosaic takes while it is on (audit A20). hdpanel reads these
     // when it writes 40-panel.lua; the plugin only holds them, so they can be
     // set from hyprland.lua or the settings like any other key. The cycle's
@@ -876,6 +881,13 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CStringValue>(KEY("animation:curve"),
                                     "the curve family for everything hyprdrive animates except the dock stacks: hyprdrive (the house curves), serpantinum (its window curve), serpantinum_glide, serpantinum_soft, serpantinum_intro, serpantinum_pop, swift, springy, linear",
                                     Hyprlang::STRING{"hyprdrive"}));
+    // THE INFINITE CANVAS'S MOTION (Mosaic.cpp canvasEase, user 2026-10-26):
+    // focus panning a window into view, Super+scroll, the Super zoom.
+    addKey(makeShared<CStringValue>(KEY("animation:canvas_curve"),
+                                    "the infinite canvas's pans and zoom: a curve family as animation:curve names them (its travel curve); hyprdrive (the house curve, no overshoot) by default",
+                                    Hyprlang::STRING{"hyprdrive"}));
+    addKey(makeShared<CIntValue>(KEY("animation:canvas_pan_ms"), "the infinite canvas's pans and zoom, in ms (scaled by anim_scale; 0 = instant)", 420,
+                                 SIntValueOptions{.min = 0, .max = 2000}));
     // DESKTOP SWITCHES (DesktopSwitch.hpp, user 2026-10-15). Super+scroll walks
     // the desktops by number, empty ones included; 50-desktop-scroll.lua binds it
     // (replacing whatever had <mods>+mouse_down/up) while this is on.

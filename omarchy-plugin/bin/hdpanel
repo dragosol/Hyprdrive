@@ -63,6 +63,10 @@ CANVAS_DIRECTIONS = [
     {"value": "horizontal", "label": "Horizontal"},
     {"value": "all", "label": "All directions"},
 ]
+CANVAS_SUPER_MOVES = [
+    {"value": "pan", "label": "Pan the canvas"},
+    {"value": "zoom", "label": "Zoom out to every window"},
+]
 HOT_CORNERS = [
     {"value": "top-left", "label": "Top left"},
     {"value": "top-right", "label": "Top right"},
@@ -170,6 +174,9 @@ KEY_META = [
     _k(PLUGIN + "dock:minimize_ms", "int", "animation", 400, min=0, max=1200),
     _k(PLUGIN + "dock:autohide_ms", "int", "animation", 200, min=0, max=800),
     _k(PLUGIN + "mission_control_reflow_ms", "int", "animation", 300, min=0, max=1000),
+    # The infinite canvas's pans and zoom (Mosaic.cpp canvasEase).
+    _k(PLUGIN + "animation:canvas_curve", "enum", "animation", "hyprdrive", options=CURVES),
+    _k(PLUGIN + "animation:canvas_pan_ms", "int", "animation", 420, min=0, max=2000),
     # Desktop switches by cause (DesktopSwitch.hpp): off = that kind is instant.
     _k(PLUGIN + "animation:desktop_keyboard", "bool", "animation", True),
     _k(PLUGIN + "animation:desktop_focus", "bool", "animation", True),
@@ -196,6 +203,7 @@ KEY_META = [
     _k(PLUGIN + "mosaic:default", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:infinite_canvas", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:canvas_directions", "enum", "mosaic", "horizontal", options=CANVAS_DIRECTIONS),
+    _k(PLUGIN + "mosaic:canvas_super_move", "enum", "mosaic", "pan", options=CANVAS_SUPER_MOVES),
     # The chords Mosaic takes (A20). Free text in the config; the panel offers
     # presets plus whatever is set now (chord_options(), per dump).
     _k(PLUGIN + "mosaic:cycle_bind", "str", "mosaic", "auto"),

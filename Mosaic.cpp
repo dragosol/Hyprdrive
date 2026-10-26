@@ -2,6 +2,8 @@
 #include "Mosaic.hpp"
 #include "MosaicPack.hpp"
 #include "MosaicCanvas.hpp"
+#include "MosaicDrive.hpp"
+#include "Motion.hpp"
 #include "IOverview.hpp"
 #include "DebugPaths.hpp"
 #include "Dock.hpp"
@@ -29,6 +31,9 @@
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/pointer/PointerController.hpp>
+#include <hyprland/src/Compositor.hpp>
 #include "Config.hpp"
 #include <linux/input-event-codes.h>
 
@@ -291,9 +296,39 @@ namespace ScrollOverview::Mosaic {
     static bool canvasAllDirections() {
         return ScrollOverview::Config::getValue<std::string>("plugin:hyprdrive:mosaic:canvas_directions") == "all";
     }
+    // HOLDING SUPER AND MOVING THE POINTER (user, 2026-10-26: "ask the user
+    // if ... they want the screen to behave like it does now or they want it
+    // to just zoom out the canvas so user can see all windows and then
+    // hovering over window of choice brings it into focus" -- a choice in the
+    // Mosaic settings): "pan" (all directions only: the pointer's place on the
+    // screen is the view's place on the canvas) or "zoom" (the whole canvas
+    // shrinks onto the screen; hovering focuses, letting go of Super zooms
+    // back in on the focused window).
+    static bool canvasZoomOnSuper() {
+        return ScrollOverview::Config::getValue<std::string>("plugin:hyprdrive:mosaic:canvas_super_move") == "zoom";
+    }
+    // THE PAN'S MOTION (user, 2026-10-26: "when I focus on a window it pans it
+    // into view smoothly with a serpantinum curve, adjustable in the animation
+    // tab"): animation:canvas_curve (a Motion.hpp preset, its DECEL) over
+    // animation:canvas_pan_ms, scaled by the global speed (anim_scale; 0 snaps).
+    static double canvasPanMs() {
+        const double MS = sc<double>(ScrollOverview::Config::getValue<Hyprlang::INT>("plugin:hyprdrive:animation:canvas_pan_ms"));
+        return std::max(0.0, MS * ScrollOverview::Config::animScale());
+    }
+    static float canvasEase(double t) {
+        return ScrollOverview::Motion::easeNamed(ScrollOverview::Config::getValue<std::string>("plugin:hyprdrive:animation:canvas_curve"),
+                                                 ScrollOverview::Motion::ERole::DECEL, sc<float>(t));
+    }
     // A swipe or a Super-pan is moving the view: focus landing on a window
     // under the pointer must not pull the view back to it mid-pan.
     static bool g_canvasPanning = false;
+    // rideCursor is warping the pointer: that motion is not the hand's.
+    static bool g_cursorRiding = false;
+    // The canvas's frame clock (pans, zooms, a drag pushing at the screen's
+    // edge): an event-loop timer, never a request from inside the render pass.
+    static void armCanvasTick();
+    // A plain click: the canvas window under the pointer pans into view.
+    static void canvasClick();
 
     class CMosaicAlgorithm : public Layout::ITiledAlgorithm {
       public:
@@ -306,21 +341,41 @@ namespace ScrollOverview::Mosaic {
             // edge would slide the canvas, put another window under the
             // pointer, focus that, and slide again. A click does reveal.
             m_focusHook = Event::bus()->m_events.window.active.listen([this](PHLWINDOW w, Desktop::eFocusReason reason) {
-                if (m_asCanvas && !g_canvasPanning && w && holds(w) && reason != Desktop::FOCUS_REASON_FFM)
-                    revealWindow(w);
+                // The window focus came FROM (SMART FOCUS PAN, step 2).
+                const auto FROM = m_lastFocus.lock();
+                if (w && holds(w) && w != FROM) {
+                    m_prevFocus = m_lastFocus;
+                    m_lastFocus = w;
+                }
+                // HOVER PANS TOO in the zoom mode (user, 2026-10-26: "when I
+                // mouseover a window in this mode it should refocus me"): the
+                // pointer rides the canvas (rideCursor), so the pan keeps it on
+                // the window it hovered and nothing cascades. Never the hover a
+                // ride itself causes. A hover while a pan is still landing
+                // re-aims it (panTo retargets): quick hops used to leave the
+                // last window focused but off screen.
+                const bool FFM   = reason == Desktop::FOCUS_REASON_FFM;
+                const bool HOVER = FFM && canvasZoomOnSuper() && !g_cursorRiding;
+                if (m_asCanvas && !g_canvasPanning && !m_zoomed && w && holds(w) && (!FFM || HOVER))
+                    revealWindow(w, true, FROM != w ? FROM : PHLWINDOW{});
             });
             // The canvas settings changed (the settings panel writes them and
             // Hyprland reloads): a desktop on the canvas re-arranges at once, and
             // one in the tiles goes onto the canvas when it was just turned on.
-            m_reloadHook = Event::bus()->m_events.config.reloaded.listen([this] {
-                if (m_asCanvas || (!m_asMosaic && !m_entries.empty() && canvasOn())) {
-                    m_revealPending = true;
-                    recalculate();
-                }
-            });
+            m_reloadHook = Event::bus()->m_events.config.reloaded.listen([this] { canvasSettingsChanged(); });
         }
         ~CMosaicAlgorithm() override {
             std::erase(g_instances, this);
+        }
+
+        // The canvas settings changed: a desktop on the canvas re-arranges at
+        // once (off: back to the plain mosaic, or the tiles if they do not
+        // fit), and one in the tiles goes onto the canvas when it was turned on.
+        void canvasSettingsChanged() {
+            if (m_asCanvas || (!m_asMosaic && !m_entries.empty() && canvasOn())) {
+                m_revealPending = true;
+                recalculate();
+            }
         }
 
         // For the corner grab and the remembered sizes.
@@ -353,25 +408,176 @@ namespace ScrollOverview::Mosaic {
         std::optional<CBox> canvasArea() const {
             return area();
         }
-        void setCanvasOffset(const Vector2D& offset, bool warp) {
-            m_canvasOffset = offset;
+        // Straight to `offset`: a swipe or the Super-pan tracking the hand.
+        // Whatever pan was easing stops where it is. `ride`: the pointer
+        // moves with the canvas (rideCursor).
+        void setCanvasOffset(const Vector2D& offset, bool warp, bool ride = false) {
+            m_pan.on            = false;
+            const Vector2D WAS  = m_canvasOffset;
+            m_canvasOffset      = offset;
             layoutCanvas(warp);
+            if (ride)
+                rideCursor(WAS);
         }
-        void revealWindow(const PHLWINDOW& w) {
-            const auto AREA = area();
-            const auto VIEW = canvasViewNow();
-            if (!AREA || !VIEW || m_canvas.rects.size() != m_entries.size())
+        // THE POINTER RIDES THE CANVAS (user, 2026-10-26: "so user doesn't
+        // accidentally refocus through a bunch of windows at once, the cursor
+        // should stay relative to where it was on the windows ... cursor holds
+        // a position within the canvas instead of relative to the screen"). The
+        // view moved from `was`: the pointer moves with what is under it, so
+        // focus that follows the mouse stays on the same window -- kept on its
+        // screen. Not mid-drag (the window follows the hand), not zoomed, not
+        // under a pointer lock (a game owns the cursor), not when the pointer
+        // is on another screen.
+        void rideCursor(const Vector2D& was) {
+            const Vector2D D = m_canvasOffset - was;
+            if ((std::abs(D.x) < 0.5 && std::abs(D.y) < 0.5) || m_zoomed || g_pInputManager->isConstrained())
                 return;
-            for (size_t i = 0; i < m_entries.size(); ++i)
-                if (const auto T = m_entries[i].target.lock(); T && T->window() == w) {
-                    const auto& R    = m_canvas.rects[i];
-                    const auto  OLD  = m_canvasOffset;
-                    m_canvasOffset.x = MosaicPack::revealAxis(m_canvasOffset.x, R.x, R.w, AREA->w, VIEW->maxX, innerGap());
-                    m_canvasOffset.y = MosaicPack::revealAxis(m_canvasOffset.y, R.y, R.h, AREA->h, VIEW->maxY, innerGap());
-                    if (std::abs(OLD.x - m_canvasOffset.x) > 0.5 || std::abs(OLD.y - m_canvasOffset.y) > 0.5)
-                        layoutCanvas(false);
+            if (g_layoutManager && g_layoutManager->dragController()->target())
+                return;
+            const auto WS  = workspace();
+            const auto MON = WS ? WS->m_monitor.lock() : PHLMONITOR{};
+            if (!MON || MON->m_activeWorkspace != WS || MON->m_activeSpecialWorkspace)
+                return;
+            const Vector2D P = g_pInputManager->getMouseCoordsInternal();
+            const CBox     B = MON->logicalBox();
+            if (!B.containsPoint(P))
+                return;
+            g_cursorRiding = true;
+            Pointer::pointerController()->warpTo(Vector2D{std::clamp(P.x - D.x, B.x + 1, B.x + B.w - 2), std::clamp(P.y - D.y, B.y + 1, B.y + B.h - 2)}, true);
+            g_cursorRiding = false;
+        }
+        // Where the view is headed: the end of the pan in flight, else here.
+        Vector2D panTarget() const {
+            return m_pan.on ? m_pan.to : m_canvasOffset;
+        }
+        // EASED to `want` (canvasEase over canvasPanMs). `settle`: at the end,
+        // keys go to a window in view (Super+scroll).
+        void panTo(Vector2D want, bool settle = false) {
+            const auto VIEW = canvasViewNow();
+            if (!VIEW)
+                return;
+            want = Vector2D{std::clamp(want.x, 0.0, VIEW->maxX), std::clamp(want.y, 0.0, VIEW->maxY)};
+            const double MS = canvasPanMs();
+            if (MS < 1.0) {
+                setCanvasOffset(want, true);
+                if (settle)
+                    settleFocus();
+                return;
+            }
+            if (m_pan.on) {
+                // Under way: it heads somewhere new FROM WHERE IT IS NOW, over
+                // a fresh curve (user, 2026-10-26: "panning shouldn't become
+                // instant just because i move my cursor to another app halfway
+                // through the pan"). Only swapping `to` kept the old start and
+                // clock, so half way through the curve the view leapt most of
+                // the way to the new target in one frame.
+                if (std::abs(want.x - m_pan.to.x) < 0.5 && std::abs(want.y - m_pan.to.y) < 0.5) {
+                    m_pan.settle |= settle;
                     return;
                 }
+                m_pan.from  = m_canvasOffset;
+                m_pan.to    = want;
+                m_pan.start = std::chrono::steady_clock::now();
+                m_pan.ms    = MS;
+                m_pan.settle |= settle;
+                trace(std::format("pan re-aimed {}x{} -> {}x{}", m_canvasOffset.x, m_canvasOffset.y, want.x, want.y));
+                return;
+            }
+            if (std::abs(want.x - m_canvasOffset.x) < 0.5 && std::abs(want.y - m_canvasOffset.y) < 0.5)
+                return;
+            m_pan = SPan{.on = true, .settle = settle, .from = m_canvasOffset, .to = want, .start = std::chrono::steady_clock::now(), .ms = MS};
+            trace(std::format("pan {}x{} -> {}x{} over {}ms", m_canvasOffset.x, m_canvasOffset.y, want.x, want.y, MS));
+            armCanvasTick();
+        }
+        // The offset that shows `w` (MosaicCanvas.hpp smartRevealAxis), seen
+        // from `cur`. Already in view whole -- and the window focus came from
+        // with it -- the view stays: a click inside the screen moves nothing.
+        std::optional<Vector2D> revealOffset(const PHLWINDOW& w, Vector2D cur, const PHLWINDOW& from = {}) const {
+            const auto AREA = area();
+            const auto VIEW = canvasViewNow();
+            const auto R    = canvasRectOf(w);
+            if (!AREA || !VIEW || !R)
+                return std::nullopt;
+            const auto FR     = from ? canvasRectOf(from) : std::nullopt;
+            const auto INVIEW = [&](const MosaicPack::SRect& q) {
+                return q.x >= cur.x - 0.5 && q.x + q.w <= cur.x + AREA->w + 0.5 && q.y >= cur.y - 0.5 && q.y + q.h <= cur.y + AREA->h + 0.5;
+            };
+            if (INVIEW(*R) && (!FR || INVIEW(*FR)))
+                return cur;
+            // The windows beside it on each axis: overlapping it across that axis.
+            std::vector<MosaicPack::SSpan> nearX, nearY;
+            for (size_t i = 0; i < m_canvas.rects.size(); ++i) {
+                const auto& Q = m_canvas.rects[i];
+                if (std::abs(Q.x - R->x) < 0.5 && std::abs(Q.y - R->y) < 0.5)
+                    continue;
+                if (Q.y < R->y + R->h && Q.y + Q.h > R->y)
+                    nearX.push_back({Q.x, Q.w});
+                if (Q.x < R->x + R->w && Q.x + Q.w > R->x)
+                    nearY.push_back({Q.y, Q.h});
+            }
+            constexpr double PEEK = 48.0;
+            const double     M    = innerGap();
+            return Vector2D{
+                MosaicPack::smartRevealAxis(AREA->w, VIEW->maxX, {R->x, R->w}, FR ? std::optional<MosaicPack::SSpan>{{FR->x, FR->w}} : std::nullopt, nearX, M, PEEK),
+                MosaicPack::smartRevealAxis(AREA->h, VIEW->maxY, {R->y, R->h}, FR ? std::optional<MosaicPack::SSpan>{{FR->y, FR->h}} : std::nullopt, nearY, M, PEEK)};
+        }
+        // `animate`: pan there (focus moved); otherwise only aim the view, for
+        // the layout pass that follows.
+        void revealWindow(const PHLWINDOW& w, bool animate, const PHLWINDOW& from = {}) {
+            const auto WANT = revealOffset(w, panTarget(), from);
+            if (!WANT)
+                return;
+            if (animate)
+                panTo(*WANT);
+            else {
+                m_pan.on       = false;
+                m_canvasOffset = *WANT;
+            }
+        }
+        // A CLICK PANS (user, 2026-10-26: "a click should refocus and pan the
+        // same way"). With focus following the mouse the window under the
+        // pointer is usually focused already, so the click itself is no focus
+        // change and the focus hook never heard it: it pans here, from the
+        // window focus had before.
+        void clickReveal(const PHLWINDOW& w) {
+            if (!m_asCanvas || m_zoomed || !holds(w))
+                return;
+            const auto LAST = m_lastFocus.lock();
+            const auto FROM = LAST == w ? m_prevFocus.lock() : LAST;
+            revealWindow(w, true, FROM != w ? FROM : PHLWINDOW{});
+        }
+        // Keys go to a window you can see: the focused one if it is still
+        // mostly in view, else the one showing most of itself.
+        // Is this desktop the one on screen? A focus the canvas makes on its own
+        // (a pan landing, a swipe settling) only then: focusing a window on a
+        // desktop you just left switches straight back to it (user,
+        // 2026-10-26: "it wouldn't let me switch desktops ... it would just take
+        // me back to that window" -- a Super+scroll pan landed after the
+        // scroll that left the desktop).
+        bool shownNow() const {
+            const auto WS  = workspace();
+            const auto MON = WS ? WS->m_monitor.lock() : PHLMONITOR{};
+            return MON && MON->m_activeWorkspace == WS && !MON->m_activeSpecialWorkspace;
+        }
+        void settleFocus() {
+            if (!shownNow())
+                return;
+            const auto F = Desktop::focusState()->window();
+            if (F && holds(F) && visibleShare(F) >= 0.5)
+                return;
+            if (const auto BEST = mostVisible()) {
+                const bool WAS  = g_canvasPanning;
+                g_canvasPanning = true; // it is in view: no reveal
+                Desktop::focusState()->fullWindowFocus(BEST, Desktop::FOCUS_REASON_KEYBIND);
+                g_canvasPanning = WAS;
+            }
+        }
+        // Where `w` sits on the canvas.
+        std::optional<MosaicPack::SRect> canvasRectOf(const PHLWINDOW& w) const {
+            for (size_t i = 0; i < m_canvasWho.size() && i < m_canvas.rects.size(); ++i)
+                if (const auto T = m_canvasWho[i].lock(); T && T->window() == w)
+                    return m_canvas.rects[i];
+            return std::nullopt;
         }
         // The window showing the most of itself in the view (after a pan).
         PHLWINDOW mostVisible() const {
@@ -812,6 +1018,10 @@ namespace ScrollOverview::Mosaic {
 
         void recalculate(Layout::eRecalculateReason reason = Layout::RECALCULATE_REASON_UNKNOWN) override {
             (void)reason;
+            // Whatever comes next is laid out for real: the zoom lets go first --
+            // unless a drag in the zoomed-out view is what re-arranged it.
+            if (!m_keepZoom)
+                endZoomNow();
             std::erase_if(m_entries, [](const SMosaicEntry& e) { return !e.target; });
             // Every window's mosaic size outlives this layout (g_windowSizes).
             for (const auto& E : m_entries)
@@ -903,64 +1113,370 @@ namespace ScrollOverview::Mosaic {
             const auto AREA = area();
             if (!AREA)
                 return;
-            // A window let go on the canvas takes its place in the order next to
-            // the window it was dropped by (the groups follow the order).
-            if (m_dropAt) {
-                const int I = indexOf(m_dropAt->target.lock());
-                if (I >= 0 && m_entries.size() > 1) {
-                    int    nearest = -1;
-                    double bestD   = 1e18;
-                    for (size_t k = 0; k < m_entries.size(); ++k)
-                        if (const auto T = m_entries[k].target.lock(); T && sc<int>(k) != I) {
-                            const auto D = T->position().middle() - m_dropAt->at;
-                            if (D.x * D.x + D.y * D.y < bestD) {
-                                bestD   = D.x * D.x + D.y * D.y;
-                                nearest = sc<int>(k);
-                            }
-                        }
-                    if (nearest >= 0) {
-                        const auto NT     = m_entries[sc<size_t>(nearest)].target.lock();
-                        const bool BEFORE = NT && m_dropAt->at.x < NT->position().middle().x;
-                        auto       moved  = m_entries[sc<size_t>(I)];
-                        m_entries.erase(m_entries.begin() + I);
-                        int at = nearest > I ? nearest - 1 : nearest;
-                        m_entries.insert(m_entries.begin() + (BEFORE ? at : at + 1), moved);
-                    }
-                }
-                m_dropAt.reset();
-            }
+            const MosaicPack::SRect AREAR{AREA->x, AREA->y, AREA->w, AREA->h};
+            // A new arrangement: the zoom (drawn from the old one) ends. A pan
+            // in flight carries on if nothing moved (below).
+            if (!m_keepZoom)
+                endZoomNow();
             std::vector<MosaicPack::SRect> sizes;
             for (const auto& E : m_entries)
                 sizes.push_back({0, 0, E.natural.x, E.natural.y});
-            m_canvas   = MosaicPack::packCanvas(sizes, MosaicPack::SRect{AREA->x, AREA->y, AREA->w, AREA->h}, looseArea(), innerGap(), canvasAllDirections());
+            // A WINDOW LET GO ON THE CANVAS lands where it was let go and the
+            // cluster packs around it, as a drop in the plain mosaic does
+            // (MosaicCanvas.hpp SCanvasDrop -> PackHint).
+            // Worked out once, on the canvas it was dropped on, and kept --
+            // like the plain mosaic's m_dropAt -- until a window arrives or
+            // leaves (forgetArrangement): every re-layout until then packs the
+            // same way, instead of the next one forgetting the drop.
+            if (m_dropAt && !m_canvasDrop) {
+                const int I = indexOf(m_dropAt->target.lock());
+                if (I >= 0 && wasCanvas && m_canvas.w > 0) {
+                    const auto OLD = MosaicPack::canvasView(m_canvas.w, m_canvas.h, AREAR);
+                    m_canvasDrop   = SCanvasDropAt{m_dropAt->target, MosaicPack::SCanvasDrop{.x    = m_dropAt->at.x - (OLD.originX - m_canvasOffset.x),
+                                                                                              .y    = m_dropAt->at.y - (OLD.originY - m_canvasOffset.y),
+                                                                                              .oldW = m_canvas.w,
+                                                                                              .oldH = m_canvas.h}};
+                    trace(std::format("canvas drop at canvas {}x{}", m_canvasDrop->drop.x, m_canvasDrop->drop.y));
+                }
+            }
+            std::optional<MosaicPack::SCanvasDrop> drop;
+            if (m_canvasDrop)
+                if (const int I = indexOf(m_canvasDrop->target.lock()); I >= 0) {
+                    drop      = m_canvasDrop->drop;
+                    drop->idx = sc<size_t>(I);
+                }
+            const auto FOCUS = Desktop::focusState()->window();
+            const auto OLDRECTS = m_canvas.rects;
+            const auto OLDWHO   = m_canvasWho;
+            m_canvas         = MosaicPack::packCanvas(sizes, AREAR, looseArea(), innerGap(), canvasAllDirections(), drop ? &*drop : nullptr);
+            m_canvasWho.clear();
+            for (const auto& E : m_entries)
+                m_canvasWho.push_back(E.target);
             m_asCanvas = true;
-            trace(std::format("canvas n={} groups={} size={}x{}", m_entries.size(), m_canvas.groups, m_canvas.w, m_canvas.h));
+            trace(std::format("canvas n={} screens={}x{} size={}x{}", m_entries.size(), m_canvas.screensX, m_canvas.screensY, m_canvas.w, m_canvas.h));
             if (!wasCanvas)
                 m_canvasOffset = {};
-            layoutCanvas(false);
+            // NOTHING MOVED ON THE CANVAS (a re-layout Hyprland asked for, the
+            // same windows packed the same way): only the view may move, and
+            // it eases there (panTo) instead of every window riding Hyprland's
+            // own move animation -- which the layout motion blur smeared.
+            bool same = wasCanvas && OLDRECTS.size() == m_canvas.rects.size() && OLDWHO.size() == m_canvasWho.size();
+            for (size_t i = 0; same && i < OLDRECTS.size(); ++i)
+                same = OLDWHO[i].lock() == m_canvasWho[i].lock() && std::abs(OLDRECTS[i].x - m_canvas.rects[i].x) < 0.5 && std::abs(OLDRECTS[i].y - m_canvas.rects[i].y) < 0.5 &&
+                    std::abs(OLDRECTS[i].w - m_canvas.rects[i].w) < 0.5 && std::abs(OLDRECTS[i].h - m_canvas.rects[i].h) < 0.5;
+            const bool REVEAL = !wasCanvas || std::exchange(m_revealPending, false);
+            if (same) {
+                // A pan in flight keeps going: committing it here made it
+                // finish in one frame whenever Hyprland re-laid the desktop
+                // mid-pan.
+                layoutCanvas(m_pan.on); // where everyone already is (mid-pan: this frame's place)
+                if (REVEAL && FOCUS && holds(FOCUS))
+                    revealWindow(FOCUS, true);
+                return;
+            }
+            // The arrangement changed: the pan was aimed at the old one.
+            if (m_pan.on) {
+                m_canvasOffset = m_pan.to;
+                m_pan.on       = false;
+            }
             // The arrangement changed (a window came, went or moved): the focused
-            // one stays in view.
-            if (!wasCanvas || std::exchange(m_revealPending, false))
-                if (const auto F = Desktop::focusState()->window(); F && holds(F))
-                    revealWindow(F);
+            // one stays in view -- aimed BEFORE the layout, so it is one move.
+            if (REVEAL && FOCUS && holds(FOCUS))
+                revealWindow(FOCUS, false);
+            layoutCanvas(false);
         }
 
-        // Every window at its canvas place for the current view.
+        // Every window at its canvas place for the current view. Not the one a
+        // Super+drag is carrying: it is out of the layout until it is let go.
         void layoutCanvas(bool warp) {
             const auto VIEW = canvasViewNow();
-            if (!VIEW || m_canvas.rects.size() != m_entries.size())
+            if (!VIEW || m_canvas.rects.size() != m_canvasWho.size())
                 return;
             m_canvasOffset.x = std::clamp(m_canvasOffset.x, 0.0, VIEW->maxX);
             m_canvasOffset.y = std::clamp(m_canvasOffset.y, 0.0, VIEW->maxY);
-            for (size_t i = 0; i < m_entries.size(); ++i) {
+            m_lastLaid       = m_canvasOffset;
+            for (size_t i = 0; i < m_canvasWho.size(); ++i) {
+                const auto T = m_canvasWho[i].lock();
+                if (!T || indexOf(T) < 0)
+                    continue;
                 const auto& R = m_canvas.rects[i];
                 const CBox  BOX{std::round(VIEW->originX + R.x - m_canvasOffset.x), std::round(VIEW->originY + R.y - m_canvasOffset.y), R.w, R.h};
-                if (const auto T = m_entries[i].target.lock()) {
-                    T->setPositionGlobal(Layout::STargetBox{.logicalBox = BOX, .visualBox = BOX});
-                    if (warp)
-                        T->warpPositionSize();
+                T->setPositionGlobal(Layout::STargetBox{.logicalBox = BOX, .visualBox = BOX});
+                if (warp)
+                    T->warpPositionSize();
+            }
+        }
+
+        // ---- the pan's and the zoom's frames (canvasTick)
+        // One frame of whatever is moving; false when nothing is.
+        bool tick(std::chrono::steady_clock::time_point now) {
+            bool busy = false;
+            if (m_pan.on) {
+                const double T = m_pan.ms > 0 ? std::chrono::duration<double, std::milli>(now - m_pan.start).count() / m_pan.ms : 1.0;
+                if (T >= 1.0) {
+                    m_pan.on       = false;
+                    m_canvasOffset = m_pan.to;
+                } else {
+                    const double E = canvasEase(T);
+                    m_canvasOffset = m_pan.from + (m_pan.to - m_pan.from) * E;
+                    busy           = true;
+                }
+                const Vector2D WAS = m_lastLaid;
+                layoutCanvas(true);
+                rideCursor(WAS);
+                if (!m_pan.on && m_pan.settle) {
+                    m_pan.settle = false;
+                    settleFocus();
                 }
             }
+            if (m_morph.on && !m_zoom.on) {
+                const bool DONE = std::chrono::duration<double, std::milli>(now - m_morph.start).count() >= m_morph.ms;
+                drawZoom();
+                if (DONE)
+                    m_morph.on = false;
+                else
+                    busy = true;
+            }
+            if (m_zoom.on) {
+                const double T = m_zoom.ms > 0 ? std::chrono::duration<double, std::milli>(now - m_zoom.start).count() / m_zoom.ms : 1.0;
+                m_zoomZ        = T >= 1.0 ? m_zoom.to : m_zoom.from + (m_zoom.to - m_zoom.from) * canvasEase(T);
+                drawZoom();
+                if (T >= 1.0) {
+                    m_zoom.on = false;
+                    if (m_zoom.to <= 0.0)
+                        endZoomNow();
+                } else
+                    busy = true;
+            }
+            return busy;
+        }
+
+        // ---- THE ZOOM (canvasZoomOnSuper)
+        bool zoomed() const {
+            return m_zoomed;
+        }
+        bool viewMoving() const {
+            return m_pan.on || m_zoom.on || m_zoomed;
+        }
+        // Where the whole canvas sits shrunk onto the screen: scale and the
+        // screen position of canvas (0,0).
+        std::optional<std::pair<double, Vector2D>> zoomFit() const {
+            const auto AREA = area();
+            if (!m_asCanvas || !AREA || m_canvas.w < 1 || m_canvas.h < 1)
+                return std::nullopt;
+            const double M = std::max(8.0, innerGap() * 2.0);
+            const double S = std::min({1.0, (AREA->w - 2 * M) / m_canvas.w, (AREA->h - 2 * M) / m_canvas.h});
+            return std::pair{S, Vector2D{AREA->x + (AREA->w - m_canvas.w * S) / 2.0, AREA->y + (AREA->h - m_canvas.h * S) / 2.0}};
+        }
+        // `w`'s box drawn at zoom `z` (0 = where the layout has it, 1 = the whole canvas on screen).
+        std::optional<CBox> zoomBoxOf(const PHLWINDOW& w, double z) const {
+            const auto FIT  = zoomFit();
+            const auto VIEW = canvasViewNow();
+            if (!FIT || !VIEW || !w)
+                return std::nullopt;
+            const CBox     LB = MosaicDrive::layoutBox(w);
+            const Vector2D P = LB.pos(), SZ = LB.size();
+            // Screen -> canvas -> the zoomed screen: canvas (0,0) is at origin - offset.
+            const Vector2D C0{VIEW->originX - m_canvasOffset.x, VIEW->originY - m_canvasOffset.y};
+            const auto&    [S, Z0] = *FIT;
+            const CBox     ZB{Z0.x + (P.x - C0.x) * S, Z0.y + (P.y - C0.y) * S, SZ.x * S, SZ.y * S};
+            // Zooming back in toward a view that has moved (zoomIn): the
+            // layout still stands at the old one until the zoom is over, so the
+            // unzoomed end is the layout box shifted by the move.
+            const double   NX = P.x - m_zoomShift.x, NY = P.y - m_zoomShift.y;
+            return CBox{NX + (ZB.x - NX) * z, NY + (ZB.y - NY) * z, SZ.x + (ZB.w - SZ.x) * z, SZ.y + (ZB.h - SZ.y) * z};
+        }
+        void drawZoom() {
+            const auto  DRAGGED = m_zDrag.lock();
+            const float ME      = m_morph.on ? canvasEase(std::clamp(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_morph.start).count() /
+                                                                         std::max(1.0, m_morph.ms),
+                                                                     0.0, 1.0))
+                                             : 1.F;
+            for (const auto& WT : m_canvasWho)
+                if (const auto T = WT.lock(); T && indexOf(T) >= 0)
+                    if (const auto W = T->window()) {
+                        auto B = zoomBoxOf(W, m_zoomZ);
+                        if (!B)
+                            continue;
+                        if (W == DRAGGED && m_zDragMoved) {
+                            // Carried by the pointer, at its zoomed size.
+                            const Vector2D P = g_pInputManager->getMouseCoordsInternal() - m_zGrab;
+                            B                = CBox{P.x, P.y, m_zDragSize.x, m_zDragSize.y};
+                        } else if (m_morph.on) {
+                            // A drop re-packed the canvas: everyone glides from
+                            // where they were drawn to their new places.
+                            for (const auto& [FW, FB] : m_morph.from)
+                                if (FW.lock() == W) {
+                                    B = CBox{FB.x + (B->x - FB.x) * ME, FB.y + (B->y - FB.y) * ME, FB.w + (B->w - FB.w) * ME, FB.h + (B->h - FB.h) * ME};
+                                    break;
+                                }
+                        }
+                        MosaicDrive::drawAt(W, *B);
+                    }
+            m_zoomed = true;
+            if (const auto WS = workspace())
+                if (const auto MON = WS->m_monitor.lock())
+                    g_pHyprRenderer->damageMonitor(MON);
+        }
+        bool zoomOut() {
+            const auto VIEW = canvasViewNow();
+            if (!VIEW || (VIEW->maxX <= 1.0 && VIEW->maxY <= 1.0))
+                return false; // all of it is on screen already
+            if (m_pan.on)
+                setCanvasOffset(m_canvasOffset, true); // the pan stops where it is
+            const double MS = canvasPanMs();
+            m_zoom          = SZoom{.on = MS >= 1.0, .from = m_zoomZ, .to = 1.0, .start = std::chrono::steady_clock::now(), .ms = MS};
+            if (!m_zoom.on) {
+                m_zoomZ = 1.0;
+                drawZoom();
+            } else
+                armCanvasTick();
+            return true;
+        }
+        // Super let go: back in, with the view on the focused window.
+        void zoomIn() {
+            if (!m_zoomed)
+                return;
+            // Aimed at the focused window. The LAYOUT moves there only when the
+            // zoom is over (endZoomNow): moving it now, under windows drawn
+            // zoomed out, put their shadows and borders at the new boxes for
+            // a frame -- a dark flash of every window (2026-10-26 recording).
+            m_zoomShift = {};
+            if (const auto F = Desktop::focusState()->window(); F && holds(F))
+                if (const auto WANT = revealOffset(F, m_canvasOffset); WANT && (std::abs(WANT->x - m_canvasOffset.x) > 0.5 || std::abs(WANT->y - m_canvasOffset.y) > 0.5)) {
+                    if (const auto VIEW = canvasViewNow())
+                        m_zoomShift = Vector2D{std::clamp(WANT->x, 0.0, VIEW->maxX), std::clamp(WANT->y, 0.0, VIEW->maxY)} - m_canvasOffset;
+                }
+            const double MS = canvasPanMs();
+            m_zoom          = SZoom{.on = MS >= 1.0, .from = m_zoomZ, .to = 0.0, .start = std::chrono::steady_clock::now(), .ms = MS};
+            if (!m_zoom.on)
+                endZoomNow();
+            else
+                armCanvasTick();
+        }
+        // Every window drawn where the layout has it again, at once.
+        void endZoomNow() {
+            m_zoom.on  = false;
+            m_zoomZ    = 0.0;
+            m_morph.on = false;
+            m_zDrag.reset();
+            m_zDragMoved = false;
+            if (!m_zoomed)
+                return;
+            m_zoomed = false;
+            // Zoomed back in toward a moved view: the layout goes there now.
+            if (std::abs(m_zoomShift.x) > 0.5 || std::abs(m_zoomShift.y) > 0.5) {
+                m_canvasOffset = m_canvasOffset + m_zoomShift;
+                m_zoomShift    = {};
+                layoutCanvas(true);
+            }
+            m_zoomShift = {};
+            for (const auto& E : m_entries)
+                if (const auto T = E.target.lock())
+                    MosaicDrive::release(T->window());
+            if (const auto WS = workspace())
+                if (const auto MON = WS->m_monitor.lock())
+                    g_pHyprRenderer->damageMonitor(MON);
+        }
+        // SUPER+DRAG IN THE ZOOMED-OUT VIEW (user, 2026-10-26: "holding super
+        // then moving cursor so I can see every window in canvas (zoomed out)
+        // i can't drag windows around (super+drag) because the super was
+        // already pressed to zoom out"). Super is already down, so the press
+        // itself is the grab: a window drawn small under the pointer. Moved,
+        // it follows the pointer at its zoomed size and, let go, is dropped
+        // there -- the canvas re-packs around it (SCanvasDrop) and everyone
+        // glides to their new zoomed places, still zoomed out. Not moved, it is
+        // the old click: pick it and zoom in.
+        bool zoomPress(const Vector2D& p) {
+            const auto W = zoomedWindowAt(p);
+            const auto B = W ? zoomBoxOf(W, m_zoomZ) : std::nullopt;
+            if (!W || !B)
+                return false;
+            m_zDrag      = W;
+            m_zPress     = p;
+            m_zGrab      = p - B->pos();
+            m_zDragSize  = B->size();
+            m_zDragMoved = false;
+            return true;
+        }
+        void zoomMove(const Vector2D& p) {
+            if (m_zDrag.expired())
+                return;
+            const Vector2D D = p - m_zPress;
+            if (!m_zDragMoved && D.x * D.x + D.y * D.y < 36.0)
+                return;
+            if (!m_zDragMoved)
+                if (const auto W = m_zDrag.lock())
+                    Desktop::windowState()->raise(W); // carried above the rest, not under them
+            m_zDragMoved = true;
+            drawZoom();
+        }
+        // The press is over: true when it was a drag (dropped), false for a click.
+        bool zoomRelease(const Vector2D& p) {
+            const auto W     = m_zDrag.lock();
+            const bool MOVED = m_zDragMoved;
+            if (!W || !MOVED) {
+                m_zDrag.reset();
+                m_zDragMoved = false;
+                return false;
+            }
+            const auto FIT = zoomFit();
+            const int  I   = [&] {
+                for (size_t i = 0; i < m_entries.size(); ++i)
+                    if (const auto T = m_entries[i].target.lock(); T && T->window() == W)
+                        return sc<int>(i);
+                return -1;
+            }();
+            if (FIT && I >= 0) {
+                // Where everyone is drawn now: the glide starts there.
+                m_morph.from.clear();
+                for (const auto& WT : m_canvasWho)
+                    if (const auto T = WT.lock(); T && T->window())
+                        m_morph.from.emplace_back(T->window(), T->window() == W ? CBox{p - m_zGrab, m_zDragSize} : zoomBoxOf(T->window(), m_zoomZ).value_or(CBox{}));
+                // The dropped window's centre, back on the canvas.
+                const auto&    [S, Z0] = *FIT;
+                const Vector2D C       = (p - m_zGrab + m_zDragSize / 2.0 - Z0) / S;
+                forgetArrangement();
+                m_canvasDrop = SCanvasDropAt{m_entries[sc<size_t>(I)].target, MosaicPack::SCanvasDrop{.x = C.x, .y = C.y, .oldW = m_canvas.w, .oldH = m_canvas.h}};
+                m_zDrag.reset();
+                m_zDragMoved = false;
+                m_keepZoom   = true;
+                recalculate();
+                m_keepZoom = false;
+                // The window just moved is the one you are working with: it has
+                // focus, and letting go of Super zooms in on it (the hover on
+                // the way had handed focus to whatever the pointer crossed).
+                Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
+                if (m_asCanvas && m_zoomed) {
+                    // The new places go to the layout at once (unseen: every
+                    // window is drawn zoomed), then the glide.
+                    layoutCanvas(true);
+                    m_morph.start = std::chrono::steady_clock::now();
+                    m_morph.ms    = std::max(1.0, canvasPanMs());
+                    m_morph.on    = true;
+                    drawZoom();
+                    armCanvasTick();
+                } else
+                    endZoomNow();
+            }
+            m_zDrag.reset();
+            m_zDragMoved = false;
+            return true;
+        }
+        // Super let go mid-drag: the drag is off, the window goes back.
+        void zoomDragCancel() {
+            m_zDrag.reset();
+            m_zDragMoved = false;
+        }
+
+        // The window drawn under `p` while zoomed out.
+        PHLWINDOW zoomedWindowAt(const Vector2D& p) const {
+            for (const auto& WT : m_canvasWho)
+                if (const auto T = WT.lock(); T && indexOf(T) >= 0)
+                    if (const auto W = T->window())
+                        if (const auto B = zoomBoxOf(W, m_zoomZ); B && B->containsPoint(p))
+                            return W;
+            return nullptr;
         }
 
         void layoutTiles() {
@@ -1036,11 +1552,14 @@ namespace ScrollOverview::Mosaic {
             const auto             TA = m_entries[a].target.lock(), TB = m_entries[b].target.lock();
             const auto             FOCUS = Desktop::focusState()->window();
             std::optional<SDropAt> swapDrop;
-            if (m_asMosaic && TA && TB)
+            // The canvas packs the same way (one cluster): a swap there is the
+            // same drop, read off the canvas (arrangeCanvas).
+            if ((m_asMosaic || m_asCanvas) && TA && TB)
                 swapDrop = FOCUS && TB->window() == FOCUS ? SDropAt{TB, TA->position().middle()} : SDropAt{TA, TB->position().middle()};
             std::swap(m_entries[a], m_entries[b]);
             std::swap(m_entries[a].id, m_entries[b].id);
             m_dropAt = swapDrop;
+            m_canvasDrop.reset();
         }
 
         SP<Layout::ITarget> getNextCandidate(SP<Layout::ITarget> old) override {
@@ -1244,7 +1763,38 @@ namespace ScrollOverview::Mosaic {
         bool                      m_tiledHold = false; // a resize went past its limit: tiles until the mosaic fits unshrunk
         bool                      m_asCanvas  = false; // the last arrangement was the infinite canvas
         MosaicPack::SCanvasPack   m_canvas;            // where everyone sits on it
+        std::vector<WP<Layout::ITarget>> m_canvasWho;  // whose rect is which (m_canvas.rects' order)
         Vector2D                  m_canvasOffset;      // the view, 0..SCanvasView::max
+        struct SPan {
+            bool                                  on = false, settle = false;
+            Vector2D                              from, to;
+            std::chrono::steady_clock::time_point start;
+            double                                ms = 0;
+        } m_pan;
+        struct SZoom {
+            bool                                  on = false;
+            double                                from = 0, to = 0;
+            std::chrono::steady_clock::time_point start;
+            double                                ms = 0;
+        } m_zoom;
+        Vector2D                  m_lastLaid;       // the offset the windows were last laid out at
+        PHLWINDOWREF              m_lastFocus;      // this desktop's last focused window (smart pan's "from")
+        PHLWINDOWREF              m_prevFocus;      // the one before it
+        bool                      g_cursorRiding = false; // rideCursor is warping the pointer
+        double                    m_zoomZ  = 0.0;   // 0 = the layout, 1 = the whole canvas on screen
+        Vector2D                  m_zoomShift;      // zooming in toward a view this far from the layout's
+        // A DRAG IN THE ZOOMED-OUT VIEW (zoomPress/Move/Release).
+        PHLWINDOWREF              m_zDrag;
+        Vector2D                  m_zGrab, m_zPress, m_zDragSize;
+        bool                      m_zDragMoved = false;
+        bool                      m_keepZoom   = false; // the re-pack a zoomed drop asks for keeps the zoom
+        struct SMorph {
+            bool                                         on = false;
+            std::vector<std::pair<PHLWINDOWREF, CBox>>   from;
+            std::chrono::steady_clock::time_point        start;
+            double                                       ms = 0;
+        } m_morph;
+        bool                      m_zoomed = false; // some window is drawn off its layout box
         bool                      m_revealPending = false;
         CHyprSignalListener       m_focusHook;
         CHyprSignalListener       m_reloadHook;
@@ -1266,7 +1816,14 @@ namespace ScrollOverview::Mosaic {
         WP<Layout::ITarget>       m_dragHold;
         void                      forgetArrangement() {
             m_dropAt.reset();
+            m_canvasDrop.reset();
         }
+        // The canvas's own record of the drop (arrangeCanvas).
+        struct SCanvasDropAt {
+            WP<Layout::ITarget>     target;
+            MosaicPack::SCanvasDrop drop;
+        };
+        std::optional<SCanvasDropAt> m_canvasDrop;
         MosaicPack::CDwindleTree  m_tree;              // the tiles; empty while the mosaic stands
         long long                 m_nextId = 0;
         long long                 m_dragLeaf = -1;     // the tile a Super+drag picked its window out of
@@ -1623,8 +2180,115 @@ namespace ScrollOverview::Mosaic {
                 A->finishResize();
     }
 
+    static void canvasClick() {
+        const auto W = Desktop::viewState()->hitTest().windowAt(g_pInputManager->getMouseCoordsInternal(),
+                                                                 Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+        if (!W)
+            return;
+        for (auto* A : g_instances)
+            if (A->holds(W)) {
+                A->clickReveal(W);
+                return;
+            }
+    }
+
+    // ------------------------------------------------ Super held, pointer moved --
+    // What a held Super is doing on the canvas. ARMED: Super is down, nothing
+    // decided yet. A button pressed then (Super+drag, Super+click) SPENDS it:
+    // no pan or zoom until Super is let go -- the window being aimed at stays
+    // put, and so does the canvas after the drop (user, 2026-10-26: Super+drag
+    // "is buggy"; the pan used to fire on the way to the window and again
+    // after the drop). Moving SUPER_SLOP px with no button ENGAGES it.
+    namespace {
+        enum class ESuper : uint8_t { IDLE, ARMED, PANNING, ZOOMED, SPENT };
+        ESuper            g_super = ESuper::IDLE;
+        Vector2D          g_superAnchor;
+        CMosaicAlgorithm* g_superCanvas = nullptr; // the zoomed one
+        bool              g_swallowRelease = false;
+        bool              g_zoomPressing   = false; // the left button went down in the zoomed-out view
+        constexpr double  SUPER_SLOP = 32.0;
+    }
+
+    static CMosaicAlgorithm* liveZoomed() {
+        return g_superCanvas && std::ranges::find(g_instances, g_superCanvas) != g_instances.end() ? g_superCanvas : nullptr;
+    }
+
+    // The gesture is over (Super let go, another modifier joined, unload).
+    static void superEnd(bool superStillDown) {
+        if (auto* A = liveZoomed()) {
+            // Let go of Super mid-drag: the drag is off; the button's release,
+            // still to come, is ours.
+            if (g_zoomPressing) {
+                A->zoomDragCancel();
+                g_zoomPressing   = false;
+                g_swallowRelease = true;
+            }
+            A->zoomIn();
+        }
+        g_superCanvas = nullptr;
+        if (g_super == ESuper::PANNING || g_super == ESuper::ZOOMED)
+            g_canvasPanning = false;
+        g_super = superStillDown ? ESuper::SPENT : ESuper::IDLE;
+    }
+
+    void onSuperKey(bool pressed) {
+        if (pressed) {
+            if (g_super == ESuper::IDLE) {
+                g_super       = ESuper::ARMED;
+                g_superAnchor = g_pInputManager->getMouseCoordsInternal();
+            }
+            return;
+        }
+        superEnd(false);
+    }
+
+    // ALL DIRECTIONS (user, 2026-10-26: "I can hold down super and my cursor
+    // movement maps to the entire collection of the screens so that ... the
+    // top/bottom portions of the screen result in my cursor being at the
+    // top/bottom of the canvas"). Super alone held, no button: the pointer's
+    // place on its monitor is the view's place on the canvas, both axes.
     bool onButton(const IPointer::SButtonEvent& e, bool blocked) {
         const bool PRESSED = e.state == WL_POINTER_BUTTON_STATE_PRESSED;
+        // THE SUPER GESTURE. Zoomed out, a click picks the window under it and
+        // zooms back in on it -- the windows are drawn small, the app would
+        // get the click at the wrong place. Armed, a press is a Super+click
+        // or Super+drag: no pan or zoom until Super is let go.
+        // Zoomed out, the LEFT button grabs the window under it (zoomPress):
+        // dragged, it is dropped where it is let go; a click picks it.
+        if (e.button == BTN_LEFT && PRESSED && g_super == ESuper::ZOOMED)
+            if (auto* A = liveZoomed(); A && A->zoomPress(g_pInputManager->getMouseCoordsInternal())) {
+                g_zoomPressing = true;
+                return true;
+            }
+        if (e.button == BTN_LEFT && !PRESSED && g_zoomPressing) {
+            g_zoomPressing = false;
+            auto*          A = liveZoomed();
+            const Vector2D P = g_pInputManager->getMouseCoordsInternal();
+            if (A && !A->zoomRelease(P)) {
+                if (const auto W = A->zoomedWindowAt(P))
+                    Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
+                superEnd(true);
+            }
+            return true;
+        }
+        if (PRESSED && g_super == ESuper::ZOOMED) {
+            if (auto* A = liveZoomed()) {
+                if (const auto W = A->zoomedWindowAt(g_pInputManager->getMouseCoordsInternal()))
+                    Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
+            }
+            superEnd(true);
+            g_swallowRelease = true;
+            return true;
+        }
+        if (!PRESSED && g_swallowRelease) {
+            g_swallowRelease = false;
+            return true;
+        }
+        if (PRESSED && g_super == ESuper::ARMED)
+            g_super = ESuper::SPENT;
+        // A plain left click on a canvas window pans it into view (clickReveal).
+        if (PRESSED && !blocked && e.button == BTN_LEFT && modsNow() == 0 && !(g_layoutManager && g_layoutManager->dragController()->target()))
+            canvasClick();
         if (!PRESSED) {
             if (g_ourDrag && e.button == BTN_LEFT) {
                 g_ourDrag = false;
@@ -1676,7 +2340,7 @@ namespace ScrollOverview::Mosaic {
 
     void canvasSetOffset(const PHLWORKSPACE& ws, double offsetX, bool warp) {
         if (auto* A = canvasOf(ws))
-            A->setCanvasOffset(Vector2D{offsetX, A->canvasOffset().y}, warp);
+            A->setCanvasOffset(Vector2D{offsetX, A->canvasOffset().y}, warp, true);
     }
 
     std::optional<CBox> canvasBox(const PHLWORKSPACE& ws) {
@@ -1694,71 +2358,230 @@ namespace ScrollOverview::Mosaic {
 
     void canvasSettle(const PHLWORKSPACE& ws) {
         g_canvasPanning = false;
-        const auto* A = canvasOf(ws);
-        if (!A)
-            return;
-        // Keys go to a window you can see: the focused one if it is still
-        // mostly in view, else the one showing most of itself.
-        const auto F = Desktop::focusState()->window();
-        if (F && A->holds(F) && A->visibleShare(F) >= 0.5)
-            return;
-        if (const auto BEST = A->mostVisible())
-            Desktop::focusState()->fullWindowFocus(BEST, Desktop::FOCUS_REASON_KEYBIND);
+        if (auto* A = canvasOf(ws))
+            A->settleFocus();
     }
 
+    // Half a screen, eased (canvasEase); the next notch during the pan adds
+    // to where it is headed. Keys go to a window in view when it lands.
     bool canvasStep(const PHLWORKSPACE& ws, int dir) {
         auto*      A    = canvasOf(ws);
         const auto V    = A ? A->canvasViewNow() : std::nullopt;
         const auto AREA = A ? A->canvasArea() : std::nullopt;
-        if (!V || !AREA || V->maxX <= 1.0)
+        if (!V || !AREA || V->maxX <= 1.0 || A->zoomed())
             return false;
-        const double X = A->canvasOffset().x;
-        if ((dir > 0 && X >= V->maxX - 0.5) || (dir < 0 && X <= 0.5))
+        const Vector2D TO = A->panTarget();
+        if ((dir > 0 && TO.x >= V->maxX - 0.5) || (dir < 0 && TO.x <= 0.5))
             return false; // at that end: the step goes on to the next desktop
-        A->setCanvasOffset(Vector2D{std::clamp(X + dir * AREA->w * 0.5, 0.0, V->maxX), A->canvasOffset().y}, false);
-        if (const auto BEST = A->mostVisible(); BEST && A->visibleShare(Desktop::focusState()->window()) < 0.5) {
-            g_canvasPanning = true;
-            Desktop::focusState()->fullWindowFocus(BEST, Desktop::FOCUS_REASON_KEYBIND);
-            g_canvasPanning = false;
-        }
+        A->panTo(Vector2D{TO.x + dir * AREA->w * 0.5, TO.y}, true);
         return true;
     }
 
-    // ALL DIRECTIONS (user, 2026-10-26: "I can hold down super and my cursor
-    // movement maps to the entire collection of the screens so that ... the
-    // top/bottom portions of the screen result in my cursor being at the
-    // top/bottom of the canvas"). Super alone held, no button: the pointer's
-    // place on its monitor is the view's place on the canvas, both axes.
-    static bool superPan(bool blocked) {
-        if (blocked || !canvasAllDirections() || (g_layoutManager && g_layoutManager->dragController()->target()))
+    // ---------------------------------------------------- the canvas's clock --
+    namespace {
+        wl_event_source*  g_canvasTimer = nullptr;
+        constexpr int     CANVAS_TICK_MS = 8; // half a 60 Hz frame: always one booked
+        // A Super+drag pushing at the screen's edge pans the canvas under it
+        // (user, 2026-10-26: Super+drag on the canvas "doesn't behave ... like
+        // regular mosaic"): the far groups are otherwise out of reach.
+        Vector2D          g_edgePush;       // -1/0/1 per axis while pushing
+        PHLWORKSPACEREF   g_edgeWorkspace;
+        std::chrono::steady_clock::time_point g_edgeLast;
+        constexpr double  EDGE_ZONE  = 4.0;    // px from the outer edge
+        constexpr double  EDGE_SPEED = 1400.0; // canvas px per second
+    }
+    static bool edgeTick(std::chrono::steady_clock::time_point now);
+
+    static int canvasTickCb(void*) {
+        const auto NOW  = std::chrono::steady_clock::now();
+        bool       busy = false;
+        // A copy: a tick can re-lay a desktop out, never add or drop a layout,
+        // but be safe against it anyway.
+        for (auto* A : std::vector<CMosaicAlgorithm*>{g_instances})
+            busy |= A->tick(NOW);
+        busy |= edgeTick(NOW);
+        if (busy && g_canvasTimer)
+            wl_event_source_timer_update(g_canvasTimer, CANVAS_TICK_MS);
+        return 0;
+    }
+
+    static void armCanvasTick() {
+        if (!g_canvasTimer)
+            g_canvasTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, canvasTickCb, nullptr);
+        if (g_canvasTimer)
+            wl_event_source_timer_update(g_canvasTimer, 1);
+    }
+
+    static bool edgeTick(std::chrono::steady_clock::time_point now) {
+        if (g_edgePush.x == 0 && g_edgePush.y == 0)
             return false;
-        if (modsNow() != HL_MODIFIER_META)
+        const auto DRAGGED = g_layoutManager ? g_layoutManager->dragController()->target() : SP<Layout::ITarget>{};
+        auto*      A       = canvasOf(g_edgeWorkspace.lock());
+        if (!DRAGGED || !A) {
+            g_edgePush = {};
             return false;
-        const Vector2D P   = g_pInputManager->getMouseCoordsInternal();
-        const auto     MON = State::monitorState()->query().vec(P).run();
+        }
+        const double DT = std::min(0.05, std::chrono::duration<double>(now - g_edgeLast).count());
+        g_edgeLast      = now;
+        const auto O    = A->canvasOffset();
+        A->setCanvasOffset(O + g_edgePush * (EDGE_SPEED * DT), true);
+        return true;
+    }
+
+    bool canvasMotion(const PHLWINDOW& w) {
+        if (!w || !w->m_workspace)
+            return false;
+        for (const auto* A : g_instances)
+            if (A->holds(w))
+                return A->arrangedAsCanvas() &&
+                    (A->viewMoving() || g_canvasPanning || ((g_edgePush.x != 0 || g_edgePush.y != 0) && g_edgeWorkspace.lock() == w->m_workspace));
+        return false;
+    }
+
+    // Is the pointer pushing at an outer edge of its monitor (no monitor
+    // beyond it) while a Super+drag is over a canvas desktop?
+    static void updateEdgePush() {
+        const auto DRAGGED = g_layoutManager ? g_layoutManager->dragController()->target() : SP<Layout::ITarget>{};
+        Vector2D   push;
+        PHLWORKSPACE ws;
+        if (DRAGGED && DRAGGED->window()) {
+            const Vector2D P   = g_pInputManager->getMouseCoordsInternal();
+            const auto     MON = State::monitorState()->query().vec(P).run();
+            if (MON && !MON->m_activeSpecialWorkspace && canvasOf(MON->m_activeWorkspace)) {
+                const CBox B       = MON->logicalBox();
+                // An outer edge: no monitor that way (vec() would answer the
+                // CLOSEST monitor, this one, for a point past the edge).
+                const auto OUTER = [&](Math::eDirection d) {
+                    const auto M = State::monitorState()->query().relativeTo(MON).inDirection(d).run();
+                    return !M || M == MON;
+                };
+                if (P.x <= B.x + EDGE_ZONE && OUTER(Math::DIRECTION_LEFT))
+                    push.x = -1;
+                else if (P.x >= B.x + B.w - EDGE_ZONE && OUTER(Math::DIRECTION_RIGHT))
+                    push.x = 1;
+                if (canvasAllDirections()) {
+                    if (P.y <= B.y + EDGE_ZONE && OUTER(Math::DIRECTION_UP))
+                        push.y = -1;
+                    else if (P.y >= B.y + B.h - EDGE_ZONE && OUTER(Math::DIRECTION_DOWN))
+                        push.y = 1;
+                }
+                ws = MON->m_activeWorkspace;
+            }
+        }
+        const bool START = (push.x != 0 || push.y != 0) && g_edgePush.x == 0 && g_edgePush.y == 0;
+        g_edgePush       = push;
+        g_edgeWorkspace  = ws;
+        if (START) {
+            g_edgeLast = std::chrono::steady_clock::now();
+            armCanvasTick();
+        }
+    }
+
+    // The Super gesture, on every pointer motion. Pan: the pointer's place on
+    // the screen is the view's place on the canvas -- eased there when it
+    // engages (no jump), then tracking. Zoom: the canvas shrinks onto the
+    // screen once, and hovering a window focuses it.
+    static void superMove(bool blocked) {
+        const int MODS = modsNow();
+        if (!(MODS & HL_MODIFIER_META)) {
+            if (g_super != ESuper::IDLE)
+                superEnd(false);
+            return;
+        }
+        if (MODS != HL_MODIFIER_META) {
+            // Another modifier joined: someone's chord, not this.
+            if (g_super != ESuper::IDLE && g_super != ESuper::SPENT)
+                superEnd(true);
+            return;
+        }
+        const Vector2D P = g_pInputManager->getMouseCoordsInternal();
+        if (g_super == ESuper::IDLE) {
+            // Super went down before we heard it (held across a reload).
+            g_super       = ESuper::ARMED;
+            g_superAnchor = P;
+        }
+        if (g_super == ESuper::SPENT || blocked || g_cursorRiding || (g_layoutManager && g_layoutManager->dragController()->target()))
+            return;
+        const auto MON = State::monitorState()->query().vec(P).run();
         if (!MON || MON->m_activeSpecialWorkspace || openScrollOverviewForMonitor(MON))
-            return false;
+            return;
         auto*      A = canvasOf(MON->m_activeWorkspace);
         const auto V = A ? A->canvasViewNow() : std::nullopt;
         if (!V || (V->maxX <= 1.0 && V->maxY <= 1.0))
-            return false;
-        const CBox   B  = MON->logicalBox();
-        const double FX = B.w > 0 ? std::clamp((P.x - B.x) / B.w, 0.0, 1.0) : 0.0, FY = B.h > 0 ? std::clamp((P.y - B.y) / B.h, 0.0, 1.0) : 0.0;
-        const Vector2D WANT{FX * V->maxX, FY * V->maxY};
-        if (std::abs(WANT.x - A->canvasOffset().x) < 0.5 && std::abs(WANT.y - A->canvasOffset().y) < 0.5)
-            return true;
-        g_canvasPanning = true;
-        A->setCanvasOffset(WANT, true);
-        // Super was held to pan, not tapped: no overview on its release.
-        ScrollOverview::cancelSuperTap();
-        return true;
+            return;
+
+        if (g_super == ESuper::ARMED) {
+            const Vector2D D = P - g_superAnchor;
+            if (D.x * D.x + D.y * D.y < SUPER_SLOP * SUPER_SLOP)
+                return;
+            if (canvasZoomOnSuper()) {
+                if (!A->zoomOut())
+                    return;
+                g_super       = ESuper::ZOOMED;
+                g_superCanvas = A;
+            } else if (canvasAllDirections())
+                g_super = ESuper::PANNING;
+            else
+                return;
+            g_canvasPanning = true;
+            // Super was held for this, not tapped: no overview on its release.
+            ScrollOverview::cancelSuperTap();
+        }
+
+        if (g_super == ESuper::ZOOMED && g_zoomPressing) {
+            A->zoomMove(P); // carrying a window (zoomPress)
+            return;
+        }
+        if (g_super == ESuper::ZOOMED) {
+            // Hovering a window focuses it (as focus follows the mouse, but
+            // whatever input:follow_mouse says: this is the zoom's own pick).
+            if (const auto W = A->zoomedWindowAt(P); W && W != Desktop::focusState()->window())
+                Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
+            return;
+        }
+        if (g_super == ESuper::PANNING) {
+            const CBox   B  = MON->logicalBox();
+            const double FX = B.w > 0 ? std::clamp((P.x - B.x) / B.w, 0.0, 1.0) : 0.0, FY = B.h > 0 ? std::clamp((P.y - B.y) / B.h, 0.0, 1.0) : 0.0;
+            const Vector2D WANT{FX * V->maxX, FY * V->maxY};
+            // Easing toward the pointer (just engaged, or a pan from a key
+            // still landing): keep easing, toward here. Else track it.
+            if (!(A->panTarget() == A->canvasOffset()) || std::abs(WANT.x - A->canvasOffset().x) > SUPER_SLOP * 2 || std::abs(WANT.y - A->canvasOffset().y) > SUPER_SLOP * 2)
+                A->panTo(WANT);
+            else
+                A->setCanvasOffset(WANT, true);
+        }
+    }
+
+    // THE PANEL TURNS THE CANVAS ON OR OFF LIVE (user, 2026-10-26: "when
+    // turning off infinite canvas in settings, it should immediately go back
+    // to regular mosaic"): the panel applies a key with `hyprctl eval
+    // hl.config(...)`, which is no config reload, so the reload hook never
+    // heard it. Two cached reads per pointer motion (the hand that just
+    // clicked the switch moves on) see the change instead.
+    static void watchCanvasKeys() {
+        if (!ScrollOverview::Config::g_pluginKeysRegistered)
+            return;
+        static auto&       ON   = ScrollOverview::Config::valueRef<Hyprlang::INT>("plugin:hyprdrive:mosaic:infinite_canvas");
+        static auto&       DIRS = ScrollOverview::Config::valueRef<std::string>("plugin:hyprdrive:mosaic:canvas_directions");
+        static int64_t     lastOn   = -1;
+        static std::string lastDirs;
+        const int64_t      NOWON    = *ON;
+        const std::string& NOWDIRS  = *DIRS;
+        if (NOWON == lastOn && NOWDIRS == lastDirs)
+            return;
+        const bool FIRST = lastOn < 0;
+        lastOn           = NOWON;
+        lastDirs         = NOWDIRS;
+        if (FIRST)
+            return;
+        for (auto* A : std::vector<CMosaicAlgorithm*>{g_instances})
+            A->canvasSettingsChanged();
     }
 
     void onMove(bool blocked) {
-        if (!superPan(blocked) && g_canvasPanning && modsNow() != HL_MODIFIER_META) {
-            // The Super-pan is over: the focused window is where the pointer is.
-            g_canvasPanning = false;
-        }
+        watchCanvasKeys();
+        superMove(blocked);
+        updateEdgePush();
         if (std::ranges::any_of(g_instances, [](const CMosaicAlgorithm* a) { return a->resizing(); }))
             checkResizeEnded();
         // A drag hold whose window was let go elsewhere, or carried to another
@@ -1783,6 +2606,18 @@ namespace ScrollOverview::Mosaic {
     }
 
     void shutdown() {
+        // Nothing left drawn off its box, no clock left to fire into unmapped code.
+        for (auto* A : g_instances)
+            A->endZoomNow();
+        g_superCanvas    = nullptr;
+        g_super          = ESuper::IDLE;
+        g_zoomPressing   = false;
+        g_swallowRelease = false;
+        g_edgePush       = {};
+        if (g_canvasTimer) {
+            wl_event_source_remove(g_canvasTimer);
+            g_canvasTimer = nullptr;
+        }
         if (g_ourDrag && g_layoutManager && g_layoutManager->dragController()->target())
             g_layoutManager->endDragTarget();
         g_ourDrag = false;

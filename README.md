@@ -135,16 +135,33 @@ mosaic once they fit again. Each app's size is remembered.
   Mosaic off with `mosaic:enabled = false` or in the settings.
 - **Infinite canvas** (off by default, `mosaic:infinite_canvas`): instead of
   tiling when the windows no longer fit, they keep their sizes and spill past
-  the screen onto a canvas you pan across. Focusing a window (a click,
-  Super+arrows, the dock) brings it into view.
+  the screen: still one tight mosaic cluster, only the gap between windows, on
+  a canvas you pan across. Turning it off puts the desktop straight back in the
+  mosaic (or its tiles).
+  - **Focus pans smoothly** (`animation:canvas_curve`, the house curve by
+    default, no bounce, over `animation:canvas_pan_ms`; both in Settings >
+    Animation). A window focused off screen, or clicked, is brought fully into
+    view and centred, keeping the window focus came from in view too when both
+    fit, and a sliver of its neighbours where there is room. With the zoom
+    choice below, hovering a window does the same. A window already in view
+    does not move the canvas. The pointer moves with the canvas, so it stays on
+    the same window.
   - **Horizontal** (`mosaic:canvas_directions = "horizontal"`, the default): one
     strip. Swipe sideways with three fingers, or Super+scroll, to pan it; past
     the first or last window the same gesture switches desktops, as on a
     Scrolling desktop.
-  - **All directions** (`"all"`): the canvas grows down as well as across. Hold
-    Super and move the pointer: its place on the screen is your place on the
-    canvas, so the top-left corner shows the top left of the canvas and the
-    bottom-right corner the bottom right.
+  - **All directions** (`"all"`): the canvas grows down as well as across.
+  - **Holding Super and moving the pointer** (`mosaic:canvas_super_move`):
+    `"pan"` (All directions only): the pointer's place on the screen is your
+    place on the canvas, so the top-left corner shows the top left of the
+    canvas. `"zoom"`: every window shrinks onto the screen; hover one to focus
+    it, click it or let go of Super to zoom back in on it, or press on one and
+    drag it to rearrange the canvas while zoomed out. Neither starts
+    before the pointer has moved a little, and a Super+click or Super+drag
+    does neither until Super is let go.
+  - **Super+drag** works as in the mosaic: the window lands where you let go
+    and the cluster packs around it. Push against the screen's edge while
+    dragging to pan the canvas.
 
   In the overview, the desktop strip shows the whole canvas zoomed out.
 

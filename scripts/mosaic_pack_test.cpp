@@ -488,7 +488,7 @@ int main() {
                 for (size_t j = i + 1; j < C.rects.size(); ++j)
                     noOverlap = noOverlap && !overlaps(C.rects[i], C.rects[j]) && sep(C.rects[i], C.rects[j]) >= G - 0.5;
             }
-            expect(C.groups > 1, TWOD ? "canvas 2D: nine big windows make several groups" : "canvas: nine big windows make several groups");
+            expect(C.screensX * C.screensY > 1, TWOD ? "canvas 2D: nine big windows take more than one screen" : "canvas: nine big windows take more than one screen");
             expect(sizesKept, "canvas: every window keeps its size");
             expect(noOverlap, "canvas: no two windows overlap, gap kept");
             expect(onCanvas, "canvas: everything inside the canvas bounds");
@@ -506,6 +506,51 @@ int main() {
         expect(revealAxis(0, 3000, 500, 1920, V.maxX, G) == 3510 - 1920, "reveal: scrolls just far enough right");
         expect(revealAxis(1500, 100, 500, 1920, V.maxX, G) == 90, "reveal: scrolls just far enough left");
         expect(revealAxis(500, 700, 500, 1920, V.maxX, G) == 500, "reveal: a window in view does not move it");
+
+        // ONE TIGHT CLUSTER (user, 2026-10-26: no spaces between windows
+        // other than the gap): every window has a neighbour one gap away.
+        for (const bool TWOD : {false, true}) {
+            const auto C     = packCanvas(MANY, SCREEN, std::nullopt, G, TWOD);
+            bool       tight = true;
+            for (size_t i = 0; i < C.rects.size(); ++i) {
+                double nearest = 1e18;
+                for (size_t j = 0; j < C.rects.size(); ++j)
+                    if (i != j)
+                        nearest = std::min(nearest, sep(C.rects[i], C.rects[j]));
+                tight = tight && nearest <= G + 0.5;
+            }
+            expect(tight, TWOD ? "canvas 2D: every window sits one gap from a neighbour" : "canvas: every window sits one gap from a neighbour");
+        }
+        {
+            // A drop lands at the point it was let go (the plain mosaic's PackHint).
+            const auto FIRST = packCanvas(MANY, SCREEN, std::nullopt, G, false);
+            const SCanvasDrop D{.idx = 0, .x = FIRST.w - 200, .y = FIRST.h / 2, .oldW = FIRST.w, .oldH = FIRST.h};
+            const auto AFTER = packCanvas(MANY, SCREEN, std::nullopt, G, false, &D);
+            const auto& R    = AFTER.rects[0];
+            expect(R.x + R.w / 2 > AFTER.w / 2, "canvas drop: dropped at the far end, it lands in the far half");
+            const auto T0 = std::chrono::steady_clock::now();
+            std::vector<SRect> twelve(12, SRect{0, 0, 900, 600});
+            (void)packCanvas(twelve, SCREEN, std::nullopt, G, true);
+            const double MS = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+            std::printf("  canvas of 12 (all directions): %.2f ms\n", MS);
+            expect(MS < 40.0, "canvas of 12 packs under 40 ms");
+        }
+        // SMART FOCUS PAN.
+        {
+            const double VW = 1920, MAX = 6000;
+            // Alone: centred.
+            expect(std::abs(smartRevealAxis(VW, MAX, {3000, 600}, std::nullopt, {}, G, 48) - (3300 - 960)) < 0.5, "smart pan: a lone window is centred");
+            // From a neighbour that fits with it: the two centred together.
+            const double PAIR = smartRevealAxis(VW, MAX, {3000, 600}, SSpan{2390, 600}, {}, G, 48);
+            expect(std::abs(PAIR - ((2390 + 3600) / 2.0 - 960)) < 0.5, "smart pan: the window focus came from stays in view");
+            // From one too far to fit: leans toward it, the new one still whole.
+            const double FAR = smartRevealAxis(VW, MAX, {3000, 600}, SSpan{500, 600}, {}, G, 48);
+            expect(std::abs(FAR - (3000 - G)) < 0.5, "smart pan: leans toward a far window, the focused one whole");
+            // Neighbours peek in.
+            const double PEEKS = smartRevealAxis(VW, MAX, {3000, 1500}, std::nullopt, {{1490, 1500}, {4510, 900}}, G, 48);
+            expect(PEEKS <= 2990 - 48 + 0.5 || PEEKS + VW >= 4510 + 48 - 0.5, "smart pan: a neighbour's edge shows where there is room");
+            expect(PEEKS <= 3000 - G + 0.5 && PEEKS + VW >= 4500 + G - 0.5, "smart pan: the focused window stays whole");
+        }
     }
 
     std::printf("mosaic_pack_test: %d checks, %d failed\n", checks, failed);

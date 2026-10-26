@@ -1306,6 +1306,10 @@ static void                registerRawKeyHooks() {
             return;
         }
 
+        // The infinite canvas's Super gesture (Mosaic.hpp): armed on the press,
+        // over on the release -- zoomed out, the release zooms back in.
+        ScrollOverview::Mosaic::onSuperKey(PRESSED);
+
         if (PRESSED) {
             g_tapSuperCandidate = true;
             g_tapSuperPressedAt = event.timeMs;

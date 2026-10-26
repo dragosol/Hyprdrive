@@ -55,6 +55,13 @@ namespace ScrollOverview::Mosaic {
     void canvasSettle(const PHLWORKSPACE& ws);
     // Super+scroll: half a screen along the canvas; false at that end.
     bool canvasStep(const PHLWORKSPACE& ws, int dir);
+    // Super went down / came up (main.cpp's key hook): the canvas's Super
+    // gesture -- hold and move to pan or zoom out (mosaic:canvas_super_move),
+    // never while a Super+click or Super+drag has used the press.
+    void onSuperKey(bool pressed);
+    // Is `w` on a canvas whose view is moving (a pan, the zoom, a swipe, a
+    // drag pushing at the edge)? The layout motion blur leaves it alone.
+    bool canvasMotion(const PHLWINDOW& w);
     // The whole canvas in global layout coordinates at the current view, for
     // the overview's strip thumbnail (the whole canvas, zoomed out). Nothing
     // when the desktop is not on its canvas.

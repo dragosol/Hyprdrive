@@ -195,6 +195,14 @@ var sections = [
         { type: "slider", key: P + "dock:autohide_ms", label: "Dock autohide slide", min: 0, max: 800, step: 10, unit: "ms" },
         { type: "slider", key: P + "mission_control_reflow_ms", label: "Grid reflow", min: 0, max: 1000, step: 10, unit: "ms",
           desc: "Tiles gliding to new slots as a search filters them." }
+      ]},
+      // Mosaic's infinite canvas (Mosaic.cpp canvasEase): its own curve, so a
+      // pan can glide on Serpantinum whatever the rest of hyprdrive uses.
+      { title: "Infinite canvas", rows: [
+        { type: "curve", key: P + "animation:canvas_curve", label: "Canvas pan curve", when: "canvasMotionOn",
+          desc: "How the canvas glides when focus brings a window into view, on Super+scroll and on the Super zoom." },
+        { type: "slider", key: P + "animation:canvas_pan_ms", label: "Canvas pan", min: 0, max: 2000, step: 10, unit: "ms", when: "canvasMotionOn",
+          desc: "0 jumps straight there." }
       ]}
     ]
   },
@@ -290,7 +298,9 @@ var sections = [
         { type: "toggle", key: P + "mosaic:infinite_canvas", label: "Infinite canvas", when: "mosaicOn",
           desc: "When windows no longer fit the screen, they keep their size and spill onto a canvas you pan across, instead of tiling. Swipe sideways or Super+scroll to pan; past the last window it switches desktops." },
         { type: "choice", key: P + "mosaic:canvas_directions", label: "Canvas directions", when: "canvasOn",
-          desc: "Horizontal: one strip of windows. All directions: a grid of them; hold Super and move the pointer, and its place on the screen is your place on the canvas." }
+          desc: "Horizontal: one strip of windows. All directions: a grid of them." },
+        { type: "choice", key: P + "mosaic:canvas_super_move", label: "Hold Super and move the pointer", when: "canvasOn",
+          desc: "Pan: your place on the screen is your place on the canvas (All directions only). Zoom out: every window shrinks onto the screen; hover one to focus it, let go of Super to zoom back in on it. A Super+click or Super+drag does neither." }
       ]},
       // The chords Mosaic takes while it is on (hdpanel chord_options). Auto
       // is Super+L for the cycle on every desktop; for the focus keys it is
