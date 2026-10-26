@@ -8,6 +8,7 @@
 #include "SearchProviders.hpp"
 #include "Scratchpad.hpp"
 #include "DockStacks.hpp"
+#include "Mosaic.hpp"
 #include <format>
 
 #include <algorithm>
@@ -146,6 +147,13 @@ void COverviewGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
         OVERVIEW->onSwipeEnd();
 }
 
+void COverviewWorkspaceGesture::setTapeOffset(const PHLWORKSPACE& ws) {
+    if (m_tapeCanvas)
+        ScrollOverview::Mosaic::canvasSetOffset(ws, m_tapeOffset, true);
+    else
+        ScrollOverview::DesktopTape::setOffset(ws, m_tapeOffset);
+}
+
 void COverviewWorkspaceGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
     ITrackpadGesture::begin(e);
     m_inOverview = false;
@@ -162,8 +170,25 @@ void COverviewWorkspaceGesture::begin(const ITrackpadGesture::STrackpadGestureBe
 
     m_mode = EMode::Native;
     m_tapeWorkspace.reset();
+    m_tapeCanvas = false;
     if (!m_allWorkspaces && MONITOR && !MONITOR->m_activeSpecialWorkspace) {
         if (const auto WS = MONITOR->m_activeWorkspace; WS) {
+            // A Mosaic desktop on its infinite canvas pans the same way: the
+            // view first, desktops past either end (no snapping to columns).
+            if (const auto CANVAS = ScrollOverview::Mosaic::canvasProbe(WS); CANVAS.usable) {
+                m_mode          = EMode::Tape;
+                m_tapeCanvas    = true;
+                m_tapeWorkspace = WS;
+                m_tapeOffset    = std::clamp(CANVAS.offset, 0.0, CANVAS.maxOffset);
+                m_tapeMax       = CANVAS.maxOffset;
+                if (!m_forcedFollow) {
+                    m_prevFollow   = ScrollOverview::Config::getValue<int>("input:follow_mouse");
+                    m_forcedFollow = true;
+                    ScrollOverview::Config::setValue("input:follow_mouse", 0);
+                }
+                ScrollOverview::Mosaic::canvasPanning(true);
+                return;
+            }
             if (const auto TAPE = ScrollOverview::DesktopTape::probe(WS); TAPE.usable) {
                 m_mode          = EMode::Tape;
                 m_tapeWorkspace = WS;
@@ -203,7 +228,8 @@ void COverviewWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureU
     }
 
     if (m_mode == EMode::Tape) {
-        m_tape.update(e); // its velocity is what the release snaps with
+        if (!m_tapeCanvas)
+            m_tape.update(e); // its velocity is what the release snaps with
         const auto WS = m_tapeWorkspace.lock();
         if (!WS)
             return;
@@ -215,7 +241,7 @@ void COverviewWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureU
         else if (WANT < 0.0)
             over = WANT; // negative: past the start
         m_tapeOffset = std::clamp(WANT, 0.0, m_tapeMax);
-        ScrollOverview::DesktopTape::setOffset(WS, m_tapeOffset);
+        setTapeOffset(WS);
         if (over == 0.0)
             return;
         // Pinned at the end it reached; the rest of the travel switches.
@@ -234,6 +260,12 @@ void COverviewWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureU
         m_switchSide      = m_switchDelta > 0.0 ? 1 : -1;
         m_tapeAtEnd       = FAREND;
         m_mode            = EMode::TapeSwitch;
+        // Leaving a canvas from its end: focus goes to a window there first, so
+        // coming back to this desktop shows the end it was left at.
+        if (m_tapeCanvas) {
+            ScrollOverview::Mosaic::canvasSettle(WS);
+            ScrollOverview::Mosaic::canvasPanning(true);
+        }
         g_pUnifiedWorkspaceSwipe->update(m_switchDelta);
         return;
     }
@@ -254,7 +286,7 @@ void COverviewWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureU
         m_mode = EMode::Tape;
         if (const auto WS = m_tapeWorkspace.lock()) {
             m_tapeOffset = std::clamp(m_tapeAtEnd ? m_tapeMax - std::abs(D) : std::abs(D), 0.0, m_tapeMax);
-            ScrollOverview::DesktopTape::setOffset(WS, m_tapeOffset);
+            setTapeOffset(WS);
         }
         return;
     }
@@ -284,6 +316,12 @@ void COverviewWorkspaceGesture::end(const ITrackpadGesture::STrackpadGestureEnd&
     // (user, 2026-09-29: "never see empty space on the scrolling desktop").
     // Whatever it picked is pulled back inside the tape.
     const auto SNAPINSIDE = [this, &e] {
+        if (m_tapeCanvas) {
+            // The canvas stays where the fingers left it; keys go to a window in view.
+            if (const auto WS = m_tapeWorkspace.lock())
+                ScrollOverview::Mosaic::canvasSettle(WS);
+            return;
+        }
         m_tape.end(e); // snap to a column (with momentum) and focus it
         if (const auto WS = m_tapeWorkspace.lock()) {
             ScrollOverview::DesktopTape::setOffset(WS, ScrollOverview::DesktopTape::probe(WS).offset); // setOffset clamps
@@ -306,6 +344,8 @@ void COverviewWorkspaceGesture::end(const ITrackpadGesture::STrackpadGestureEnd&
         const auto WS = m_tapeWorkspace.lock();
         if (const auto MONITOR = WS ? WS->m_monitor.lock() : PHLMONITOR{}; MONITOR && MONITOR->m_activeWorkspace == WS)
             SNAPINSIDE();
+        else if (m_tapeCanvas)
+            ScrollOverview::Mosaic::canvasPanning(false);
         m_mode = EMode::Native;
         m_tapeWorkspace.reset();
         return;

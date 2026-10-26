@@ -133,6 +133,20 @@ mosaic once they fit again. Each app's size is remembered.
   to start new ones in Mosaic. Pick another chord with `mosaic:cycle_bind`
   (e.g. `"SUPER + M"`, or `"none"` to keep a Super+L of your own), or turn
   Mosaic off with `mosaic:enabled = false` or in the settings.
+- **Infinite canvas** (off by default, `mosaic:infinite_canvas`): instead of
+  tiling when the windows no longer fit, they keep their sizes and spill past
+  the screen onto a canvas you pan across. Focusing a window (a click,
+  Super+arrows, the dock) brings it into view.
+  - **Horizontal** (`mosaic:canvas_directions = "horizontal"`, the default): one
+    strip. Swipe sideways with three fingers, or Super+scroll, to pan it; past
+    the first or last window the same gesture switches desktops, as on a
+    Scrolling desktop.
+  - **All directions** (`"all"`): the canvas grows down as well as across. Hold
+    Super and move the pointer: its place on the screen is your place on the
+    canvas, so the top-left corner shows the top left of the canvas and the
+    bottom-right corner the bottom right.
+
+  In the overview, the desktop strip shows the whole canvas zoomed out.
 
 It is best on large displays, and it is the part of Hyprdrive most likely to
 have rough edges.

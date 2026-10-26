@@ -1,6 +1,7 @@
 // MosaicPack: the tight mosaic (MosaicPackFinal.hpp's pack), the dwindle
 // tiles, the calculated limit, and the size each window arrives with.
 #include "../MosaicPack.hpp"
+#include "../MosaicCanvas.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -469,6 +470,42 @@ int main() {
         const double LMS = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
         std::printf("  pack of 20: %.2f ms, a resize step at 20: %.2f ms (limit %.0fx%.0f%s)\n", MS, LMS, L.w, L.h, L.reached ? " reached" : "");
         expect(MS < 25.0 && LMS < 25.0, "pack of 20 under 25 ms, a resize step under 25 ms");
+    }
+
+    // ---- THE INFINITE CANVAS (MosaicCanvas.hpp) ----
+    {
+        const SRect  SCREEN{0, 0, 1920, 1040};
+        const double G = 10;
+        std::vector<SRect> MANY;
+        for (int i = 0; i < 9; ++i)
+            MANY.push_back({0, 0, 900, 600});
+        for (const bool TWOD : {false, true}) {
+            const auto C = packCanvas(MANY, SCREEN, std::nullopt, G, TWOD);
+            bool       noOverlap = true, sizesKept = true, onCanvas = true;
+            for (size_t i = 0; i < C.rects.size(); ++i) {
+                sizesKept = sizesKept && C.rects[i].w == 900 && C.rects[i].h == 600;
+                onCanvas  = onCanvas && C.rects[i].x >= -0.5 && C.rects[i].y >= -0.5 && C.rects[i].x + C.rects[i].w <= C.w + 0.5 && C.rects[i].y + C.rects[i].h <= C.h + 0.5;
+                for (size_t j = i + 1; j < C.rects.size(); ++j)
+                    noOverlap = noOverlap && !overlaps(C.rects[i], C.rects[j]) && sep(C.rects[i], C.rects[j]) >= G - 0.5;
+            }
+            expect(C.groups > 1, TWOD ? "canvas 2D: nine big windows make several groups" : "canvas: nine big windows make several groups");
+            expect(sizesKept, "canvas: every window keeps its size");
+            expect(noOverlap, "canvas: no two windows overlap, gap kept");
+            expect(onCanvas, "canvas: everything inside the canvas bounds");
+            if (TWOD)
+                expect(C.h > SCREEN.h && C.w > SCREEN.w, "canvas 2D: grows both ways");
+            else
+                expect(C.h <= SCREEN.h + 0.5 && C.w > SCREEN.w, "canvas horizontal: one screen tall, wider than the screen");
+        }
+        // A window bigger than the screen is shown screen sized.
+        const auto BIG = packCanvas({{0, 0, 2500, 1500}, {0, 0, 800, 600}}, SCREEN, std::nullopt, G, false);
+        expect(BIG.rects[0].w <= SCREEN.w && BIG.rects[0].h <= SCREEN.h, "canvas: an oversized window is clamped to the screen");
+        // The view.
+        const auto V = canvasView(4000, 1000, SCREEN);
+        expect(V.maxX == 4000 - 1920 && V.maxY == 0 && V.originY == 20, "canvas view: pans along x only, centred in y");
+        expect(revealAxis(0, 3000, 500, 1920, V.maxX, G) == 3510 - 1920, "reveal: scrolls just far enough right");
+        expect(revealAxis(1500, 100, 500, 1920, V.maxX, G) == 90, "reveal: scrolls just far enough left");
+        expect(revealAxis(500, 700, 500, 1920, V.maxX, G) == 500, "reveal: a window in view does not move it");
     }
 
     std::printf("mosaic_pack_test: %d checks, %d failed\n", checks, failed);

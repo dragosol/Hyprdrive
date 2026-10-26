@@ -1093,6 +1093,12 @@ static CHyprSignalListener g_pScrollCameraMovedHook;
 static CHyprSignalListener g_pClickPreReloadHook;
 static bool                g_tapSuperCandidate = false;
 static uint32_t            g_tapSuperPressedAt = 0;
+// Mosaic.cpp: Super held down to pan an infinite canvas was not a tap.
+namespace ScrollOverview {
+    void cancelSuperTap() {
+        g_tapSuperCandidate = false;
+    }
+}
 static bool                g_tapShiftCandidate = false;
 static uint32_t            g_tapShiftPressedAt = 0;
 // Release time of the last completed SHIFT tap; 0 = no pair in flight.

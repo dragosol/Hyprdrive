@@ -1,6 +1,8 @@
 // The "mosaic" layout: see Mosaic.hpp and MosaicPack.hpp.
 #include "Mosaic.hpp"
 #include "MosaicPack.hpp"
+#include "MosaicCanvas.hpp"
+#include "IOverview.hpp"
 #include "DebugPaths.hpp"
 #include "Dock.hpp"
 
@@ -41,6 +43,11 @@
 #include <typeinfo>
 #include <unordered_map>
 #include <vector>
+
+// main.cpp: Super held to pan the canvas is not a Super tap.
+namespace ScrollOverview {
+    void cancelSuperTap();
+}
 
 namespace ScrollOverview::Mosaic {
 
@@ -275,10 +282,42 @@ namespace ScrollOverview::Mosaic {
             f << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() % 100000000 << ' ' << line << '\n';
     }
 
+    // THE INFINITE CANVAS (MosaicCanvas.hpp; user, 2026-10-26). Off: a mosaic
+    // that no longer fits tiles, as before. On: it spills onto a canvas the view
+    // pans across -- a strip (horizontal) or a grid (all directions).
+    static bool canvasOn() {
+        return ScrollOverview::Config::getValue<bool>("plugin:hyprdrive:mosaic:infinite_canvas");
+    }
+    static bool canvasAllDirections() {
+        return ScrollOverview::Config::getValue<std::string>("plugin:hyprdrive:mosaic:canvas_directions") == "all";
+    }
+    // A swipe or a Super-pan is moving the view: focus landing on a window
+    // under the pointer must not pull the view back to it mid-pan.
+    static bool g_canvasPanning = false;
+
     class CMosaicAlgorithm : public Layout::ITiledAlgorithm {
       public:
         CMosaicAlgorithm() {
             g_instances.push_back(this);
+            // The canvas follows focus (a click, Super+arrows, the dock, a new
+            // window): the focused window is brought into view, as the
+            // scrolling layout brings its column.
+            // Not focus that follows the mouse: hovering a window half off the
+            // edge would slide the canvas, put another window under the
+            // pointer, focus that, and slide again. A click does reveal.
+            m_focusHook = Event::bus()->m_events.window.active.listen([this](PHLWINDOW w, Desktop::eFocusReason reason) {
+                if (m_asCanvas && !g_canvasPanning && w && holds(w) && reason != Desktop::FOCUS_REASON_FFM)
+                    revealWindow(w);
+            });
+            // The canvas settings changed (the settings panel writes them and
+            // Hyprland reloads): a desktop on the canvas re-arranges at once, and
+            // one in the tiles goes onto the canvas when it was just turned on.
+            m_reloadHook = Event::bus()->m_events.config.reloaded.listen([this] {
+                if (m_asCanvas || (!m_asMosaic && !m_entries.empty() && canvasOn())) {
+                    m_revealPending = true;
+                    recalculate();
+                }
+            });
         }
         ~CMosaicAlgorithm() override {
             std::erase(g_instances, this);
@@ -293,6 +332,76 @@ namespace ScrollOverview::Mosaic {
         }
         bool arrangedAsMosaic() const {
             return m_asMosaic;
+        }
+        bool arrangedAsCanvas() const {
+            return m_asCanvas;
+        }
+
+        // ---- the canvas's view (MosaicCanvas.hpp)
+        std::optional<MosaicPack::SCanvasView> canvasViewNow() const {
+            const auto AREA = area();
+            if (!m_asCanvas || !AREA)
+                return std::nullopt;
+            return MosaicPack::canvasView(m_canvas.w, m_canvas.h, MosaicPack::SRect{AREA->x, AREA->y, AREA->w, AREA->h});
+        }
+        Vector2D canvasOffset() const {
+            return m_canvasOffset;
+        }
+        Vector2D canvasSize() const {
+            return Vector2D{m_canvas.w, m_canvas.h};
+        }
+        std::optional<CBox> canvasArea() const {
+            return area();
+        }
+        void setCanvasOffset(const Vector2D& offset, bool warp) {
+            m_canvasOffset = offset;
+            layoutCanvas(warp);
+        }
+        void revealWindow(const PHLWINDOW& w) {
+            const auto AREA = area();
+            const auto VIEW = canvasViewNow();
+            if (!AREA || !VIEW || m_canvas.rects.size() != m_entries.size())
+                return;
+            for (size_t i = 0; i < m_entries.size(); ++i)
+                if (const auto T = m_entries[i].target.lock(); T && T->window() == w) {
+                    const auto& R    = m_canvas.rects[i];
+                    const auto  OLD  = m_canvasOffset;
+                    m_canvasOffset.x = MosaicPack::revealAxis(m_canvasOffset.x, R.x, R.w, AREA->w, VIEW->maxX, innerGap());
+                    m_canvasOffset.y = MosaicPack::revealAxis(m_canvasOffset.y, R.y, R.h, AREA->h, VIEW->maxY, innerGap());
+                    if (std::abs(OLD.x - m_canvasOffset.x) > 0.5 || std::abs(OLD.y - m_canvasOffset.y) > 0.5)
+                        layoutCanvas(false);
+                    return;
+                }
+        }
+        // The window showing the most of itself in the view (after a pan).
+        PHLWINDOW mostVisible() const {
+            const auto AREA = area();
+            if (!m_asCanvas || !AREA)
+                return nullptr;
+            PHLWINDOW best;
+            double    bestA = 0;
+            for (const auto& E : m_entries)
+                if (const auto T = E.target.lock(); T && T->window()) {
+                    const CBox B = T->position();
+                    const double W = std::min(B.x + B.w, AREA->x + AREA->w) - std::max(B.x, AREA->x), H = std::min(B.y + B.h, AREA->y + AREA->h) - std::max(B.y, AREA->y);
+                    if (W > 0 && H > 0 && W * H / std::max(1.0, B.w * B.h) > bestA) {
+                        bestA = W * H / std::max(1.0, B.w * B.h);
+                        best  = T->window();
+                    }
+                }
+            return best;
+        }
+        double visibleShare(const PHLWINDOW& w) const {
+            const auto AREA = area();
+            if (!AREA || !w)
+                return 0;
+            for (const auto& E : m_entries)
+                if (const auto T = E.target.lock(); T && T->window() == w) {
+                    const CBox   B = T->position();
+                    const double W = std::min(B.x + B.w, AREA->x + AREA->w) - std::max(B.x, AREA->x), H = std::min(B.y + B.h, AREA->y + AREA->h) - std::max(B.y, AREA->y);
+                    return W > 0 && H > 0 ? W * H / std::max(1.0, B.w * B.h) : 0.0;
+                }
+            return 0;
         }
         PHLWORKSPACE workspace() const {
             return m_parent && m_parent->space() ? m_parent->space()->workspace() : PHLWORKSPACE{};
@@ -311,6 +420,7 @@ namespace ScrollOverview::Mosaic {
         }
 
         void newTarget(SP<Layout::ITarget> target) override {
+            m_revealPending = true;
             // A Super+drag let go is the same window put down, not one arriving:
             // the tiles keep their hold (m_tiledHold) through it.
             const bool DROP = droppingNow();
@@ -325,6 +435,7 @@ namespace ScrollOverview::Mosaic {
         }
 
         void movedTarget(SP<Layout::ITarget> target, std::optional<Vector2D> focalPoint = std::nullopt) override {
+            m_revealPending = true;
             const bool DROP = droppingNow();
             m_dragHold.reset();
             if (indexOf(target) < 0) {
@@ -740,6 +851,8 @@ namespace ScrollOverview::Mosaic {
 
             const MosaicPack::SRect AREAR{AREA.x, AREA.y, AREA.w, AREA.h};
             m_asMosaic = false;
+            const bool WASCANVAS = m_asCanvas;
+            m_asCanvas = false;
             // After a resize pushed past its limit the desktop stays tiled until
             // a window arrives or leaves (m_tiledHold).
             std::optional<MosaicPack::PackHint> hint;
@@ -769,12 +882,85 @@ namespace ScrollOverview::Mosaic {
                 return;
             }
 
+            // THE INFINITE CANVAS instead of the tiles (mosaic:infinite_canvas):
+            // everyone at their mosaic size, past the screen, the view panned.
+            if (canvasOn()) {
+                m_tree.clear();
+                m_tiledHold = false;
+                arrangeCanvas(WASCANVAS);
+                return;
+            }
+
             // THE TILES (user, 2026-10-14): a dwindle tree (MosaicPack::
             // CDwindleTree), each split where the user left it. Plain cells, so Hyprland insets them by gaps_in exactly
             // as it does dwindle's. They never touch `natural`: the mosaic that
             // comes back has every window as it was.
             trace(std::format("tiles n={} hold={}", m_entries.size(), m_tiledHold));
             layoutTiles();
+        }
+
+        void arrangeCanvas(bool wasCanvas) {
+            const auto AREA = area();
+            if (!AREA)
+                return;
+            // A window let go on the canvas takes its place in the order next to
+            // the window it was dropped by (the groups follow the order).
+            if (m_dropAt) {
+                const int I = indexOf(m_dropAt->target.lock());
+                if (I >= 0 && m_entries.size() > 1) {
+                    int    nearest = -1;
+                    double bestD   = 1e18;
+                    for (size_t k = 0; k < m_entries.size(); ++k)
+                        if (const auto T = m_entries[k].target.lock(); T && sc<int>(k) != I) {
+                            const auto D = T->position().middle() - m_dropAt->at;
+                            if (D.x * D.x + D.y * D.y < bestD) {
+                                bestD   = D.x * D.x + D.y * D.y;
+                                nearest = sc<int>(k);
+                            }
+                        }
+                    if (nearest >= 0) {
+                        const auto NT     = m_entries[sc<size_t>(nearest)].target.lock();
+                        const bool BEFORE = NT && m_dropAt->at.x < NT->position().middle().x;
+                        auto       moved  = m_entries[sc<size_t>(I)];
+                        m_entries.erase(m_entries.begin() + I);
+                        int at = nearest > I ? nearest - 1 : nearest;
+                        m_entries.insert(m_entries.begin() + (BEFORE ? at : at + 1), moved);
+                    }
+                }
+                m_dropAt.reset();
+            }
+            std::vector<MosaicPack::SRect> sizes;
+            for (const auto& E : m_entries)
+                sizes.push_back({0, 0, E.natural.x, E.natural.y});
+            m_canvas   = MosaicPack::packCanvas(sizes, MosaicPack::SRect{AREA->x, AREA->y, AREA->w, AREA->h}, looseArea(), innerGap(), canvasAllDirections());
+            m_asCanvas = true;
+            trace(std::format("canvas n={} groups={} size={}x{}", m_entries.size(), m_canvas.groups, m_canvas.w, m_canvas.h));
+            if (!wasCanvas)
+                m_canvasOffset = {};
+            layoutCanvas(false);
+            // The arrangement changed (a window came, went or moved): the focused
+            // one stays in view.
+            if (!wasCanvas || std::exchange(m_revealPending, false))
+                if (const auto F = Desktop::focusState()->window(); F && holds(F))
+                    revealWindow(F);
+        }
+
+        // Every window at its canvas place for the current view.
+        void layoutCanvas(bool warp) {
+            const auto VIEW = canvasViewNow();
+            if (!VIEW || m_canvas.rects.size() != m_entries.size())
+                return;
+            m_canvasOffset.x = std::clamp(m_canvasOffset.x, 0.0, VIEW->maxX);
+            m_canvasOffset.y = std::clamp(m_canvasOffset.y, 0.0, VIEW->maxY);
+            for (size_t i = 0; i < m_entries.size(); ++i) {
+                const auto& R = m_canvas.rects[i];
+                const CBox  BOX{std::round(VIEW->originX + R.x - m_canvasOffset.x), std::round(VIEW->originY + R.y - m_canvasOffset.y), R.w, R.h};
+                if (const auto T = m_entries[i].target.lock()) {
+                    T->setPositionGlobal(Layout::STargetBox{.logicalBox = BOX, .visualBox = BOX});
+                    if (warp)
+                        T->warpPositionSize();
+                }
+            }
         }
 
         void layoutTiles() {
@@ -873,6 +1059,7 @@ namespace ScrollOverview::Mosaic {
         }
 
         void swapTargets(SP<Layout::ITarget> a, SP<Layout::ITarget> b) override {
+            m_revealPending = true;
             const int IA = indexOf(a), IB = indexOf(b);
             if (IA >= 0 && IB >= 0)
                 tradePlaces(sc<size_t>(IA), sc<size_t>(IB));
@@ -884,6 +1071,7 @@ namespace ScrollOverview::Mosaic {
         // in that direction takes it, as binds:window_direction_monitor_fallback
         // asks of every layout.
         void moveTargetInDirection(SP<Layout::ITarget> t, Math::eDirection dir, bool silent) override {
+            m_revealPending = true;
             (void)silent;
             const int I = indexOf(t);
             if (I < 0 || !t)
@@ -1054,6 +1242,12 @@ namespace ScrollOverview::Mosaic {
         std::vector<SMosaicEntry> m_entries;
         bool                      m_asMosaic  = false; // the last arrangement was the mosaic, not its tiles
         bool                      m_tiledHold = false; // a resize went past its limit: tiles until the mosaic fits unshrunk
+        bool                      m_asCanvas  = false; // the last arrangement was the infinite canvas
+        MosaicPack::SCanvasPack   m_canvas;            // where everyone sits on it
+        Vector2D                  m_canvasOffset;      // the view, 0..SCanvasView::max
+        bool                      m_revealPending = false;
+        CHyprSignalListener       m_focusHook;
+        CHyprSignalListener       m_reloadHook;
         // THE USER'S ARRANGEMENT (2026-10-16): a drop (or a swap) put a window
         // where it is -- it keeps to that point (MosaicPack::PackHint) until a
         // window arrives or leaves; then the mosaic regroups tight.
@@ -1155,7 +1349,7 @@ namespace ScrollOverview::Mosaic {
             SResize r;
             r.target    = target;
             r.corner    = corner;
-            r.tiled     = !m_asMosaic;
+            r.tiled     = !m_asMosaic && !m_asCanvas;
             r.start     = target->position();
             r.requested = r.start.size();
             r.shown     = r.start.size();
@@ -1198,6 +1392,14 @@ namespace ScrollOverview::Mosaic {
                 sizes.push_back({0, 0, box.w, box.h});
             }
             const MosaicPack::SRect AREAR{AREA->x, AREA->y, AREA->w, AREA->h};
+            // THE CANVAS has no limit: a window that outgrows the screen's
+            // mosaic sends the desktop onto the canvas when it is let go.
+            if (canvasOn()) {
+                m_resize->shown = Vector2D{std::clamp(m_resize->requested.x, MIN_SIDE, std::max(MIN_SIDE, AREA->w)),
+                                           std::clamp(m_resize->requested.y, MIN_SIDE, std::max(MIN_SIDE, AREA->h))};
+                applyResize();
+                return;
+            }
             const auto LIMIT = MosaicPack::limitFor(sizes, idx, m_resize->requested.x, m_resize->requested.y, AREAR, innerGap(), MIN_SIDE, looseArea());
             m_resize->shown  = Vector2D{LIMIT.w, LIMIT.h};
             const bool PAST  = !LIMIT.reached && (m_resize->requested.x > LIMIT.w + PUSH_PAST || m_resize->requested.y > LIMIT.h + PUSH_PAST);
@@ -1229,8 +1431,10 @@ namespace ScrollOverview::Mosaic {
             // grows about the centre).
             double x = C == Layout::CORNER_NONE ? S.x + (S.w - SIZE.x) / 2.0 : Layout::edgeLeft(C) ? S.x + S.w - SIZE.x : S.x;
             double y = C == Layout::CORNER_NONE ? S.y + (S.h - SIZE.y) / 2.0 : Layout::edgeTop(C) ? S.y + S.h - SIZE.y : S.y;
-            x = std::clamp(x, AREA->x, std::max(AREA->x, AREA->x + AREA->w - SIZE.x));
-            y = std::clamp(y, AREA->y, std::max(AREA->y, AREA->y + AREA->h - SIZE.y));
+            if (!m_asCanvas) {
+                x = std::clamp(x, AREA->x, std::max(AREA->x, AREA->x + AREA->w - SIZE.x));
+                y = std::clamp(y, AREA->y, std::max(AREA->y, AREA->y + AREA->h - SIZE.y));
+            }
             const CBox BOX{std::round(x), std::round(y), std::round(SIZE.x), std::round(SIZE.y)};
             TARGET->setPositionGlobal(Layout::STargetBox{.logicalBox = BOX, .visualBox = BOX});
         }
@@ -1448,7 +1652,113 @@ namespace ScrollOverview::Mosaic {
         return g_ourDrag;
     }
 
+    // ------------------------------------------------------------ the canvas view --
+    static CMosaicAlgorithm* canvasOf(const PHLWORKSPACE& ws) {
+        if (!ws)
+            return nullptr;
+        for (auto* A : g_instances)
+            if (A->workspace() == ws && A->arrangedAsCanvas())
+                return A;
+        return nullptr;
+    }
+
+    SCanvasProbe canvasProbe(const PHLWORKSPACE& ws) {
+        SCanvasProbe p;
+        const auto*  A = canvasOf(ws);
+        const auto   V = A ? A->canvasViewNow() : std::nullopt;
+        if (!V)
+            return p;
+        p.offset    = A->canvasOffset().x;
+        p.maxOffset = V->maxX;
+        p.usable    = V->maxX > 1.0;
+        return p;
+    }
+
+    void canvasSetOffset(const PHLWORKSPACE& ws, double offsetX, bool warp) {
+        if (auto* A = canvasOf(ws))
+            A->setCanvasOffset(Vector2D{offsetX, A->canvasOffset().y}, warp);
+    }
+
+    std::optional<CBox> canvasBox(const PHLWORKSPACE& ws) {
+        const auto* A = canvasOf(ws);
+        const auto  V = A ? A->canvasViewNow() : std::nullopt;
+        const auto  S = A ? A->canvasSize() : Vector2D{};
+        if (!V || S.x < 1 || S.y < 1)
+            return std::nullopt;
+        return CBox{V->originX - A->canvasOffset().x, V->originY - A->canvasOffset().y, S.x, S.y};
+    }
+
+    void canvasPanning(bool on) {
+        g_canvasPanning = on;
+    }
+
+    void canvasSettle(const PHLWORKSPACE& ws) {
+        g_canvasPanning = false;
+        const auto* A = canvasOf(ws);
+        if (!A)
+            return;
+        // Keys go to a window you can see: the focused one if it is still
+        // mostly in view, else the one showing most of itself.
+        const auto F = Desktop::focusState()->window();
+        if (F && A->holds(F) && A->visibleShare(F) >= 0.5)
+            return;
+        if (const auto BEST = A->mostVisible())
+            Desktop::focusState()->fullWindowFocus(BEST, Desktop::FOCUS_REASON_KEYBIND);
+    }
+
+    bool canvasStep(const PHLWORKSPACE& ws, int dir) {
+        auto*      A    = canvasOf(ws);
+        const auto V    = A ? A->canvasViewNow() : std::nullopt;
+        const auto AREA = A ? A->canvasArea() : std::nullopt;
+        if (!V || !AREA || V->maxX <= 1.0)
+            return false;
+        const double X = A->canvasOffset().x;
+        if ((dir > 0 && X >= V->maxX - 0.5) || (dir < 0 && X <= 0.5))
+            return false; // at that end: the step goes on to the next desktop
+        A->setCanvasOffset(Vector2D{std::clamp(X + dir * AREA->w * 0.5, 0.0, V->maxX), A->canvasOffset().y}, false);
+        if (const auto BEST = A->mostVisible(); BEST && A->visibleShare(Desktop::focusState()->window()) < 0.5) {
+            g_canvasPanning = true;
+            Desktop::focusState()->fullWindowFocus(BEST, Desktop::FOCUS_REASON_KEYBIND);
+            g_canvasPanning = false;
+        }
+        return true;
+    }
+
+    // ALL DIRECTIONS (user, 2026-10-26: "I can hold down super and my cursor
+    // movement maps to the entire collection of the screens so that ... the
+    // top/bottom portions of the screen result in my cursor being at the
+    // top/bottom of the canvas"). Super alone held, no button: the pointer's
+    // place on its monitor is the view's place on the canvas, both axes.
+    static bool superPan(bool blocked) {
+        if (blocked || !canvasAllDirections() || (g_layoutManager && g_layoutManager->dragController()->target()))
+            return false;
+        if (modsNow() != HL_MODIFIER_META)
+            return false;
+        const Vector2D P   = g_pInputManager->getMouseCoordsInternal();
+        const auto     MON = State::monitorState()->query().vec(P).run();
+        if (!MON || MON->m_activeSpecialWorkspace || openScrollOverviewForMonitor(MON))
+            return false;
+        auto*      A = canvasOf(MON->m_activeWorkspace);
+        const auto V = A ? A->canvasViewNow() : std::nullopt;
+        if (!V || (V->maxX <= 1.0 && V->maxY <= 1.0))
+            return false;
+        const CBox   B  = MON->logicalBox();
+        const double FX = B.w > 0 ? std::clamp((P.x - B.x) / B.w, 0.0, 1.0) : 0.0, FY = B.h > 0 ? std::clamp((P.y - B.y) / B.h, 0.0, 1.0) : 0.0;
+        const Vector2D WANT{FX * V->maxX, FY * V->maxY};
+        if (std::abs(WANT.x - A->canvasOffset().x) < 0.5 && std::abs(WANT.y - A->canvasOffset().y) < 0.5)
+            return true;
+        g_canvasPanning = true;
+        A->setCanvasOffset(WANT, true);
+        // Super was held to pan, not tapped: no overview on its release.
+        ScrollOverview::cancelSuperTap();
+        return true;
+    }
+
     void onMove(bool blocked) {
+        if (!superPan(blocked) && g_canvasPanning && modsNow() != HL_MODIFIER_META) {
+            // The Super-pan is over: the focused window is where the pointer is.
+            g_canvasPanning = false;
+        }
         if (std::ranges::any_of(g_instances, [](const CMosaicAlgorithm* a) { return a->resizing(); }))
             checkResizeEnded();
         // A drag hold whose window was let go elsewhere, or carried to another
@@ -1489,7 +1799,7 @@ namespace ScrollOverview::Mosaic {
             if (A->holds(w)) {
                 // Only a size the app or the user chose (SNatural::trusted):
                 // never a tile or a size inherited from another layout.
-                if (A->arrangedAsMosaic() && A->trustedOf(w))
+                if ((A->arrangedAsMosaic() || A->arrangedAsCanvas()) && A->trustedOf(w))
                     if (const auto N = A->naturalOf(w))
                         saveSize(APP, *N);
                 return;
@@ -1520,7 +1830,7 @@ namespace ScrollOverview::Mosaic {
     // dwindle").
     static PHLWINDOW mosaicNeighbour(const PHLWINDOW& from, Math::eDirection dir) {
         if (!from || !from->m_workspace ||
-            !std::ranges::any_of(g_instances, [&](const CMosaicAlgorithm* a) { return a->holds(from) && a->arrangedAsMosaic(); }))
+            !std::ranges::any_of(g_instances, [&](const CMosaicAlgorithm* a) { return a->holds(from) && (a->arrangedAsMosaic() || a->arrangedAsCanvas()); }))
             return nullptr;
         const Vector2D D  = dir == Math::DIRECTION_RIGHT ? Vector2D{1, 0} : dir == Math::DIRECTION_LEFT ? Vector2D{-1, 0} : dir == Math::DIRECTION_UP ? Vector2D{0, -1} : Vector2D{0, 1};
         const auto     C0 = from->middle();

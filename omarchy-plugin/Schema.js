@@ -286,7 +286,11 @@ var sections = [
             allow: "Allow", glyph: ""
           } },
         { type: "toggle", key: P + "mosaic:default", label: "Make Mosaic the default", when: "mosaicOn",
-          desc: "New desktops, and any you have not set with Super+L, start in Mosaic. Off restores the previous default." }
+          desc: "New desktops, and any you have not set with Super+L, start in Mosaic. Off restores the previous default." },
+        { type: "toggle", key: P + "mosaic:infinite_canvas", label: "Infinite canvas", when: "mosaicOn",
+          desc: "When windows no longer fit the screen, they keep their size and spill onto a canvas you pan across, instead of tiling. Swipe sideways or Super+scroll to pan; past the last window it switches desktops." },
+        { type: "choice", key: P + "mosaic:canvas_directions", label: "Canvas directions", when: "canvasOn",
+          desc: "Horizontal: one strip of windows. All directions: a grid of them; hold Super and move the pointer, and its place on the screen is your place on the canvas." }
       ]},
       // The chords Mosaic takes while it is on (hdpanel chord_options). Auto
       // is Super+L for the cycle on every desktop; for the focus keys it is

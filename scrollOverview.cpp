@@ -6,6 +6,7 @@
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include "Integration.hpp"
 #include "OverviewInternal.hpp"
+#include "Mosaic.hpp"
 #include "FlightBlur.hpp"
 #include "OpenProf.hpp"
 #include "FramePacing.hpp"
@@ -6211,6 +6212,19 @@ CBox CScrollOverview::stripMiniBox(const CBox& cell, PHLWINDOW window, PHLMONITO
     const auto  GEOM   = window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
 
     const auto WORKSPACE = window->m_workspace;
+
+    // A Mosaic desktop on its infinite canvas: the whole canvas, with the
+    // screen it pans across, zoomed out into the cell at one scale and centred
+    // -- every window on it shows, as the tape's minis do for a scrolling one.
+    if (const auto CANVAS = ScrollOverview::Mosaic::canvasBox(WORKSPACE)) {
+        const CBox   MON{monitor->m_position, monitor->m_size};
+        const double X0 = std::min(CANVAS->x, MON.x), Y0 = std::min(CANVAS->y, MON.y);
+        const double W  = std::max(CANVAS->x + CANVAS->w, MON.x + MON.w) - X0, H = std::max(CANVAS->y + CANVAS->h, MON.y + MON.h) - Y0;
+        const double S  = std::min(cell.width / std::max(1.0, W), cell.height / std::max(1.0, H));
+        const double OX = cell.x + (cell.width - W * S) / 2.0, OY = cell.y + (cell.height - H * S) / 2.0;
+        return CBox{OX + (GEOM.x - X0) * S, OY + (GEOM.y - Y0) * S, GEOM.w * S, GEOM.h * S};
+    }
+
     const float SPAN_RATIO = workspaceScrollingSpanRatio(WORKSPACE, monitor);
 
     if (SPAN_RATIO > 1.0F) {

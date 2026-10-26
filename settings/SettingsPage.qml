@@ -309,6 +309,7 @@ Item {
     case "desktopSlideOn": return kb("animations:enabled") && kb("animations:workspaces")
     case "blurOn": return kb("plugin:hyprdrive:motion_blur:enabled")
     case "mosaicOn": return kb("plugin:hyprdrive:mosaic:enabled")
+    case "canvasOn": return kb("plugin:hyprdrive:mosaic:enabled") && kb("plugin:hyprdrive:mosaic:infinite_canvas")
     case "scrollDesktopsOn": return kb("plugin:hyprdrive:binds:scroll_desktops")
     default: return true
     }

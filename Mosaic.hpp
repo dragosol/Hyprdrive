@@ -36,4 +36,27 @@ namespace ScrollOverview::Mosaic {
     void onWindowClose(const PHLWINDOW& w);
     // PLUGIN_EXIT: our drag ended, our cursor override dropped.
     void shutdown();
+
+    // THE INFINITE CANVAS (MosaicCanvas.hpp, mosaic:infinite_canvas). A mosaic
+    // desktop on its canvas pans like the scrolling layout's tape: the desktop
+    // swipe (OverviewGesture) and Super+scroll (DesktopSwitch) move the view
+    // first and switch desktops only past either end of it.
+    struct SCanvasProbe {
+        bool   usable    = false; // on the canvas, and wider than the view
+        double offset    = 0.0;   // the view's left edge along the canvas
+        double maxOffset = 0.0;
+    };
+    SCanvasProbe canvasProbe(const PHLWORKSPACE& ws);
+    // Put the view at `offsetX` (clamped). `warp`: no animation (a swipe tracks the fingers).
+    void canvasSetOffset(const PHLWORKSPACE& ws, double offsetX, bool warp);
+    // A swipe started / is over: focus does not pull the view while it pans;
+    // at the end, focus goes to a window in view if the focused one left it.
+    void canvasPanning(bool on);
+    void canvasSettle(const PHLWORKSPACE& ws);
+    // Super+scroll: half a screen along the canvas; false at that end.
+    bool canvasStep(const PHLWORKSPACE& ws, int dir);
+    // The whole canvas in global layout coordinates at the current view, for
+    // the overview's strip thumbnail (the whole canvas, zoomed out). Nothing
+    // when the desktop is not on its canvas.
+    std::optional<CBox> canvasBox(const PHLWORKSPACE& ws);
 }

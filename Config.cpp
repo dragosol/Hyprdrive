@@ -614,6 +614,13 @@ static void registerConfigValuesFor() {
     // layout of desktops with none of their own.
     addKey(makeShared<CBoolValue>(KEY("mosaic:enabled"), "mosaic: Super+L cycles Dwindle -> Scrolling -> Mosaic (on by default; the panel asks before turning it back on)", true));
     addKey(makeShared<CBoolValue>(KEY("mosaic:default"), "mosaic: new desktops use the Mosaic layout (needs mosaic:enabled)", false));
+    // THE INFINITE CANVAS (MosaicCanvas.hpp, user 2026-10-26). Opt-in.
+    addKey(makeShared<CBoolValue>(KEY("mosaic:infinite_canvas"),
+                                  "mosaic: windows that no longer fit the screen spill onto a canvas you pan across, at their own sizes, instead of tiling", false));
+    addKey(makeShared<CStringValue>(KEY("mosaic:canvas_directions"),
+                                    "mosaic: the infinite canvas grows horizontal (a strip; swipe or Super+scroll pans it, then switches desktops) or all (a grid; hold "
+                                    "Super and the pointer's place on the screen is the view's place on the canvas)",
+                                    Hyprlang::STRING{"horizontal"}));
     // The chords Mosaic takes while it is on (audit A20). hdpanel reads these
     // when it writes 40-panel.lua; the plugin only holds them, so they can be
     // set from hyprland.lua or the settings like any other key. The cycle's

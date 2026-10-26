@@ -4,6 +4,7 @@
 
 #include "Config.hpp"
 #include "IOverview.hpp"
+#include "Mosaic.hpp"
 #include "globals.hpp"
 
 #include <hyprland/src/animation/WorkspaceAnimationController.hpp>
@@ -174,6 +175,10 @@ namespace ScrollOverview::DesktopSwitch {
         SDispatchResult step(int dir) {
             const auto MONITOR = Desktop::focusState()->monitor();
             if (!MONITOR || !MONITOR->m_activeWorkspace)
+                return {};
+            // A Mosaic desktop on its infinite canvas: the wheel walks the
+            // canvas first, and the desktops only from either end of it.
+            if (!MONITOR->m_activeSpecialWorkspace && Mosaic::canvasStep(MONITOR->m_activeWorkspace, dir))
                 return {};
             const auto  HERE    = desktopsOn(MONITOR, false);
             const auto  THERE   = desktopsOn(MONITOR, true);
