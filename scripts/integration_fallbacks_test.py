@@ -59,8 +59,9 @@ try:
                 env=env, capture_output=True, text=True).stdout.strip()
         got["hdpanel"] = subprocess.run(
             [sys.executable, "-c",
-             "import sys; from importlib.machinery import SourceFileLoader as L;"
-             "m = L('hdpanel', sys.argv[1]).load_module(); print(m.integration())",
+             "import sys, importlib.util; from importlib.machinery import SourceFileLoader as L;"
+             "l = L('hdpanel', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('hdpanel', l));"
+             "l.exec_module(m); print(m.integration())",
              str(ROOT / "omarchy-plugin/bin/hdpanel")],
             env=env, capture_output=True, text=True).stdout.strip()
         # The rule's own expectation, independent of all three: any install

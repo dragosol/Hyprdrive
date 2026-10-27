@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import importlib.util
 from importlib.machinery import SourceFileLoader
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -63,7 +64,10 @@ def load(integration):
     os.environ["XDG_RUNTIME_DIR"] = tempfile.mkdtemp()
     os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = "none"
     os.environ["PATH"] = "/nonexistent"  # no hyprdrive-integration CLI either
-    m = SourceFileLoader("hdpanel_" + integration, str(ROOT / "omarchy-plugin" / "bin" / "hdpanel")).load_module()
+    # load_module() is gone in newer Pythons: spec + exec_module instead.
+    loader = SourceFileLoader("hdpanel_" + integration, str(ROOT / "omarchy-plugin" / "bin" / "hdpanel"))
+    m = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(m)
     m.LAYOUT_CYCLE = pathlib.Path("/x/hd-layout-cycle")
     return m
 
