@@ -202,8 +202,8 @@ KEY_META = [
     _k(PLUGIN + "mosaic:enabled", "bool", "mosaic", True),
     _k(PLUGIN + "mosaic:default", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:infinite_canvas", "bool", "mosaic", False),
-    _k(PLUGIN + "mosaic:canvas_directions", "enum", "mosaic", "horizontal", options=CANVAS_DIRECTIONS),
-    _k(PLUGIN + "mosaic:canvas_super_move", "enum", "mosaic", "pan", options=CANVAS_SUPER_MOVES),
+    _k(PLUGIN + "mosaic:canvas_directions", "enum", "mosaic", "all", options=CANVAS_DIRECTIONS),
+    _k(PLUGIN + "mosaic:canvas_super_move", "enum", "mosaic", "zoom", options=CANVAS_SUPER_MOVES),
     # The chords Mosaic takes (A20). Free text in the config; the panel offers
     # presets plus whatever is set now (chord_options(), per dump).
     _k(PLUGIN + "mosaic:cycle_bind", "str", "mosaic", "auto"),

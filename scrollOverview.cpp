@@ -2267,8 +2267,16 @@ void CScrollOverview::beginWindowDrag(PHLWINDOW window, const CBox* stripMiniOri
     drag.recentreChangedAt = Time::steadyNow();
 
     // Last, after refreshDragOriginalOverviewBoxes() above has read the boxes it
-    // needs out of the full grid.
-    grid().dragExcluded = WINDOW.get();
+    // needs out of the full grid. With hold to swap on, a drag that starts in
+    // the main grid keeps its slot while it stays there: closing the gap slid
+    // the other tiles out from under the pointer, so the window a drag was
+    // aimed at was never the one held over (user, 2026-10-27: hold to swap
+    // should "work between existing windows in the same workspace and in ANY
+    // desktop mode" -- a canvas desktop's tiles reflowed and re-scaled). The
+    // gap closes once the drag heads for the strip, the dock or another
+    // desktop (updateWindowDrag), as it did before.
+    if (!ScrollOverview::Config::getValue<bool>("plugin:hyprdrive:drag:hold_to_swap") || drag.miniOver)
+        grid().dragExcluded = WINDOW.get();
     TileChrome::setHovered(PHLWINDOW{});
 
     updateWindowDrag();
@@ -2336,6 +2344,10 @@ void CScrollOverview::updateWindowDrag() {
         drag.miniOver      = OVERFOREIGN;
         drag.miniChangedAt = Time::steadyNow();
     }
+    // Leaving its own desktop's tiles: now the survivors close the gap (the
+    // slot kept for hold to swap, beginWindowDrag).
+    if (drag.miniOver && !grid().dragExcluded)
+        grid().dragExcluded = drag.activeWindow.lock().get();
 
     // X3 delta 6. Any drop target, own workspace included -- the reference's
     // "tiles" DropArea spans the whole main area (WindowTiles.qml:444-452).

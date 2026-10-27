@@ -226,7 +226,9 @@ static void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e) {
     // the held drag with the sum of every finger.
     if (ScrollOverview::FingerSwipe::swallowMotion(e))
         return;
+    const Vector2D BEFORE = g_pInputManager->getMouseCoordsInternal();
     rc<origOnMouseMoved>(g_pScrollMouseMovedHook->m_original)(thisptr, e);
+    ScrollOverview::Mosaic::onPointerDelta(e.delta, g_pInputManager->getMouseCoordsInternal() - BEFORE);
     ScrollOverview::Dock::feedPointerMotion(e.delta);
     ScrollOverview::XGeometry::check();
 }
@@ -2289,6 +2291,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         const bool LOCKED = ScrollOverview::Dock::pointerHeldByClient();
         // Mosaic's corner resize: the resize cursor over a grabbable corner.
         ScrollOverview::Mosaic::onMove(!HIT || LOCKED || ScrollOverview::Dock::occupiesPointer(HIT->first, HIT->second) || g_pSessionLockManager->isSessionLocked());
+        // The zoomed-out canvas (Mosaic::zoomOwnsPointer): no window under the
+        // pointer's full-size place gets the motion or focus, and the arrow
+        // (no client's text cursor) while it lasts.
+        if (ScrollOverview::Mosaic::zoomOwnsPointer()) {
+            info.cancelled = true;
+            setDockCursor(true);
+            return;
+        }
 
         if (!HIT || LOCKED) {
             ScrollOverview::Dock::releasePointerFocus();

@@ -184,8 +184,8 @@ Prefix: `plugin:hyprdrive:mosaic:`
 | `enabled` | bool | `true` |  | mosaic: Super+L cycles Dwindle -> Scrolling -> Mosaic (on by default; the panel asks before turning it back on) |
 | `default` | bool | `false` |  | mosaic: new desktops use the Mosaic layout (needs mosaic:enabled) |
 | `infinite_canvas` | bool | `false` |  | mosaic: windows that no longer fit the screen spill onto a canvas you pan across, at their own sizes, instead of tiling |
-| `canvas_directions` | string | `"horizontal"` |  | mosaic: the infinite canvas grows horizontal (a strip; swipe or Super+scroll pans it, then switches desktops) or all (a grid; hold Super and the pointer's place on the screen is the view's place on the canvas) |
-| `canvas_super_move` | string | `"pan"` |  | mosaic: holding Super and moving the pointer on the infinite canvas pans it (pan; all directions only: the pointer's place on the screen is the view's place on the canvas) or zooms out to show every window (zoom; hovering one focuses it, letting go of Super zooms back in on it) |
+| `canvas_directions` | string | `"all"` |  | mosaic: the infinite canvas grows horizontal (a strip; swipe or Super+scroll pans it, then switches desktops) or all (a grid; hold Super and the pointer's place on the screen is the view's place on the canvas) |
+| `canvas_super_move` | string | `"zoom"` |  | mosaic: holding Super and moving the pointer on the infinite canvas pans it (pan; all directions only: the pointer's place on the screen is the view's place on the canvas) or zooms out to show every window (zoom; hovering one focuses it, letting go of Super zooms back in on it) |
 | `cycle_bind` | string | `"auto"` |  | mosaic: the chord that cycles Dwindle -> Scrolling -> Mosaic -- auto (SUPER + L), none, or a chord like SUPER + M |
 | `focus_binds` | string | `"auto"` |  | mosaic: modifier for mosaic-aware focus on the arrow keys -- auto (SUPER on Omarchy, none elsewhere), none, or a modifier like SUPER or SUPER + ALT |
 

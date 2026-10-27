@@ -497,6 +497,35 @@ int main() {
             else
                 expect(C.h <= SCREEN.h + 0.5 && C.w > SCREEN.w, "canvas horizontal: one screen tall, wider than the screen");
         }
+        // THE TWO DIRECTIONS DIFFER (user, 2026-10-27: "switching between
+        // mosaic canvas directions ... doesn't do anything, I'm stuck in
+        // horizontal"): a desktop a little past one screen used to take one
+        // screen more along x in both. All directions keeps the screen's shape.
+        {
+            const SRect        XPS{12, 34, 2280, 1394};
+            std::vector<SRect> SIX = {{0, 0, 1037, 664}, {0, 0, 751, 504}, {0, 0, 751, 504}, {0, 0, 751, 504}, {0, 0, 751, 504}, {0, 0, 690, 519}};
+            for (int i = 0; i < 8; ++i)
+                SIX.push_back({0, 0, 900, 600});
+            const auto H = packCanvas(SIX, XPS, std::nullopt, G, false);
+            const auto A = packCanvas(SIX, XPS, std::nullopt, G, true);
+            expect(A.h > XPS.h && A.w < H.w && A.w / A.h < H.w / H.h, "canvas: all directions spreads down as well as across, horizontal stays one strip");
+        }
+        // A DROP IN THE MIDDLE OF THE CLUSTER LANDS IN ITS MIDDLE (user,
+        // 2026-10-27): the big window used to stay on the cluster's edge.
+        {
+            const SRect              AR{12, 12, 1896, 1056};
+            const std::vector<SRect> EIGHT = {{0, 0, 622, 416}, {0, 0, 622, 416}, {0, 0, 571, 428}, {0, 0, 571, 428},
+                                              {0, 0, 571, 428}, {0, 0, 571, 428}, {0, 0, 860, 549}, {0, 0, 622, 416}};
+            const auto P = packCanvas(EIGHT, AR, std::nullopt, G, true);
+            bool       centred = true;
+            for (const size_t I : {size_t{6}, size_t{0}, size_t{2}}) {
+                const SCanvasDrop D{.idx = I, .x = P.w / 2, .y = P.h / 2, .oldW = P.w, .oldH = P.h};
+                const auto        Q = packCanvas(EIGHT, AR, std::nullopt, G, true, &D);
+                const auto&       R = Q.rects[I];
+                centred = centred && std::abs(R.x + R.w / 2 - Q.w / 2) < R.w / 2 && std::abs(R.y + R.h / 2 - Q.h / 2) < R.h / 2;
+            }
+            expect(centred, "canvas: a window dropped on the cluster's centre covers the new cluster's centre");
+        }
         // A window bigger than the screen is shown screen sized.
         const auto BIG = packCanvas({{0, 0, 2500, 1500}, {0, 0, 800, 600}}, SCREEN, std::nullopt, G, false);
         expect(BIG.rects[0].w <= SCREEN.w && BIG.rects[0].h <= SCREEN.h, "canvas: an oversized window is clamped to the screen");

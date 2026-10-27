@@ -30,6 +30,12 @@ namespace ScrollOverview::Mosaic {
     bool onButton(const IPointer::SButtonEvent& e, bool blocked);
     // Pointer motion: the resize cursor while over a grabbable corner.
     void onMove(bool blocked);
+    // Super zoomed the canvas out: pointer motion is the zoom's alone, never
+    // Hyprland's focus follows mouse over the windows' real (full size) places.
+    bool zoomOwnsPointer();
+    // Raw pointer motion: `delta` asked, `moved` what the pointer really moved
+    // (less at a screen's edge). A resize reaches past the edge by the rest.
+    void onPointerDelta(const Vector2D& delta, const Vector2D& moved);
     // A window is closing (Hyprland's window.close, before the layout drops
     // it): on a desktop in the mosaic arrangement, its size becomes its app's
     // size in mosaic from now on.

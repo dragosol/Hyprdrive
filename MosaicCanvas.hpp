@@ -54,26 +54,33 @@ namespace ScrollOverview::MosaicPack {
             s.push_back(SRect{0, 0, std::min(R.w, area.w), std::min(R.h, area.h)});
 
         // The smallest area that holds everyone: one screen, then a screen
-        // more along x (horizontal), or alternately along x and y (all
-        // directions: 1x1, 2x1, 2x2, 3x2, 3x3 ...).
+        // more along x (horizontal); ALL DIRECTIONS grows the screen's own
+        // shape a quarter at a time on both axes (1, 1.25, 1.5 ... screens
+        // each way), so the cluster spills down as much as across (user,
+        // 2026-10-27: "switching between mosaic canvas directions ... doesn't
+        // do anything, I'm stuck in horizontal" -- a screen more along x came
+        // first in both, and most desktops never needed a second step).
         std::optional<std::vector<SRect>> placed;
         SRect                             big = area;
         size_t                            cx = 1, cy = 1;
-        for (size_t step = 0; step <= 2 * sizes.size() + 2 && !placed; ++step) {
-            big = SRect{area.x, area.y, area.w * static_cast<double>(cx) + gap * static_cast<double>(cx - 1),
-                        area.h * static_cast<double>(cy) + gap * static_cast<double>(cy - 1)};
+        for (size_t step = 0; step <= 4 * sizes.size() + 4 && !placed; ++step) {
+            if (twoD) {
+                const double K = 1.0 + 0.25 * static_cast<double>(step);
+                big            = SRect{area.x, area.y, area.w * K, area.h * K};
+                cx = cy = static_cast<size_t>(std::ceil(K - 1e-9));
+            } else
+                big = SRect{area.x, area.y, area.w * static_cast<double>(cx) + gap * static_cast<double>(cx - 1),
+                            area.h * static_cast<double>(cy) + gap * static_cast<double>(cy - 1)};
             std::optional<PackHint> hint;
             if (drop && drop->idx < s.size())
                 hint = PackHint{.idx = drop->idx, .x = big.x + (big.w - drop->oldW) / 2.0 + drop->x, .y = big.y + (big.h - drop->oldH) / 2.0 + drop->y};
-            const bool ONE = cx == 1 && cy == 1;
+            const bool ONE = step == 0;
             if (ONE ? fitsEased(s, area, loose, gap) : fitLayout(s, big, gap, true).has_value())
                 placed = ONE ? packEased(s, area, loose, gap, hint ? &*hint : nullptr) : pack(s, big, gap, hint ? &*hint : nullptr);
             if (placed)
                 break;
-            if (!twoD || cx <= cy)
+            if (!twoD)
                 ++cx;
-            else
-                ++cy;
         }
         if (!placed) {
             // Nothing packs (cannot happen short of a broken size): a row.

@@ -8,6 +8,7 @@
 #include "DebugPaths.hpp"
 #include "Dock.hpp"
 
+#include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
@@ -901,12 +902,41 @@ namespace ScrollOverview::Mosaic {
             // moves (dwindle:smart_resizing or not), every tile following.
             // Letting go still lets the window's mosaic size shrink toward its
             // tile (finishResize).
+            const Vector2D PRESS = g_pInputManager->getMouseCoordsInternal() - delta;
             if (!m_tree.empty() && !m_asMosaic) {
                 if (!m_resize || m_resize->target.lock() != target)
-                    beginResize(target, corner);
+                    beginResize(target, corner, PRESS);
                 const auto AREA = tilesArea();
                 if (!m_resize || !AREA)
                     return;
+                // A DRAG FREEZES THE TILES TOO (user, 2026-10-27: "when I
+                // expand a window I want everything else in the cluster or
+                // tiled mode in Mosaic to stay still"): the tile follows the
+                // pointer over its still neighbours, drawn on top; letting go
+                // moves dwindle's split by the whole way at once (finishResize)
+                // and the tiles settle. A keyboard resize stays dwindle's step.
+                if (corner != Layout::CORNER_NONE) {
+                    const Vector2D P = g_pInputManager->getMouseCoordsInternal() + m_resize->grabOffset;
+                    const CBox&    S = m_resize->start;
+                    double         x0 = S.x, y0 = S.y, x1 = S.x + S.w, y1 = S.y + S.h;
+                    if (Layout::edgeLeft(corner))
+                        x0 = std::clamp(P.x, AREA->x, x1 - MIN_SIDE);
+                    if (Layout::edgeRight(corner))
+                        x1 = std::clamp(P.x, x0 + MIN_SIDE, AREA->x + AREA->w);
+                    if (Layout::edgeTop(corner))
+                        y0 = std::clamp(P.y, AREA->y, y1 - MIN_SIDE);
+                    if (Layout::edgeBottom(corner))
+                        y1 = std::clamp(P.y, y0 + MIN_SIDE, AREA->y + AREA->h);
+                    if (!m_resize->tileFrozen)
+                        if (const auto W = target->window())
+                            Desktop::windowState()->raise(W);
+                    m_resize->tileFrozen = true;
+                    m_resize->tileBox    = CBox{std::round(x0), std::round(y0), std::round(x1 - x0), std::round(y1 - y0)};
+                    m_resize->shown      = m_resize->tileBox.size();
+                    trace(std::format("tile drag P={}x{} box={}x{} {}x{}", P.x, P.y, m_resize->tileBox.x, m_resize->tileBox.y, m_resize->tileBox.w, m_resize->tileBox.h));
+                    applyTileResize();
+                    return;
+                }
                 static auto PSMART = CConfigValue<::Config::INTEGER>("dwindle:smart_resizing");
                 const MosaicPack::CDwindleTree::SEdges EDGES{
                     .left = Layout::edgeLeft(corner), .right = Layout::edgeRight(corner), .top = Layout::edgeTop(corner), .bottom = Layout::edgeBottom(corner)};
@@ -932,28 +962,64 @@ namespace ScrollOverview::Mosaic {
             }
 
             if (!m_resize || m_resize->target.lock() != target)
-                beginResize(target, corner);
+                beginResize(target, corner, PRESS);
             if (!m_resize)
                 return;
             if (corner == Layout::CORNER_NONE)
                 m_resize->requested = m_resize->requested + grow;
-            else {
-                // A DRAG follows the POINTER, measured from the corner that
-                // stays put -- not a sum of deltas, which can only drift. The
-                // grab's own offset from the corner is kept.
-                const Vector2D P = g_pInputManager->getMouseCoordsInternal() + m_resize->grabOffset;
-                const CBox&    S = m_resize->start;
-                const double   AX = Layout::edgeLeft(corner) ? S.x + S.w : S.x, AY = Layout::edgeTop(corner) ? S.y + S.h : S.y;
-                // An EDGE (user, 2026-10-15) moves one side only: the other
-                // axis stays at its size.
-                const bool     HORIZ = corner & (Layout::CORNER_LEFT | Layout::CORNER_RIGHT), VERT = corner & (Layout::CORNER_TOP | Layout::CORNER_BOTTOM);
-                m_resize->requested  = Vector2D{HORIZ ? std::max(MIN_SIDE, Layout::edgeLeft(corner) ? AX - P.x : P.x - AX) : S.w,
-                                               VERT ? std::max(MIN_SIDE, Layout::edgeTop(corner) ? AY - P.y : P.y - AY) : S.h};
-            }
+            else
+                requestFromPointer();
             stepResize();
             // A keyboard resize is one step: settle at once.
             if (corner == Layout::CORNER_NONE)
                 finishResize();
+        }
+
+        // A DRAG follows the POINTER, measured from the corner that stays put --
+        // not a sum of deltas, which can only drift. The grab's own offset from
+        // the corner is kept, and so is how far the view was pushed past the
+        // screen's edge (reach).
+        void requestFromPointer() {
+            if (!m_resize)
+                return;
+            const auto     corner = m_resize->corner;
+            const Vector2D P      = g_pInputManager->getMouseCoordsInternal() + m_resize->grabOffset + m_resize->reach;
+            const CBox&    S      = m_resize->start;
+            const double   AX = Layout::edgeLeft(corner) ? S.x + S.w : S.x, AY = Layout::edgeTop(corner) ? S.y + S.h : S.y;
+            // An EDGE (user, 2026-10-15) moves one side only: the other axis
+            // stays at its size.
+            const bool HORIZ    = corner & (Layout::CORNER_LEFT | Layout::CORNER_RIGHT), VERT = corner & (Layout::CORNER_TOP | Layout::CORNER_BOTTOM);
+            m_resize->requested = Vector2D{HORIZ ? std::max(MIN_SIDE, Layout::edgeLeft(corner) ? AX - P.x : P.x - AX) : S.w,
+                                           VERT ? std::max(MIN_SIDE, Layout::edgeTop(corner) ? AY - P.y : P.y - AY) : S.h};
+        }
+        // PAST THE SCREEN'S EDGE (user, 2026-10-27: "if I expand toward the
+        // edge of the canvas/screen, it should let me move beyond the
+        // boundaries of the canvas while I expand the window"). With the canvas
+        // on, the mouse moving on past an outer edge of the screen slides the
+        // whole view -- the frozen windows and the one growing -- by as much as
+        // it moved (onPointerDelta), so the side being dragged keeps going past
+        // it, up to a screen-sized window. Let
+        // go, the desktop packs (onto the canvas if it no longer fits) with the
+        // window in view.
+        bool resizeCanReach() const {
+            return m_resize && !m_resize->tiled && m_resize->corner != Layout::CORNER_NONE && canvasOn();
+        }
+        void resizeReach(const Vector2D& d) {
+            if (!resizeCanReach())
+                return;
+            m_resize->reach = m_resize->reach + d;
+            requestFromPointer();
+            stepResize();
+            // Grown as far as it may (screen sized): the view stops with it --
+            // the slide gives back what the window could not take.
+            if (!m_resize)
+                return;
+            const Vector2D OVER{std::max(0.0, m_resize->requested.x - m_resize->shown.x), std::max(0.0, m_resize->requested.y - m_resize->shown.y)};
+            if (OVER.x > 0.5 || OVER.y > 0.5) {
+                m_resize->reach = m_resize->reach - Vector2D{d.x > 0 ? OVER.x : d.x < 0 ? -OVER.x : 0.0, d.y > 0 ? OVER.y : d.y < 0 ? -OVER.y : 0.0};
+                requestFromPointer();
+                stepResize();
+            }
         }
 
         // The drag ended (Mosaic::onButton / onMove see the drag controller let go).
@@ -971,6 +1037,21 @@ namespace ScrollOverview::Mosaic {
             setDim(false, SESSION);
 
             const int I = indexOf(SESSION.target.lock());
+            if (SESSION.tiled && SESSION.tileFrozen && I >= 0) {
+                // The frozen drag lands: dwindle's split moves by the whole way
+                // each dragged side went, as its live resize would have.
+                const auto AREA = tilesArea();
+                const CBox &S = SESSION.start, &B = SESSION.tileBox;
+                const auto C = SESSION.corner;
+                const double DX = Layout::edgeLeft(C) ? B.x - S.x : Layout::edgeRight(C) ? (B.x + B.w) - (S.x + S.w) : 0.0;
+                const double DY = Layout::edgeTop(C) ? B.y - S.y : Layout::edgeBottom(C) ? (B.y + B.h) - (S.y + S.h) : 0.0;
+                static auto  PSMART = CConfigValue<::Config::INTEGER>("dwindle:smart_resizing");
+                if (AREA && (std::abs(DX) >= 1 || std::abs(DY) >= 1)) {
+                    const MosaicPack::CDwindleTree::SEdges EDGES{.left = Layout::edgeLeft(C), .right = Layout::edgeRight(C), .top = Layout::edgeTop(C), .bottom = Layout::edgeBottom(C)};
+                    m_tree.resizeDwindle(m_entries[sc<size_t>(I)].id, DX, DY, EDGES, *PSMART != 0, *AREA, treeOpts());
+                }
+                layoutTiles();
+            }
             if (SESSION.tiled) {
                 // A tile let go: its dwindle split moves to the size it was
                 // dragged to. Its mosaic size may only SHRINK toward it, per
@@ -1012,7 +1093,11 @@ namespace ScrollOverview::Mosaic {
                         m_tiledHold = true;
                 }
             }
-            trace(std::format("finish past={} shown={}x{} requested={}x{}", SESSION.past, SESSION.shown.x, SESSION.shown.y, SESSION.requested.x, SESSION.requested.y));
+            // With the canvas on, the window just sized is brought into view.
+            if (!SESSION.tiled && canvasOn())
+                m_revealPending = true;
+            trace(std::format("finish past={} shown={}x{} requested={}x{} reach={}x{}", SESSION.past, SESSION.shown.x, SESSION.shown.y, SESSION.requested.x,
+                              SESSION.requested.y, SESSION.reach.x, SESSION.reach.y));
             recalculate();
         }
 
@@ -1046,6 +1131,10 @@ namespace ScrollOverview::Mosaic {
             // asked. (A tile resizes live: the tiles below lay it out.)
             if (m_resize && !m_resize->tiled) {
                 applyResize();
+                return;
+            }
+            if (m_resize && m_resize->tileFrozen) {
+                applyTileResize();
                 return;
             }
 
@@ -1298,7 +1387,9 @@ namespace ScrollOverview::Mosaic {
                         auto B = zoomBoxOf(W, m_zoomZ);
                         if (!B)
                             continue;
-                        if (W == DRAGGED && m_zDragMoved) {
+                        if (W == DRAGGED && m_zDragMoved && m_zCorner != Layout::CORNER_NONE)
+                            B = m_zBox; // being resized
+                        else if (W == DRAGGED && m_zDragMoved) {
                             // Carried by the pointer, at its zoomed size.
                             const Vector2D P = g_pInputManager->getMouseCoordsInternal() - m_zGrab;
                             B                = CBox{P.x, P.y, m_zDragSize.x, m_zDragSize.y};
@@ -1361,6 +1452,7 @@ namespace ScrollOverview::Mosaic {
             m_morph.on = false;
             m_zDrag.reset();
             m_zDragMoved = false;
+            m_zCorner    = Layout::CORNER_NONE;
             if (!m_zoomed)
                 return;
             m_zoomed = false;
@@ -1387,11 +1479,47 @@ namespace ScrollOverview::Mosaic {
         // there -- the canvas re-packs around it (SCanvasDrop) and everyone
         // glides to their new zoomed places, still zoomed out. Not moved, it is
         // the old click: pick it and zoom in.
+        // RESIZING IN THE ZOOMED-OUT VIEW (user, 2026-10-27: "I also want to
+        // drag to expand while I'm holding super in infinite canvas and the
+        // canvas is zoomed out"): a zoomed window's corner or edge, as on the
+        // desktop -- a band ZONE px each side of its drawn border.
+        Layout::eRectCorner zoomCornerAt(const Vector2D& p, PHLWINDOW* who = nullptr) const {
+            constexpr double ZONE = 8.0;
+            for (const auto& WT : m_canvasWho)
+                if (const auto T = WT.lock(); T && indexOf(T) >= 0)
+                    if (const auto W = T->window())
+                        if (const auto B = zoomBoxOf(W, m_zoomZ)) {
+                            const bool LEFT = std::abs(p.x - B->x) <= ZONE, RIGHT = std::abs(p.x - (B->x + B->w)) <= ZONE;
+                            const bool TOP = std::abs(p.y - B->y) <= ZONE, BOTTOM = std::abs(p.y - (B->y + B->h)) <= ZONE;
+                            const bool SPANX = p.x > B->x - ZONE && p.x < B->x + B->w + ZONE, SPANY = p.y > B->y - ZONE && p.y < B->y + B->h + ZONE;
+                            if (!SPANX || !SPANY)
+                                continue;
+                            const int C = (LEFT ? Layout::CORNER_LEFT : 0) | (RIGHT ? Layout::CORNER_RIGHT : 0) | (TOP ? Layout::CORNER_TOP : 0) |
+                                (BOTTOM ? Layout::CORNER_BOTTOM : 0);
+                            if (C == 0)
+                                continue;
+                            if (who)
+                                *who = W;
+                            return sc<Layout::eRectCorner>(C);
+                        }
+            return Layout::CORNER_NONE;
+        }
+        bool zoomResizing() const {
+            return !m_zDrag.expired() && m_zCorner != Layout::CORNER_NONE;
+        }
+        Layout::eRectCorner zoomCorner() const {
+            return m_zCorner;
+        }
         bool zoomPress(const Vector2D& p) {
-            const auto W = zoomedWindowAt(p);
-            const auto B = W ? zoomBoxOf(W, m_zoomZ) : std::nullopt;
+            PHLWINDOW  RW;
+            const auto CORNER = zoomCornerAt(p, &RW);
+            const auto W      = CORNER != Layout::CORNER_NONE ? RW : zoomedWindowAt(p);
+            const auto B      = W ? zoomBoxOf(W, m_zoomZ) : std::nullopt;
             if (!W || !B)
                 return false;
+            m_zCorner    = CORNER;
+            m_zStart     = *B;
+            m_zBox       = *B;
             m_zDrag      = W;
             m_zPress     = p;
             m_zGrab      = p - B->pos();
@@ -1409,6 +1537,26 @@ namespace ScrollOverview::Mosaic {
                 if (const auto W = m_zDrag.lock())
                     Desktop::windowState()->raise(W); // carried above the rest, not under them
             m_zDragMoved = true;
+            if (m_zCorner != Layout::CORNER_NONE) {
+                // The side or corner pressed follows the pointer, the opposite
+                // one stays; no smaller than a window may be, no bigger than
+                // the screen (the canvas shows a window at most screen sized).
+                const auto FIT  = zoomFit();
+                const auto AREA = area();
+                if (!FIT || !AREA)
+                    return;
+                const double S = FIT->first;
+                double       x0 = m_zStart.x, y0 = m_zStart.y, x1 = m_zStart.x + m_zStart.w, y1 = m_zStart.y + m_zStart.h;
+                if (Layout::edgeLeft(m_zCorner))
+                    x0 = std::clamp(x0 + D.x, x1 - AREA->w * S, x1 - MIN_SIDE * S);
+                if (Layout::edgeRight(m_zCorner))
+                    x1 = std::clamp(x1 + D.x, x0 + MIN_SIDE * S, x0 + AREA->w * S);
+                if (Layout::edgeTop(m_zCorner))
+                    y0 = std::clamp(y0 + D.y, y1 - AREA->h * S, y1 - MIN_SIDE * S);
+                if (Layout::edgeBottom(m_zCorner))
+                    y1 = std::clamp(y1 + D.y, y0 + MIN_SIDE * S, y0 + AREA->h * S);
+                m_zBox = CBox{x0, y0, x1 - x0, y1 - y0};
+            }
             drawZoom();
         }
         // The press is over: true when it was a drag (dropped), false for a click.
@@ -1418,6 +1566,7 @@ namespace ScrollOverview::Mosaic {
             if (!W || !MOVED) {
                 m_zDrag.reset();
                 m_zDragMoved = false;
+                m_zCorner    = Layout::CORNER_NONE;
                 return false;
             }
             const auto FIT = zoomFit();
@@ -1429,17 +1578,28 @@ namespace ScrollOverview::Mosaic {
             }();
             if (FIT && I >= 0) {
                 // Where everyone is drawn now: the glide starts there.
+                const bool RESIZED = m_zCorner != Layout::CORNER_NONE;
+                const CBox HERE    = RESIZED ? m_zBox : CBox{p - m_zGrab, m_zDragSize};
                 m_morph.from.clear();
                 for (const auto& WT : m_canvasWho)
                     if (const auto T = WT.lock(); T && T->window())
-                        m_morph.from.emplace_back(T->window(), T->window() == W ? CBox{p - m_zGrab, m_zDragSize} : zoomBoxOf(T->window(), m_zoomZ).value_or(CBox{}));
-                // The dropped window's centre, back on the canvas.
-                const auto&    [S, Z0] = *FIT;
-                const Vector2D C       = (p - m_zGrab + m_zDragSize / 2.0 - Z0) / S;
+                        m_morph.from.emplace_back(T->window(), T->window() == W ? HERE : zoomBoxOf(T->window(), m_zoomZ).value_or(CBox{}));
+                const auto& [S, Z0] = *FIT;
+                if (RESIZED) {
+                    // Its new size is its mosaic size from now on, as a resize
+                    // on the desktop leaves it.
+                    auto& E   = m_entries[sc<size_t>(I)];
+                    E.natural = Vector2D{std::max(MIN_SIDE, std::round(HERE.w / S)), std::max(MIN_SIDE, std::round(HERE.h / S))};
+                    E.trusted = true;
+                }
+                // The window's centre, back on the canvas: it stays there and
+                // the cluster packs around it.
+                const Vector2D C = (HERE.pos() + HERE.size() / 2.0 - Z0) / S;
                 forgetArrangement();
                 m_canvasDrop = SCanvasDropAt{m_entries[sc<size_t>(I)].target, MosaicPack::SCanvasDrop{.x = C.x, .y = C.y, .oldW = m_canvas.w, .oldH = m_canvas.h}};
                 m_zDrag.reset();
                 m_zDragMoved = false;
+                m_zCorner    = Layout::CORNER_NONE;
                 m_keepZoom   = true;
                 recalculate();
                 m_keepZoom = false;
@@ -1461,12 +1621,14 @@ namespace ScrollOverview::Mosaic {
             }
             m_zDrag.reset();
             m_zDragMoved = false;
+            m_zCorner    = Layout::CORNER_NONE;
             return true;
         }
         // Super let go mid-drag: the drag is off, the window goes back.
         void zoomDragCancel() {
             m_zDrag.reset();
             m_zDragMoved = false;
+            m_zCorner    = Layout::CORNER_NONE;
         }
 
         // The window drawn under `p` while zoomed out.
@@ -1787,6 +1949,9 @@ namespace ScrollOverview::Mosaic {
         PHLWINDOWREF              m_zDrag;
         Vector2D                  m_zGrab, m_zPress, m_zDragSize;
         bool                      m_zDragMoved = false;
+        // A corner or edge of a zoomed window pressed: it is RESIZED, not carried.
+        Layout::eRectCorner       m_zCorner = Layout::CORNER_NONE;
+        CBox                      m_zStart, m_zBox; // its zoomed box at the press, and now
         bool                      m_keepZoom   = false; // the re-pack a zoomed drop asks for keeps the zoom
         struct SMorph {
             bool                                         on = false;
@@ -1896,11 +2061,18 @@ namespace ScrollOverview::Mosaic {
             Vector2D                                        grabOffset; // corner minus pointer, at the press
             bool                                            past  = false;
             bool                                            tiled = false; // began in the tiles: no limit, no dim
+            bool                                            tileFrozen = false; // a tile dragged by a corner/edge: the rest stand still
+            CBox                                            tileBox;            // ... and where it is drawn meanwhile
+            Vector2D                                        reach;              // the view pushed past the screen's edge (canvas on)
             std::vector<std::pair<WP<Layout::ITarget>, CBox>> frozen; // every OTHER window, where it stands
         };
         std::optional<SResize> m_resize;
 
-        void beginResize(const SP<Layout::ITarget>& target, Layout::eRectCorner corner) {
+        // `pressAt`: where the pointer was when the drag began. Hyprland's first
+        // resizeTarget comes after the pointer has already moved by `delta`,
+        // so the grab is measured from there, not from the pointer now -- or the
+        // window lags the pointer by that first step all the way (2026-10-27).
+        void beginResize(const SP<Layout::ITarget>& target, Layout::eRectCorner corner, std::optional<Vector2D> pressAt = std::nullopt) {
             if (m_resize)
                 finishResize();
             SResize r;
@@ -1912,7 +2084,7 @@ namespace ScrollOverview::Mosaic {
             r.shown     = r.start.size();
             if (corner != Layout::CORNER_NONE) {
                 const Vector2D CORNERPOS{Layout::edgeLeft(corner) ? r.start.x : r.start.x + r.start.w, Layout::edgeTop(corner) ? r.start.y : r.start.y + r.start.h};
-                r.grabOffset = CORNERPOS - g_pInputManager->getMouseCoordsInternal();
+                r.grabOffset = CORNERPOS - pressAt.value_or(g_pInputManager->getMouseCoordsInternal());
             }
             for (const auto& E : m_entries)
                 if (const auto T = E.target.lock(); T && T != target)
@@ -1978,9 +2150,14 @@ namespace ScrollOverview::Mosaic {
             const auto AREA   = area();
             if (!TARGET || !AREA)
                 return;
+            const Vector2D R = m_resize->reach;
             for (const auto& [WT, BOX] : m_resize->frozen)
-                if (const auto T = WT.lock())
-                    T->setPositionGlobal(Layout::STargetBox{.logicalBox = BOX, .visualBox = BOX});
+                if (const auto T = WT.lock()) {
+                    const CBox AT{BOX.x - R.x, BOX.y - R.y, BOX.w, BOX.h};
+                    T->setPositionGlobal(Layout::STargetBox{.logicalBox = AT, .visualBox = AT});
+                    if (R.x != 0 || R.y != 0)
+                        T->warpPositionSize();
+                }
             const CBox&    S    = m_resize->start;
             const Vector2D SIZE = m_resize->shown;
             const auto     C    = m_resize->corner;
@@ -1988,12 +2165,29 @@ namespace ScrollOverview::Mosaic {
             // grows about the centre).
             double x = C == Layout::CORNER_NONE ? S.x + (S.w - SIZE.x) / 2.0 : Layout::edgeLeft(C) ? S.x + S.w - SIZE.x : S.x;
             double y = C == Layout::CORNER_NONE ? S.y + (S.h - SIZE.y) / 2.0 : Layout::edgeTop(C) ? S.y + S.h - SIZE.y : S.y;
-            if (!m_asCanvas) {
+            // On the screen's mosaic it stays on the screen; with the canvas on
+            // it may grow past the edge (resizeReach).
+            if (!m_asCanvas && !canvasOn()) {
                 x = std::clamp(x, AREA->x, std::max(AREA->x, AREA->x + AREA->w - SIZE.x));
                 y = std::clamp(y, AREA->y, std::max(AREA->y, AREA->y + AREA->h - SIZE.y));
             }
-            const CBox BOX{std::round(x), std::round(y), std::round(SIZE.x), std::round(SIZE.y)};
+            const CBox BOX{std::round(x - R.x), std::round(y - R.y), std::round(SIZE.x), std::round(SIZE.y)};
             TARGET->setPositionGlobal(Layout::STargetBox{.logicalBox = BOX, .visualBox = BOX});
+            if (R.x != 0 || R.y != 0)
+                TARGET->warpPositionSize();
+        }
+
+        // A tile being dragged over its still neighbours (resizeTarget).
+        void applyTileResize() {
+            if (!m_resize)
+                return;
+            for (const auto& [WT, BOX] : m_resize->frozen)
+                if (const auto T = WT.lock())
+                    T->setPositionGlobal(Layout::STargetBox{.logicalBox = BOX, .visualBox = {}});
+            if (const auto T = m_resize->target.lock()) {
+                T->setPositionGlobal(Layout::STargetBox{.logicalBox = m_resize->tileBox, .visualBox = {}});
+                T->warpPositionSize(); // under the pointer, no animation chasing it
+            }
         }
 
         // Past the limit: every OTHER window dims, so the desktop reads as about
@@ -2412,12 +2606,64 @@ namespace ScrollOverview::Mosaic {
             wl_event_source_timer_update(g_canvasTimer, 1);
     }
 
+    static CMosaicAlgorithm* reachingOn(const PHLWORKSPACE& ws);
+
+    // ONLY AS FAR AS THE HAND MOVES (user, 2026-10-27: "it shouldn't just keep
+    // expanding as long as my drag is held against the corner, it leads to
+    // uncontrollable resizing. It should only expand as far as I'm moving the
+    // cursor"). The pointer stops at the screen's edge; what the mouse moved
+    // past it -- `delta` minus what the pointer actually moved -- is what the
+    // resize reaches past the edge by. Held still, nothing grows.
+    void onPointerDelta(const Vector2D& delta, const Vector2D& moved) {
+        const Vector2D LOST = delta - moved;
+        if (std::abs(LOST.x) < 0.01 && std::abs(LOST.y) < 0.01)
+            return;
+        const Vector2D P   = g_pInputManager->getMouseCoordsInternal();
+        const auto     MON = State::monitorState()->query().vec(P).run();
+        if (!MON || MON->m_activeSpecialWorkspace)
+            return;
+        auto* A = reachingOn(MON->m_activeWorkspace);
+        if (!A)
+            return;
+        // Only past an outer edge (no monitor that way) the pointer is at.
+        const CBox B     = MON->logicalBox();
+        const auto OUTER = [&](Math::eDirection d) {
+            const auto M = State::monitorState()->query().relativeTo(MON).inDirection(d).run();
+            return !M || M == MON;
+        };
+        Vector2D r;
+        if (LOST.x > 0 && P.x >= B.x + B.w - 2 && OUTER(Math::DIRECTION_RIGHT))
+            r.x = LOST.x;
+        else if (LOST.x < 0 && P.x <= B.x + 1 && OUTER(Math::DIRECTION_LEFT))
+            r.x = LOST.x;
+        if (canvasAllDirections()) {
+            if (LOST.y > 0 && P.y >= B.y + B.h - 2 && OUTER(Math::DIRECTION_DOWN))
+                r.y = LOST.y;
+            else if (LOST.y < 0 && P.y <= B.y + 1 && OUTER(Math::DIRECTION_UP))
+                r.y = LOST.y;
+        }
+        if (r.x != 0 || r.y != 0)
+            A->resizeReach(r);
+    }
+
+    // The desktop on `ws` whose resize may reach past the screen's edge.
+    static CMosaicAlgorithm* reachingOn(const PHLWORKSPACE& ws) {
+        if (!ws)
+            return nullptr;
+        for (auto* A : g_instances)
+            if (A->workspace() == ws && A->resizeCanReach())
+                return A;
+        return nullptr;
+    }
+
     static bool edgeTick(std::chrono::steady_clock::time_point now) {
         if (g_edgePush.x == 0 && g_edgePush.y == 0)
             return false;
         const auto DRAGGED = g_layoutManager ? g_layoutManager->dragController()->target() : SP<Layout::ITarget>{};
         auto*      A       = canvasOf(g_edgeWorkspace.lock());
-        if (!DRAGGED || !A) {
+        // A resize is never panned by the clock: it reaches past the edge by
+        // the motion the edge swallows (onPointerDelta).
+        if (!DRAGGED || !A || reachingOn(g_edgeWorkspace.lock())) {
             g_edgePush = {};
             return false;
         }
@@ -2433,7 +2679,7 @@ namespace ScrollOverview::Mosaic {
             return false;
         for (const auto* A : g_instances)
             if (A->holds(w))
-                return A->arrangedAsCanvas() &&
+                return (A->arrangedAsCanvas() || A->resizeCanReach()) &&
                     (A->viewMoving() || g_canvasPanning || ((g_edgePush.x != 0 || g_edgePush.y != 0) && g_edgeWorkspace.lock() == w->m_workspace));
         return false;
     }
@@ -2447,7 +2693,7 @@ namespace ScrollOverview::Mosaic {
         if (DRAGGED && DRAGGED->window()) {
             const Vector2D P   = g_pInputManager->getMouseCoordsInternal();
             const auto     MON = State::monitorState()->query().vec(P).run();
-            if (MON && !MON->m_activeSpecialWorkspace && canvasOf(MON->m_activeWorkspace)) {
+            if (MON && !MON->m_activeSpecialWorkspace && canvasOf(MON->m_activeWorkspace) && !reachingOn(MON->m_activeWorkspace)) {
                 const CBox B       = MON->logicalBox();
                 // An outer edge: no monitor that way (vec() would answer the
                 // CLOSEST monitor, this one, for a point past the edge).
@@ -2519,6 +2765,9 @@ namespace ScrollOverview::Mosaic {
                     return;
                 g_super       = ESuper::ZOOMED;
                 g_superCanvas = A;
+                // The window under the pointer at full size lets go of it
+                // (zoomOwnsPointer: no motion reaches the clients while zoomed).
+                g_pSeatManager->setPointerFocus(nullptr, {});
             } else if (canvasAllDirections())
                 g_super = ESuper::PANNING;
             else
@@ -2578,6 +2827,17 @@ namespace ScrollOverview::Mosaic {
             A->canvasSettingsChanged();
     }
 
+    // THE ZOOMED CANVAS OWNS THE POINTER (user, 2026-10-27: "when I hold super
+    // it keeps selecting the browser even though my cursor is hovering over
+    // another window"). The windows are only DRAWN small: at their real, full
+    // sized places the pointer was over the browser, so Hyprland's own focus
+    // follows mouse focused it on every motion, against the zoom's hover pick
+    // (zoomedWindowAt), and the browser got the hover (its sidebar opened).
+    bool zoomOwnsPointer() {
+        const auto* A = liveZoomed();
+        return A && A->zoomed();
+    }
+
     void onMove(bool blocked) {
         watchCanvasKeys();
         superMove(blocked);
@@ -2591,7 +2851,11 @@ namespace ScrollOverview::Mosaic {
                 A->releaseDragHold();
         const bool DRAGGING = g_layoutManager && g_layoutManager->dragController()->target();
         Layout::eRectCorner corner = Layout::CORNER_NONE;
-        if (!blocked && !DRAGGING) {
+        if (const auto* Z = liveZoomed(); Z && Z->zoomed()) {
+            // Zoomed out: the corners are the drawn ones (and a resize under
+            // way keeps its cursor).
+            corner = Z->zoomResizing() ? Z->zoomCorner() : Z->zoomCornerAt(g_pInputManager->getMouseCoordsInternal());
+        } else if (!blocked && !DRAGGING) {
             const int MODS = modsNow();
             if (MODS == 0 || MODS == HL_MODIFIER_META)
                 corner = cornerTarget(g_pInputManager->getMouseCoordsInternal(), MODS == HL_MODIFIER_META).second;

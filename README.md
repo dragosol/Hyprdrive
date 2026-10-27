@@ -48,7 +48,8 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
   ![Drag a window to a new desktop](https://hyprdrive.shastasia.com/readme/new-desktop.gif)
 
 - **Hold to swap:** drag a window over another one and hold it there. Let go
-  and the two trade places (`drag:hold_to_swap`, on by default).
+  and the two trade places (`drag:hold_to_swap`, on by default). Works between
+  windows of the same desktop in every layout, the Mosaic canvas included.
 - Step through desktops with the scroll wheel, a trackpad swipe (with magnetic
   detents and a name pill on the card the swipe is settling on) or the
   keyboard.
@@ -124,6 +125,9 @@ mosaic once they fit again. Each app's size is remembered.
 - **Rearrange by dragging:** Super+drag a window and drop it. It lands on the
   side of the cluster you dropped it on, or in the middle when the others can
   close around it, and the other windows hold still until you let go.
+- **Resize from any corner or edge** (Super+drag there, or a plain drag on a
+  corner): the other windows hold still while you drag, in the cluster and in
+  the tiles alike, and settle when you let go.
 - **Keyboard:** set `mosaic:focus_binds` to a modifier (for example `SUPER`)
   for Mosaic-aware focus on the arrow keys; adding Shift swaps the focused
   window with its neighbour in that direction.
@@ -146,21 +150,24 @@ mosaic once they fit again. Each app's size is remembered.
     choice below, hovering a window does the same. A window already in view
     does not move the canvas. The pointer moves with the canvas, so it stays on
     the same window.
-  - **Horizontal** (`mosaic:canvas_directions = "horizontal"`, the default): one
-    strip. Swipe sideways with three fingers, or Super+scroll, to pan it; past
-    the first or last window the same gesture switches desktops, as on a
+  - **All directions** (`mosaic:canvas_directions = "all"`, the default): the
+    canvas grows down as well as across.
+  - **Horizontal** (`"horizontal"`): one strip. Swipe sideways with three
+    fingers, or Super+scroll, to pan it; past the first or last window the same gesture switches desktops, as on a
     Scrolling desktop.
-  - **All directions** (`"all"`): the canvas grows down as well as across.
   - **Holding Super and moving the pointer** (`mosaic:canvas_super_move`):
-    `"pan"` (All directions only): the pointer's place on the screen is your
-    place on the canvas, so the top-left corner shows the top left of the
-    canvas. `"zoom"`: every window shrinks onto the screen; hover one to focus
+    `"zoom"` (the default): every window shrinks onto the screen; hover one to focus
     it, click it or let go of Super to zoom back in on it, or press on one and
-    drag it to rearrange the canvas while zoomed out. Neither starts
+    drag it to rearrange the canvas while zoomed out. `"pan"` (All directions
+    only): the pointer's place on the screen is your place on the canvas, so
+    the top-left corner shows the top left of the canvas. Neither starts
     before the pointer has moved a little, and a Super+click or Super+drag
     does neither until Super is let go.
   - **Super+drag** works as in the mosaic: the window lands where you let go
-    and the cluster packs around it. Push against the screen's edge while
+    and the cluster packs around it. Resizing works there too, even zoomed out
+    (press a window's corner or edge), and moving the mouse on past the
+    screen's edge while resizing slides the view so the window keeps growing,
+    only as far as you move. Push against the screen's edge while
     dragging to pan the canvas.
 
   In the overview, the desktop strip shows the whole canvas zoomed out.
