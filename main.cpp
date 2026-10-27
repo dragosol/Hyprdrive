@@ -1126,6 +1126,13 @@ static void                registerRawKeyHooks() {
                 g_heldGuardKeys.erase(event.keycode);
         }
 
+        // The zoomed-out canvas: the user's screenshot key (Print) shoots it,
+        // though Super is held for the zoom (Mosaic::onZoomKey).
+        if (ScrollOverview::Mosaic::onZoomKey(event.keycode, PRESSED)) {
+            info.cancelled = true;
+            return;
+        }
+
         // A REAL KEY BREAKS EVERY TAP IN FLIGHT -- and it has to be recorded
         // HERE, above every consume path, not after them.
         //

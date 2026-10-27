@@ -2899,6 +2899,63 @@ namespace ScrollOverview::Mosaic {
     // sized places the pointer was over the browser, so Hyprland's own focus
     // follows mouse focused it on every motion, against the zoom's hover pick
     // (zoomedWindowAt), and the browser got the hover (its sidebar opened).
+    // THE USER'S SCREENSHOT KEY, ZOOMED OUT (user, 2026-10-27: "I meant
+    // whatever the user has for screenshots in Omarchy. For example I do 3
+    // fingers press on track pad or press print screen"). Super is held for
+    // the zoom, so Print arrives as Super+Print -- Omarchy's colour picker.
+    // While zoomed out, a key whose Super chord is not a screenshot bind but
+    // whose plain chord (the same mods without Super) is, runs that
+    // screenshot. A screenshot bind is one whose description or command says
+    // so; whatever keys the user gave it, they work.
+    namespace {
+        std::unordered_set<uint32_t> g_zoomKeysTaken; // presses taken: their releases too
+        bool isScreenshotBind(const SP<SKeybind>& k) {
+            std::string s = k->description + " " + k->arg;
+            std::ranges::transform(s, s.begin(), [](unsigned char c) { return sc<char>(std::tolower(c)); });
+            for (const char* W : {"screenshot", "hyprshot", "grimblast", "flameshot", "grim "})
+                if (s.find(W) != std::string::npos)
+                    return true;
+            return false;
+        }
+        SP<SKeybind> bindFor(uint32_t mods, xkb_keysym_t sym) {
+            if (!g_pKeybindManager)
+                return nullptr;
+            for (const auto& K : g_pKeybindManager->m_keybinds) {
+                if (!K || !K->enabled || K->mouse || K->release || !K->submap.name.empty() || K->modmask != mods || K->key.empty())
+                    continue;
+                if (xkb_keysym_from_name(K->key.c_str(), XKB_KEYSYM_CASE_INSENSITIVE) == sym)
+                    return K;
+            }
+            return nullptr;
+        }
+    }
+
+    bool onZoomKey(uint32_t keycode, bool pressed) {
+        if (!pressed)
+            return g_zoomKeysTaken.erase(keycode) > 0;
+        if (g_super != ESuper::ZOOMED || !liveZoomed())
+            return false;
+        const auto KB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
+        if (!KB || !KB->m_xkbState)
+            return false;
+        const xkb_keysym_t SYM  = xkb_state_key_get_one_sym(KB->m_xkbState, keycode + 8);
+        const uint32_t     MODS = g_pInputManager->getModsFromAllKBs();
+        if (SYM == XKB_KEY_NoSymbol || !(MODS & HL_MODIFIER_META))
+            return false;
+        if (const auto OWN = bindFor(MODS, SYM); OWN && isScreenshotBind(OWN))
+            return false; // the Super chord is a screenshot itself (Super+Shift+S): Hyprland runs it
+        const auto PLAIN = bindFor(MODS & ~HL_MODIFIER_META, SYM);
+        if (!PLAIN || !isScreenshotBind(PLAIN))
+            return false;
+        const auto IT = g_pKeybindManager->m_dispatchers.find(PLAIN->handler);
+        if (IT == g_pKeybindManager->m_dispatchers.end())
+            return false;
+        trace(std::format("zoomed screenshot key {} -> {} {}", PLAIN->key, PLAIN->handler, PLAIN->description));
+        IT->second(PLAIN->arg);
+        g_zoomKeysTaken.insert(keycode);
+        return true;
+    }
+
     bool zoomOwnsPointer() {
         const auto* A = liveZoomed();
         return A && A->zoomed() && !pickerOpen();

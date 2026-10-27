@@ -160,8 +160,10 @@ mosaic once they fit again. Each app's size is remembered.
     it, click it or let go of Super to zoom back in on it, or press on one and
     drag it to rearrange the canvas while zoomed out. Right-drag a window
     (Super + right-drag, as on the desktop) to resize it from its nearest corner.
-    Super+Shift+S takes a screenshot of the zoomed-out canvas: the zoom stays
-    until you let go of Super, and the region picker gets the pointer. `"pan"` (All directions
+    Your screenshot shortcut shoots the zoomed-out canvas: Print (Super is
+    held, but Print still runs your screenshot rather than Super+Print), a
+    trackpad press bound to it, or a Super chord like Super+Shift+S. The zoom
+    stays until you let go of Super, and the region picker gets the pointer. `"pan"` (All directions
     only): the pointer's place on the screen is your place on the canvas, so
     the top-left corner shows the top left of the canvas. Neither starts
     before the pointer has moved a little, and a Super+click or Super+drag
