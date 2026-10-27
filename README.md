@@ -158,7 +158,10 @@ mosaic once they fit again. Each app's size is remembered.
   - **Holding Super and moving the pointer** (`mosaic:canvas_super_move`):
     `"zoom"` (the default): every window shrinks onto the screen; hover one to focus
     it, click it or let go of Super to zoom back in on it, or press on one and
-    drag it to rearrange the canvas while zoomed out. `"pan"` (All directions
+    drag it to rearrange the canvas while zoomed out. Right-drag a window
+    (Super + right-drag, as on the desktop) to resize it from its nearest corner.
+    Super+Shift+S takes a screenshot of the zoomed-out canvas: the zoom stays
+    until you let go of Super, and the region picker gets the pointer. `"pan"` (All directions
     only): the pointer's place on the screen is your place on the canvas, so
     the top-left corner shows the top left of the canvas. Neither starts
     before the pointer has moved a little, and a Super+click or Super+drag

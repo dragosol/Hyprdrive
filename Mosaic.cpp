@@ -35,6 +35,8 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/pointer/PointerController.hpp>
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
+#include <hyprland/src/protocols/LayerShell.hpp>
 #include "Config.hpp"
 #include <linux/input-event-codes.h>
 
@@ -58,6 +60,7 @@ namespace ScrollOverview {
 namespace ScrollOverview::Mosaic {
 
     class CMosaicAlgorithm;
+    static bool pickerOpen(); // a screenshot's region picker is up (below)
     // Every live mosaic layout -- one per desktop on mosaic. Hyprland keeps the
     // algorithm behind a desktop private, so "is this window on a mosaic
     // desktop" is answered from here instead.
@@ -1104,8 +1107,10 @@ namespace ScrollOverview::Mosaic {
         void recalculate(Layout::eRecalculateReason reason = Layout::RECALCULATE_REASON_UNKNOWN) override {
             (void)reason;
             // Whatever comes next is laid out for real: the zoom lets go first --
-            // unless a drag in the zoomed-out view is what re-arranged it.
-            if (!m_keepZoom)
+            // unless a drag in the zoomed-out view is what re-arranged it, or a
+            // screenshot's region picker opening (a new layer re-lays out the
+            // monitor) while the zoomed-out canvas is what is being shot.
+            if (!m_keepZoom && !zoomSurvives())
                 endZoomNow();
             std::erase_if(m_entries, [](const SMosaicEntry& e) { return !e.target; });
             // Every window's mosaic size outlives this layout (g_windowSizes).
@@ -1205,7 +1210,7 @@ namespace ScrollOverview::Mosaic {
             const MosaicPack::SRect AREAR{AREA->x, AREA->y, AREA->w, AREA->h};
             // A new arrangement: the zoom (drawn from the old one) ends. A pan
             // in flight carries on if nothing moved (below).
-            if (!m_keepZoom)
+            if (!m_keepZoom && !zoomSurvives())
                 endZoomNow();
             std::vector<MosaicPack::SRect> sizes;
             for (const auto& E : m_entries)
@@ -1417,6 +1422,8 @@ namespace ScrollOverview::Mosaic {
                 setCanvasOffset(m_canvasOffset, true); // the pan stops where it is
             const double MS = canvasPanMs();
             m_zoom          = SZoom{.on = MS >= 1.0, .from = m_zoomZ, .to = 1.0, .start = std::chrono::steady_clock::now(), .ms = MS};
+            m_zoomArea      = area();
+            m_zoomN         = liveEntries();
             if (!m_zoom.on) {
                 m_zoomZ = 1.0;
                 drawZoom();
@@ -1510,13 +1517,22 @@ namespace ScrollOverview::Mosaic {
         Layout::eRectCorner zoomCorner() const {
             return m_zCorner;
         }
-        bool zoomPress(const Vector2D& p) {
+        // `anywhere`: SUPER + RIGHT-DRAG (user, 2026-10-27, from a tester:
+        // "super + right click ... resize the focused window by default on
+        // omarchy/hyprland"; "even with windows zoomed out right click should
+        // resize windows from that view"). Pressed anywhere on a window, it
+        // resizes from the corner nearest the press, as Hyprland's own
+        // resizewindow does; an edge band still picks that edge.
+        bool zoomPress(const Vector2D& p, bool anywhere = false) {
             PHLWINDOW  RW;
-            const auto CORNER = zoomCornerAt(p, &RW);
+            auto       CORNER = zoomCornerAt(p, &RW);
             const auto W      = CORNER != Layout::CORNER_NONE ? RW : zoomedWindowAt(p);
             const auto B      = W ? zoomBoxOf(W, m_zoomZ) : std::nullopt;
             if (!W || !B)
                 return false;
+            if (anywhere && CORNER == Layout::CORNER_NONE)
+                CORNER = sc<Layout::eRectCorner>((p.x < B->x + B->w / 2.0 ? Layout::CORNER_LEFT : Layout::CORNER_RIGHT) |
+                                                 (p.y < B->y + B->h / 2.0 ? Layout::CORNER_TOP : Layout::CORNER_BOTTOM));
             m_zCorner    = CORNER;
             m_zStart     = *B;
             m_zBox       = *B;
@@ -1652,6 +1668,22 @@ namespace ScrollOverview::Mosaic {
         }
 
         // The desktop the mosaic lays out in.
+        size_t liveEntries() const {
+            return sc<size_t>(std::ranges::count_if(m_entries, [](const SMosaicEntry& e) { return !e.target.expired(); }));
+        }
+        // A RE-LAYOUT THAT CHANGES NOTHING keeps the zoom (user, 2026-10-27:
+        // "fix taking screenshots while zoomed out"): a screenshot's region
+        // picker is a new layer, and Hyprland re-lays out the monitor as it
+        // appears -- the same windows in the same area, so the zoomed-out
+        // canvas stays for the shot. A window come or gone, or the work area
+        // changed, still ends it.
+        bool zoomSurvives() const {
+            if (!m_zoomed || !m_zoomArea)
+                return false;
+            const auto A = area();
+            return A && std::abs(A->x - m_zoomArea->x) < 0.5 && std::abs(A->y - m_zoomArea->y) < 0.5 && std::abs(A->w - m_zoomArea->w) < 0.5 &&
+                std::abs(A->h - m_zoomArea->h) < 0.5 && liveEntries() == m_zoomN;
+        }
         std::optional<CBox> area() const {
             if (!m_parent || !m_parent->space())
                 return std::nullopt;
@@ -1952,6 +1984,10 @@ namespace ScrollOverview::Mosaic {
         // A corner or edge of a zoomed window pressed: it is RESIZED, not carried.
         Layout::eRectCorner       m_zCorner = Layout::CORNER_NONE;
         CBox                      m_zStart, m_zBox; // its zoomed box at the press, and now
+        // What the zoom was drawn from (zoomOut): a re-layout that changes
+        // neither keeps it (zoomSurvives).
+        std::optional<CBox>       m_zoomArea;
+        size_t                    m_zoomN = 0;
         bool                      m_keepZoom   = false; // the re-pack a zoomed drop asks for keeps the zoom
         struct SMorph {
             bool                                         on = false;
@@ -2399,8 +2435,27 @@ namespace ScrollOverview::Mosaic {
         Vector2D          g_superAnchor;
         CMosaicAlgorithm* g_superCanvas = nullptr; // the zoomed one
         bool              g_swallowRelease = false;
-        bool              g_zoomPressing   = false; // the left button went down in the zoomed-out view
+        bool              g_zoomPressing   = false; // a button went down in the zoomed-out view
+        uint32_t          g_zoomButton     = 0;     // which: BTN_LEFT carries or resizes, BTN_RIGHT resizes
         constexpr double  SUPER_SLOP = 32.0;
+    }
+
+    // A SCREEN PICKER IS UP (user, 2026-10-27: "fix taking screenshots while
+    // zoomed out"): a region picker (slurp, hyprpicker's freeze) is a layer
+    // surface over a whole monitor on the overlay layer. While one is up the
+    // zoomed-out canvas stays drawn for the screenshot, but the pointer and
+    // its buttons are the picker's.
+    static bool pickerOpen() {
+        for (const auto& M : State::monitorState()->monitors())
+            for (const auto& LSREF : M->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
+                const auto LS = LSREF.lock();
+                if (!Desktop::View::validMapped(LS))
+                    continue;
+                const auto& G = LS->m_geometry;
+                if (G.w >= M->m_size.x - 1 && G.h >= M->m_size.y - 1)
+                    return true;
+            }
+        return false;
     }
 
     static CMosaicAlgorithm* liveZoomed() {
@@ -2449,16 +2504,23 @@ namespace ScrollOverview::Mosaic {
         // or Super+drag: no pan or zoom until Super is let go.
         // Zoomed out, the LEFT button grabs the window under it (zoomPress):
         // dragged, it is dropped where it is let go; a click picks it.
-        if (e.button == BTN_LEFT && PRESSED && g_super == ESuper::ZOOMED)
-            if (auto* A = liveZoomed(); A && A->zoomPress(g_pInputManager->getMouseCoordsInternal())) {
+        // The RIGHT button resizes the window under it from its nearest
+        // corner (Super + right-drag, as on the desktop).
+        const bool ZOOMBUTTON = e.button == BTN_LEFT || e.button == BTN_RIGHT;
+        if (g_super == ESuper::ZOOMED && !g_zoomPressing && !g_swallowRelease && pickerOpen())
+            return false; // a screenshot's region picker: its click
+        if (ZOOMBUTTON && PRESSED && g_super == ESuper::ZOOMED && !g_zoomPressing)
+            if (auto* A = liveZoomed(); A && A->zoomPress(g_pInputManager->getMouseCoordsInternal(), e.button == BTN_RIGHT)) {
                 g_zoomPressing = true;
+                g_zoomButton   = e.button;
                 return true;
             }
-        if (e.button == BTN_LEFT && !PRESSED && g_zoomPressing) {
+        if (!PRESSED && g_zoomPressing && e.button == g_zoomButton) {
             g_zoomPressing = false;
             auto*          A = liveZoomed();
             const Vector2D P = g_pInputManager->getMouseCoordsInternal();
-            if (A && !A->zoomRelease(P)) {
+            // A right click that never moved resizes nothing: still zoomed out.
+            if (A && !A->zoomRelease(P) && e.button == BTN_LEFT) {
                 if (const auto W = A->zoomedWindowAt(P))
                     Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
                 superEnd(true);
@@ -2735,8 +2797,10 @@ namespace ScrollOverview::Mosaic {
             return;
         }
         if (MODS != HL_MODIFIER_META) {
-            // Another modifier joined: someone's chord, not this.
-            if (g_super != ESuper::IDLE && g_super != ESuper::SPENT)
+            // Another modifier joined: someone's chord, not this. Zoomed out,
+            // the view stays until Super is let go: Super+Shift+S takes a
+            // screenshot of the zoomed-out canvas, not of the view behind it.
+            if (g_super != ESuper::IDLE && g_super != ESuper::SPENT && g_super != ESuper::ZOOMED)
                 superEnd(true);
             return;
         }
@@ -2781,6 +2845,8 @@ namespace ScrollOverview::Mosaic {
             A->zoomMove(P); // carrying a window (zoomPress)
             return;
         }
+        if (g_super == ESuper::ZOOMED && pickerOpen())
+            return; // the picker has the pointer: no hover picks under it
         if (g_super == ESuper::ZOOMED) {
             // Hovering a window focuses it (as focus follows the mouse, but
             // whatever input:follow_mouse says: this is the zoom's own pick).
@@ -2835,7 +2901,7 @@ namespace ScrollOverview::Mosaic {
     // (zoomedWindowAt), and the browser got the hover (its sidebar opened).
     bool zoomOwnsPointer() {
         const auto* A = liveZoomed();
-        return A && A->zoomed();
+        return A && A->zoomed() && !pickerOpen();
     }
 
     void onMove(bool blocked) {
