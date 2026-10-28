@@ -1128,7 +1128,7 @@ static void                registerRawKeyHooks() {
 
         // The zoomed-out canvas: the user's screenshot key (Print) shoots it,
         // though Super is held for the zoom (Mosaic::onZoomKey).
-        if (ScrollOverview::Mosaic::onZoomKey(event.keycode, PRESSED)) {
+        if (ScrollOverview::Mosaic::onZoomKey(event.keycode, PRESSED, event.timeMs)) {
             info.cancelled = true;
             return;
         }

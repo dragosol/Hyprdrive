@@ -29,7 +29,7 @@ namespace ScrollOverview::Mosaic {
     // the overview, the dock or a lock screen owns the pointer.
     bool onButton(const IPointer::SButtonEvent& e, bool blocked);
     // A key while the canvas is zoomed out (Super held): true = taken.
-    bool onZoomKey(uint32_t keycode, bool pressed);
+    bool onZoomKey(uint32_t keycode, bool pressed, uint32_t timeMs);
     // Pointer motion: the resize cursor while over a grabbable corner.
     void onMove(bool blocked);
     // Super zoomed the canvas out: pointer motion is the zoom's alone, never

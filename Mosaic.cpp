@@ -2909,6 +2909,7 @@ namespace ScrollOverview::Mosaic {
     // so; whatever keys the user gave it, they work.
     namespace {
         std::unordered_set<uint32_t> g_zoomKeysTaken; // presses taken: their releases too
+        std::unordered_set<uint32_t> g_zoomKeysSent;  // presses handed to the picker: their releases too
         bool isScreenshotBind(const SP<SKeybind>& k) {
             std::string s = k->description + " " + k->arg;
             std::ranges::transform(s, s.begin(), [](unsigned char c) { return sc<char>(std::tolower(c)); });
@@ -2930,9 +2931,15 @@ namespace ScrollOverview::Mosaic {
         }
     }
 
-    bool onZoomKey(uint32_t keycode, bool pressed) {
-        if (!pressed)
+    bool onZoomKey(uint32_t keycode, bool pressed, uint32_t timeMs) {
+        if (!pressed) {
+            if (g_zoomKeysSent.erase(keycode) > 0) {
+                if (g_pSeatManager)
+                    g_pSeatManager->sendKeyboardKey(timeMs, keycode, WL_KEYBOARD_KEY_STATE_RELEASED);
+                return true;
+            }
             return g_zoomKeysTaken.erase(keycode) > 0;
+        }
         if (g_super != ESuper::ZOOMED || !liveZoomed())
             return false;
         const auto KB = g_pSeatManager ? g_pSeatManager->m_keyboard.lock() : nullptr;
@@ -2942,6 +2949,28 @@ namespace ScrollOverview::Mosaic {
         const uint32_t     MODS = g_pInputManager->getModsFromAllKBs();
         if (SYM == XKB_KEY_NoSymbol || !(MODS & HL_MODIFIER_META))
             return false;
+        // THE PICKER'S OWN KEYS (user, 2026-10-28: Escape out of the picker
+        // opened the System menu): while it is up, Super is only held for the
+        // zoom, so a key is what it would be without Super -- the picker's
+        // binds (Omarchy's Return, Tab, arrows), or else the key itself, sent
+        // to the picker (Escape cancels it), never a Super bind.
+        if (pickerOpen()) {
+            if (!bindFor(MODS, SYM))
+                return false; // no Super bind to steal it: Hyprland delivers it
+            if (const auto PLAIN = bindFor(MODS & ~HL_MODIFIER_META, SYM)) {
+                const auto IT = g_pKeybindManager->m_dispatchers.find(PLAIN->handler);
+                if (IT != g_pKeybindManager->m_dispatchers.end()) {
+                    trace(std::format("zoomed picker key {} -> {} {}", PLAIN->key, PLAIN->handler, PLAIN->description));
+                    IT->second(PLAIN->arg);
+                    g_zoomKeysTaken.insert(keycode);
+                    return true;
+                }
+            }
+            trace(std::format("zoomed picker key {} -> the picker", keycode));
+            g_pSeatManager->sendKeyboardKey(timeMs, keycode, WL_KEYBOARD_KEY_STATE_PRESSED);
+            g_zoomKeysSent.insert(keycode);
+            return true;
+        }
         if (const auto OWN = bindFor(MODS, SYM); OWN && isScreenshotBind(OWN))
             return false; // the Super chord is a screenshot itself (Super+Shift+S): Hyprland runs it
         const auto PLAIN = bindFor(MODS & ~HL_MODIFIER_META, SYM);
