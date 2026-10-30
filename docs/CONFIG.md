@@ -186,7 +186,7 @@ Prefix: `plugin:hyprdrive:mosaic:`
 | `infinite_canvas` | bool | `false` |  | mosaic: windows that no longer fit the screen spill onto a canvas you pan across, at their own sizes, instead of tiling |
 | `canvas_directions` | string | `"all"` |  | mosaic: the infinite canvas grows horizontal (a strip) or all (a grid); on either, hold Super and move the pointer to zoom out to every window, hover one to focus it, let go of Super to zoom back in |
 | `canvas_super_move` | string | `"zoom"` |  | mosaic: retired and ignored (holding Super on the canvas always zooms out) |
-| `zoom_labels` | string | `"hover"` |  | mosaic: window titles on the zoomed-out canvas: none, hover (the window under the pointer) or all |
+| `zoom_labels` | string | `"hover"` |  | window titles while Super is held and the pointer moves, on any desktop (the zoomed-out canvas too): none, hover (the window under the pointer) or all |
 | `cycle_bind` | string | `"auto"` |  | mosaic: the chord that cycles Dwindle -> Scrolling -> Mosaic -- auto (SUPER + L), none, or a chord like SUPER + M |
 | `focus_binds` | string | `"auto"` |  | mosaic: modifier for mosaic-aware focus on the arrow keys -- auto (SUPER on Omarchy, none elsewhere), none, or a modifier like SUPER or SUPER + ALT |
 

@@ -326,6 +326,18 @@ namespace ScrollOverview::Mosaic {
     // A plain click: the canvas window under the pointer pans into view.
     static void canvasClick();
 
+    // A window's title pill at the bottom of the box it is drawn at (zoomed or
+    // where it is): the overview's caption pill (OverviewRender::labelPill).
+    static void drawWindowLabel(const PHLMONITOR& monitor, const PHLWINDOW& w, float alpha) {
+        const float    SCALE = std::max(monitor->m_scale, 0.01F);
+        const Vector2D P = w->positionAnimation()->value(), S = w->sizeAnimation()->value();
+        if (S.x < 48 || S.y < 32)
+            return;
+        const double CX     = (P.x + S.x / 2.0 - monitor->m_position.x) * SCALE;
+        const double BOTTOM = (P.y + S.y - monitor->m_position.y - 14.0) * SCALE;
+        OverviewRender::labelPill(monitor, w->m_title.empty() ? w->m_class : w->m_title, CX, BOTTOM, alpha, SCALE);
+    }
+
     class CMosaicAlgorithm : public Layout::ITiledAlgorithm {
       public:
         CMosaicAlgorithm() {
@@ -1498,19 +1510,13 @@ namespace ScrollOverview::Mosaic {
             if (!m_zoomed || m_zoomZ <= 0.5)
                 return;
             const float ALPHA = std::clamp(sc<float>((m_zoomZ - 0.5) / 0.5), 0.F, 1.F);
-            const float SCALE = std::max(monitor->m_scale, 0.01F);
             const auto  DRAG  = m_zDragMoved ? m_zDrag.lock() : PHLWINDOW{};
             for (const auto& WT : m_canvasWho) {
                 const auto T = WT.lock();
                 const auto W = T ? T->window() : nullptr;
                 if (!W || W == DRAG || (!all && W != hovered))
                     continue;
-                const Vector2D P = W->positionAnimation()->value(), S = W->sizeAnimation()->value();
-                if (S.x < 48 || S.y < 32)
-                    continue;
-                const double CX     = (P.x + S.x / 2.0 - monitor->m_position.x) * SCALE;
-                const double BOTTOM = (P.y + S.y - monitor->m_position.y - 14.0) * SCALE;
-                OverviewRender::labelPill(monitor, W->m_title.empty() ? W->m_class : W->m_title, CX, BOTTOM, ALPHA, SCALE);
+                drawWindowLabel(monitor, W, ALPHA);
             }
         }
         bool zoomed() const {
@@ -2621,6 +2627,7 @@ namespace ScrollOverview::Mosaic {
         uint32_t          g_zoomButton     = 0;     // which: BTN_LEFT carries or resizes, BTN_RIGHT resizes
         constexpr double  SUPER_SLOP = 32.0;
         PHLWINDOWREF      g_labelHover; // the window whose title the hover shows (mosaic:zoom_labels)
+        bool              g_superLabels = false; // Super held and the pointer moved: titles up
     }
 
     // A SCREEN PICKER IS UP (user, 2026-10-27: "fix taking screenshots while
@@ -2641,12 +2648,24 @@ namespace ScrollOverview::Mosaic {
         return false;
     }
 
+    // The titles come down (Super let go, or spent on a click or a drag).
+    static void dropSuperLabels() {
+        if (!g_superLabels)
+            return;
+        g_superLabels = false;
+        g_labelHover.reset();
+        for (const auto& M : State::monitorState()->monitors())
+            if (M)
+                g_pHyprRenderer->damageMonitor(M);
+    }
+
     static CMosaicAlgorithm* liveZoomed() {
         return g_superCanvas && std::ranges::find(g_instances, g_superCanvas) != g_instances.end() ? g_superCanvas : nullptr;
     }
 
     // The gesture is over (Super let go, another modifier joined, unload).
     static void superEnd(bool superStillDown) {
+        dropSuperLabels();
         if (auto* A = liveZoomed()) {
             // Let go of Super mid-drag: the drag is off; the button's release,
             // still to come, is ours.
@@ -2675,17 +2694,39 @@ namespace ScrollOverview::Mosaic {
     }
 
     void renderZoomLabels(PHLMONITOR monitor) {
-        auto* A = monitor ? liveZoomed() : nullptr;
-        const auto WS = A ? A->workspace() : nullptr;
-        if (!WS || monitor->m_activeWorkspace != WS || monitor->m_activeSpecialWorkspace)
+        if (!monitor || !g_superLabels || g_super == ESuper::IDLE || g_super == ESuper::SPENT || openScrollOverviewForMonitor(monitor))
             return;
         const auto MODE = ScrollOverview::Config::getValue<std::string>("plugin:hyprdrive:mosaic:zoom_labels");
         if (MODE != "hover" && MODE != "all")
             return;
-        const auto HOVER = MODE == "all" ? PHLWINDOW{} : A->zoomedWindowAt(g_pInputManager->getMouseCoordsInternal());
+        // Looked up fresh, not g_labelHover (that only asks for the redraws):
+        // a desktop switch under a still pointer changes the window under it.
+        auto*          A      = liveZoomed();
+        const auto     WS     = A ? A->workspace() : nullptr;
+        const bool     ZOOMED = WS && monitor->m_activeWorkspace == WS && !monitor->m_activeSpecialWorkspace;
+        const Vector2D P      = g_pInputManager->getMouseCoordsInternal();
+        const auto     HOVER  = ZOOMED ? A->zoomedWindowAt(P) :
+                                         Desktop::viewState()->hitTest().windowAt(P, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
         if (MODE == "hover" && !HOVER)
             return;
-        A->drawZoomLabels(monitor, MODE == "all", HOVER);
+        // The zoomed-out canvas: on the zoomed boxes, fading in with the zoom.
+        if (ZOOMED) {
+            A->drawZoomLabels(monitor, MODE == "all", HOVER);
+            return;
+        }
+        // Any other desktop, any layout: the windows where they are. Under a
+        // fullscreen window only it and what floats over it are seen.
+        const auto SHOWN = monitor->m_activeSpecialWorkspace ? monitor->m_activeSpecialWorkspace : monitor->m_activeWorkspace;
+        if (!SHOWN)
+            return;
+        const auto FS = Fullscreen::controller()->getFullscreenWindow(SHOWN);
+        for (const auto& W : Desktop::windowState()->windows()) {
+            if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != SHOWN || (FS && W != FS && !W->m_isFloating))
+                continue;
+            if (MODE == "hover" && W != HOVER)
+                continue;
+            drawWindowLabel(monitor, W, 1.F);
+        }
     }
 
     PHLWINDOW zoomCarried() {
@@ -2714,6 +2755,7 @@ namespace ScrollOverview::Mosaic {
         g_superCanvas   = nullptr;
         g_canvasPanning = false;
         g_super         = ESuper::SPENT; // Super still down: no new zoom until it is let go
+        dropSuperLabels();
         g_layoutManager->beginDragTarget(W->layoutTarget(), MBIND_MOVE);
         // It grows from where it was drawn, under the hand, to its own size
         // there -- not from its place on the canvas (off the screen, as often
@@ -2776,8 +2818,10 @@ namespace ScrollOverview::Mosaic {
             g_swallowRelease = false;
             return true;
         }
-        if (PRESSED && g_super == ESuper::ARMED)
+        if (PRESSED && g_super == ESuper::ARMED) {
             g_super = ESuper::SPENT;
+            dropSuperLabels(); // a Super+click or Super+drag: no titles over it
+        }
         // A plain left click on a canvas window pans it into view (clickReveal).
         if (PRESSED && !blocked && e.button == BTN_LEFT && modsNow() == 0 && !(g_layoutManager && g_layoutManager->dragController()->target()))
             canvasClick();
@@ -3046,7 +3090,32 @@ namespace ScrollOverview::Mosaic {
         if (g_super == ESuper::SPENT || blocked || g_cursorRiding || (g_layoutManager && g_layoutManager->dragController()->target()))
             return;
         const auto MON = State::monitorState()->query().vec(P).run();
-        if (!MON || MON->m_activeSpecialWorkspace || openScrollOverviewForMonitor(MON))
+        if (!MON || openScrollOverviewForMonitor(MON))
+            return;
+        // TITLES WHILE SUPER IS HELD (user, 2026-10-30: "have them appear when
+        // I'm holding super and moving my mouse, even if it doesn't zoom out,
+        // and have the labels work in any desktop mode"): past the slop they
+        // come up on any desktop, canvas or not; the zoom below is the
+        // canvas's own. mosaic:zoom_labels picks none, the hovered window, or
+        // all. The hovered one is tracked here, and a change redraws the whole
+        // screen so the last pill goes with it.
+        if (!g_superLabels) {
+            const Vector2D D = P - g_superAnchor;
+            if (g_super == ESuper::ZOOMED || D.x * D.x + D.y * D.y >= SUPER_SLOP * SUPER_SLOP) {
+                g_superLabels = true;
+                g_pHyprRenderer->damageMonitor(MON);
+            }
+        }
+        if (g_superLabels) {
+            const auto* Z = liveZoomed();
+            const auto  W = Z ? Z->zoomedWindowAt(P) :
+                                Desktop::viewState()->hitTest().windowAt(P, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+            if (W != g_labelHover.lock()) {
+                g_labelHover = W;
+                g_pHyprRenderer->damageMonitor(MON);
+            }
+        }
+        if (MON->m_activeSpecialWorkspace)
             return;
         auto*      A = canvasOf(MON->m_activeWorkspace);
         const auto V = A ? A->canvasViewNow() : std::nullopt;
@@ -3078,15 +3147,8 @@ namespace ScrollOverview::Mosaic {
         if (g_super == ESuper::ZOOMED) {
             // Hovering a window focuses it (as focus follows the mouse, but
             // whatever input:follow_mouse says: this is the zoom's own pick).
-            const auto W = A->zoomedWindowAt(P);
-            if (W && W != Desktop::focusState()->window())
+            if (const auto W = A->zoomedWindowAt(P); W && W != Desktop::focusState()->window())
                 Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
-            // The hovered title moved with it (mosaic:zoom_labels): the whole
-            // screen, or the last pill stays where the damage did not reach.
-            if (W != g_labelHover.lock()) {
-                g_labelHover = W;
-                g_pHyprRenderer->damageMonitor(MON);
-            }
             return;
         }
     }
