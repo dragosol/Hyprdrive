@@ -63,10 +63,6 @@ CANVAS_DIRECTIONS = [
     {"value": "horizontal", "label": "Horizontal"},
     {"value": "all", "label": "All directions"},
 ]
-CANVAS_SUPER_MOVES = [
-    {"value": "pan", "label": "Pan the canvas"},
-    {"value": "zoom", "label": "Zoom out to every window"},
-]
 HOT_CORNERS = [
     {"value": "top-left", "label": "Top left"},
     {"value": "top-right", "label": "Top right"},
@@ -203,7 +199,6 @@ KEY_META = [
     _k(PLUGIN + "mosaic:default", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:infinite_canvas", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:canvas_directions", "enum", "mosaic", "all", options=CANVAS_DIRECTIONS),
-    _k(PLUGIN + "mosaic:canvas_super_move", "enum", "mosaic", "zoom", options=CANVAS_SUPER_MOVES),
     # The chords Mosaic takes (A20). Free text in the config; the panel offers
     # presets plus whatever is set now (chord_options(), per dump).
     _k(PLUGIN + "mosaic:cycle_bind", "str", "mosaic", "auto"),
@@ -670,10 +665,21 @@ def on_battery():
     return False
 
 
+# Keys the panel no longer offers. A store that still holds one drops it, so
+# 40-panel.lua stops writing it the next time it is saved.
+RETIRED_KEYS = (PLUGIN + "mosaic:canvas_super_move",)
+
+
 def load_store():
     if STORE.exists():
         try:
-            return json.loads(STORE.read_text())
+            store = json.loads(STORE.read_text())
+            for key in RETIRED_KEYS:
+                store.get("keys", {}).pop(key, None)
+                for profile in store.get("profiles", {}).values():
+                    if isinstance(profile, dict):
+                        profile.pop(key, None)
+            return store
         except ValueError:
             pass
     return {

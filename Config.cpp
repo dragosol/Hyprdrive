@@ -178,10 +178,10 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .name            = "debug",
             // `gesture .+`: the script is parsed by the topic itself
             // (DebugGestureScript.hpp), which reports a bad step precisely.
-            .argPattern      = std::regex{"^(frames|mem|motion|windows|glass|desktop|scratchpad|type|type \\S+|activate \\S+|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
+            .argPattern      = std::regex{"^(frames|mem|motion|windows|glass|desktop|scratchpad|type|type \\S+|activate \\S+|tile \\S+|xgeom|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
             .defaultArg      = "frames",
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: frames | mem | motion | desktop | scratchpad | type [text] | activate <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
+            .invalidArgError = "expected: frames | mem | motion | desktop | scratchpad | type [text] | activate <class> | tile <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "debug"); },
             .luaLegacy       = [](lua_State* L) {
                 ScrollOverview::Compat::noteLegacyUse(ScrollOverview::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.debug");
@@ -619,13 +619,12 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CBoolValue>(KEY("mosaic:infinite_canvas"),
                                   "mosaic: windows that no longer fit the screen spill onto a canvas you pan across, at their own sizes, instead of tiling", false));
     addKey(makeShared<CStringValue>(KEY("mosaic:canvas_directions"),
-                                    "mosaic: the infinite canvas grows horizontal (a strip; swipe or Super+scroll pans it, then switches desktops) or all (a grid; hold "
-                                    "Super and the pointer's place on the screen is the view's place on the canvas)",
+                                    "mosaic: the infinite canvas grows horizontal (a strip) or all (a grid); on "
+                                    "either, hold Super and move the pointer to zoom out to every window, hover one to focus it, let go of Super to zoom back in",
                                     Hyprlang::STRING{"all"}));
-    addKey(makeShared<CStringValue>(KEY("mosaic:canvas_super_move"),
-                                    "mosaic: holding Super and moving the pointer on the infinite canvas pans it (pan; all directions only: the pointer's place on "
-                                    "the screen is the view's place on the canvas) or zooms out to show every window (zoom; hovering one focuses it, letting go of "
-                                    "Super zooms back in on it)",
+    // RETIRED (user, 2026-10-29): holding Super always zooms out. Still registered
+    // so a config or settings-panel fragment that sets it loads; nothing reads it.
+    addKey(makeShared<CStringValue>(KEY("mosaic:canvas_super_move"), "mosaic: retired and ignored (holding Super on the canvas always zooms out)",
                                     Hyprlang::STRING{"zoom"}));
     // The chords Mosaic takes while it is on (audit A20). hdpanel reads these
     // when it writes 40-panel.lua; the plugin only holds them, so they can be
@@ -883,7 +882,7 @@ static void registerConfigValuesFor() {
                                     "the curve family for everything hyprdrive animates except the dock stacks: hyprdrive (the house curves), serpantinum (its window curve), serpantinum_glide, serpantinum_soft, serpantinum_intro, serpantinum_pop, swift, springy, linear",
                                     Hyprlang::STRING{"hyprdrive"}));
     // THE INFINITE CANVAS'S MOTION (Mosaic.cpp canvasEase, user 2026-10-26):
-    // focus panning a window into view, Super+scroll, the Super zoom.
+    // focus panning a window into view, the Super zoom.
     addKey(makeShared<CStringValue>(KEY("animation:canvas_curve"),
                                     "the infinite canvas's pans and zoom: a curve family as animation:curve names them (its travel curve); hyprdrive (the house curve, no overshoot) by default",
                                     Hyprlang::STRING{"hyprdrive"}));

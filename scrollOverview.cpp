@@ -7,6 +7,7 @@
 #include "Integration.hpp"
 #include "OverviewInternal.hpp"
 #include "Mosaic.hpp"
+#include "FullscreenGuard.hpp"
 #include "FlightBlur.hpp"
 #include "OpenProf.hpp"
 #include "FramePacing.hpp"
@@ -1108,6 +1109,13 @@ void CScrollOverview::updateWorkspaceOverflow() {
 
     for (const auto& img : images) {
         if (!img || !img->pWorkspace)
+            continue;
+
+        // A Mosaic desktop on its infinite canvas: windows past the screen's
+        // edge are the canvas out of view, not a desktop hanging over its
+        // neighbours -- room made for them was an empty gap between desktops
+        // (user, 2026-10-29).
+        if (ScrollOverview::Mosaic::canvasBox(img->pWorkspace))
             continue;
 
         for (const auto& windowRef : img->windows) {
@@ -3607,7 +3615,8 @@ void CScrollOverview::syncSelectionToViewport() {
 // out of fullscreen (misc:on_focus_under_fullscreen 1/2) -- and a Wine game puts
 // itself straight back 15 ms later, steals the focus with it, and then ignores
 // the mouse. Browsing leaves such a window a SELECTION, and picking it (close())
-// minimizes the cover first -- still fullscreen, back from the dock as it was.
+// minimizes a GAME cover first -- still fullscreen, back from the dock as it
+// was; any other cover leaves fullscreen (FullscreenGuard.hpp).
 // Mode 0 means "the cover keeps the focus", which Hyprland does without a fight.
 static PHLWINDOW fullscreenCoverOf(const PHLWINDOW& window) {
     if (!window || window->m_isFloating || !window->m_workspace || ScrollOverview::Config::getValue<int>("misc:on_focus_under_fullscreen") == 0)
@@ -9924,9 +9933,12 @@ void CScrollOverview::close() {
     if (closeOnWindow && ScrollOverview::Minimize::isMinimized(closeOnWindow.lock()))
         ScrollOverview::Minimize::restore(closeOnWindow.lock());
 
-    // The pick is a tiled window a fullscreen one covers: the cover goes to the
+    // The pick is a tiled window a fullscreen GAME covers: the game goes to the
     // dock, still fullscreen, before the pick is focused (fullscreenCoverOf).
-    if (const auto COVER = fullscreenCoverOf(closeOnWindow.lock()))
+    // Any other cover -- a video in the browser -- Hyprland takes out of
+    // fullscreen as the pick is focused (user, 2026-10-29: "browser minimizes
+    // itself instead of the video exiting fullscreen").
+    if (const auto COVER = fullscreenCoverOf(closeOnWindow.lock()); COVER && ScrollOverview::FullscreenGuard::isGame(COVER))
         ScrollOverview::Minimize::minimize(COVER, false);
 
     // X43: focus and stacking are two different things. fullWindowFocus() only

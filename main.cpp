@@ -62,6 +62,7 @@ using namespace Hyprutils::String;
 #include "SearchLetters.hpp"
 #include "KeyboardCat.hpp"
 #include "Mosaic.hpp"
+#include "MosaicSlide.hpp"
 #include <hyprland/src/managers/SessionLockManager.hpp>
 
 #include "Compat.hpp"
@@ -80,6 +81,7 @@ using namespace Hyprutils::String;
 #include "Motion.hpp"
 #include "ConfigureHold.hpp"
 #include "XGeometry.hpp"
+#include "FullscreenGuard.hpp"
 #include "SizeAck.hpp"
 #include "CpuPulse.hpp"
 #include "Genie.hpp"
@@ -206,6 +208,27 @@ static void hkSendWindowSize(void* thisptr, bool force) {
     rc<origSendWindowSize>(g_pSendWindowSizeHook->m_original)(thisptr, force);
 }
 
+// Mosaic.hpp hideDuringSlide: a canvas window off its view stays off the
+// desktop slide.
+static CFunctionHook* g_pShouldRenderWindowHook = nullptr;
+static bool           hkShouldRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR monitor) {
+    if (ScrollOverview::Mosaic::hideDuringSlide(window, monitor))
+        return false;
+    return rc<bool (*)(void*, PHLWINDOW, PHLMONITOR)>(g_pShouldRenderWindowHook->m_original)(thisptr, window, monitor);
+}
+
+// MosaicSlide.hpp: a canvas window half in view, clipped to its sliding desktop.
+static CFunctionHook* g_pRenderWindowHook = nullptr;
+static void hkRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR monitor, const Time::steady_tp& now, bool decorate, Render::eRenderPassMode mode, bool ignorePosition,
+                           bool standalone) {
+    const auto CLIP  = ignorePosition || standalone ? std::nullopt : ScrollOverview::Mosaic::slideClip(window, monitor);
+    const auto FIRST = CLIP ? ScrollOverview::MosaicSlide::mark() : 0;
+    rc<void (*)(void*, PHLWINDOW, PHLMONITOR, const Time::steady_tp&, bool, Render::eRenderPassMode, bool, bool)>(g_pRenderWindowHook->m_original)(
+        thisptr, window, monitor, now, decorate, mode, ignorePosition, standalone);
+    if (CLIP)
+        ScrollOverview::MosaicSlide::clip(window, *CLIP, FIRST);
+}
+
 // SizeAck.hpp: Hyprland's CWindow::onAck, minus its bug. Never calls the original.
 static CFunctionHook* g_pOnAckHook = nullptr;
 static void           hkOnAck(void* thisptr, uint32_t serial) {
@@ -231,6 +254,7 @@ static void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e) {
     ScrollOverview::Mosaic::onPointerDelta(e.delta, g_pInputManager->getMouseCoordsInternal() - BEFORE);
     ScrollOverview::Dock::feedPointerMotion(e.delta);
     ScrollOverview::XGeometry::check();
+    ScrollOverview::FullscreenGuard::resumePointerLock();
 }
 
 // The click gestures need to know a press is the TOUCHPAD's while they judge
@@ -1675,6 +1699,28 @@ static SDispatchResult onDebugDispatcher(std::string arg) {
             return {.success = false, .error = std::format("hyprdrive:debug activate: no dock item for class {}", CLASS)};
         return {};
     }
+    // `tile <class>`: where that app's window is drawn in the focused
+    // monitor's open overview (monitor-local render px), so a test clicks it
+    // with a real pointer instead of guessing at a screenshot.
+    if (TOPIC == "tile") {
+        const std::string CLASS   = data.size() > 1 ? std::string{data[1]} : std::string{};
+        const auto        MONITOR = Desktop::focusState()->monitor();
+        const auto        OV      = MONITOR ? openScrollOverviewForMonitor(MONITOR) : nullptr;
+        if (!OV)
+            return {.success = false, .error = "hyprdrive:debug tile: no open overview"};
+        for (const auto& W : Desktop::windowState()->windows()) {
+            if (!W || !W->m_isMapped || W->m_class != CLASS)
+                continue;
+            const auto B = OV->tileBox(W);
+            if (B.width < 1 || B.height < 1)
+                continue;
+            return {.success = false, .error = std::format("tile {} {} {} {} {}", CLASS, sc<int>(B.x), sc<int>(B.y), sc<int>(B.width), sc<int>(B.height))};
+        }
+        return {.success = false, .error = std::format("hyprdrive:debug tile: no tile for class {}", CLASS)};
+    }
+    // `xgeom`: XGeometry's view of the focused window right now.
+    if (TOPIC == "xgeom")
+        return {.success = false, .error = "xgeom " + ScrollOverview::XGeometry::status()};
     // `ripple [x y]`: the hot corner's ripple on the focused monitor, from its
     // top-left corner or from global logical (x, y) -- the rig has no pointer
     // that can reach a corner.
@@ -1774,7 +1820,7 @@ static SDispatchResult onDebugDispatcher(std::string arg) {
         return {};
     }
     if (TOPIC != "frames")
-        return {.success = false, .error = "hyprdrive:debug frames|mem|motion|activate <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
+        return {.success = false, .error = "hyprdrive:debug frames|mem|motion|activate <class>|tile <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
 
     std::string report = "hyprdrive frames:";
     for (const auto& monitor : State::monitorState()->monitors()) {
@@ -2143,6 +2189,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
     g_pOnAckHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("onAck", {"CWindow::onAck("}), rc<void*>(hkOnAck));
     g_pOnAckHook->hook();
+    g_pShouldRenderWindowHook = HyprlandAPI::createFunctionHook(
+        SCROLLOVERVIEW_HANDLE,
+        findFnOrThrow("shouldRenderWindow", {"shouldRenderWindow(Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>, Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>)"}),
+        rc<void*>(hkShouldRenderWindow));
+    g_pShouldRenderWindowHook->hook();
+    g_pRenderWindowHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("renderWindow", {"IHyprRenderer::renderWindow("}), rc<void*>(hkRenderWindow));
+    g_pRenderWindowHook->hook();
 
     CursorShape::init();
     OpenProf::init();
@@ -2199,7 +2252,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // gate reads off one. The plugin's own mutators -- setHidden for a flight,
     // minimize/restore, the search query -- bump at their own call sites, since
     // no event announces them.
-    g_pMembOpenHook  = Event::bus()->m_events.window.open.listen([](PHLWINDOW) { Membership::bump("window.open"); });
+    g_pMembOpenHook  = Event::bus()->m_events.window.open.listen([](PHLWINDOW w) {
+        Membership::bump("window.open");
+        ScrollOverview::Dock::onWindowOpen(w);
+    });
     g_pMembLateHook  = Event::bus()->m_events.window.openLate.listen([](PHLWINDOW) { Membership::bump("window.openLate"); });
     g_pMembCloseHook = Event::bus()->m_events.window.close.listen([](PHLWINDOW w) {
         Membership::bump("window.close");

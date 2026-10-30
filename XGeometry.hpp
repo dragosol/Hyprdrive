@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // A FULLSCREEN GAME WHOSE X SIDE DISAGREES WITH HYPRLAND (user, 2026-10-21:
 // "the mouse coords don't match the cursor" in Overwatch under Proton;
 // Alt+Enter out of fullscreen and back fixes it, minimize and restore
@@ -37,4 +39,8 @@ namespace ScrollOverview::XGeometry {
 
     // PLUGIN_EXIT: drop the X connection the clip check opened.
     void shutdown();
+
+    // `hyprdrive:debug xgeom`: what check() would see right now, without
+    // acting -- which condition lets it through or stops it.
+    std::string status();
 }

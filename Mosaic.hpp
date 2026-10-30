@@ -46,30 +46,28 @@ namespace ScrollOverview::Mosaic {
     void shutdown();
 
     // THE INFINITE CANVAS (MosaicCanvas.hpp, mosaic:infinite_canvas). A mosaic
-    // desktop on its canvas pans like the scrolling layout's tape: the desktop
-    // swipe (OverviewGesture) and Super+scroll (DesktopSwitch) move the view
-    // first and switch desktops only past either end of it.
-    struct SCanvasProbe {
-        bool   usable    = false; // on the canvas, and wider than the view
-        double offset    = 0.0;   // the view's left edge along the canvas
-        double maxOffset = 0.0;
-    };
-    SCanvasProbe canvasProbe(const PHLWORKSPACE& ws);
-    // Put the view at `offsetX` (clamped). `warp`: no animation (a swipe tracks the fingers).
-    void canvasSetOffset(const PHLWORKSPACE& ws, double offsetX, bool warp);
-    // A swipe started / is over: focus does not pull the view while it pans;
-    // at the end, focus goes to a window in view if the focused one left it.
-    void canvasPanning(bool on);
-    void canvasSettle(const PHLWORKSPACE& ws);
-    // Super+scroll: half a screen along the canvas; false at that end.
-    bool canvasStep(const PHLWORKSPACE& ws, int dir);
+    // desktop on its canvas: the view follows the focus and the Super zoom.
+    // Neither the desktop swipe (user, 2026-10-29) nor Super+scroll (user,
+    // 2026-10-30) pans it -- both switch desktops.
     // Super went down / came up (main.cpp's key hook): the canvas's Super
-    // gesture -- hold and move to pan or zoom out (mosaic:canvas_super_move),
+    // gesture -- hold and move to zoom out,
     // never while a Super+click or Super+drag has used the press.
     void onSuperKey(bool pressed);
+    // A zoomed-out canvas drag (Spring): the window it carries, and handing it
+    // to Hyprland as an ordinary Super+drag so a desktop switch takes it along.
+    PHLWINDOW zoomCarried();
+    bool      handZoomDragOff();
     // Is `w` on a canvas whose view is moving (a pan, the zoom, a swipe, a
     // drag pushing at the edge)? The layout motion blur leaves it alone.
     bool canvasMotion(const PHLWINDOW& w);
+    // A desktop slide (a swipe, a switch) is carrying this window's canvas
+    // desktop and the window is off its view: not drawn (main.cpp's
+    // shouldRenderWindow hook), or the slide brings it onto the desktop
+    // next door.
+    bool hideDuringSlide(const PHLWINDOW& w, const PHLMONITOR& monitor);
+    // ... and one only partly in view is clipped to its desktop as it slides
+    // (MosaicSlide.hpp): the box, in monitor-local device px.
+    std::optional<CBox> slideClip(const PHLWINDOW& w, const PHLMONITOR& monitor);
     // The whole canvas in global layout coordinates at the current view, for
     // the overview's strip thumbnail (the whole canvas, zoomed out). Nothing
     // when the desktop is not on its canvas.

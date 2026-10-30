@@ -1,4 +1,5 @@
 // See DesktopSwitch.hpp; the decisions are DesktopSwitchModel.hpp.
+#include "FullscreenGuard.hpp"
 #include "DesktopSwitch.hpp"
 #include "DesktopSwitchModel.hpp"
 
@@ -118,6 +119,9 @@ namespace ScrollOverview::DesktopSwitch {
         // changeWorkspace's own refocus, which runs after the animation started.
         using origFullWindowFocus = void (*)(void*, PHLWINDOW, Desktop::eFocusReason, SP<CWLSurfaceResource>, bool);
         void hkFullWindowFocus(void* thisptr, PHLWINDOW w, Desktop::eFocusReason reason, SP<CWLSurfaceResource> surface, bool forceFSCycle) {
+            // A fullscreen game under the window being focused goes to the dock
+            // first, still fullscreen (FullscreenGuard.hpp).
+            FullscreenGuard::beforeFocus(w, reason);
             const bool COUNT = reason != Desktop::FOCUS_REASON_WORKSPACE_CHANGE;
             g_focusDepth += COUNT ? 1 : 0;
             rc<origFullWindowFocus>(g_fullFocusHook->m_original)(thisptr, w, reason, surface, forceFSCycle);
@@ -175,10 +179,6 @@ namespace ScrollOverview::DesktopSwitch {
         SDispatchResult step(int dir) {
             const auto MONITOR = Desktop::focusState()->monitor();
             if (!MONITOR || !MONITOR->m_activeWorkspace)
-                return {};
-            // A Mosaic desktop on its infinite canvas: the wheel walks the
-            // canvas first, and the desktops only from either end of it.
-            if (!MONITOR->m_activeSpecialWorkspace && Mosaic::canvasStep(MONITOR->m_activeWorkspace, dir))
                 return {};
             const auto  HERE    = desktopsOn(MONITOR, false);
             const auto  THERE   = desktopsOn(MONITOR, true);

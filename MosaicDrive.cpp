@@ -16,6 +16,7 @@
 #undef private
 
 #include "MosaicDrive.hpp"
+#include "FlightController.hpp"
 
 namespace ScrollOverview::MosaicDrive {
     void drawAt(const PHLWINDOW& w, const CBox& box) {
@@ -55,5 +56,21 @@ namespace ScrollOverview::MosaicDrive {
         w->m_realSize->m_bIsBeingAnimated     = true;
         w->m_realPosition->warp();
         w->m_realSize->warp();
+    }
+
+    bool followPan(const PHLWINDOW& w) {
+        if (!w || !w->m_realPosition || !w->m_realSize || !w->m_realSize->isBeingAnimated())
+            return false;
+        // Only the open animation. A restore from the dock flies the window in
+        // with its size animating too (and sets m_animatingIn); centring it here
+        // took its flight over (user, 2026-10-29: "you replaced my maximize from
+        // dock animation").
+        if (!w->m_animatingIn || ScrollOverview::Flight::hasFlight(w))
+            return false;
+        const auto GP = w->m_realPosition->goal(), GS = w->m_realSize->goal(), S = w->m_realSize->value();
+        w->m_realPosition->setValue(GP + (GS - S) / 2.0);
+        if (w->m_isMapped)
+            w->updateWindowDecos();
+        return true;
     }
 }

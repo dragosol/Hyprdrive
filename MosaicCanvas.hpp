@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -39,6 +40,60 @@ namespace ScrollOverview::MosaicPack {
         double x = 0, y = 0;
         double oldW = 0, oldH = 0;
     };
+
+    // CLOSE THE SLACK (user, 2026-10-29: "clustering is supposed to have them
+    // as close together as possible"): the packer can leave a window short of
+    // its neighbour -- Pear 132 px off the terminal beside it, every other gap
+    // the inner one, against the cluster's edge instead. Each window slides
+    // toward the cluster's centre, one axis at a time, until the inner gap to
+    // whatever is in its way (or it reaches the centre): the layout stays, the
+    // gaps close. `keep` (a drop) stays where it was let go.
+    inline void closeSlack(std::vector<SRect>& r, double gap, size_t keep = SIZE_MAX) {
+        if (r.size() < 2)
+            return;
+        for (int round = 0; round < 8; ++round) {
+            double minX = 1e18, minY = 1e18, maxX = -1e18, maxY = -1e18;
+            for (const auto& R : r) {
+                minX = std::min(minX, R.x);
+                minY = std::min(minY, R.y);
+                maxX = std::max(maxX, R.x + R.w);
+                maxY = std::max(maxY, R.y + R.h);
+            }
+            const double CX = (minX + maxX) / 2.0, CY = (minY + maxY) / 2.0;
+            bool         moved = false;
+            for (size_t i = 0; i < r.size(); ++i) {
+                if (i == keep)
+                    continue;
+                for (int axis = 0; axis < 2; ++axis) {
+                    SRect&       A   = r[i];
+                    const double POS = axis ? A.y : A.x, LEN = axis ? A.h : A.w, MID = POS + LEN / 2.0, C = axis ? CY : CX;
+                    const double DIR = C < MID ? -1.0 : 1.0;
+                    double       room = std::abs(C - MID); // never past the centre
+                    for (size_t j = 0; j < r.size(); ++j) {
+                        if (j == i)
+                            continue;
+                        const SRect& B = r[j];
+                        // In the way only if they share the OTHER axis.
+                        const bool SHARE = axis ? (A.x < B.x + B.w && B.x < A.x + A.w) : (A.y < B.y + B.h && B.y < A.y + A.h);
+                        if (!SHARE)
+                            continue;
+                        const double BPOS = axis ? B.y : B.x, BLEN = axis ? B.h : B.w;
+                        const double FREE = DIR < 0 ? POS - (BPOS + BLEN) - gap : BPOS - (POS + LEN) - gap;
+                        if (FREE >= -0.5)
+                            room = std::min(room, std::max(0.0, FREE));
+                        else if (DIR < 0 ? BPOS + BLEN <= POS + 0.5 : BPOS >= POS + LEN - 0.5)
+                            room = 0; // already closer than the gap: stay
+                    }
+                    if (room >= 1.0) {
+                        (axis ? A.y : A.x) += DIR * std::floor(room);
+                        moved = true;
+                    }
+                }
+            }
+            if (!moved)
+                break;
+        }
+    }
 
     // `area` is the screen's work area (the view), `loose` the eased one.
     inline SCanvasPack packCanvas(const std::vector<SRect>& sizes, const SRect& area, const std::optional<SRect>& loose, double gap, bool twoD,
@@ -91,6 +146,7 @@ namespace ScrollOverview::MosaicPack {
                 x += R.w + gap;
             }
         }
+        closeSlack(*placed, gap, drop ? drop->idx : SIZE_MAX);
         double minX = 1e18, minY = 1e18, maxX = -1e18, maxY = -1e18;
         for (const auto& R : *placed) {
             minX = std::min(minX, R.x);

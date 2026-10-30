@@ -4,6 +4,7 @@
 #include "Dock.hpp"
 #include "DockDrop.hpp"
 #include "IOverview.hpp"
+#include "Mosaic.hpp"
 
 #include <cairo/cairo.h>
 #include <cmath>
@@ -110,8 +111,10 @@ namespace ScrollOverview::Spring {
             return DockDrop::dndInProgress();
         }
 
+        // A zoomed-out canvas drag counts: it is handed to Hyprland when the
+        // hold completes (Mosaic::handZoomDragOff).
         bool dragging() {
-            return fileDrag() || draggedWindow();
+            return fileDrag() || draggedWindow() || Mosaic::zoomCarried();
         }
 
         bool swipeInFlight() {
@@ -389,8 +392,11 @@ namespace ScrollOverview::Spring {
                     if (g_swipe && g_swipe->phase == EPhase::Peek) {
                         const double P = smoothstep((T - GRACE_MS) / std::max(1.F, DELAY - GRACE_MS));
                         setDelta(dir * PEEK * swipeDistance() * P);
-                        if (T >= DELAY)
+                        if (T >= DELAY) {
+                            if (!draggedWindow() && Mosaic::zoomCarried())
+                                Mosaic::handZoomDragOff();
                             toPhase(EPhase::Commit);
+                        }
                     }
                     damageLine(monitor);
                     fast = true;

@@ -200,7 +200,7 @@ var sections = [
       // pan can glide on Serpantinum whatever the rest of hyprdrive uses.
       { title: "Infinite canvas", rows: [
         { type: "curve", key: P + "animation:canvas_curve", label: "Canvas pan curve", when: "canvasMotionOn",
-          desc: "How the canvas glides when focus brings a window into view, on Super+scroll and on the Super zoom." },
+          desc: "How the canvas glides when focus brings a window into view, and on the Super zoom." },
         { type: "slider", key: P + "animation:canvas_pan_ms", label: "Canvas pan", min: 0, max: 2000, step: 10, unit: "ms", when: "canvasMotionOn",
           desc: "0 jumps straight there." }
       ]}
@@ -296,11 +296,11 @@ var sections = [
         { type: "toggle", key: P + "mosaic:default", label: "Make Mosaic the default", when: "mosaicOn",
           desc: "New desktops, and any you have not set with Super+L, start in Mosaic. Off restores the previous default." },
         { type: "toggle", key: P + "mosaic:infinite_canvas", label: "Infinite canvas", when: "mosaicOn",
-          desc: "When windows no longer fit the screen, they keep their size and spill onto a canvas you pan across, instead of tiling. Swipe sideways or Super+scroll to pan; past the last window it switches desktops." },
+          desc: "When windows no longer fit the screen, they keep their size and spill onto a canvas you pan across, instead of tiling. Hold Super and move the pointer to see every window on it." },
         { type: "choice", key: P + "mosaic:canvas_directions", label: "Canvas directions", when: "canvasOn",
           desc: "Horizontal: one strip of windows. All directions: a grid of them." },
-        { type: "choice", key: P + "mosaic:canvas_super_move", label: "Hold Super and move the pointer", when: "canvasOn",
-          desc: "Pan: your place on the screen is your place on the canvas (All directions only). Zoom out: every window shrinks onto the screen; hover one to focus it, let go of Super to zoom back in on it. A Super+click or Super+drag does neither." }
+        { type: "note", label: "Hold Super and move the pointer", when: "canvasOn",
+          desc: "Every window on the canvas zooms out onto the screen. Hover one to focus it, then let go of Super to zoom back in on it. Drag a window while zoomed out to move it; hold it at the screen's edge to take it to the next desktop. A Super+click or Super+drag does not zoom." }
       ]},
       // The chords Mosaic takes while it is on (hdpanel chord_options). Auto
       // is Super+L for the cycle on every desktop; for the focus keys it is
