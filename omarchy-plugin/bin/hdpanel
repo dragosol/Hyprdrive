@@ -63,6 +63,11 @@ CANVAS_DIRECTIONS = [
     {"value": "horizontal", "label": "Horizontal"},
     {"value": "all", "label": "All directions"},
 ]
+ZOOM_LABELS = [
+    {"value": "none", "label": "None"},
+    {"value": "hover", "label": "Hovered window"},
+    {"value": "all", "label": "All windows"},
+]
 HOT_CORNERS = [
     {"value": "top-left", "label": "Top left"},
     {"value": "top-right", "label": "Top right"},
@@ -199,6 +204,7 @@ KEY_META = [
     _k(PLUGIN + "mosaic:default", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:infinite_canvas", "bool", "mosaic", False),
     _k(PLUGIN + "mosaic:canvas_directions", "enum", "mosaic", "all", options=CANVAS_DIRECTIONS),
+    _k(PLUGIN + "mosaic:zoom_labels", "enum", "mosaic", "hover", options=ZOOM_LABELS),
     # The chords Mosaic takes (A20). Free text in the config; the panel offers
     # presets plus whatever is set now (chord_options(), per dump).
     _k(PLUGIN + "mosaic:cycle_bind", "str", "mosaic", "auto"),

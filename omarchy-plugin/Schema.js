@@ -300,7 +300,9 @@ var sections = [
         { type: "choice", key: P + "mosaic:canvas_directions", label: "Canvas directions", when: "canvasOn",
           desc: "Horizontal: one strip of windows. All directions: a grid of them." },
         { type: "note", label: "Hold Super and move the pointer", when: "canvasOn",
-          desc: "Every window on the canvas zooms out onto the screen. Hover one to focus it, then let go of Super to zoom back in on it. Drag a window while zoomed out to move it; hold it at the screen's edge to take it to the next desktop. A Super+click or Super+drag does not zoom." }
+          desc: "Every window on the canvas zooms out onto the screen. Hover one to focus it, then let go of Super to zoom back in on it. Drag a window while zoomed out to move it; hold it at the screen's edge to take it to the next desktop. A Super+click or Super+drag does not zoom." },
+        { type: "choice", key: P + "mosaic:zoom_labels", label: "Window titles when zoomed out", when: "canvasOn",
+          desc: "None, the window under the pointer, or every window." }
       ]},
       // The chords Mosaic takes while it is on (hdpanel chord_options). Auto
       // is Super+L for the cycle on every desktop; for the focus keys it is

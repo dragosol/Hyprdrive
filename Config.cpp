@@ -626,6 +626,9 @@ static void registerConfigValuesFor() {
     // so a config or settings-panel fragment that sets it loads; nothing reads it.
     addKey(makeShared<CStringValue>(KEY("mosaic:canvas_super_move"), "mosaic: retired and ignored (holding Super on the canvas always zooms out)",
                                     Hyprlang::STRING{"zoom"}));
+    // The zoomed-out canvas's window titles (user, 2026-10-30).
+    addKey(makeShared<CStringValue>(KEY("mosaic:zoom_labels"),
+                                    "mosaic: window titles on the zoomed-out canvas: none, hover (the window under the pointer) or all", Hyprlang::STRING{"hover"}));
     // The chords Mosaic takes while it is on (audit A20). hdpanel reads these
     // when it writes 40-panel.lua; the plugin only holds them, so they can be
     // set from hyprland.lua or the settings like any other key. The cycle's

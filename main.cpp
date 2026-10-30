@@ -2533,6 +2533,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // the flag if the overview closed while one was in flight.
         ScrollOverview::Dock::setWindowDragActive(false);
 
+        ScrollOverview::Mosaic::renderZoomLabels(MONITOR);
         ScrollOverview::Dock::render(MONITOR);
         // A file dragged out of a fan: its icon under the pointer, over the dock.
         ScrollOverview::DockDrop::renderGhost(MONITOR);

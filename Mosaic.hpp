@@ -72,4 +72,7 @@ namespace ScrollOverview::Mosaic {
     // the overview's strip thumbnail (the whole canvas, zoomed out). Nothing
     // when the desktop is not on its canvas.
     std::optional<CBox> canvasBox(const PHLWORKSPACE& ws);
+    // main.cpp's RENDER_POST_WINDOWS (before the dock): the zoomed-out
+    // canvas's window titles, as mosaic:zoom_labels asks.
+    void renderZoomLabels(PHLMONITOR monitor);
 }
