@@ -63,11 +63,9 @@ namespace ScrollOverview::Mosaic {
     // A desktop slide (a swipe, a switch) is carrying this window's canvas
     // desktop and the window is off its view: not drawn (main.cpp's
     // shouldRenderWindow hook), or the slide brings it onto the desktop
-    // next door.
+    // next door. Also where a slide is noticed (its tail, the zoom left
+    // behind): Mosaic.cpp, DESKTOP SLIDES.
     bool hideDuringSlide(const PHLWINDOW& w, const PHLMONITOR& monitor);
-    // ... and one only partly in view is clipped to its desktop as it slides
-    // (MosaicSlide.hpp): the box, in monitor-local device px.
-    std::optional<CBox> slideClip(const PHLWINDOW& w, const PHLMONITOR& monitor);
     // The whole canvas in global layout coordinates at the current view, for
     // the overview's strip thumbnail (the whole canvas, zoomed out). Nothing
     // when the desktop is not on its canvas.

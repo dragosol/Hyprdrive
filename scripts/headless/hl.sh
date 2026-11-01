@@ -270,7 +270,7 @@ unset WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS HYPRLAND_INSTANCE_SIGNATU
 
 sig()   { cat "$STATE/sig" 2>/dev/null || die "no instance (not started?)"; }
 wlsock(){ cat "$STATE/wl" 2>/dev/null || die "no wayland socket recorded"; }
-hc()    { HYPRLAND_INSTANCE_SIGNATURE=$(sig) hyprctl "$@"; }
+hc()    { local s; s=$(sig) && [ -n "$s" ] || exit 1; HYPRLAND_INSTANCE_SIGNATURE=$s hyprctl --instance "$s" "$@"; } # never the live session: an empty signature made hyprctl pick it
 running(){ [ -f "$STATE/hypr.pid" ] && kill -0 "$(cat "$STATE/hypr.pid")" 2>/dev/null; }
 
 # every process we launch carries XDG_RUNTIME_DIR=$RT and runs in its own

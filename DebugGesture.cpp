@@ -105,8 +105,9 @@ namespace ScrollOverview::DebugGesture {
             for (const auto& O : scrollOverviews())
                 if (O && !O->isClosing())
                     ++open;
-            return std::format("hyprdrive gesture: finger model {}, trackpad gesture {}, {} step(s) queued, {} played, {} overview(s) open",
-                               FingerSwipe::debugMode(), GestureDrive::active() ? "ACTIVE" : "none", g_queue.size(), g_played, open);
+            return std::format("hyprdrive gesture: finger model {}, trackpad gesture {}, {} step(s) queued, {} played, {} overview(s) open, mods {}",
+                               FingerSwipe::debugMode(), GestureDrive::active() ? "ACTIVE" : "none", g_queue.size(), g_played, open,
+                               g_pInputManager ? g_pInputManager->getModsFromAllKBs() : 0);
         }
         if (script == "stop") {
             g_queue.clear();

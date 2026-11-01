@@ -19,6 +19,8 @@
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/fullscreen/handler/FullscreenHandler.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/animation/AnimationManager.hpp>
+#include <hyprland/src/config/shared/animation/AnimationTree.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
@@ -30,6 +32,7 @@
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/layout/supplementary/DragController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/managers/input/UnifiedWorkspaceSwipeGesture.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
@@ -337,6 +340,9 @@ namespace ScrollOverview::Mosaic {
         const double BOTTOM = (P.y + S.y - monitor->m_position.y - 14.0) * SCALE;
         OverviewRender::labelPill(monitor, w->m_title.empty() ? w->m_class : w->m_title, CX, BOTTOM, alpha, SCALE);
     }
+
+    // The slide tail's curve (CMosaicAlgorithm::startSlideTail).
+    inline constexpr const char* SLIDE_TAIL_BEZIER_NAME = "hyprdriveSlideTail";
 
     class CMosaicAlgorithm : public Layout::ITiledAlgorithm {
       public:
@@ -2131,6 +2137,161 @@ namespace ScrollOverview::Mosaic {
             return {};
         }
 
+        // ---- DESKTOP SLIDES (slideFrame / slideWatch, below the class)
+        struct SSlide {
+            bool     seen        = false; // seen sliding: if it stops off screen with windows still in view, the tail runs
+            bool     tail        = false; // sliding on by itself (startSlideTail)
+            bool     zoomLeaving = false; // left while zoomed out: the zoom ends once the slide is over
+            Vector2D tailGoal, tailLast;
+            SP<Hyprutils::Animation::SAnimationPropertyConfig> prevConfig; // the desktop animation's own, back after the tail
+            // The tail's: an animated variable holds its config WEAKLY, so this
+            // keeps it alive (a local one expired at once -- "disabled", stuck).
+            SP<Hyprutils::Animation::SAnimationPropertyConfig> tailConfig;
+        } m_slide;
+        // The tail is done or a new slide took the desktop: its own animation back.
+        void endSlideTail() {
+            const auto WS = workspace();
+            if (WS && WS->m_renderOffset && m_slide.prevConfig)
+                WS->m_renderOffset->setConfig(m_slide.prevConfig);
+            m_slide.prevConfig.reset();
+            m_slide.tailConfig.reset();
+            m_slide.tail = false;
+        }
+        // THE TAIL (user, 2026-11-01: windows hanging over the edge "should
+        // still show until the gesture/slide is complete, THEN slide off the
+        // desktop themselves as if I were still doing a gesture"). The slide
+        // took the desktop a screen away; a window that hung over its edge is
+        // still partly on screen, over the desktop that arrived. The desktop
+        // carries on the same way, with the desktop animation, until the last
+        // of them is off -- then Hyprland stops drawing it as it always does.
+        // Only windows that were on screen at home: one parked further out on
+        // the canvas is not drawn in a slide at all (hideDuringSlide).
+        // THE SLIDE CARRIES THEM OFF (user, 2026-11-01: the windows sliding away
+        // "should happen at the same velocity of the desktop switch. right now
+        // the animation finishes, then the slide away starts"). On the first
+        // frame of a slide taking this desktop away, the slide itself is
+        // extended to where its last window in view is off the screen: the
+        // same curve, its duration stretched by the extra distance -- so it
+        // leaves at the speed the other desktop arrives at and simply carries
+        // on a little further, easing out, with no stop in between.
+        bool extendSlide() {
+            const auto WS  = workspace();
+            const auto MON = WS ? WS->m_monitor.lock() : PHLMONITOR{};
+            if (!WS || !MON || !WS->m_renderOffset || !m_asCanvas || m_zoomed || !WS->m_renderOffset->isBeingAnimated())
+                return false;
+            const Vector2D GOAL = WS->m_renderOffset->goal(), VAL = WS->m_renderOffset->value();
+            const bool     XAX  = std::abs(GOAL.x) >= std::abs(GOAL.y);
+            const double   D    = XAX ? GOAL.x : GOAL.y;
+            const double   SPAN = XAX ? MON->m_size.x : MON->m_size.y;
+            // Away: headed at least half a screen off, and further than now.
+            if (std::abs(D) < SPAN / 2.0 || std::abs(D) <= std::abs(XAX ? VAL.x : VAL.y))
+                return false;
+            const double NEED = overhangAt(WS, MON, D, XAX);
+            if (NEED < 1)
+                return false;
+            const double   STEP    = (D < 0 ? -1.0 : 1.0) * (NEED + 2.0);
+            const Vector2D NEWGOAL = XAX ? Vector2D{GOAL.x + STEP, GOAL.y} : Vector2D{GOAL.x, GOAL.y + STEP};
+            const double   DIST0 = std::abs(XAX ? GOAL.x - VAL.x : GOAL.y - VAL.y), DIST1 = std::abs(XAX ? NEWGOAL.x - VAL.x : NEWGOAL.y - VAL.y);
+            if (DIST0 < 1)
+                return false;
+            const auto BASE = WS->m_renderOffset->getConfig().lock();
+            const auto VALS = BASE && BASE->pValues ? BASE->pValues.lock() : BASE;
+            if (!VALS)
+                return false;
+            auto CFG             = makeShared<Hyprutils::Animation::SAnimationPropertyConfig>();
+            CFG->overridden      = true;
+            CFG->internalBezier  = VALS->internalBezier;
+            CFG->internalStyle   = VALS->internalStyle;
+            CFG->internalEnabled = VALS->internalEnabled;
+            CFG->internalSpeed   = VALS->internalSpeed * sc<float>(DIST1 / DIST0);
+            CFG->pValues         = CFG;
+            trace(std::format("slide extended: {:.0f} -> {:.0f} (+{:.0f}), speed {:.1f} -> {:.1f}", XAX ? VAL.x : VAL.y, XAX ? NEWGOAL.x : NEWGOAL.y, NEED,
+                              VALS->internalSpeed, CFG->internalSpeed));
+            m_slide.prevConfig = BASE;
+            m_slide.tailConfig = CFG;
+            m_slide.tail       = true;
+            m_slide.tailGoal   = NEWGOAL;
+            m_slide.tailLast   = VAL;
+            WS->m_renderOffset->setConfig(CFG);
+            *WS->m_renderOffset = NEWGOAL;
+            return true;
+        }
+        // How far past the screen the windows that were in view at home still
+        // reach with the desktop at offset `d` (along the slide's axis).
+        double overhangAt(const PHLWORKSPACE& ws, const PHLMONITOR& mon, double d, bool xax) const {
+            const CBox MB{mon->m_position, mon->m_size};
+            double     need = 0;
+            for (const auto& E : m_entries) {
+                const auto T = E.target.lock();
+                const auto W = T ? T->window() : PHLWINDOW{};
+                if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != ws || W->m_isFloating)
+                    continue;
+                const auto B = W->getFullWindowBoundingBox();
+                if (B.intersection(MB).empty())
+                    continue; // off the view at home: never drawn in the slide
+                const double LO = (xax ? B.x : B.y) + d, HI = LO + (xax ? B.w : B.h);
+                const double SLO = xax ? MB.x : MB.y, SHI = SLO + (xax ? MB.w : MB.h);
+                need = std::max(need, d < 0 ? HI - SLO : SHI - LO);
+            }
+            return need;
+        }
+        void startSlideTail() {
+            const auto WS  = workspace();
+            const auto MON = WS ? WS->m_monitor.lock() : PHLMONITOR{};
+            if (!WS || !MON || !WS->m_renderOffset || !m_asCanvas || m_zoomed)
+                return;
+            const Vector2D OFF  = WS->m_renderOffset->value();
+            const bool     XAX  = std::abs(OFF.x) >= std::abs(OFF.y);
+            const double   D    = XAX ? OFF.x : OFF.y;
+            if (std::abs(D) < 1)
+                return;
+            const CBox MB{MON->m_position, MON->m_size};
+            double     need = 0;
+            for (const auto& E : m_entries) {
+                const auto T = E.target.lock();
+                const auto W = T ? T->window() : PHLWINDOW{};
+                if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != WS || W->m_isFloating)
+                    continue;
+                const auto B = W->getFullWindowBoundingBox();
+                if (B.intersection(MB).empty())
+                    continue; // off the view at home: never drawn in the slide
+                const double LO = (XAX ? B.x : B.y) + D, HI = LO + (XAX ? B.w : B.h);
+                const double SLO = XAX ? MB.x : MB.y, SHI = SLO + (XAX ? MB.w : MB.h);
+                need = std::max(need, D < 0 ? HI - SLO : SHI - LO);
+            }
+            if (need < 1)
+                return;
+            const double   STEP = (D < 0 ? -1.0 : 1.0) * (need + 2.0);
+            const Vector2D GOAL = XAX ? Vector2D{OFF.x + STEP, OFF.y} : Vector2D{OFF.x, OFF.y + STEP};
+            // Its own motion: the slide eased to a stop, so the tail starts slow
+            // and speeds away, over a time for the distance left -- the desktop
+            // animation's own ease-out started at full speed, a kick.
+            // Speed and on/off from the config the slide itself just ran with
+            // (workspacesIn/Out, as Hyprland set it): the plain "workspaces"
+            // node read as disabled, and the tail never moved.
+            const auto BASE = WS->m_renderOffset->getConfig().lock();
+            const auto VALS = BASE && BASE->pValues ? BASE->pValues.lock() : BASE;
+            const float SPAN = std::max(1.F, sc<float>(XAX ? MB.w : MB.h));
+            auto CFG             = makeShared<Hyprutils::Animation::SAnimationPropertyConfig>();
+            CFG->overridden      = true;
+            // CSS ease-in: it picks up from the slide's stop and leaves at
+            // speed; the house accelerate curve sat still for ten frames.
+            if (Animation::mgr() && !Animation::mgr()->bezierExists(SLIDE_TAIL_BEZIER_NAME))
+                Animation::mgr()->addBezierWithName(SLIDE_TAIL_BEZIER_NAME, Vector2D{0.4, 0.0}, Vector2D{1.0, 1.0});
+            CFG->internalBezier  = SLIDE_TAIL_BEZIER_NAME;
+            CFG->internalSpeed   = (VALS ? VALS->internalSpeed : 6.F) * std::clamp(std::sqrt(sc<float>(need) / SPAN), 0.4F, 1.F);
+            CFG->internalEnabled = VALS ? VALS->internalEnabled : 1;
+            CFG->pValues         = CFG;
+            trace(std::format("slide tail: {:.0f}x{:.0f} -> {:.0f}x{:.0f} speed {:.1f}", OFF.x, OFF.y, GOAL.x, GOAL.y, CFG->internalSpeed));
+            m_slide.prevConfig = WS->m_renderOffset->getConfig().lock();
+            m_slide.tailConfig = CFG;
+            m_slide.tail       = true;
+            m_slide.tailGoal   = GOAL;
+            m_slide.tailLast   = OFF;
+            WS->m_renderOffset->setConfig(CFG);
+            *WS->m_renderOffset = GOAL;
+        }
+
       private:
         static constexpr double MIN_SIDE  = 120.0;
 
@@ -2984,45 +3145,134 @@ namespace ScrollOverview::Mosaic {
         return false;
     }
 
-    // OFF THE VIEW, OFF THE SLIDE (user, 2026-10-29: windows out of view
-    // "are visible in the desktop I swipe to until I let go of the
-    // trackpad"). Hyprland draws a sliding desktop's windows wherever the
-    // slide puts them, and a canvas window parked a screen to the right rides
-    // in over the desktop arriving from there -- and stays while the fingers
-    // hold the swipe. Out of view on its own desktop is out of the slide too.
+    // ---- DESKTOP SLIDES (user, 2026-10-29 / 2026-11-01)
+    //
+    // OFF THE VIEW, OFF THE SLIDE: Hyprland draws a sliding desktop's windows
+    // wherever the slide puts them, and a canvas window parked a screen to the
+    // right rode in over the desktop arriving from there. A window out of view
+    // on its own desktop is out of the slide. One in view -- even half -- is
+    // drawn WHOLE and travels with its desktop, over the next one if it hangs
+    // that far (not cut at the desktop's edge: "a cheap bandaid"), and the
+    // tail (startSlideTail) carries it off after the slide. The zoomed-out
+    // canvas is all on screen and slides as it is (zoomFollowsDesktop).
+    static wl_event_source* g_slideTimer = nullptr;
+    static int              slideWatch(void*);
+
+    static void armSlideWatch() {
+        if (!g_pCompositor || !g_pCompositor->m_wlEventLoop)
+            return;
+        if (!g_slideTimer)
+            g_slideTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, slideWatch, nullptr);
+        if (g_slideTimer)
+            wl_event_source_timer_update(g_slideTimer, 16);
+    }
+
+    static bool gestureSwiping() {
+        return g_pUnifiedWorkspaceSwipe && g_pUnifiedWorkspaceSwipe->isGestureInProgress();
+    }
+
+    static bool shownNowOn(const PHLWORKSPACE& ws) {
+        const auto MON = ws ? ws->m_monitor.lock() : PHLMONITOR{};
+        return MON && MON->m_activeWorkspace == ws && !MON->m_activeSpecialWorkspace;
+    }
+
+    // Every 16 ms while a canvas desktop is sliding, its tail running or a
+    // zoomed-out one leaving: a slide that stopped with the desktop off screen
+    // starts its tail, and a zoom left behind ends there, unseen.
+    static int slideWatch(void*) {
+        bool again = false;
+        for (auto* A : g_instances) {
+            const auto WS = A->workspace();
+            if (!WS || !WS->m_renderOffset)
+                continue;
+            const bool SHOWN = shownNowOn(WS), ANIM = WS->m_renderOffset->isBeingAnimated(), SWIPE = gestureSwiping();
+            const bool STOPPED_AWAY = !SHOWN && !ANIM && !SWIPE;
+            if (A->m_slide.zoomLeaving && STOPPED_AWAY) {
+                A->m_slide.zoomLeaving = false;
+                A->endZoomNow();
+            }
+            if (A->m_slide.tail && !ANIM)
+                A->endSlideTail();
+            // Hyprland damages a sliding desktop's windows only while it is
+            // shown: the tail moved with nothing redrawn. From here, not from
+            // inside the render pass.
+            if (A->m_slide.tail)
+                if (const auto MON = WS->m_monitor.lock())
+                    g_pHyprRenderer->damageMonitor(MON);
+            if (A->m_slide.seen && STOPPED_AWAY) {
+                A->m_slide.seen = false;
+                A->startSlideTail();
+            }
+            if (A->m_slide.seen && SHOWN && !ANIM && !SWIPE)
+                A->m_slide.seen = false; // came back, or never left
+            again = again || A->m_slide.seen || A->m_slide.tail || A->m_slide.zoomLeaving;
+        }
+        if (again && g_slideTimer)
+            wl_event_source_timer_update(g_slideTimer, 16);
+        return 0;
+    }
+
+    // Once per window per frame, from the renderer (main.cpp): the slide is
+    // noticed here, and a desktop called back during its tail starts back from
+    // where the tail had it -- not from a screen away, a jump the size of what
+    // the tail had travelled ("quickly reversable").
+    static void slideFrame(CMosaicAlgorithm* A, const PHLWORKSPACE& ws) {
+        auto&      OFFV = ws->m_renderOffset;
+        const bool ANIM = OFFV->isBeingAnimated();
+        if (A->m_slide.tail) {
+            const auto GOAL = OFFV->goal();
+            if (ANIM && std::abs(GOAL.x - A->m_slide.tailGoal.x) < 0.5 && std::abs(GOAL.y - A->m_slide.tailGoal.y) < 0.5)
+                A->m_slide.tailLast = OFFV->value();
+            else {
+                // A new slide of this desktop: from the tail's side only.
+                const auto V = OFFV->value(), L = A->m_slide.tailLast;
+                A->endSlideTail();
+                if (ANIM && V.x * L.x >= 0 && V.y * L.y >= 0 && (std::abs(L.x) > std::abs(V.x) || std::abs(L.y) > std::abs(V.y)))
+                    OFFV->setValue(L);
+            }
+        }
+        const auto V     = OFFV->value();
+        const bool SHOWN = shownNowOn(ws);
+        // A slide taking it away just began: it carries its windows off itself.
+        if (ANIM && !SHOWN && !A->m_slide.tail && A->extendSlide()) {
+            A->m_slide.seen = false;
+            armSlideWatch();
+            return;
+        }
+        // The slide just stopped with the desktop away: the tail starts in THIS
+        // frame -- Hyprland is deciding right now whether to draw its windows,
+        // and from the watcher's next tick they were gone for a few frames.
+        if (A->m_slide.seen && !SHOWN && !ANIM && !gestureSwiping()) {
+            A->m_slide.seen = false;
+            A->startSlideTail();
+            if (A->m_slide.tail)
+                armSlideWatch();
+            return;
+        }
+        if (ANIM || (SHOWN && (std::abs(V.x) >= 0.5 || std::abs(V.y) >= 0.5))) {
+            A->m_slide.seen = true;
+            armSlideWatch();
+        }
+    }
+
     bool hideDuringSlide(const PHLWINDOW& w, const PHLMONITOR& monitor) {
         if (!w || !monitor || w->m_isFloating || w->m_pinned)
             return false;
         const auto WS = w->m_workspace;
         if (!WS || WS->m_isSpecialWorkspace || !WS->m_renderOffset)
             return false;
-        const auto OFF = WS->m_renderOffset->value();
-        if (std::abs(OFF.x) < 0.5 && std::abs(OFF.y) < 0.5)
+        const auto OFF  = WS->m_renderOffset->value();
+        const bool ANIM = WS->m_renderOffset->isBeingAnimated();
+        if (!ANIM && std::abs(OFF.x) < 0.5 && std::abs(OFF.y) < 0.5)
             return false;
-        const auto* A = canvasOf(WS);
-        if (!A || A->zoomed() || !A->holds(w) || openScrollOverviewForMonitor(monitor))
+        auto* A = canvasOf(WS);
+        if (!A || !A->holds(w))
+            return false;
+        slideFrame(A, WS);
+        if (A->zoomed() || openScrollOverviewForMonitor(monitor) || (std::abs(OFF.x) < 0.5 && std::abs(OFF.y) < 0.5))
             return false;
         const CBox MON{monitor->m_position, monitor->m_size};
         return w->getFullWindowBoundingBox().intersection(MON).empty();
-    }
-
-    std::optional<CBox> slideClip(const PHLWINDOW& w, const PHLMONITOR& monitor) {
-        if (!w || !monitor || w->m_isFloating || w->m_pinned)
-            return std::nullopt;
-        const auto WS = w->m_workspace;
-        if (!WS || WS->m_isSpecialWorkspace || !WS->m_renderOffset || WS->m_monitor != monitor)
-            return std::nullopt;
-        const auto OFF = WS->m_renderOffset->value();
-        if (std::abs(OFF.x) < 0.5 && std::abs(OFF.y) < 0.5)
-            return std::nullopt;
-        const auto* A = canvasOf(WS);
-        if (!A || A->zoomed() || !A->holds(w) || openScrollOverviewForMonitor(monitor))
-            return std::nullopt;
-        const CBox MON{monitor->m_position, monitor->m_size};
-        const auto BB = w->getFullWindowBoundingBox();
-        if (BB.x >= MON.x && BB.y >= MON.y && BB.x + BB.w <= MON.x + MON.w && BB.y + BB.h <= MON.y + MON.h)
-            return std::nullopt; // all of it on its desktop: nothing to clip
-        return CBox{OFF, monitor->m_size}.scale(monitor->m_scale).round();
     }
 
     // Is the pointer pushing at an outer edge of its monitor (no monitor
@@ -3308,6 +3558,9 @@ namespace ScrollOverview::Mosaic {
     }
 
     void shutdown() {
+        if (g_slideTimer)
+            wl_event_source_remove(g_slideTimer);
+        g_slideTimer = nullptr;
         // Nothing left drawn off its box, no clock left to fire into unmapped code.
         for (auto* A : g_instances)
             A->endZoomNow();
@@ -3456,14 +3709,21 @@ namespace ScrollOverview::Mosaic {
     // HELD SUPER CARRIES THE ZOOM ACROSS DESKTOPS (user, 2026-10-30: "when I
     // super+move mouse and canvas zooms out, then I scroll (switches desktops
     // while I hold super), any other canvas that can zoom out should also be
-    // zoomed out"). The desktop left behind zooms back in as it slides away;
-    // the one arriving zooms out if it is a canvas wider than the screen.
+    // zoomed out"). The one arriving zooms out if it is a canvas wider than
+    // the screen. The desktop left behind slides away AS IT IS, zoomed out,
+    // and drops the zoom once it is off screen (slideWatch): zooming back in
+    // while it slid made its windows lag behind the slide and vanish at its
+    // end (user, 2026-11-01).
     static void zoomFollowsDesktop(const PHLWORKSPACE& ws) {
         if (g_super != ESuper::ZOOMED || g_zoomPressing || !ws || ws->m_isSpecialWorkspace)
             return;
         auto* A = canvasOf(ws);
-        if (auto* OLD = liveZoomed(); OLD && OLD != A)
-            OLD->zoomIn();
+        if (A)
+            A->m_slide.zoomLeaving = false; // back before it was off screen: it stays zoomed out
+        if (auto* OLD = liveZoomed(); OLD && OLD != A) {
+            OLD->m_slide.zoomLeaving = true;
+            armSlideWatch();
+        }
         if (A && A == liveZoomed())
             return;
         g_superCanvas = nullptr;

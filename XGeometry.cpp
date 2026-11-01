@@ -11,8 +11,12 @@
 #include <xcb/xcb.h>
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/managers/EventManager.hpp>
+#include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/managers/XWaylandManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
@@ -269,6 +273,84 @@ namespace ScrollOverview::XGeometry {
 
         checkBox(WINDOW, XSURFACE);
         checkClip(WINDOW, XSURFACE);
+    }
+
+    namespace {
+        CFunctionHook* g_clientMessageHook = nullptr;
+        using origHandleClientMessage      = void (*)(CXWM*, xcb_client_message_event_t*);
+
+        // The two atoms, from our own X connection (atom ids are the server's):
+        // Hyprland's HYPRATOMS is an inline header map the plugin may hold an
+        // unfilled copy of.
+        xcb_atom_t g_atomNetWmState = XCB_ATOM_NONE, g_atomWmChangeState = XCB_ATOM_NONE, g_atomAttention = XCB_ATOM_NONE;
+        bool       stateAtoms() {
+            if (g_atomNetWmState != XCB_ATOM_NONE)
+                return true;
+            const auto CONN = connection();
+            if (!CONN)
+                return false;
+            auto c1 = xcb_intern_atom(CONN, 1, 13, "_NET_WM_STATE");
+            auto c2 = xcb_intern_atom(CONN, 1, 15, "WM_CHANGE_STATE");
+            auto c3 = xcb_intern_atom(CONN, 1, 31, "_NET_WM_STATE_DEMANDS_ATTENTION");
+            auto* r1 = xcb_intern_atom_reply(CONN, c1, nullptr);
+            auto* r2 = xcb_intern_atom_reply(CONN, c2, nullptr);
+            auto* r3 = xcb_intern_atom_reply(CONN, c3, nullptr);
+            if (r1)
+                g_atomNetWmState = r1->atom;
+            if (r2)
+                g_atomWmChangeState = r2->atom;
+            if (r3)
+                g_atomAttention = r3->atom;
+            free(r1);
+            free(r2);
+            free(r3);
+            return g_atomNetWmState != XCB_ATOM_NONE;
+        }
+
+        void hkHandleClientMessage(CXWM* wm, xcb_client_message_event_t* e) {
+            if (wm && e && e->format == 32 && stateAtoms() && (e->type == g_atomNetWmState || (g_atomWmChangeState != XCB_ATOM_NONE && e->type == g_atomWmChangeState))) {
+                if (const auto XS = wm->windowForXID(e->window); XS && XS->m_mapped) {
+                    XS->m_state.requestsFullscreen.reset();
+                    XS->m_state.requestsMaximize.reset();
+                    XS->m_state.requestsMinimize.reset();
+                }
+            }
+            rc<origHandleClientMessage>(g_clientMessageHook->m_original)(wm, e);
+
+            // DEMANDS_ATTENTION, after Hyprland has had the message (it ignores it).
+            if (!wm || !e || e->format != 32 || e->type != g_atomNetWmState || g_atomAttention == XCB_ATOM_NONE)
+                return;
+            if (e->data.data32[1] != g_atomAttention && e->data.data32[2] != g_atomAttention)
+                return;
+            const auto XS = wm->windowForXID(e->window);
+            if (!XS || !XS->m_mapped)
+                return;
+            for (const auto& W : Desktop::windowState()->windows()) {
+                if (!W || !W->m_isMapped || W->m_xwaylandSurface.lock() != XS)
+                    continue;
+                const uint32_t ACTION = e->data.data32[0]; // 0 remove, 1 add, 2 toggle
+                const bool     WANT   = ACTION == 1 || (ACTION == 2 && !W->m_isUrgent);
+                if (!WANT) {
+                    W->m_isUrgent = false;
+                    break;
+                }
+                if (W->m_isUrgent || Desktop::focusState()->window() == W)
+                    break; // already asking, or already in front of you
+                W->m_isUrgent = true;
+                g_pEventManager->postEvent(SHyprIPCEvent{.event = "urgent", .data = std::format("{:x}", rc<uintptr_t>(W.get()))});
+                Event::bus()->m_events.window.urgent.emit(W);
+                break;
+            }
+        }
+    }
+
+    void installStateRequestFix() {
+        const auto FNS = HyprlandAPI::findFunctionsByName(SCROLLOVERVIEW_HANDLE, "_ZN4CXWM19handleClientMessageEP26xcb_client_message_event_t");
+        if (FNS.empty())
+            return; // Hyprland's own handling stands
+        g_clientMessageHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, FNS[0].address, rc<void*>(hkHandleClientMessage));
+        if (g_clientMessageHook && !g_clientMessageHook->hook())
+            g_clientMessageHook = nullptr;
     }
 
     std::string status() {

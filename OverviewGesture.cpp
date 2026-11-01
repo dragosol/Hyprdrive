@@ -150,7 +150,20 @@ void COverviewWorkspaceGesture::setTapeOffset(const PHLWORKSPACE& ws) {
     ScrollOverview::DesktopTape::setOffset(ws, m_tapeOffset);
 }
 
-void COverviewWorkspaceGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
+// A gesture bound to "swipe" (any direction) is handed its updates as SWIPE,
+// whose distance is the swipe's LENGTH -- never negative, so left and right
+// were the same motion and no desktop switched (user, 2026-11-01: "super+3
+// finger swipe does not switch desktops"; Omarchy's panel binds the Super one
+// that way). The desktops are a row: such a swipe is read across it.
+template <typename T>
+static T acrossDesktops(T e) {
+    if (e.direction == TRACKPAD_GESTURE_DIR_SWIPE)
+        e.direction = TRACKPAD_GESTURE_DIR_HORIZONTAL;
+    return e;
+}
+
+void COverviewWorkspaceGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& eIn) {
+    const auto e = acrossDesktops(eIn);
     ITrackpadGesture::begin(e);
     m_inOverview = false;
     m_overview.reset();
@@ -199,7 +212,8 @@ void COverviewWorkspaceGesture::begin(const ITrackpadGesture::STrackpadGestureBe
     m_native.begin(e);
 }
 
-void COverviewWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& e) {
+void COverviewWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureUpdate& eIn) {
+    const auto e = acrossDesktops(eIn);
     if (m_inOverview) {
         const auto OVERVIEW = m_overview.lock();
         if (!OVERVIEW)
@@ -269,7 +283,8 @@ void COverviewWorkspaceGesture::update(const ITrackpadGesture::STrackpadGestureU
     m_native.update(e);
 }
 
-void COverviewWorkspaceGesture::end(const ITrackpadGesture::STrackpadGestureEnd& e) {
+void COverviewWorkspaceGesture::end(const ITrackpadGesture::STrackpadGestureEnd& eIn) {
+    const auto e = acrossDesktops(eIn);
     if (m_inOverview) {
         if (const auto OVERVIEW = m_overview.lock())
             OVERVIEW->onWorkspaceSwipeEnd();

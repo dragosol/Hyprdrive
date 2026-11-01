@@ -62,7 +62,6 @@ using namespace Hyprutils::String;
 #include "SearchLetters.hpp"
 #include "KeyboardCat.hpp"
 #include "Mosaic.hpp"
-#include "MosaicSlide.hpp"
 #include <hyprland/src/managers/SessionLockManager.hpp>
 
 #include "Compat.hpp"
@@ -215,18 +214,6 @@ static bool           hkShouldRenderWindow(void* thisptr, PHLWINDOW window, PHLM
     if (ScrollOverview::Mosaic::hideDuringSlide(window, monitor))
         return false;
     return rc<bool (*)(void*, PHLWINDOW, PHLMONITOR)>(g_pShouldRenderWindowHook->m_original)(thisptr, window, monitor);
-}
-
-// MosaicSlide.hpp: a canvas window half in view, clipped to its sliding desktop.
-static CFunctionHook* g_pRenderWindowHook = nullptr;
-static void hkRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR monitor, const Time::steady_tp& now, bool decorate, Render::eRenderPassMode mode, bool ignorePosition,
-                           bool standalone) {
-    const auto CLIP  = ignorePosition || standalone ? std::nullopt : ScrollOverview::Mosaic::slideClip(window, monitor);
-    const auto FIRST = CLIP ? ScrollOverview::MosaicSlide::mark() : 0;
-    rc<void (*)(void*, PHLWINDOW, PHLMONITOR, const Time::steady_tp&, bool, Render::eRenderPassMode, bool, bool)>(g_pRenderWindowHook->m_original)(
-        thisptr, window, monitor, now, decorate, mode, ignorePosition, standalone);
-    if (CLIP)
-        ScrollOverview::MosaicSlide::clip(window, *CLIP, FIRST);
 }
 
 // SizeAck.hpp: Hyprland's CWindow::onAck, minus its bug. Never calls the original.
@@ -1464,14 +1451,30 @@ static std::expected<void, std::string> applyTrackpadGesture(size_t fingerCount,
         return g_pTrackpadGestures->addGesture(std::move(gesture), fingerCount, direction, modMask, deltaScale, disableInhibit);
     };
 
-    if (action == "unset")
+    // The desktop swipe's Super twin (below) goes with it.
+    const bool SUPERTWIN = modMask == 0 && (direction == TRACKPAD_GESTURE_DIR_HORIZONTAL || direction == TRACKPAD_GESTURE_DIR_SWIPE);
+
+    if (action == "unset") {
+        if (SUPERTWIN)
+            (void)g_pTrackpadGestures->removeGesture(fingerCount, TRACKPAD_GESTURE_DIR_HORIZONTAL, HL_MODIFIER_META, deltaScale, disableInhibit);
         return g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, disableInhibit);
+    }
 
     if (action == "overview")
         return add(makeUnique<COverviewGesture>(direction));
 
-    if (action == "workspace")
-        return add(makeUnique<COverviewWorkspaceGesture>());
+    if (action == "workspace") {
+        const auto RES = add(makeUnique<COverviewWorkspaceGesture>());
+        // SUPER TOO (user, 2026-11-01: "I want for super+3 finger swipe to ALSO
+        // do that ... when I'm zoomed out in infinite canvas" -- the zoomed-out
+        // canvas is Super held, and Hyprland matches a gesture's modifiers
+        // exactly). The same swipe with Super down switches desktops too,
+        // unless the config binds that one itself (then this add is refused).
+        if (RES && SUPERTWIN)
+            (void)g_pTrackpadGestures->addGesture(makeUnique<COverviewWorkspaceGesture>(), fingerCount, TRACKPAD_GESTURE_DIR_HORIZONTAL, HL_MODIFIER_META, deltaScale,
+                                                  disableInhibit);
+        return RES;
+    }
 
     if (action == "workspace_all")
         return add(makeUnique<COverviewWorkspaceGesture>(true));
@@ -2194,8 +2197,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         findFnOrThrow("shouldRenderWindow", {"shouldRenderWindow(Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>, Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>)"}),
         rc<void*>(hkShouldRenderWindow));
     g_pShouldRenderWindowHook->hook();
-    g_pRenderWindowHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("renderWindow", {"IHyprRenderer::renderWindow("}), rc<void*>(hkRenderWindow));
-    g_pRenderWindowHook->hook();
 
     CursorShape::init();
     OpenProf::init();
@@ -2638,6 +2639,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Spring::init();
     ScrollOverview::HotCorner::init();
     ScrollOverview::DesktopSwitch::init();
+    ScrollOverview::XGeometry::installStateRequestFix();
     ScrollOverview::Ripple::init();
     ScrollOverview::FlightBlur::init();
 
