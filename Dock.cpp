@@ -29,6 +29,7 @@
 #include <hyprland/src/render/pass/TexPassElement.hpp>
 #include <hyprland/src/render/gl/GLTexture.hpp>
 #include "Dock.hpp"
+#include "Mosaic.hpp"
 #include "CpuPulse.hpp"
 #include "Genie.hpp"
 #include "Motion.hpp"
@@ -5907,6 +5908,11 @@ const char* needsFramesReason(PHLMONITOR monitor, const SLayout& layout, const S
     // of the three pumps and be forgotten by the third.
     if (WindowPill::animating())
         return "window-pill";
+
+    // The titles Super shows over windows (Mosaic::renderZoomLabels) fade on
+    // the tooltip's clock, over a pointer that may have stopped.
+    if (Mosaic::labelsAnimating())
+        return "super-labels";
 
     // V3. The icon flying home after a missed drop. It runs after the button
     // came up, so no pointer motion is left to repaint it -- this is the only
