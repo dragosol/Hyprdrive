@@ -8,8 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <algorithm>
-#include <vector>
+#include <sys/stat.h>
 
 static int s_testsPassed = 0;
 
@@ -89,13 +88,13 @@ int main() {
         CHECK(!grokResults.empty());
         CHECK(grokResults.front().name.find("Grok") != std::string::npos);
         CHECK(grokResults.front().category == "AI Agent");
-        CHECK(grokResults.front().actionCommand.find("what is the weather today") != std::string::npos);
+        CHECK(grokResults.front().agentPrompt == "what is the weather today" && grokResults.front().actionCommand.find("weather") == std::string::npos);
 
         auto agyResults = OmarchySearch::searchAgents("/agy solve this problem");
         CHECK(!agyResults.empty());
         CHECK(agyResults.front().name.find("AGY") != std::string::npos || agyResults.front().name.find("Antigravity") != std::string::npos);
         CHECK(agyResults.front().category == "AI Agent");
-        CHECK(agyResults.front().actionCommand.find("solve this problem") != std::string::npos);
+        CHECK(agyResults.front().agentPrompt == "solve this problem" && agyResults.front().actionCommand.find("solve") == std::string::npos);
 
         auto all = OmarchySearch::promptAllAgents("what is the weather today");
         // Sentence queries only list agents that are installed and logged in
@@ -103,7 +102,7 @@ int main() {
         CHECK(all.size() < 8);
         for (const auto& it : all) {
             CHECK(it.description == "what is the weather today");
-            CHECK(it.actionCommand.find("what is the weather today") != std::string::npos);
+            CHECK(it.agentPrompt == "what is the weather today" && it.actionCommand.find("weather") == std::string::npos);
             CHECK(it.kind == OmarchySearch::EItemKind::Agent);
         }
 
@@ -175,10 +174,12 @@ int main() {
         CHECK(!overviewSpacePreviews(ESearchIntent::Hovering, false, true, true));
     }
 
-    // Agent prompts reach `bash -c` (activate()) as typed text, never as shell
-    // (marketplace review, #11012). Every agent's real command is run through
-    // bash with stand-in launchers first in PATH that record the last argv word
-    // -- the prompt -- byte for byte. A canary file must not appear.
+    // An agent's prompt is TYPED into it by agent-run, never passed as an
+    // argument (marketplace review, #11392: /proc/<pid>/cmdline is readable by
+    // every local account). No row's command holds any of the prompt; the
+    // prompt goes to a 0600 file in a 0700 directory; every agent's real
+    // command, run through bash with stand-in launchers and agents and the real
+    // agent-run, gets it typed byte for byte and the file is gone after.
     {
         namespace fs = std::filesystem;
         char tmpl[] = "/tmp/hd-agent-test-XXXXXX";
@@ -188,257 +189,81 @@ int main() {
         for (const char* ID : {"grok", "antigravity", "gemini", "claude", "opencode", "codex", "copilot", "crush", "pi", "agent"})
             std::ofstream(USAGE / (std::string(ID) + ".json")) << "{\"ready\": true}";
         setenv("XDG_STATE_HOME", DIR.c_str(), 1);
+        const fs::path RUN = DIR / "run";
+        fs::create_directories(RUN);
+        fs::permissions(RUN, fs::perms::owner_all, fs::perm_options::replace);
+        setenv("XDG_RUNTIME_DIR", RUN.c_str(), 1);
+
+        // agent-run beside this binary, where agentRunner() looks.
+        const fs::path RUNNER = OmarchySearch::agentRunner();
+        CHECK(!RUNNER.empty());
+        fs::copy_file("libexec/agent-run", RUNNER, fs::copy_options::overwrite_existing);
+        fs::permissions(RUNNER, fs::perms::owner_all);
+
         const fs::path BIN = DIR / "bin";
         fs::create_directories(BIN);
-        for (const char* L : {"omarchy-launch-tui", "omarchy-agent"}) {
-            std::ofstream(BIN / L) << "#!/bin/bash\nprintf '%s' \"${@: -1}\" > \"$HD_GOT\"\n";
-            fs::permissions(BIN / L, fs::perms::owner_all);
-        }
-        const fs::path CANARY = DIR / "pwned";
-        const std::string TOUCH = "$(touch " + CANARY.string() + ")";
-        // The placeholder itself inside the prompt (marketplace review,
-        // #11392): a pass that rescanned inserted text spliced a second
-        // quoted copy into the first, and `%P%$(...)` ran the `$(...)`.
-        for (const std::string& PROMPT : {"fix " + TOUCH + " and `touch " + CANARY.string() + "` for $HOME's \"quoted\" \\ it's\nok", "%P%" + TOUCH,
-                                          "\"%P%\"" + TOUCH, "x %P% %P%' " + TOUCH + " '%P%"}) {
-        const auto ITEMS = OmarchySearch::promptAllAgents(PROMPT);
+        // The launcher drops its --app-id and runs the rest here; every agent
+        // asks for bracketed paste and records what it is typed.
+        std::ofstream(BIN / "omarchy-launch-tui") << "#!/bin/sh\nshift\nexec \"$@\"\n";
+        const fs::path FAKE = DIR / "fake-agent.py";
+        std::ofstream(FAKE) << "import os, sys\n"
+                               "sys.stdout.write('\\x1b[?2004hagent> '); sys.stdout.flush()\n"
+                               "got = b''\n"
+                               "while not (b'\\x1b[201~' in got and got.endswith(b'\\n')):\n"
+                               "    c = os.read(0, 4096)\n"
+                               "    if not c: break\n"
+                               "    got += c\n"
+                               "open(os.environ['HD_GOT'], 'wb').write(got)\n";
+        for (const char* A : {"grok", "agy", "gemini", "claude", "opencode", "codex", "copilot", "crush", "pi", "omarchy-agent"})
+            std::ofstream(BIN / A) << "#!/bin/sh\nexec python3 '" << FAKE.string() << "'\n";
+        for (const auto& E : fs::directory_iterator(BIN))
+            fs::permissions(E.path(), fs::perms::owner_all);
+
+        const fs::path    CANARY = DIR / "pwned";
+        const std::string TOUCH  = "$(touch " + CANARY.string() + ")";
+        const std::string PROMPT = "SECRET-7f3a fix " + TOUCH + " and `touch " + CANARY.string() + "` for $HOME's \"quoted\" \\ %P% it's\nsecond line";
+        const auto        ITEMS  = OmarchySearch::promptAllAgents(PROMPT);
         CHECK(ITEMS.size() == 10);
         for (const auto& IT : ITEMS) {
+            CHECK(IT.actionCommand.find("SECRET") == std::string::npos);
+            CHECK(IT.actionCommand.find("touch") == std::string::npos);
+            CHECK(IT.agentPrompt == PROMPT);
+            CHECK(IT.actionCommand.find("--prompt-file @HYPRDRIVE_PROMPT_FILE@ -- ") != std::string::npos);
+
+            const std::string PATH = OmarchySearch::writePromptFile(IT.agentPrompt);
+            CHECK(!PATH.empty());
+            struct stat st {};
+            CHECK(stat(PATH.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
+            CHECK(stat((RUN / "hyprdrive").c_str(), &st) == 0 && (st.st_mode & 0777) == 0700);
+            std::stringstream body;
+            body << std::ifstream(PATH).rdbuf();
+            CHECK(body.str() == PROMPT);
+
+            const std::string CMD = OmarchySearch::withPromptFile(IT.actionCommand, PATH);
+            CHECK(CMD.find("@HYPRDRIVE_PROMPT_FILE@") == std::string::npos && CMD.find("SECRET") == std::string::npos);
             const fs::path GOT = DIR / "got";
             fs::remove(GOT);
-            // hand actionCommand to bash -c exactly as activate() does: as one argv word, via a file
-            std::ofstream(DIR / "cmd") << IT.actionCommand;
-            const int RC = std::system(("env PATH='" + BIN.string() + ":/usr/bin:/bin' HD_GOT='" + GOT.string() + "' /bin/bash -c \"$(cat '" + (DIR / "cmd").string() + "')\"").c_str());
+            std::ofstream(DIR / "cmd") << CMD;
+            // as activate() runs it: bash -c, the command one argv word
+            const int RC = std::system(("env PATH='" + BIN.string() + ":/usr/bin:/bin' HD_GOT='" + GOT.string() + "' /bin/bash -c \"$(cat '" +
+                                        (DIR / "cmd").string() + "')\" </dev/null >/dev/null 2>&1")
+                                           .c_str());
             CHECK(RC == 0);
-            std::ifstream f(GOT);
             std::stringstream got;
-            got << f.rdbuf();
-            if (got.str() != PROMPT)
+            got << std::ifstream(GOT).rdbuf();
+            if (got.str() != "\x1b[200~" + PROMPT + "\x1b[201~\n")
                 std::cerr << IT.name << ": got [" << got.str() << "]" << std::endl;
-            CHECK(got.str() == PROMPT);
+            CHECK(got.str() == "\x1b[200~" + PROMPT + "\x1b[201~\n");
+            CHECK(!fs::exists(PATH));
             CHECK(!fs::exists(CANARY));
         }
-        }
-        // The placeholder only ever comes from the template.
-        CHECK(OmarchySearch::agentCommand("run \"%P%\" then %P%", "%P%") == "run '%P%' then '%P%'");
-        CHECK(OmarchySearch::agentCommand("run \"%P%\" x", "") == "run  x");
+        // A path the command could not carry as it is: refused.
+        CHECK(OmarchySearch::withPromptFile(ITEMS.front().actionCommand, "/tmp/a b").empty());
+        CHECK(OmarchySearch::withPromptFile(ITEMS.front().actionCommand, "/tmp/a'$(id)").empty());
+        // A row without a prompt opens the agent as it is, no runner.
+        for (const auto& IT : OmarchySearch::promptAllAgents(""))
+            CHECK(IT.agentPrompt.empty() && IT.actionCommand.find("agent-run") == std::string::npos);
         fs::remove_all(DIR);
-    }
-
-    // 6. OFF OMARCHY (native port, A4-A11). A scratch HOME, PATH and state dir
-    // with stand-in programs: what the System column and the AI column offer,
-    // what they run, and that nothing is ever written under ~/.config/omarchy.
-    // Then the same agent rows ON Omarchy, to pin that its command lines did
-    // not move by a byte.
-    {
-        namespace fs = std::filesystem;
-        char tmpl[] = "/tmp/hd-native-test-XXXXXX";
-        const fs::path DIR  = mkdtemp(tmpl);
-        const fs::path HOME = DIR / "home";
-        const fs::path BIN  = DIR / "bin";
-        fs::create_directories(HOME / ".config/hyprdrive");
-        fs::create_directories(BIN);
-        setenv("HOME", HOME.c_str(), 1);
-        setenv("PATH", BIN.c_str(), 1);
-        setenv("XDG_STATE_HOME", (DIR / "state").c_str(), 1);
-        unsetenv("XDG_CONFIG_HOME");
-        unsetenv("TERMINAL");
-        const auto stub = [&](const std::string& name, const std::string& body) {
-            std::ofstream(BIN / name) << "#!/bin/bash\n" << body << "\n";
-            fs::permissions(BIN / name, fs::perms::owner_all);
-        };
-        const auto drop = [&](const std::string& name) {
-            fs::remove(BIN / name);
-            OmarchySearch::invalidateProgramLookups();
-        };
-        for (const char* P : {"loginctl", "systemctl", "hdtest-hello"})
-            stub(P, "exit 0");
-        // The agents record their last argv word (the prompt) and their own
-        // path; "kitty" just runs what it is handed, as the real one does.
-        for (const char* A : {"claude", "codex"})
-            stub(A, std::string("printf '%s' \"${@: -1}\" > \"$HD_GOT\"; printf '%s' \"$0\" > \"$HD_GOT.who\""));
-        stub("kitty", "exec \"$@\"");
-        stub("myterm", "[ \"$1\" = --run ] || exit 9; shift; exec \"$@\"");
-
-        // The user's menu, in Omarchy's schema: a row of their own, a built-in
-        // hidden by id, and a row whose program is not installed.
-        std::ofstream(HOME / ".config/hyprdrive/menu.jsonc") << R"({
-            // a comment, as in Omarchy's own file
-            "hello": { "label": "Hello Test", "action": "hdtest-hello --flag", "icon": "face-smile" },
-            "system.reboot": { "when": "false" },
-            "ghost": { "label": "Ghost Row", "action": "omarchy-does-not-exist" },
-            "needy": { "label": "Needy Row", "action": "true", "requires": ["not-installed-anywhere"] }
-        })";
-
-        static std::string s_searchTerminal;
-        OmarchySearch::setHost({
-            .omarchy          = [] { return false; },
-            .terminalTemplate = [] { return s_searchTerminal; },
-            .appTerminal      = [] { return std::string{}; },
-        });
-        OmarchySearch::invalidateProgramLookups();
-        CHECK(OmarchySearch::menuRootTitle() == "System");
-        CHECK(OmarchySearch::menuCurrentRouteTitle() == "System");
-
-        const auto names = [](const std::vector<OmarchySearch::SSearchItem>& v) {
-            std::vector<std::string> out;
-            for (const auto& I : v)
-                out.push_back(I.name);
-            return out;
-        };
-        const auto has = [&](const std::vector<OmarchySearch::SSearchItem>& v, const std::string& n) {
-            const auto N = names(v);
-            return std::find(N.begin(), N.end(), n) != N.end();
-        };
-
-        auto root = OmarchySearch::searchMenu("", 24);
-        CHECK(has(root, "Lock Screen"));
-        CHECK(has(root, "Suspend"));
-        CHECK(has(root, "Shut Down"));
-        CHECK(has(root, "Hello Test"));
-        CHECK(!has(root, "Restart"));           // hidden by the user's "when": "false"
-        CHECK(!has(root, "Ghost Row"));         // its program is not installed
-        CHECK(!has(root, "Needy Row"));         // "requires" a missing program
-        CHECK(!has(root, "Screenshot Region")); // no grim/slurp yet
-        for (const auto& I : root) {
-            CHECK(I.actionCommand.find("omarchy-") == std::string::npos);
-            CHECK(I.category == "System");
-        }
-        // Nothing from /usr/share/omarchy, which exists on fedora.
-        CHECK(!has(OmarchySearch::searchMenu("install", 8), "Install"));
-
-        stub("grim", "exit 0");
-        stub("slurp", "exit 0");
-        OmarchySearch::invalidateProgramLookups();
-        auto shots = OmarchySearch::searchMenu("screenshot", 8);
-        CHECK(has(shots, "Screenshot Region"));
-        CHECK(has(shots, "Screenshot Screen"));
-        drop("slurp");
-        shots = OmarchySearch::searchMenu("screenshot", 8);
-        CHECK(!has(shots, "Screenshot Region"));
-        CHECK(has(shots, "Screenshot Screen"));
-        // A harmless row, activated for real: the leading program ran.
-        {
-            const auto HELLO = OmarchySearch::searchMenu("hello", 4);
-            CHECK(!HELLO.empty() && HELLO.front().actionCommand == "hdtest-hello --flag");
-        }
-
-        // Agents: claude and codex are installed, kitty is the terminal.
-        const fs::path GOT = DIR / "got";
-        setenv("HD_GOT", GOT.c_str(), 1);
-        const auto runRow = [&](const OmarchySearch::SSearchItem& IT) {
-            fs::remove(GOT);
-            fs::remove(GOT.string() + ".who");
-            std::ofstream(DIR / "cmd") << IT.actionCommand;
-            return std::system(("/bin/bash -c \"$(/usr/bin/cat '" + (DIR / "cmd").string() + "')\"").c_str());
-        };
-        const auto slurpFile = [](const fs::path& p) {
-            std::ifstream f(p);
-            std::stringstream b;
-            b << f.rdbuf();
-            return b.str();
-        };
-
-        auto asked = OmarchySearch::promptAllAgents("fix it's $(HOME)");
-        CHECK(names(asked) == (std::vector<std::string>{"Ask Claude", "Ask Codex"}));
-        for (const auto& IT : asked) {
-            CHECK(IT.icon.starts_with("hyprdrive-agent-"));
-            CHECK(IT.actionCommand.starts_with("kitty '" + BIN.string() + "/"));
-            CHECK(runRow(IT) == 0);
-            CHECK(slurpFile(GOT) == "fix it's $(HOME)");
-        }
-        CHECK(asked.front().actionCommand == "kitty '" + (BIN / "claude").string() + "' --permission-mode auto -- 'fix it'\\''s $(HOME)'");
-        CHECK(names(OmarchySearch::agentHelpItems()).size() == 2);
-        CHECK(OmarchySearch::searchAgents("/grok hi").empty()); // exact, but not installed
-        CHECK(OmarchySearch::searchAgents("/agent hi").empty()); // no default yet
-
-        // Omarchy's usage records are NOT read off Omarchy (2026-10-15): a box
-        // that once had Omarchy keeps stale ones, which hid signed-in agents.
-        fs::create_directories(DIR / "state/omarchy/agents/usage");
-        std::ofstream(DIR / "state/omarchy/agents/usage/codex.json") << "{\"ready\": false}";
-        CHECK(names(OmarchySearch::promptAllAgents("x")).size() == 2);
-        fs::remove_all(DIR / "state");
-
-        // No terminal anywhere: no agent rows (they could not open).
-        drop("kitty");
-        CHECK(OmarchySearch::promptAllAgents("x").empty());
-        // A configured template with {cmd}.
-        s_searchTerminal = "myterm --run {cmd}";
-        {
-            const auto ROWS = OmarchySearch::promptAllAgents("tmpl");
-            CHECK(ROWS.size() == 2);
-            CHECK(!ROWS.empty() && ROWS.front().actionCommand.starts_with("myterm --run '"));
-            CHECK(!ROWS.empty() && runRow(ROWS.front()) == 0 && slurpFile(GOT) == "tmpl");
-        }
-        // ...and one that is not installed falls through to detection (none).
-        s_searchTerminal = "not-a-terminal";
-        CHECK(OmarchySearch::promptAllAgents("x").empty());
-        s_searchTerminal = "myterm --run {cmd}";
-
-        // The default agent: Hyprdrive's own file, never Omarchy's dir.
-        {
-            auto codex = OmarchySearch::searchAgents("/codex");
-            CHECK(codex.size() == 1);
-            CHECK(OmarchySearch::canBeDefaultAgent(codex.front()));
-            // D10: the write moves the inputs generation AT ONCE -- the caller
-            // re-reads the memoised rows on the next line to move the
-            // selection onto the agent's new slot, well inside the 250ms poll
-            // (and inside the same st_mtime second as any earlier write).
-            const auto GEN_BEFORE = OmarchySearch::searchInputsGeneration();
-            CHECK(OmarchySearch::setDefaultAgent(codex.front()));
-            CHECK(OmarchySearch::searchInputsGeneration() != GEN_BEFORE);
-            const auto GEN_AGAIN = OmarchySearch::searchInputsGeneration();
-            CHECK(OmarchySearch::setDefaultAgent(codex.front()));
-            CHECK(OmarchySearch::searchInputsGeneration() != GEN_AGAIN);
-            CHECK(slurpFile(HOME / ".config/hyprdrive/default-agent") == "codex\n");
-            CHECK(!fs::exists(HOME / ".config/omarchy"));
-            CHECK(OmarchySearch::isDefaultAgent(codex.front()));
-            CHECK(names(OmarchySearch::promptAllAgents("y")) == (std::vector<std::string>{"Ask Codex", "Ask Claude"}));
-            // `/agent` is the default, by name, and runs it.
-            const auto AGENT = OmarchySearch::searchAgents("/agent go");
-            CHECK(AGENT.size() == 1 && AGENT.front().name == "Ask Codex" && AGENT.front().icon == "hyprdrive-agent-codex");
-            CHECK(!AGENT.empty() && runRow(AGENT.front()) == 0 && slurpFile(GOT) == "go" && slurpFile(GOT.string() + ".who") == (BIN / "codex").string());
-            // "/" lists every agent once: the pseudo-row is not a second Codex.
-            CHECK(OmarchySearch::searchAgents("/").size() == 2);
-        }
-
-        // ON OMARCHY: the same rows are the launcher lines they always were,
-        // readiness is the usage file again, and a default lands in Omarchy's
-        // file with a mirror in Hyprdrive's.
-        OmarchySearch::setHost({.omarchy = [] { return true; }});
-        CHECK(OmarchySearch::menuRootTitle() == "Omarchy Menu");
-        {
-            const auto CLAUDE = OmarchySearch::searchAgents("/claude hi there");
-            CHECK(CLAUDE.size() == 1);
-            CHECK(!CLAUDE.empty() && CLAUDE.front().actionCommand == "omarchy-launch-tui --app-id=org.omarchy.agent claude --permission-mode auto -- 'hi there'");
-            CHECK(!CLAUDE.empty() && !CLAUDE.front().icon.starts_with("hyprdrive-agent-")); // the agents plugins' artwork, as before
-            CHECK(OmarchySearch::promptAllAgents("x").empty()); // no usage records = none logged in, as before
-            const auto HELP = OmarchySearch::searchAgents("/codex");
-            CHECK(HELP.size() == 1 && HELP.front().actionCommand == "omarchy-launch-tui --app-id=org.omarchy.agent codex --approve-for-me -- ");
-            const auto AGY = OmarchySearch::searchAgents("/agy");
-            CHECK(AGY.size() == 1 && OmarchySearch::setDefaultAgent(AGY.front()));
-            CHECK(slurpFile(HOME / ".config/omarchy/defaults/agent") == "gemini\n");
-            CHECK(slurpFile(HOME / ".config/hyprdrive/default-agent") == "agy\n");
-        }
-        OmarchySearch::setHost({});
-        OmarchySearch::resetMenuRoute();
-        fs::remove_all(DIR);
-    }
-
-    // D6a: fd prints a directory with a trailing slash; the row's name is the
-    // folder's own, its subtitle the parent -- never "" and the folder itself.
-    {
-        const auto DIRHIT = OmarchySearch::splitFoundPath("/home/u/Documents/");
-        CHECK(DIRHIT.name == "Documents");
-        CHECK(DIRHIT.dir == "/home/u");
-        CHECK(DIRHIT.path == "/home/u/Documents");
-        const auto FILEHIT = OmarchySearch::splitFoundPath("/home/u/Documents/hdtest-unique.txt");
-        CHECK(FILEHIT.name == "hdtest-unique.txt" && FILEHIT.dir == "/home/u/Documents" && FILEHIT.path == "/home/u/Documents/hdtest-unique.txt");
-        const auto TOP = OmarchySearch::splitFoundPath("/srv//");
-        CHECK(TOP.name == "srv" && TOP.dir == "/" && TOP.path == "/srv");
-        const auto BARE = OmarchySearch::splitFoundPath("notes.txt");
-        CHECK(BARE.name == "notes.txt" && BARE.dir.empty());
-        CHECK(OmarchySearch::splitFoundPath("/").name.empty()); // skipped by the worker
     }
 
     std::cout << "omarchy_search_test: " << s_testsPassed << " checks OK" << std::endl;

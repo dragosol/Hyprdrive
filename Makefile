@@ -76,6 +76,8 @@ check: hyprdrive.so
 	python3 scripts/hdicons_test.py
 	python3 scripts/settings_app_test.py
 	python3 scripts/update_cli_test.py
+	python3 scripts/agent_run_test.py
+	python3 scripts/tool_scripts_test.py
 	python3 scripts/integration_fallbacks_test.py
 
 PREFIX ?= $(HOME)/.local
@@ -106,6 +108,7 @@ install-only:
 	@[ -s hyprdrive.so ] || { echo "install-only: no hyprdrive.so -- run make (build + check) first" >&2; exit 1; }
 	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/hyprdrive.so
 	install -Dm644 assets/scratchpad-symbolic.svg $(PREFIX)/lib/hyprdrive/scratchpad-symbolic.svg
+	install -Dm755 libexec/agent-run $(PREFIX)/lib/hyprdrive/agent-run
 	PREFIX="$(PREFIX)" bash scripts/install-fragments.sh
 
 uninstall:

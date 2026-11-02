@@ -8,6 +8,8 @@
 using namespace Hyprutils::OS;
 
 #include <algorithm>
+#include <cerrno>
+#include <dlfcn.h>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -461,31 +463,33 @@ struct SAgentDef {
     std::string name;
     std::string model;
     std::string description;
-    std::string commandTemplate; // e.g. "omarchy-launch-tui --app-id=org.omarchy.agent grok --permission-mode bypassPermissions -- %P"
+    // The agent opened with NO prompt: a prompt is typed into it by agent-run
+    // (agentLaunch), never passed as an argument (marketplace review, #11392).
+    std::string commandTemplate; // e.g. "omarchy-launch-tui --app-id=org.omarchy.agent grok --permission-mode bypassPermissions"
 };
 
 static const std::vector<SAgentDef>& agentDefs() {
     static const std::vector<SAgentDef> AGENTS = {
         {"grok", "Grok", "xAI Grok", "Direct chat with Grok via CLI",
-         "omarchy-launch-tui --app-id=org.omarchy.agent grok --permission-mode bypassPermissions -- \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent grok --permission-mode bypassPermissions"},
         {"agy", "Antigravity", "Google DeepMind AGY", "DeepMind agentic coding CLI with yolo permissions",
-         "omarchy-launch-tui --app-id=org.omarchy.agent agy --dangerously-skip-permissions --prompt-interactive \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent agy --dangerously-skip-permissions"},
         {"gemini", "Gemini", "Google Gemini", "Gemini CLI interactive prompt",
-         "omarchy-launch-tui --app-id=org.omarchy.agent gemini --yolo --prompt-interactive \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent gemini --yolo"},
         {"claude", "Claude", "Anthropic Claude", "Claude Code interactive agent",
-         "omarchy-launch-tui --app-id=org.omarchy.agent claude --permission-mode auto -- \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent claude --permission-mode auto"},
         {"opencode", "OpenCode", "OpenCode AI", "Open-source coding assistant",
-         "omarchy-launch-tui --app-id=org.omarchy.agent opencode --auto --prompt \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent opencode --auto"},
         {"codex", "Codex", "Codex CLI", "AI terminal companion",
-         "omarchy-launch-tui --app-id=org.omarchy.agent codex --approve-for-me -- \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent codex --approve-for-me"},
         {"copilot", "Copilot", "GitHub Copilot", "GitHub Copilot in the CLI",
-         "omarchy-launch-tui --app-id=org.omarchy.agent copilot --allow-all --interactive \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent copilot --allow-all"},
         {"crush", "Crush", "Crush CLI", "Fast command runner agent",
-         "omarchy-launch-tui --app-id=org.omarchy.agent crush run \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent crush"},
         {"pi", "Pi", "Inflection Pi", "Conversational AI assistant",
-         "omarchy-launch-tui --app-id=org.omarchy.agent pi \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent pi"},
         {"agent", "Default Agent", "Omarchy Default Agent", "Configured default coding agent",
-         "omarchy-agent --prompt \"%P%\""},
+         "omarchy-launch-tui --app-id=org.omarchy.agent omarchy-agent --inline"},
     };
     return AGENTS;
 }
@@ -509,7 +513,7 @@ static std::string agentBinary(const SAgentDef& AG) {
     return std::string{REST.substr(0, REST.find(' '))};
 }
 
-// The binary's arguments, %P% placeholders still in.
+// The binary's arguments.
 static std::string agentArgs(const SAgentDef& AG) {
     if (!AG.commandTemplate.starts_with(OMARCHY_TUI))
         return {};
@@ -524,31 +528,73 @@ bool isAgentQuery(const std::string& query) {
     return query[0] == '/';
 }
 
-// THE PROMPT INTO THE TEMPLATE, IN ONE PASS (marketplace review, #11392):
-// every `"%P%"` or `%P%` in the TEMPLATE becomes the quoted prompt, and
-// nothing inserted is ever scanned again. Two replaceAll passes rescanned the
-// first pass's output, so a prompt holding `%P%` had a second quoted copy
-// spliced inside its own quotes -- `%P%$(id)` came out as
-// `''%P%$(id)'$(id)'`, and bash ran the `$(id)`. An empty `quoted` drops the
-// placeholder and its quotes.
-static std::string fillPrompt(const std::string& tmpl, const std::string& quoted) {
-    std::string out;
-    size_t      i = 0;
-    while (i < tmpl.size()) {
-        if (tmpl.compare(i, 5, "\"%P%\"") == 0) {
-            out += quoted;
-            i += 5;
-        } else if (tmpl.compare(i, 3, "%P%") == 0) {
-            out += quoted;
-            i += 3;
-        } else
-            out += tmpl[i++];
-    }
-    return out;
+// A PROMPT IS TYPED, NEVER PASSED (marketplace review, #11392): every
+// process's argument list is readable by every local account in
+// /proc/<pid>/cmdline, and the agent CLIs take an opening prompt only as an
+// argument. So the prompt goes nowhere near a command line: activate() writes
+// it to a fresh 0600 file in $XDG_RUNTIME_DIR/hyprdrive, and the agent is
+// started by agent-run (installed beside hyprdrive.so), which deletes the file,
+// runs the agent on a terminal of its own and types the prompt into it. The
+// command carries only the file's path, in place of PROMPT_FILE_MARK.
+static constexpr std::string_view PROMPT_FILE_MARK = "@HYPRDRIVE_PROMPT_FILE@";
+
+// agent-run, beside the hyprdrive.so this code is in (or, in a host test,
+// beside the test binary).
+std::string agentRunner() {
+    Dl_info info{};
+    if (dladdr(reinterpret_cast<void*>(&agentRunner), &info) == 0 || !info.dli_fname)
+        return {};
+    return (fs::path(info.dli_fname).parent_path() / "agent-run").string();
 }
 
-std::string agentCommand(const std::string& tmpl, const std::string& prompt) {
-    return fillPrompt(tmpl, prompt.empty() ? std::string{} : ScrollOverview::shellQuote(prompt));
+// `cmd` (the agent and its arguments) run by agent-run with the prompt file.
+static std::string viaRunner(const std::string& cmd) {
+    return ScrollOverview::shellQuote(agentRunner()) + " --prompt-file " + std::string{PROMPT_FILE_MARK} + " -- " + cmd;
+}
+
+std::string agentLaunch(const std::string& tmpl, bool withPrompt) {
+    if (!withPrompt || !tmpl.starts_with(OMARCHY_TUI))
+        return tmpl;
+    return std::string{OMARCHY_TUI} + viaRunner(tmpl.substr(OMARCHY_TUI.size()));
+}
+
+std::string writePromptFile(const std::string& prompt) {
+    const char* RUNTIME = std::getenv("XDG_RUNTIME_DIR");
+    if (!RUNTIME || !*RUNTIME)
+        return {};
+    const auto DIR = fs::path(RUNTIME) / "hyprdrive";
+    if (mkdir(DIR.c_str(), 0700) != 0 && errno != EEXIST)
+        return {};
+    struct stat st {};
+    if (lstat(DIR.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & 077))
+        return {};
+    std::string path = (DIR / "agent-prompt-XXXXXX").string();
+    const int   FD   = mkstemp(path.data()); // 0600, created new
+    if (FD < 0)
+        return {};
+    size_t done = 0;
+    while (done < prompt.size()) {
+        const ssize_t N = write(FD, prompt.data() + done, prompt.size() - done);
+        if (N <= 0) {
+            close(FD);
+            unlink(path.c_str());
+            return {};
+        }
+        done += static_cast<size_t>(N);
+    }
+    close(FD);
+    return path;
+}
+
+// The path goes in as it is, so it is right inside or outside any quotes the
+// command puts around it (a terminal's "{cmd}" may be quoted); a path with
+// anything but [A-Za-z0-9/._-] in it is refused (empty).
+std::string withPromptFile(const std::string& command, const std::string& path) {
+    const auto AT = command.find(PROMPT_FILE_MARK);
+    if (AT == std::string::npos || path.empty() ||
+        !std::ranges::all_of(path, [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '/' || c == '.' || c == '_' || c == '-'; }))
+        return {};
+    return command.substr(0, AT) + path + command.substr(AT + PROMPT_FILE_MARK.size());
 }
 
 static std::string agentUsageId(const SAgentDef& AG) {
@@ -686,13 +732,12 @@ static std::string agentIconPath(const SAgentDef& AG) {
     return "utilities-terminal";
 }
 
-// The `bash -c` line a row runs, with %P% already substituted in `args` form.
-// Omarchy: the template itself. Off Omarchy: <terminal> '<abs binary>' <args>.
-static std::string agentCommand(const SAgentDef& AG, const std::string& quotedPrompt) {
-    const auto fill = [&](const std::string& s) { return fillPrompt(s, quotedPrompt); };
-
+// The `bash -c` line a row runs. Omarchy: the template itself. Off Omarchy:
+// <terminal> '<abs binary>' <args>. With a prompt, agent-run starts the agent
+// and types it (agentLaunch); the prompt is never in the line.
+static std::string agentCommand(const SAgentDef& AG, bool withPrompt) {
     if (omarchyMode())
-        return fill(AG.commandTemplate);
+        return agentLaunch(AG.commandTemplate, withPrompt);
 
     const SAgentDef* REAL = isDefaultAgentPseudo(AG) ? nativeDefaultDef() : &AG;
     if (!REAL)
@@ -702,13 +747,11 @@ static std::string agentCommand(const SAgentDef& AG, const std::string& quotedPr
     if (PATH.empty() || !TERM.ok())
         return {};
     std::string cmd = ScrollOverview::shellQuote(PATH);
-    if (const auto ARGS = fill(agentArgs(*REAL)); !ARGS.empty())
+    if (const auto ARGS = agentArgs(*REAL); !ARGS.empty())
         cmd += " " + ARGS;
-    // A help row's empty prompt leaves a trailing "-- " -- harmless to every
-    // agent, and the Omarchy line has had it all along.
     while (!cmd.empty() && cmd.back() == ' ')
         cmd.pop_back();
-    return TERM.wrap(cmd);
+    return TERM.wrap(withPrompt ? viaRunner(cmd) : cmd);
 }
 
 static SSearchItem agentItem(const SAgentDef& AG, const std::string& prompt) {
@@ -722,20 +765,13 @@ static SSearchItem agentItem(const SAgentDef& AG, const std::string& prompt) {
     if (prompt.empty()) {
         item.name          = "/" + AG.prefix + " <prompt>";
         item.description   = SHOWN ? "Default agent: " + SHOWN->name + " (" + SHOWN->model + ")" : AG.name + " (" + AG.model + ") — " + AG.description;
-        if (omarchyMode()) {
-            item.actionCommand = fillPrompt(AG.commandTemplate, "");
-        } else
-            item.actionCommand = agentCommand(AG, "");
+        item.actionCommand = agentCommand(AG, false);
     } else {
         item.name        = "Ask " + (SHOWN ? SHOWN->name : AG.name);
         item.description = prompt;
-        // The prompt is user text going into a `bash -c` string (activate()):
-        // one single-quoted word, so the shell expands none of it -- `$(...)`,
-        // backticks and `$VAR` reach the agent as typed (marketplace review,
-        // #11012). The templates wrap %P% in double quotes, which would expand;
-        // the quoted word replaces the quotes too.
-        const std::string QUOTED = ScrollOverview::shellQuote(prompt);
-        item.actionCommand       = agentCommand(AG, QUOTED);
+        // Never in the command: typed by agent-run (agentLaunch).
+        item.agentPrompt   = prompt;
+        item.actionCommand = agentCommand(AG, true);
     }
     return item;
 }
@@ -2366,9 +2402,20 @@ bool activate(const SSearchItem& item) {
         return proc.runAsync();
     }
     if (item.kind == EItemKind::Agent || item.kind == EItemKind::Action) {
+        std::string command = item.actionCommand;
+        if (item.kind == EItemKind::Agent && !item.agentPrompt.empty()) {
+            const auto PATH = writePromptFile(item.agentPrompt);
+            if (PATH.empty())
+                return false;
+            command = withPromptFile(command, PATH);
+            if (command.empty()) {
+                unlink(PATH.c_str());
+                return false;
+            }
+        }
         // An action can start an app (an agent opens a terminal): its own scope.
         std::string              binary = "/bin/bash";
-        std::vector<std::string> args   = {"-c", item.actionCommand};
+        std::vector<std::string> args   = {"-c", command};
         ScrollOverview::Launch::wrap(binary, args);
         CProcess proc(binary, args);
         return proc.runAsync();
