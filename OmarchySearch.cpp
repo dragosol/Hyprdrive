@@ -524,13 +524,31 @@ bool isAgentQuery(const std::string& query) {
     return query[0] == '/';
 }
 
-static std::string replaceAll(std::string str, const std::string& from, const std::string& to) {
-    size_t start_pos = 0;
-    while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
-        str.replace(start_pos, from.length(), to);
-        start_pos += to.length();
+// THE PROMPT INTO THE TEMPLATE, IN ONE PASS (marketplace review, #11392):
+// every `"%P%"` or `%P%` in the TEMPLATE becomes the quoted prompt, and
+// nothing inserted is ever scanned again. Two replaceAll passes rescanned the
+// first pass's output, so a prompt holding `%P%` had a second quoted copy
+// spliced inside its own quotes -- `%P%$(id)` came out as
+// `''%P%$(id)'$(id)'`, and bash ran the `$(id)`. An empty `quoted` drops the
+// placeholder and its quotes.
+static std::string fillPrompt(const std::string& tmpl, const std::string& quoted) {
+    std::string out;
+    size_t      i = 0;
+    while (i < tmpl.size()) {
+        if (tmpl.compare(i, 5, "\"%P%\"") == 0) {
+            out += quoted;
+            i += 5;
+        } else if (tmpl.compare(i, 3, "%P%") == 0) {
+            out += quoted;
+            i += 3;
+        } else
+            out += tmpl[i++];
     }
-    return str;
+    return out;
+}
+
+std::string agentCommand(const std::string& tmpl, const std::string& prompt) {
+    return fillPrompt(tmpl, prompt.empty() ? std::string{} : ScrollOverview::shellQuote(prompt));
 }
 
 static std::string agentUsageId(const SAgentDef& AG) {
@@ -671,10 +689,7 @@ static std::string agentIconPath(const SAgentDef& AG) {
 // The `bash -c` line a row runs, with %P% already substituted in `args` form.
 // Omarchy: the template itself. Off Omarchy: <terminal> '<abs binary>' <args>.
 static std::string agentCommand(const SAgentDef& AG, const std::string& quotedPrompt) {
-    const auto fill = [&](std::string s) {
-        s = replaceAll(std::move(s), "\"%P%\"", quotedPrompt);
-        return replaceAll(std::move(s), "%P%", quotedPrompt);
-    };
+    const auto fill = [&](const std::string& s) { return fillPrompt(s, quotedPrompt); };
 
     if (omarchyMode())
         return fill(AG.commandTemplate);
@@ -708,8 +723,7 @@ static SSearchItem agentItem(const SAgentDef& AG, const std::string& prompt) {
         item.name          = "/" + AG.prefix + " <prompt>";
         item.description   = SHOWN ? "Default agent: " + SHOWN->name + " (" + SHOWN->model + ")" : AG.name + " (" + AG.model + ") — " + AG.description;
         if (omarchyMode()) {
-            item.actionCommand = replaceAll(AG.commandTemplate, "\"%P%\"", "");
-            item.actionCommand = replaceAll(item.actionCommand, "%P%", "");
+            item.actionCommand = fillPrompt(AG.commandTemplate, "");
         } else
             item.actionCommand = agentCommand(AG, "");
     } else {
