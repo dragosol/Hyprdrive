@@ -2257,6 +2257,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
         ScrollOverview::Dock::damageIfChanged(monitor);
 
+        // The desktop strip's place for this frame (DesktopStrip.hpp), then a
+        // canvas desktop a swipe brings in starts past its overhang (Mosaic.cpp).
+        ScrollOverview::DesktopSwitch::preRender(monitor);
+        ScrollOverview::Mosaic::preRender(monitor);
+
         // Layout motion blur (FlightBlur.hpp). The overview draws its own
         // windows; there, only the sweep runs.
         ScrollOverview::DockRoom::watch(monitor);

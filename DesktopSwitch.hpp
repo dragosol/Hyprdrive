@@ -5,6 +5,8 @@
 
 #include <string>
 
+#include "globals.hpp"
+
 // DESKTOP SWITCHES (user, 2026-10-15). Two things about moving between desktops,
 // both with the pure decisions in DesktopSwitchModel.hpp:
 //
@@ -54,4 +56,7 @@ namespace ScrollOverview::DesktopSwitch {
 
     // `debug desktop`: the toggles, the last cause and decision, the notch bank.
     std::string debugReport();
+
+    // render.pre: the desktop strip's frame (DesktopStrip.hpp).
+    void preRender(PHLMONITOR monitor);
 }

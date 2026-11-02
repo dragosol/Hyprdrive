@@ -186,7 +186,11 @@ var sections = [
         { type: "toggle", key: P + "animation:desktop_keyboard", label: "Animate desktop changes from keys", when: "desktopSlideOn",
           desc: "Slide when a key or the scroll wheel changes the desktop: Super+1…0, Super+Tab, Super+scroll, moving a window along with you." },
         { type: "toggle", key: P + "animation:desktop_focus", label: "Animate desktop changes when focus moves", when: "desktopSlideOn",
-          desc: "Slide when the desktop changes because a window elsewhere takes focus: a dock click, a notification, an app asking for attention." }
+          desc: "Slide when the desktop changes because a window elsewhere takes focus: a dock click, a notification, an app asking for attention." },
+        { type: "toggle", key: P + "animation:desktop_row_bounce", label: "Bounce at the first and last desktop", when: "desktopSlideOn",
+          desc: "Scrolling past either end of the row stretches it a little and springs back, so you can feel where it stops." },
+        { type: "toggle", key: P + "animation:desktop_jump_through", label: "Slide through desktops on a jump", when: "desktopSlideOn",
+          desc: "A key or dock jump of several desktops, like Super+5 from desktop 1, slides past the desktops between instead of straight to the new one." }
       ]},
       { title: "Timing", rows: [
         { type: "slider", key: P + "open_speed", label: "Overview open", min: 0.5, max: 8, step: 0.1, fmt: "deciseconds" },
@@ -326,9 +330,21 @@ var sections = [
     cards: [
       { title: "Desktops", rows: [
         { type: "bind", bind: "desktop", key: P + "binds:scroll_desktops", label: "Scroll through desktops",
-          desc: "Hold the modifier and turn the wheel: down for the next desktop, up for the previous one, empty ones included. One desktop per notch. In the overview it moves between the desktops there." },
+          desc: "Hold the modifier and turn the wheel: down for the next desktop, up for the previous one. The row of desktops slides with the wheel, notch after notch, and turns round the moment you scroll back. In the overview it moves between the desktops there." },
         { type: "choice", key: P + "binds:scroll_desktops_mods", label: "Scroll modifier", when: "scrollDesktopsOn", custom: "wheel",
           desc: "Held with the wheel. Whatever these keys and the wheel did before is replaced while scrolling through desktops is on." }
+      ]},
+      { title: "Scrolling through desktops", rows: [
+        { type: "toggle", key: P + "binds:scroll_desktops_smooth", label: "Smooth scrolling", when: "scrollDesktopsOn",
+          desc: "The desktops follow the wheel continuously, two notches to a desktop, and settle on the nearest one when you stop. Off, they move a whole desktop at a time." },
+        { type: "slider", key: P + "binds:scroll_desktops_ticks", label: "Notches per desktop", min: 1, max: 10, step: 1, when: "scrollSteppedOn",
+          desc: "How many wheel notches move one desktop. Notches short of a desktop show as a peek of the next one." },
+        { type: "toggle", key: P + "binds:scroll_desktops_sticky", label: "Sticky desktops", when: "scrollDesktopsOn",
+          desc: "After the first desktop of a quick scroll, each further one takes a little more push, so a fast spin is easier to stop where you want." },
+        { type: "toggle", key: P + "binds:scroll_desktops_stop_at_empty", label: "Stop at the first empty desktop", when: "scrollDesktopsOn",
+          desc: "The wheel goes no further than one empty desktop past your last desktop with windows, as the overview does. Off, it goes on to 10 or your highest desktop." },
+        { type: "toggle", key: P + "binds:scroll_desktops_populated_only", label: "Skip empty desktops", when: "scrollDesktopsOn",
+          desc: "Only desktops with windows, plus that first empty one and the desktop you are on. Off, every desktop number in between is visited too." }
       ]},
       { title: "Overview", rows: [
         { type: "bind", bind: "overview", key: P + "tap_super", label: "Overview",

@@ -216,6 +216,7 @@ Item {
     case "canvasOn": return kb("plugin:hyprdrive:mosaic:enabled") && kb("plugin:hyprdrive:mosaic:infinite_canvas")
     case "canvasMotionOn": return kb("plugin:hyprdrive:mosaic:enabled") && kb("plugin:hyprdrive:mosaic:infinite_canvas") && kn("plugin:hyprdrive:anim_scale") > 0.001
     case "scrollDesktopsOn": return kb("plugin:hyprdrive:binds:scroll_desktops")
+    case "scrollSteppedOn": return kb("plugin:hyprdrive:binds:scroll_desktops") && !kb("plugin:hyprdrive:binds:scroll_desktops_smooth")
     default: return true
     }
   }

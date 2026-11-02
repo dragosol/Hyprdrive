@@ -181,6 +181,8 @@ KEY_META = [
     # Desktop switches by cause (DesktopSwitch.hpp): off = that kind is instant.
     _k(PLUGIN + "animation:desktop_keyboard", "bool", "animation", True),
     _k(PLUGIN + "animation:desktop_focus", "bool", "animation", True),
+    _k(PLUGIN + "animation:desktop_row_bounce", "bool", "animation", True),
+    _k(PLUGIN + "animation:desktop_jump_through", "bool", "animation", False),
     # Motion blur
     _k(PLUGIN + "motion_blur:enabled", "bool", "blur", True),
     _k(PLUGIN + "layout_motion_blur", "int", "blur", 16, min=0, max=32),
@@ -213,6 +215,12 @@ KEY_META = [
     # a parse -- 50-desktop-scroll.lua reads the two scroll keys at parse time.
     _k(PLUGIN + "binds:scroll_desktops", "bool", "keybinds", True, reload=True),
     _k(PLUGIN + "binds:scroll_desktops_mods", "str", "keybinds", "SUPER", reload=True),
+    # How the wheel moves the row (DesktopStrip.hpp): read live, no reload.
+    _k(PLUGIN + "binds:scroll_desktops_smooth", "bool", "keybinds", False),
+    _k(PLUGIN + "binds:scroll_desktops_ticks", "int", "keybinds", 1, min=1, max=10),
+    _k(PLUGIN + "binds:scroll_desktops_sticky", "bool", "keybinds", False),
+    _k(PLUGIN + "binds:scroll_desktops_stop_at_empty", "bool", "keybinds", True),
+    _k(PLUGIN + "binds:scroll_desktops_populated_only", "bool", "keybinds", False),
     # A key of the plugin's AND a set of binds: on, 40-panel.lua binds
     # Super+1..0 to the dock (keybinds_lua), so it reloads like the two above.
     _k(PLUGIN + "dock:hot_keys", "bool", "keybinds", False, reload=True),

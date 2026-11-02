@@ -2,6 +2,8 @@
 #include "FullscreenGuard.hpp"
 #include "DesktopSwitch.hpp"
 #include "DesktopSwitchModel.hpp"
+#include "DesktopRowModel.hpp"
+#include "DesktopStrip.hpp"
 
 #include "Config.hpp"
 #include "IOverview.hpp"
@@ -20,9 +22,11 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
 
+#include <algorithm>
 #include <format>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace ScrollOverview::DesktopSwitch {
     namespace {
@@ -38,6 +42,86 @@ namespace ScrollOverview::DesktopSwitch {
         int g_focusDepth  = 0;
 
         SNotchAccumulator g_notches;
+
+        // The desktop strip (DesktopStrip.hpp).
+        constexpr const char* KEY_SMOOTH     = "plugin:hyprdrive:binds:scroll_desktops_smooth";
+        constexpr const char* KEY_TICKS      = "plugin:hyprdrive:binds:scroll_desktops_ticks";
+        constexpr const char* KEY_STICKY     = "plugin:hyprdrive:binds:scroll_desktops_sticky";
+        constexpr const char* KEY_STOP_EMPTY = "plugin:hyprdrive:binds:scroll_desktops_stop_at_empty";
+        constexpr const char* KEY_POPULATED  = "plugin:hyprdrive:binds:scroll_desktops_populated_only";
+        constexpr const char* KEY_BOUNCE     = "plugin:hyprdrive:animation:desktop_row_bounce";
+        constexpr const char* KEY_JUMP       = "plugin:hyprdrive:animation:desktop_jump_through";
+
+        // A switch in progress: the desktop its OUT half took away, and where
+        // that one was on screen before Hyprland moved it (hkStartAnimation).
+        int      g_switchFrom = 0;
+        Vector2D g_switchFromOffset;
+
+        // THE ROW the wheel walks on `monitor` (DesktopRowModel.hpp), `current`
+        // shown: binds:scroll_desktops_stop_at_empty / _populated_only.
+        std::vector<int> rowOn(const PHLMONITOR& monitor, int current) {
+            DesktopRow::SFacts f{.current       = current,
+                                 .stopAtEmpty   = Config::getValue<Hyprlang::INT>(KEY_STOP_EMPTY) != 0,
+                                 .populatedOnly = Config::getValue<Hyprlang::INT>(KEY_POPULATED) != 0};
+            for (const auto& REF : State::workspaceState()->workspaces()) {
+                const auto WS = REF.lock();
+                if (!WS || WS->m_isSpecialWorkspace || WS->m_id < DesktopRow::FIRST)
+                    continue;
+                if (WS->m_monitor.lock() != monitor) {
+                    f.elsewhere.push_back(sc<int>(WS->m_id));
+                    continue;
+                }
+                f.existing.push_back(sc<int>(WS->m_id));
+                if (WS->getWindowCount() > 0)
+                    f.populated.push_back(sc<int>(WS->m_id));
+            }
+            return DesktopRow::row(f);
+        }
+
+        StripModel::SSettings stripSettings() {
+            return {.smooth = Config::getValue<Hyprlang::INT>(KEY_SMOOTH) != 0,
+                    .ticks  = std::clamp(sc<int>(Config::getValue<Hyprlang::INT>(KEY_TICKS)), 1, 10),
+                    .sticky = Config::getValue<Hyprlang::INT>(KEY_STICKY) != 0,
+                    .bounce = Config::getValue<Hyprlang::INT>(KEY_BOUNCE) != 0};
+        }
+
+        // FROM WHERE IT IS (user, 2026-11-02: "I always want stuff to be
+        // reversible"). Hyprland starts a switch by sliding the desktop going
+        // out from wherever it is, but WARPS the one coming in a whole screen
+        // away first: scrolling back mid-slide, or on to the next one, jumped.
+        // The one coming in now starts right beside the one going out, where
+        // it is this frame: back mid-way, it is the desktop that was leaving,
+        // turned around where it stood; on to a third, it follows the second
+        // in like the next card in a strip. The same slide, toward the same
+        // place (setValue: no warp, so the one going out is still drawn).
+        void continueFromHere(const PHLWORKSPACE& in) {
+            const auto MONITOR = in->m_monitor.lock();
+            if (!MONITOR || !in->m_renderOffset)
+                return;
+            const Vector2D START = in->m_renderOffset->value(); // the side it comes from, a screen away
+            if (std::abs(START.x) < 0.5 && std::abs(START.y) < 0.5)
+                return; // not a slide (fade, or no animation)
+            // The one going out heads exactly the other way, a screen off. Two
+            // can (a third notch: the first desktop is still sliding away too):
+            // it is the one most on screen.
+            PHLWORKSPACE out;
+            for (const auto& REF : State::workspaceState()->workspaces()) {
+                const auto WS = REF.lock();
+                if (!WS || WS == in || WS->m_isSpecialWorkspace || WS->m_monitor != MONITOR || !WS->m_renderOffset || !WS->m_renderOffset->isBeingAnimated())
+                    continue;
+                const Vector2D GOAL = WS->m_renderOffset->goal();
+                if (std::abs(GOAL.x + START.x) > 1.0 || std::abs(GOAL.y + START.y) > 1.0)
+                    continue;
+                if (!out || WS->m_renderOffset->value().size() < out->m_renderOffset->value().size())
+                    out = WS;
+            }
+            if (!out)
+                return;
+            const Vector2D NOW = out->m_renderOffset->value();
+            if (std::abs(NOW.x) < 0.5 && std::abs(NOW.y) < 0.5)
+                return; // it was at rest: an ordinary switch
+            in->m_renderOffset->setValue(NOW + START);
+        }
 
         // For `debug desktop`.
         ECause      g_lastCause = ECause::Other;
@@ -105,12 +189,51 @@ namespace ScrollOverview::DesktopSwitch {
             return SNAP;
         }
 
+        // ANIMATION:DESKTOP_JUMP_THROUGH (user, 2026-11-02): a key or the dock
+        // jumping several desktops slides past the ones between.
+        bool jumpThrough() {
+            const auto CAUSE = classify(g_ownDispatch > 0, bindRunning(), g_focusDepth > 0);
+            return (CAUSE == ECause::Keyboard || CAUSE == ECause::Focus) && Config::getValue<Hyprlang::INT>(KEY_JUMP) != 0;
+        }
+
         // ---- hooks
+        // Whose slide a switch is: the strip's own switch, or one the strip
+        // claims (it is moving, or a jump through) -- Hyprland's half lands at
+        // once and the strip draws; a cause whose switch is off lands at once;
+        // otherwise Hyprland's, continued from where things are. OUT starts
+        // first (changeWorkspace), with the new desktop already active.
         using origStartAnimation = void (*)(PHLWORKSPACE, Animation::Workspace::eAnimationType, bool, bool, std::optional<std::string>);
         void hkStartAnimation(PHLWORKSPACE ws, Animation::Workspace::eAnimationType type, bool left, bool instant, std::optional<std::string> style) {
-            if (!instant && ws && decide(ws, type))
+            const bool IN  = type == Animation::Workspace::ANIMATION_TYPE_IN;
+            const auto MON = ws && !ws->m_isSpecialWorkspace ? ws->m_monitor.lock() : PHLMONITOR{};
+            int        to  = 0;
+            if (!instant && MON && MON->m_activeWorkspace) {
+                to = sc<int>(MON->m_activeWorkspace->m_id);
+                if (!IN) {
+                    g_switchFrom       = sc<int>(ws->m_id);
+                    g_switchFromOffset = ws->m_renderOffset ? ws->m_renderOffset->value() : Vector2D{};
+                }
+            }
+            const int  FROM  = g_switchFrom;
+            bool       strip = false;
+            if (!instant && ws && decide(ws, type)) {
                 instant = true;
+                if (IN && MON)
+                    DesktopStrip::finishNow();
+            } else if (!instant && MON && !scrollOverviewForMonitor(MON) && DesktopStrip::claims(MON, FROM, to, jumpThrough())) {
+                instant = true;
+                strip   = true;
+            }
             rc<origStartAnimation>(g_startAnimHook->m_original)(ws, type, left, instant, style);
+            if (IN) {
+                if (strip)
+                    DesktopStrip::take(MON, FROM, to, g_switchFromOffset, jumpThrough());
+                g_switchFrom = 0;
+            }
+            if (instant || !ws || ws->m_isSpecialWorkspace || !ws->m_renderOffset)
+                return;
+            if (IN)
+                continueFromHere(ws);
         }
 
         // Focus moving to a window: when its desktop is not the visible one,
@@ -152,18 +275,6 @@ namespace ScrollOverview::DesktopSwitch {
                 return nullptr;
             return hook;
         }
-
-        std::vector<WORKSPACEID> desktopsOn(const PHLMONITOR& monitor, bool other) {
-            std::vector<WORKSPACEID> out;
-            for (const auto& REF : State::workspaceState()->workspaces()) {
-                const auto WS = REF.lock();
-                if (!WS || WS->m_isSpecialWorkspace || WS->m_id < 1)
-                    continue;
-                if ((WS->m_monitor.lock() == monitor) != other)
-                    out.push_back(WS->m_id);
-            }
-            return out;
-        }
     }
 
     CFocusScope::CFocusScope() {
@@ -180,13 +291,8 @@ namespace ScrollOverview::DesktopSwitch {
             const auto MONITOR = Desktop::focusState()->monitor();
             if (!MONITOR || !MONITOR->m_activeWorkspace)
                 return {};
-            const auto  HERE    = desktopsOn(MONITOR, false);
-            const auto  THERE   = desktopsOn(MONITOR, true);
-            WORKSPACEID highest = 0;
-            for (const auto ID : HERE)
-                highest = std::max(highest, ID);
-            const auto CURRENT = MONITOR->m_activeWorkspace->m_id;
-            const auto TARGET  = stepTarget(CURRENT, dir, std::max(highest, CURRENT), [&](int64_t id) { return std::ranges::find(THERE, id) != THERE.end(); });
+            const int CURRENT = sc<int>(MONITOR->m_activeWorkspace->m_id);
+            const int TARGET  = DesktopRow::neighbour(rowOn(MONITOR, CURRENT), CURRENT, dir);
             if (TARGET == CURRENT)
                 return {};
 
@@ -230,13 +336,23 @@ namespace ScrollOverview::DesktopSwitch {
         return WANT != 0 && g_pInputManager->getModsFromAllKBs() == WANT;
     }
 
+    void preRender(PHLMONITOR monitor) {
+        if (!monitor)
+            return;
+        // The overview opening owns the desktops: the row lands first.
+        if (DesktopStrip::driving(monitor) && scrollOverviewForMonitor(monitor))
+            DesktopStrip::finishNow();
+        DesktopStrip::preRender(monitor);
+    }
+
     std::string debugReport() {
-        return std::format("desktop: scroll_desktops={} mods={} animate keyboard={} focus={} | last switch ws {} cause {} {} | snapped {} left to Hyprland {} | notch bank {} pending {}",
+        return DesktopStrip::debugReport() + " | " + std::format("desktop: scroll_desktops={} mods={} animate keyboard={} focus={} | last switch ws {} cause {} {} | snapped {} left to Hyprland {} | notch bank {} pending {}",
                            Config::getScrollDesktops(), Config::getScrollDesktopsMods(), Config::getAnimateDesktopKeyboard(), Config::getAnimateDesktopFocus(),
                            g_lastWs, causeName(g_lastCause), g_lastSnap ? "snapped" : "left to Hyprland", g_snaps, g_animated, g_notches.accum, g_notches.pending);
     }
 
     void init() {
+        DesktopStrip::init(rowOn, [](const PHLMONITOR&, int id) { (void)::Config::Actions::changeWorkspace(std::to_string(id)); });
         g_startAnimHook = hookByMangledName(
             "_ZN9Animation9Workspace14startAnimationEN9Hyprutils6Memory14CSharedPointerI10CWorkspaceEENS0_14eAnimationTypeEbbSt8optionalINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE",
             rc<void*>(hkStartAnimation));
@@ -247,10 +363,36 @@ namespace ScrollOverview::DesktopSwitch {
 
         // Every wheel event, ahead of scroll_event_delay's throttle (which only
         // lets the BIND see the first of a burst): the notch bank.
-        g_axis = Event::bus()->m_events.input.mouse.axis.listen([](IPointer::SAxisEvent e, Event::SCallbackInfo&) {
+        g_axis = Event::bus()->m_events.input.mouse.axis.listen([](IPointer::SAxisEvent e, Event::SCallbackInfo& info) {
             if (e.source != WL_POINTER_AXIS_SOURCE_WHEEL || e.axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
                 return;
             const int V120 = e.deltaDiscrete != 0 ? sc<int>(e.deltaDiscrete) : sc<int>(std::lround(e.delta * 8.0));
+            // THE WHEEL MOVES THE ROW (DesktopStrip.hpp; user, 2026-11-02: "if
+            // I do two ticks it needs to be able to quickly go through two
+            // desktops or more"). On the chord, outside the overview, the wheel
+            // is ours and the event goes no further: the bind it would fire is
+            // throttled by binds:scroll_event_delay (300 ms), which threw away
+            // every notch of a quick burst but the first. Down = next, as the
+            // bind.
+            if (const auto MONITOR = Desktop::focusState()->monitor();
+                !info.cancelled && MONITOR && !openScrollOverviewForMonitor(MONITOR) && overviewWheelSwitchesDesktops(e)) {
+                info.cancelled = true;
+                if (DesktopStrip::onWheel(MONITOR, V120, stripSettings()))
+                    return;
+                // A named desktop shown (not in the row): a desktop per notch.
+                static int      s_acc  = 0;
+                static uint32_t s_last = 0;
+                if (e.timeMs < s_last || e.timeMs - s_last > 1000 || (s_acc > 0 && V120 < 0) || (s_acc < 0 && V120 > 0))
+                    s_acc = 0;
+                s_last = e.timeMs;
+                s_acc += V120;
+                while (std::abs(s_acc) >= NOTCH) {
+                    const int DIR = s_acc > 0 ? 1 : -1;
+                    s_acc -= DIR * NOTCH;
+                    step(DIR);
+                }
+                return;
+            }
             // The bind fired on part of a notch and this event completes it.
             if (const int DIR = g_notches.feed(V120, e.timeMs); DIR != 0)
                 step(DIR);
@@ -258,6 +400,7 @@ namespace ScrollOverview::DesktopSwitch {
     }
 
     void shutdown() {
+        DesktopStrip::shutdown();
         g_axis.reset();
         for (auto** hook : {&g_startAnimHook, &g_fullFocusHook, &g_actionFocusHook}) {
             if (*hook)

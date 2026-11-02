@@ -898,9 +898,25 @@ static void registerConfigValuesFor() {
     // the desktops by number, empty ones included; 50-desktop-scroll.lua binds it
     // (replacing whatever had <mods>+mouse_down/up) while this is on.
     addKey(makeShared<CBoolValue>(KEY("binds:scroll_desktops"),
-                                  "<mods>+scroll wheel steps to the next / previous desktop on the focused monitor, empty ones included (one per notch, 1 to max(10, highest), no wrap)", true));
+                                  "<mods>+scroll wheel moves through the desktops on the focused monitor, empty ones included, no wrap -- the row of desktops slides with the wheel", true));
     addKey(makeShared<CStringValue>(KEY("binds:scroll_desktops_mods"), "the modifiers for binds:scroll_desktops, e.g. SUPER or SUPER + ALT",
                                     Hyprlang::STRING{"SUPER"}));
+    // THE DESKTOP STRIP (DesktopStrip.hpp, DesktopRowModel.hpp; user,
+    // 2026-11-02): how the wheel moves the row and which desktops are in it.
+    addKey(makeShared<CBoolValue>(KEY("binds:scroll_desktops_smooth"),
+                                  "the row of desktops follows the wheel continuously (two notches a desktop) and settles on the nearest once the wheel stops; false = a desktop per binds:scroll_desktops_ticks notches",
+                                  false));
+    addKey(makeShared<CIntValue>(KEY("binds:scroll_desktops_ticks"),
+                                 "wheel notches per desktop while binds:scroll_desktops_smooth is off; a notch short shows as a peek toward the next desktop", 1,
+                                 SIntValueOptions{.min = 1, .max = 10}));
+    addKey(makeShared<CBoolValue>(KEY("binds:scroll_desktops_sticky"),
+                                  "after the first desktop of a quick scroll, each further one takes more push (two notches more, or a short dead zone when smooth); let go after 0.4 s still",
+                                  false));
+    addKey(makeShared<CBoolValue>(KEY("binds:scroll_desktops_stop_at_empty"),
+                                  "the wheel stops at the first empty desktop past the last one with windows, as the overview does; false = it goes on to 10 or the highest desktop",
+                                  true));
+    addKey(makeShared<CBoolValue>(KEY("binds:scroll_desktops_populated_only"),
+                                  "the wheel visits only desktops with windows, the first empty one after them and the one shown; false = every desktop number between", false));
     // Desktop switches by cause: off makes that kind of switch instant (no
     // slide or fade), the other kind unaffected. A no-op while Hyprland's
     // workspaces animation is off (Omarchy's default).
@@ -909,6 +925,10 @@ static void registerConfigValuesFor() {
     addKey(makeShared<CBoolValue>(KEY("animation:desktop_focus"),
                                   "animate desktop switches made by focus moving to a window on another desktop (an app asking for focus, a dock click, a notification, focuswindow)",
                                   true));
+    addKey(makeShared<CBoolValue>(KEY("animation:desktop_row_bounce"),
+                                  "the row of desktops stretches a little past its first and last desktop and springs back", true));
+    addKey(makeShared<CBoolValue>(KEY("animation:desktop_jump_through"),
+                                  "a key or dock jump of several desktops (Super+5 from desktop 1) slides through the desktops between", false));
     // MOTION BLUR, PER ANIMATION (user, 2026-09-30). Each site smears a share
     // of its frame-to-frame motion (strength, 0..1; 0 = that site off) shaped
     // over the animation by `fade`: early (full at the start, gone by the

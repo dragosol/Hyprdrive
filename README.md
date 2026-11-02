@@ -64,9 +64,14 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
 
 ### Desktops
 
-- **Super+scroll** walks the desktops one per wheel notch, empty ones included
+- **Super+scroll** moves the row of desktops itself, empty ones included
   (`binds:scroll_desktops`, modifier `binds:scroll_desktops_mods`; it replaces
-  whatever had that chord, such as Omarchy's "scroll active workspace").
+  whatever had that chord, such as Omarchy's "scroll active workspace"). One
+  spring carries the row: quick notches add up without a stop, scrolling back
+  turns it round where it is, several desktops slide past on a fast spin,
+  motion blur and all. `binds:scroll_desktops_smooth`, `_ticks`, `_sticky`,
+  `_stop_at_empty` and `_populated_only` shape it; `animation:desktop_row_bounce`
+  and `animation:desktop_jump_through` are its two animation switches.
 - **Push a window to the next desktop:** drag a window, file or folder to the
   left or right edge of the screen and hold it there (`drag:spring_edges`).
   Keep holding to keep going.
@@ -421,7 +426,7 @@ a line there overrides the generated one above it.
 | `focus` | `l`, `r`, `u`, `d` | Mosaic-aware focus by direction |
 | `swap` | `l`, `r`, `u`, `d` | Mosaic-aware swap with the neighbour in that direction (Hyprland's own swap elsewhere) |
 | `gesture` | a gesture spec | bind a trackpad gesture to a Hyprdrive action (see Gestures) |
-| `desktop` | `next`, `prev` | the next / previous desktop by number, empty ones included (Super+scroll, `binds:scroll_desktops`) |
+| `desktop` | `next`, `prev` | the next / previous desktop along the focused monitor's row (`binds:scroll_desktops_stop_at_empty` / `_populated_only`; Super+scroll, `binds:scroll_desktops`) |
 | `settings` | `open`, `toggle`, `close`, `pane <id>`, `icons <app>` | open the settings |
 | `debug` | `frames`, `mem`, `gesture <script>`, ... | diagnostics and test hooks, see [docs/DEBUG.md](docs/DEBUG.md) |
 
