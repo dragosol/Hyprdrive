@@ -44,6 +44,8 @@
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
+
+#include <utility>
 }
 
 namespace {
@@ -1068,6 +1070,23 @@ std::optional<std::pair<std::string, std::string>> boundAction(const std::string
     try {
         ref = std::stoi(luaRef);
     } catch (...) { return std::nullopt; }
+    // LUA_REGISTRYINDEX is a HEADER constant (5.4: -1001000, 5.5:
+    // -1073742823). Built against another Lua than the one Hyprland runs, it
+    // is a wild stack slot and lua_rawgeti segfaults the compositor
+    // (dragosol/Hyprdrive#1). The Makefile picks Hyprland's own Lua
+    // (scripts/lua_pc.sh); a build that still does not match lists no Lua
+    // binds instead, and says why once.
+    if (sc<int>(lua_version(g_bindLua)) != LUA_VERSION_NUM) {
+        static bool warned = false;
+        if (!std::exchange(warned, true)) {
+            const int RUN = sc<int>(lua_version(g_bindLua));
+            HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE,
+                                         std::format("[hyprdrive] built against Lua {}.{}, but Hyprland runs Lua {}.{}: rebuild hyprdrive (make) to list Lua binds",
+                                                     LUA_VERSION_NUM / 100, LUA_VERSION_NUM % 100, RUN / 100, RUN % 100),
+                                         CHyprColor{1.0, 0.6, 0.2, 1.0}, 8000);
+        }
+        return std::nullopt;
+    }
     lua_rawgeti(g_bindLua, LUA_REGISTRYINDEX, ref);
     const void* FN = lua_topointer(g_bindLua, -1);
     lua_pop(g_bindLua, 1);

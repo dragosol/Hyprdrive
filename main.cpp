@@ -102,6 +102,7 @@ using namespace Hyprutils::String;
 #include "FingerSwipe.hpp"
 #include "Spring.hpp"
 #include "HotCorner.hpp"
+#include "DesktopStrip.hpp"
 #include "DesktopSwitch.hpp"
 #include "Ripple.hpp"
 #include "BorderFade.hpp"
@@ -2261,6 +2262,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // canvas desktop a swipe brings in starts past its overhang (Mosaic.cpp).
         ScrollOverview::DesktopSwitch::preRender(monitor);
         ScrollOverview::Mosaic::preRender(monitor);
+        // After Mosaic's: a live swipe's place, for its release (DesktopStrip.hpp).
+        ScrollOverview::DesktopStrip::sampleSwipe(monitor);
 
         // Layout motion blur (FlightBlur.hpp). The overview draws its own
         // windows; there, only the sweep runs.
