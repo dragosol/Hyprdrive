@@ -286,16 +286,19 @@ namespace ScrollOverview::Mosaic {
         const auto                                   NOW     = std::chrono::steady_clock::now();
         if (NOW - checked > std::chrono::seconds(1)) {
             checked = NOW;
-            std::error_code ec;
-            on      = std::filesystem::exists(ScrollOverview::DebugPaths::path("hyprdrive-mosaic.on"), ec);
+            on      = ScrollOverview::DebugPaths::flagOn("hyprdrive-mosaic.on");
         }
         return on;
     }
     static void trace(const std::string& line) {
         if (!traceOn())
             return;
-        if (std::ofstream f(ScrollOverview::DebugPaths::path("hyprdrive-mosaic.log"), std::ios::app); f)
-            f << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() % 100000000 << ' ' << line << '\n';
+        if (FILE* const F = ScrollOverview::DebugPaths::openLog("hyprdrive-mosaic.log")) {
+            std::fprintf(F, "%lld %s\n",
+                         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() % 100000000),
+                         line.c_str());
+            std::fclose(F);
+        }
     }
 
     // THE INFINITE CANVAS (MosaicCanvas.hpp; user, 2026-10-26). Off: a mosaic

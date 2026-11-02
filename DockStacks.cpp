@@ -1704,10 +1704,10 @@ namespace ScrollOverview::Stacks {
     }
 
     void traceEvent(const std::string& what) {
-        struct stat st{};
-        if (::stat(ScrollOverview::DebugPaths::path("hyprdrive-stacklog.on").c_str(), &st) != 0)
+        // Ours only, in the private runtime directory (DebugPaths.hpp).
+        if (!ScrollOverview::DebugPaths::flagOn("hyprdrive-stacklog.on"))
             return;
-        if (FILE* f = std::fopen(ScrollOverview::DebugPaths::path("hyprdrive-stack.log").c_str(), "a")) {
+        if (FILE* f = ScrollOverview::DebugPaths::openLog("hyprdrive-stack.log")) {
             const auto MS = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() % 100000000;
             std::fprintf(f, "%08lld %s\n", sc<long long>(MS), what.c_str());
             std::fclose(f);

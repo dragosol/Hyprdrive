@@ -41,7 +41,7 @@ namespace Prof {
         // The sentinel file is read once per plugin LOAD, so `touch` it and
         // hot-reload the plugin and the same instrument is live.
         static const bool ON = std::getenv("HYPRDRIVE_PROFILE") != nullptr || std::getenv("SCROLLOVERVIEW_PROFILE") != nullptr ||
-                               ::access(ScrollOverview::DebugPaths::path("hyprdrive-profile.on").c_str(), F_OK) == 0;
+                               ScrollOverview::DebugPaths::flagOn("hyprdrive-profile.on"); // ours only (DebugPaths.hpp)
         return ON;
     }
 

@@ -104,7 +104,7 @@ struct SDrawn {
 static void zdbg(const char* fmt, ...) {
     if (!Config::getValue<bool>(KEY_FLIGHT_LOG))
         return;
-    if (FILE* F = fopen(ScrollOverview::DebugPaths::path("ovdbg.log").c_str(), "a")) {
+    if (FILE* F = ScrollOverview::DebugPaths::openLog("ovdbg.log")) {
         va_list ap;
         va_start(ap, fmt);
         vfprintf(F, fmt, ap);

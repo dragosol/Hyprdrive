@@ -136,11 +136,15 @@ acceleration. The deltas and hold durations are taken exactly as given.
 ## Debug files
 
 Every debug log, and every file whose presence switches one on, lives in the
-compositor's `$XDG_RUNTIME_DIR` (`DebugPaths.hpp`). If that is unset or not a
-directory, they live in `/tmp`. They used to be fixed `/tmp` paths shared by
-every Hyprland on the machine, so one test instance's plugin load truncated
-another's compat log. In the headless harness, `$XDG_RUNTIME_DIR` is the
-instance's own `/tmp/hl-<name>/rt`.
+compositor's `$XDG_RUNTIME_DIR` (`DebugPaths.hpp`), and only there: it must be
+a directory of yours that nobody else can enter (mode 0700). If it is unset or
+not that, debugging is off -- there is no `/tmp` fallback. A switch counts only
+if it is a regular file of yours that nobody else can write, and every log is
+created (or narrowed to) mode 0600 and never opened through a symlink. Shared
+`/tmp` paths let another local account switch on logs of search text and
+folder paths, and the logs were readable at umask 022 (marketplace review,
+#11392). The profile log records the query's length, not its text. In the
+headless harness, `$XDG_RUNTIME_DIR` is the instance's own `/tmp/hl-<name>/rt`.
 
 | file | what it is |
 | --- | --- |
