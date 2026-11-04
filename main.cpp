@@ -2406,10 +2406,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // the pill (Dock::pointerHeldByClient, user 2026-10-19).
         const bool LOCKED = ScrollOverview::Dock::pointerHeldByClient();
         // Mosaic's corner resize: the resize cursor over a grabbable corner.
-        ScrollOverview::Mosaic::onMove(!HIT || LOCKED || ScrollOverview::Dock::occupiesPointer(HIT->first, HIT->second) || g_pSessionLockManager->isSessionLocked());
+        ScrollOverview::Mosaic::onMove(!HIT || LOCKED || ScrollOverview::Dock::occupiesPointer(HIT->first, HIT->second) || ScrollOverview::Stacks::ownsHover(HIT->first, HIT->second) ||
+                                       g_pSessionLockManager->isSessionLocked());
         // The zoomed-out canvas (Mosaic::zoomOwnsPointer): no window under the
         // pointer's full-size place gets the motion or focus, and the arrow
         // (no client's text cursor) while it lasts.
+        // Through the bar: the window under it takes focus (Mosaic.hpp).
+        if (HIT && !g_pSessionLockManager->isSessionLocked())
+            ScrollOverview::Mosaic::focusUnderBar();
         if (ScrollOverview::Mosaic::zoomOwnsPointer()) {
             info.cancelled = true;
             setDockCursor(true);
@@ -2442,7 +2446,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // that (the cursor itself has already moved). Not with the overview up
         // (it owns its own input), and not during a drag-and-drop, whose target
         // Hyprland must keep tracking.
-        const bool ON_CHROME = !scrollOverviewForMonitor(MONITOR) && !ScrollOverview::DockDrop::dndInProgress() && ScrollOverview::Dock::occupiesPointer(MONITOR, LOCAL);
+        // An open fan's gaps count too (Stacks::ownsHover): crossing between
+        // its papers must not focus the window under them.
+        const bool ON_CHROME = !scrollOverviewForMonitor(MONITOR) && !ScrollOverview::DockDrop::dndInProgress() &&
+            (ScrollOverview::Dock::occupiesPointer(MONITOR, LOCAL) || ScrollOverview::Stacks::ownsHover(MONITOR, LOCAL));
         if (ON_CHROME)
             info.cancelled = true;
         // The cancel also skips Hyprland's cursor-shape update, so a pointer that

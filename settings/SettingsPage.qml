@@ -305,6 +305,7 @@ Item {
     case "isolateOvApplies": return !kb("plugin:hyprdrive:dock:isolate_workspaces")
     case "roomApplies": return kb("plugin:hyprdrive:dock:enabled") && !kb("plugin:hyprdrive:dock:autohide")
     case "motionOn": return kn("plugin:hyprdrive:anim_scale") > 0.001
+    case "dockMenuAnimOn": return kb("plugin:hyprdrive:dock:menu_animation") && kn("plugin:hyprdrive:anim_scale") > 0.001
     case "compositorAnimOn": return kb("animations:enabled")
     case "desktopSlideOn": return kb("animations:enabled") && kb("animations:workspaces")
     case "blurOn": return kb("plugin:hyprdrive:motion_blur:enabled")

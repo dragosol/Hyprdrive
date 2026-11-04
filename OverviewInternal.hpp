@@ -844,8 +844,10 @@ inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry) {
 // to its root) -- which BROWSES: the menu's root, the folder shortcuts, the
 // agent help rows (FEATURE-INVENTORY D5/D6/D9). Every "are there results to
 // walk into" question asks this one, so the pane and the keys cannot disagree.
+// The focused-and-empty browse is search:browse_on_click (off by default,
+// user 2026-11-04): off, the pane is up only for a query or a submenu.
 inline bool overviewSearchPaneUp() {
-    return !g_search.query.text.empty() || g_search.query.active || OmarchySearch::canNavigateMenuBack();
+    return !g_search.query.text.empty() || (g_search.query.active && ScrollOverview::Config::getSearchBrowseOnClick()) || OmarchySearch::canNavigateMenuBack();
 }
 
 // After ANY step through the menu tree -- a drill, the Back row, Esc, Backspace
@@ -857,8 +859,18 @@ inline bool overviewSearchPaneUp() {
 // The walk up ends in the root browse, not in an empty pane: at the root the
 // search counts as focused-and-empty, which lists the menu's root.
 inline void overviewSettleMenuStep(const std::string& from = {}) {
-    if (!OmarchySearch::canNavigateMenuBack())
+    if (!OmarchySearch::canNavigateMenuBack()) {
+        if (!ScrollOverview::Config::getSearchBrowseOnClick()) {
+            // No root browse to land in: back to the bare search field.
+            g_search.nav.zone              = EOverviewNavZone::Search;
+            g_search.nav.selection         = -1;
+            g_search.nav.explicitSelection = false;
+            g_search.nav.intent            = ESearchIntent::Typing;
+            g_search.nav.hoverIndex        = -1;
+            return;
+        }
         g_search.query.active = true;
+    }
     g_search.nav.zone               = EOverviewNavZone::Result;
     g_search.nav.explicitSelection  = true;
     g_search.nav.selectFirstPending = false;

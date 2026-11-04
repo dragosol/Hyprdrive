@@ -239,6 +239,12 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
             return;
 
         const bool RELEASESPOINTERGRAB = event.state == WL_POINTER_BUTTON_STATE_RELEASED;
+        // Whatever this release is for, the pill's squeeze lets go with it.
+        if (RELEASESPOINTERGRAB) {
+            searchPillPress(false);
+            damage();
+            requestInputFrame();
+        }
         auto       releasePointerGrab  = Hyprutils::Utils::CScopeGuard([this, RELEASESPOINTERGRAB] {
             if (RELEASESPOINTERGRAB && g_pointerGrabOverview == this)
                 g_pointerGrabOverview = nullptr;
@@ -455,6 +461,7 @@ void CScrollOverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallba
                     g_search.nav.zone        = EOverviewNavZone::Search;
                     g_search.nav.selection   = -1;
                     g_search.pointer.uiPress = true;
+                    searchPillPress(true); // the playful squeeze (scrollOverview.cpp, THE PILL PLAYS)
                     damage();
                     requestInputFrame();
                     return;
@@ -672,6 +679,9 @@ void CScrollOverview::onMouseAxis(IPointer::SAxisEvent e, Event::SCallbackInfo& 
             ScrollOverview::Stacks::noteAxis(e.delta, e.source == WL_POINTER_AXIS_SOURCE_WHEEL);
         if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && e.delta != 0.0 &&
             ScrollOverview::Stacks::scroll(pMonitor.lock(), getOverviewMousePosLocal(pMonitor.lock()), e.delta < 0.0))
+            return;
+        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && e.delta != 0.0 &&
+            ScrollOverview::Dock::menuScroll(pMonitor.lock(), getOverviewMousePosLocal(pMonitor.lock()), e.delta < 0.0))
             return;
 
         const auto ACTION = e.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL ? ScrollOverview::Config::getHorizontalScrollAction(layout) :
