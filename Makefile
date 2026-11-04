@@ -4,6 +4,21 @@ CXX ?= g++
 # must match the liblua the compositor runs. Arch has `lua` 5.5 (Hyprland's) AND
 # `lua54` (via libinput); the old "lua5.4 whenever it exists" pick crashed
 # `hyprctl hyprdrive-binds` (dragosol/Hyprdrive#1).
+# THE PREREQUISITES (scripts/prereqs.sh): before anything compiles, whatever the
+# build needs and the system lacks is installed (it asks first; HYPRDRIVE_YES=1
+# does not), and where the distro ships no Hyprland headers of the installed
+# version (Fedora) they are made from Hyprland's source into a private SDK,
+# whose pkgconfig dir comes back here. Not for the goals that compile nothing.
+ifneq ($(if $(MAKECMDGOALS),$(filter-out install-only uninstall clean,$(MAKECMDGOALS)),all),)
+HYPRLAND_SDK_PC := $(shell bash scripts/prereqs.sh --make)
+ifneq ($(.SHELLSTATUS),0)
+$(error Hyprdrive cannot be built until the prerequisites above are installed)
+endif
+ifneq ($(HYPRLAND_SDK_PC),)
+export PKG_CONFIG_PATH := $(HYPRLAND_SDK_PC)$(if $(PKG_CONFIG_PATH),:$(PKG_CONFIG_PATH))
+endif
+endif
+
 LUA_PC := $(shell sh scripts/lua_pc.sh)
 
 # Parallel by default: the edit->build->hyprrestart->gate loop lives and dies

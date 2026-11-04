@@ -218,10 +218,18 @@ switches, the overview, the dock) or turned off.
   Lua, though, so nothing loads them; `make install` says so and suggests what
   to do.
 - **To build:** a C++23 compiler with `#embed` (GCC 15+ or Clang 19+), `make`
-  and `pkg-config`. You also need the development files for Hyprland 0.56
-  (its headers come with the Hyprland package on most distros), pixman,
-  libdrm, pango/cairo, fontconfig, libinput, libudev, wayland-server,
-  xkbcommon, libsystemd, gio and Lua 5.4.
+  and `pkg-config`, Hyprland's headers for the version you run, and the
+  development files of pixman, libdrm, pango/cairo, fontconfig, libinput,
+  libudev, wayland-server, xkbcommon, libsystemd, gio, glslang and Lua.
+  **You do not have to gather these yourself:** `make` (and `hyprdrive
+  update`) runs `scripts/prereqs.sh` first, which lists whatever is missing,
+  asks, and installs it with your package manager (pacman, dnf, zypper or
+  apt). Where the distro ships no Hyprland headers (Fedora's Hyprland COPR
+  builds have no `hyprland-devel`), it makes them once per Hyprland version
+  from Hyprland's source at the exact commit your Hyprland was built from,
+  into `~/.local/share/hyprdrive/sdk`. Nothing of Hyprland is built or
+  installed system-wide. On a system without `make` at all, run
+  `bash scripts/prereqs.sh` first.
 - **Optional at runtime:**
   - Quickshell (`qs`) 0.3 and Python 3, for the settings app
   - an icon font such as a Nerd Font. Without one, the plugin draws its own

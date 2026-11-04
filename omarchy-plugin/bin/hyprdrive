@@ -333,9 +333,9 @@ def check(refresh=False):
 
 
 # ---- installing ---------------------------------------------------------------
-def run(cmd, cwd=None):
+def run(cmd, cwd=None, env=None):
     print("$ " + " ".join(shlex.quote(c) for c in cmd), flush=True)
-    return subprocess.call(cmd, cwd=cwd)
+    return subprocess.call(cmd, cwd=cwd, env=env)
 
 
 def git(src, *args, capture=False):
@@ -407,8 +407,20 @@ def install(target_ref, label, yes, info):
     if FLAVOR == "omarchy":
         if run(["make", "all"], cwd=src) != 0 or run(["make", "install"], cwd=src) != 0:
             return 1
-    elif run(["make", "install", "PREFIX=" + prefix], cwd=src) != 0:
-        return 1
+    else:
+        # The build installs what it is missing first (scripts/prereqs.sh:
+        # compilers, -devel packages, and on distros without Hyprland headers a
+        # private SDK made from Hyprland's source). --yes answers its question too.
+        env = dict(os.environ)
+        if yes:
+            env["HYPRDRIVE_YES"] = "1"
+        # First on its own: it installs `make` itself when that is missing.
+        if (src / "scripts/prereqs.sh").exists() and run(["bash", "scripts/prereqs.sh"], cwd=src, env=env) != 0:
+            print("The build's prerequisites are not there yet. Install what it lists, then run `hyprdrive update` again.")
+            return 1
+        if run(["make", "install", "PREFIX=" + prefix], cwd=src, env=env) != 0:
+            print("The build failed. If it says what is missing, install that and run `hyprdrive update` again.")
+            return 1
     so = pathlib.Path(prefix) / "lib/hyprdrive/hyprdrive.so"
     try:
         CHECK_CACHE.unlink()
