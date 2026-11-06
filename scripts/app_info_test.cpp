@@ -2,7 +2,7 @@
 // that is installed is asked in turn, so a box that carries more than one
 // (fedora with dpkg installed, E11) still finds the owner. The stand-ins are
 // shell scripts on a PATH of their own; the real tools on the host never run.
-#include "../AppInfo.hpp"
+#include "../src/AppInfo.hpp"
 
 #include <chrono>
 #include <cstdio>

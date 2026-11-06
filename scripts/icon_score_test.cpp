@@ -1,6 +1,6 @@
 // IconScore.hpp: which file of an icon the index keeps (G6 -- the largest SVG
 // design, not whichever size directory the walk reached first).
-#include "../IconScore.hpp"
+#include "../src/IconScore.hpp"
 
 #include <cstdio>
 #include <string>

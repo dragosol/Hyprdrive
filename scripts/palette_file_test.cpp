@@ -2,7 +2,7 @@
 // theme:palette_file accepts -- Omarchy's colors.toml, a pywal colors.json and
 // a matugen export (2.x and 3.x nesting) -- each land on the right roles, and
 // a role a file does not name stays unset for Config.cpp to derive.
-#include "../PaletteFile.hpp"
+#include "../src/PaletteFile.hpp"
 
 #include <cstdio>
 #include <string>

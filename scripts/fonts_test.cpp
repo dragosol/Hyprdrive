@@ -11,8 +11,8 @@
 //   host       the machine's real fonts: whatever is chosen is installed,
 //              covers at least MIN_COVERAGE of the glyphs and the anchor, and
 //              "builtin" chooses nothing.
-#include "../Fonts.hpp"
-#include "../Glyphs.hpp"
+#include "../src/Fonts.hpp"
+#include "../src/Glyphs.hpp"
 
 #include <fontconfig/fontconfig.h>
 

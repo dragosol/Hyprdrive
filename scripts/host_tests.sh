@@ -67,13 +67,13 @@ run() {
 
 run drop_table_test scripts/drop_table_test.cpp
 # shellcheck disable=SC2046
-run geometry_test scripts/geometry_test.cpp OverviewGeometry.cpp $(pkg-config --cflags --libs hyprutils)
+run geometry_test scripts/geometry_test.cpp src/OverviewGeometry.cpp $(pkg-config --cflags --libs hyprutils)
 run strip_scrolling_test scripts/strip_scrolling_test.cpp $(pkg-config --cflags --libs hyprutils)
 run search_letters_test scripts/search_letters_test.cpp
 run workspace_plan_test scripts/workspace_plan_test.cpp
 run strip_layout_test scripts/strip_layout_test.cpp
 run tool_search_test scripts/tool_search_test.cpp
-run stack_model_test scripts/stack_model_test.cpp StackModel.cpp
+run stack_model_test scripts/stack_model_test.cpp src/StackModel.cpp
 run mount_sort_test scripts/mount_sort_test.cpp
 run gvfs_mount_test scripts/gvfs_mount_test.cpp
 run mosaic_pack_test scripts/mosaic_pack_test.cpp
@@ -90,22 +90,22 @@ run desktop_row_test scripts/desktop_row_test.cpp
 run desktop_strip_test scripts/desktop_strip_test.cpp
 run submap_borrow_test scripts/submap_borrow_test.cpp
 # shellcheck disable=SC2046
-run builtin_icons_test scripts/builtin_icons_test.cpp BuiltinIcons.cpp $(pkg-config --cflags --libs librsvg-2.0)
+run builtin_icons_test scripts/builtin_icons_test.cpp src/BuiltinIcons.cpp --embed-dir=. $(pkg-config --cflags --libs librsvg-2.0)
 # shellcheck disable=SC2046
-run stack_reader_test scripts/stack_reader_test.cpp StackReader.cpp StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
-run omarchy_search_test scripts/omarchy_search_test.cpp OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
-run app_info_test scripts/app_info_test.cpp AppInfo.cpp
+run stack_reader_test scripts/stack_reader_test.cpp src/StackReader.cpp src/StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
+run omarchy_search_test scripts/omarchy_search_test.cpp src/OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
+run app_info_test scripts/app_info_test.cpp src/AppInfo.cpp
 run icon_score_test scripts/icon_score_test.cpp
 # shellcheck disable=SC2046
 run icon_size_test scripts/icon_size_test.cpp $(pkg-config --cflags --libs cairo)
 run integration_test scripts/integration_test.cpp
 run native_search_test scripts/native_search_test.cpp
 # shellcheck disable=SC2046
-run glyphs_test scripts/glyphs_test.cpp Glyphs.cpp $(pkg-config --cflags --libs librsvg-2.0)
+run glyphs_test scripts/glyphs_test.cpp src/Glyphs.cpp $(pkg-config --cflags --libs librsvg-2.0)
 # shellcheck disable=SC2046
-run fonts_test scripts/fonts_test.cpp Fonts.cpp Glyphs.cpp $(pkg-config --cflags --libs fontconfig)
-run palette_file_test scripts/palette_file_test.cpp PaletteFile.cpp
+run fonts_test scripts/fonts_test.cpp src/Fonts.cpp src/Glyphs.cpp $(pkg-config --cflags --libs fontconfig)
+run palette_file_test scripts/palette_file_test.cpp src/PaletteFile.cpp
 # shellcheck disable=SC2046
-run search_providers_nobus_test scripts/search_providers_nobus_test.cpp SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
+run search_providers_nobus_test scripts/search_providers_nobus_test.cpp src/SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
 
 exit $fail

@@ -35,7 +35,7 @@ PKGS := pixman-1 libdrm hyprland pangocairo fontconfig libinput libudev wayland-
 # Goals that compile nothing ask pkg-config nothing: install-only runs as a user
 # who may not have the SDK on PKG_CONFIG_PATH at all (see install-only).
 ifneq ($(if $(MAKECMDGOALS),$(filter-out install-only uninstall clean,$(MAKECMDGOALS)),all),)
-CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build \
+CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build -Isrc --embed-dir=. \
             $(shell pkg-config --cflags $(PKGS))
 # fontconfig: Fonts.cpp asks it which family "monospace" is and whether an icon
 # font covers the UI glyphs. Hyprland's pango already loads it; linking it
@@ -47,8 +47,10 @@ ifeq ($(CXX),g++)
     CXXFLAGS += -fno-gnu-unique
 endif
 
-SRCS := $(wildcard *.cpp)
-OBJS := $(SRCS:%.cpp=.build/%.o)
+# The sources live in src/ (flat: every #include is a bare name). --embed-dir=. is for
+# BuiltinIcons.cpp's #embed "assets/icons/...", which resolves from the root.
+SRCS := $(wildcard src/*.cpp)
+OBJS := $(SRCS:src/%.cpp=.build/%.o)
 DEPS := $(OBJS:.o=.d)
 
 VERSION_HEADER = .build/PluginVersion.hpp
@@ -71,7 +73,7 @@ hyprdrive.so: $(OBJS)
 # dock stacks C: the icons are #embed-ded, so their object depends on them.
 .build/BuiltinIcons.o: $(wildcard assets/icons/*.svg) assets/scratchpad-symbolic.svg
 
-.build/%.o: %.cpp | $(VERSION_HEADER)
+.build/%.o: src/%.cpp | $(VERSION_HEADER)
 	@mkdir -p .build
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
