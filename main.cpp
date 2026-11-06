@@ -61,8 +61,13 @@ using namespace Hyprutils::String;
 #include "globals.hpp"
 #include "SearchLetters.hpp"
 #include "KeyboardCat.hpp"
+#include "Intent.hpp"
+#include "GameApps.hpp"
+#include "FullscreenDesktop.hpp"
 #include "Mosaic.hpp"
 #include <hyprland/src/managers/SessionLockManager.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
 
 #include "Compat.hpp"
 #include "Integration.hpp"
@@ -212,6 +217,11 @@ static void hkSendWindowSize(void* thisptr, bool force) {
 // desktop slide.
 static CFunctionHook* g_pShouldRenderWindowHook = nullptr;
 static bool           hkShouldRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR monitor) {
+    // A window travelling to or from its fullscreen desktop is drawn all the
+    // way -- before the canvas's rule that hides windows off its view while
+    // their desktop slides (a fullscreen app on a canvas usually starts there).
+    if (ScrollOverview::FullscreenDesktop::travelling(window, monitor))
+        return true;
     if (ScrollOverview::Mosaic::hideDuringSlide(window, monitor))
         return false;
     return rc<bool (*)(void*, PHLWINDOW, PHLMONITOR)>(g_pShouldRenderWindowHook->m_original)(thisptr, window, monitor);
@@ -1198,6 +1208,19 @@ static void                registerRawKeyHooks() {
             g_tapCtrlLastTapMs  = 0;
         }
 
+        // The overview's strip lifts the desktop under the pointer while Super
+        // is held; Super+Shift+Left/Right moves the desktop shown -- in the
+        // overview only (outside it the chord stays Omarchy's window swap).
+        if (ISSUPER)
+            overviewSuperChanged();
+        if (PRESSED && (event.keycode == 105 || event.keycode == 106) && g_pInputManager &&
+            (g_pInputManager->getModsFromAllKBs() & ~(HL_MODIFIER_CAPS | HL_MODIFIER_MOD2)) == (HL_MODIFIER_META | HL_MODIFIER_SHIFT) &&
+            overviewMoveShownDesktop(event.keycode == 106 ? 1 : -1)) {
+            g_consumedPresses.insert(event.keycode);
+            info.cancelled = true;
+            return;
+        }
+
         if (!ISSUPER) {
             if (PRESSED) {
                 // The easter egg owns the overview's keys while it is up: the
@@ -1829,6 +1852,26 @@ static SDispatchResult onDebugDispatcher(std::string arg) {
     }
     // `lockstate`: the lock and the overview search, for the lock gate
     // (scripts/headless/lock_gate.sh). The query's LENGTH, never its text.
+    // `exclusive`: the layer surfaces holding the keyboard EXCLUSIVELY. While
+    // any is mapped Hyprland refuses every window focus (rawWindowFocus) --
+    // clicks and typing on windows go nowhere, the overview and dock still work
+    // (user, 2026-11-06, after a lock + unlock). Names who holds it.
+    if (TOPIC == "exclusive") {
+        std::string report = std::format("hyprdrive exclusive: {}", g_pInputManager ? g_pInputManager->m_exclusiveLSes.size() : 0);
+        if (g_pInputManager)
+            for (const auto& REF : g_pInputManager->m_exclusiveLSes) {
+                const auto LS = REF.lock();
+                if (!LS) {
+                    report += " | (expired)";
+                    continue;
+                }
+                const auto MON = LS->m_monitor.lock();
+                const pid_t pid = LS->getPID();
+                report += std::format(" | ns={} pid={} mon={} mapped={} layer={} box={},{} {}x{}", LS->m_namespace, pid, MON ? MON->m_name : std::string{"(none)"},
+                                      LS->m_mapped ? 1 : 0, LS->m_layer, (int)LS->m_geometry.x, (int)LS->m_geometry.y, (int)LS->m_geometry.width, (int)LS->m_geometry.height);
+            }
+        return {.success = false, .error = report};
+    }
     if (TOPIC == "lockstate")
         return {.success = false,
                 .error   = std::format("hyprdrive lockstate: locked={} overviews={} accepting={} qlen={}", hyprdriveSessionLocked() ? 1 : 0, scrollOverviews().size(),
@@ -2262,6 +2305,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // canvas desktop a swipe brings in starts past its overhang (Mosaic.cpp).
         ScrollOverview::DesktopSwitch::preRender(monitor);
         ScrollOverview::Mosaic::preRender(monitor);
+        ScrollOverview::FullscreenDesktop::preRender(monitor);
+        ScrollOverview::Intent::preRender(monitor);
         // After Mosaic's: a live swipe's place, for its release (DesktopStrip.hpp).
         ScrollOverview::DesktopStrip::sampleSwipe(monitor);
 
@@ -2517,7 +2562,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             // drag, so Hyprland never entered its own button state machine for
             // it and nothing on its side will let go -- the button came up and
             // the window kept following the pointer until the NEXT click.
-            g_layoutManager->dragController()->dragEnd();
+            // ONLY WITH A TARGET: Hyprland's dragEnd dereferences it unchecked
+            // (DragController.cpp: m_target.lock()->window()), and the drag may
+            // have ended already or its window gone -- releasing then SIGSEGV'd
+            // the compositor (XPS, 2026-11-06 11:19, the whole session lost).
+            if (TARGET)
+                g_layoutManager->dragController()->dragEnd();
             ScrollOverview::Dock::clearDockNativeDrag();
             const auto ANCHOR = ScrollOverview::Placement::takeDragAnchor();
 
@@ -2681,6 +2731,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // The "mosaic" layout (Mosaic.hpp). Registered whether or not the panel has
     // enabled it: a desktop whose saved layout is mosaic must find it at login.
     ScrollOverview::Mosaic::registerLayout(SCROLLOVERVIEW_HANDLE);
+    ScrollOverview::Intent::init();
+    ScrollOverview::GameApps::init();
+    ScrollOverview::FullscreenDesktop::init();
     // dock:cpu_pulse's sampler (CpuPulse.hpp): idle unless the option is on.
     ScrollOverview::CpuPulse::init();
     // The animation:curve preset onto Hyprland's named house beziers -- only
@@ -2766,6 +2819,9 @@ APICALL EXPORT void PLUGIN_EXIT() {
     ScrollOverview::SettingsApp::shutdown(); // likewise
     // FIRST: Hyprland hands every mosaic desktop back to its default layout and
     // destroys our algorithm objects -- while their code is still mapped.
+    ScrollOverview::Intent::shutdown();
+    ScrollOverview::FullscreenDesktop::shutdown();
+    ScrollOverview::GameApps::shutdown();
     ScrollOverview::Mosaic::shutdown();
     ScrollOverview::Mosaic::unregisterLayout(SCROLLOVERVIEW_HANDLE);
     ScrollOverview::KeyboardCat::shutdown(); // ffmpeg killed, its reader joined, before the code goes
