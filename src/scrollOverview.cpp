@@ -369,6 +369,8 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
     if (sharedStateOwner)
         forceWorkspaceAlphaVisible();
     ScrollOverview::Dock::releasePointerFocus();
+    // A zoomed-out canvas ends here: its presses would be ours too.
+    ScrollOverview::Mosaic::onOverviewOpen();
     applyInputConfigOverrides();
     OpenProf::mark("ctor overrides applied");
     g_pInputManager->unconstrainMouse();
@@ -11707,6 +11709,8 @@ void CScrollOverview::reopen() {
 
     closeOnWindow.reset();
     setClosing(false); // flips `closing` back to false + re-arms the overrides
+    // Open again, as from the constructor: a zoom started during the close ends.
+    ScrollOverview::Mosaic::onOverviewOpen();
 
     if (sharedStateOwner)
         forceWorkspaceAlphaVisible();
