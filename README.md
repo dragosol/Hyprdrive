@@ -277,8 +277,23 @@ before changing anything, then checks that release out in your checkout,
 builds it from scratch (`make clean && make install`) and reloads the plugin.
 The settings show **Update available!** beside the version when there is one;
 clicking it runs the same update in your terminal. `hyprdrive update --check`
-only reports. By hand: `git pull`, then `make clean && make install`, then log
-out and back in. After a Hyprland update the plugin may refuse to load with
+only reports. By hand, in your checkout:
+
+```bash
+git pull
+make clean && make install   # builds, checks and installs; the running plugin is untouched
+hyprctl plugin unload ~/.local/lib/hyprdrive/hyprdrive.so
+hyprctl plugin load ~/.local/lib/hyprdrive/hyprdrive.so
+hyprctl reload
+hyprctl configerrors
+```
+
+Build first, then reload: `make install` replaces the plugin file without
+disturbing the copy that is running, so nothing needs unloading or deleting
+beforehand, and a failed build leaves you with the plugin you had. If Hyprland
+itself was updated since you logged in, skip the four `hyprctl` lines and log
+out and back in instead: no plugin can be loaded into a Hyprland whose binary
+was replaced. After a Hyprland update the plugin may refuse to load with
 `[he] Version mismatch` until it is rebuilt the same way, or with
 `hyprdrive update --rebuild`.
 

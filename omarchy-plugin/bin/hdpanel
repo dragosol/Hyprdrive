@@ -847,15 +847,21 @@ def emit_table(obj, indent=8):
 
 
 def compose_fragment(machine, existing_path):
+    # scripts/fragment.py's split(), kept in step (fragment_test holds the two to
+    # it): nothing below BEGIN is dropped. A missing END means the raw block runs
+    # to the end of the file, and lines after END stay in it. One panel save used
+    # to empty the raw block of a file whose END line was gone (review, 2026-11-09).
     raw = ""
     if existing_path.exists():
-        text = existing_path.read_text()
-        b = next((i for i, l in enumerate(text.splitlines()) if l.strip().startswith("-- BEGIN raw-snippet")), None)
+        lines = existing_path.read_text().splitlines()
+        b = next((i for i, l in enumerate(lines) if l.strip().startswith("-- BEGIN raw-snippet")), None)
         if b is not None:
-            lines = text.splitlines()
             e = next((i for i in range(b + 1, len(lines)) if lines[i].strip() == END), None)
-            if e is not None:
-                raw = "\n".join(lines[b + 1:e])
+            if e is None:
+                raw = "\n".join(lines[b + 1:])
+            else:
+                tail = lines[e + 1:]
+                raw = "\n".join(lines[b + 1:e] + (tail if any(l.strip() for l in tail) else []))
     return machine.rstrip("\n") + "\n\n" + BEGIN + "\n" + raw.strip("\n") + ("\n" if raw.strip("\n") else "") + END + "\n"
 
 
@@ -1122,7 +1128,9 @@ def revert_mosaic_workspaces(fallback, chosen_too):
                     continue
                 persisted.add(f.stem)
                 if chosen_too:
-                    f.write_text('hl.workspace_rule({ workspace = "%s", layout = "dwindle" })\n' % f.stem)
+                    # Atomic (review, 2026-11-09): every config parse replays
+                    # this file, so a half-written one is a Lua error.
+                    write_fragment(f, 'hl.workspace_rule({ workspace = "%s", layout = "dwindle" })\n' % f.stem)
     else:
         # Our own fragment (A18): the same rewrite, one line per workspace.
         chosen = native_layouts()
@@ -2396,10 +2404,13 @@ def migrate_gestures():
     try:
         store = load_store()
         done = store.setdefault("migrations", [])
-        if "canvas_zoom_down" in done or not store.get("gestures"):
+        if "canvas_zoom_down" in done:
             return
         changed = False
-        for g in store["gestures"]:
+        # No saved map is marked done too (review, 2026-11-09): returning before
+        # the mark left this armed, and the first map saved afterwards -- with a
+        # 3-finger down set to overview on purpose -- went back to canvas_zoom.
+        for g in store.get("gestures") or []:
             if (isinstance(g, dict) and int(g.get("fingers", 0)) == 3 and str(g.get("direction") or "") == "down"
                     and str(g.get("action") or "overview") == "overview" and not g.get("mods")):
                 g["action"] = "canvas_zoom"
