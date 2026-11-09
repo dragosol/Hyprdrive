@@ -274,12 +274,13 @@ fragment loads it at every login.
 
 **Updating:** run `hyprdrive update`. It looks up the newest release, asks
 before changing anything, then checks that release out in your checkout,
-runs `make install` and reloads the plugin. The settings show **Update
-available!** beside the version when there is one; clicking it runs the same
-update in your terminal. `hyprdrive update --check` only reports. By hand:
-`git pull`, then `make install` again, then log out and back in.
-After a Hyprland update the plugin may refuse to load with
-`[he] Version mismatch`. Rebuild from scratch with `make clean && make install`.
+builds it from scratch (`make clean && make install`) and reloads the plugin.
+The settings show **Update available!** beside the version when there is one;
+clicking it runs the same update in your terminal. `hyprdrive update --check`
+only reports. By hand: `git pull`, then `make clean && make install`, then log
+out and back in. After a Hyprland update the plugin may refuse to load with
+`[he] Version mismatch` until it is rebuilt the same way, or with
+`hyprdrive update --rebuild`.
 
 **Removal:** run `make uninstall` from the checkout. It removes the plugin, the
 loader and the `require` line (a backup of `hyprland.lua` is kept). It moves
