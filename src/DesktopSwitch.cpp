@@ -32,6 +32,7 @@ namespace ScrollOverview::DesktopSwitch {
     namespace {
         CFunctionHook* g_startAnimHook  = nullptr;
         CFunctionHook* g_fullFocusHook  = nullptr;
+        CFunctionHook* g_rawFocusHook   = nullptr; // focus following the mouse comes this way
         CFunctionHook* g_actionFocusHook = nullptr;
 
         CHyprSignalListener g_axis;
@@ -244,11 +245,24 @@ namespace ScrollOverview::DesktopSwitch {
         void hkFullWindowFocus(void* thisptr, PHLWINDOW w, Desktop::eFocusReason reason, SP<CWLSurfaceResource> surface, bool forceFSCycle) {
             // A fullscreen game under the window being focused goes to the dock
             // first, still fullscreen (FullscreenGuard.hpp).
+            // A hover onto a window only peeking in at the edge, or through the
+            // dock, focuses nothing (Mosaic::vetoHoverFocus).
+            if (reason == Desktop::FOCUS_REASON_FFM && Mosaic::vetoHoverFocus(w))
+                return;
             FullscreenGuard::beforeFocus(w, reason);
             const bool COUNT = reason != Desktop::FOCUS_REASON_WORKSPACE_CHANGE;
             g_focusDepth += COUNT ? 1 : 0;
             rc<origFullWindowFocus>(g_fullFocusHook->m_original)(thisptr, w, reason, surface, forceFSCycle);
             g_focusDepth -= COUNT ? 1 : 0;
+        }
+
+        // Focus following the mouse calls rawWindowFocus, not fullWindowFocus:
+        // the same veto (Mosaic::vetoHoverFocus).
+        using origRawWindowFocus = void (*)(void*, PHLWINDOW, Desktop::eFocusReason, SP<CWLSurfaceResource>);
+        void hkRawWindowFocus(void* thisptr, PHLWINDOW w, Desktop::eFocusReason reason, SP<CWLSurfaceResource> surface) {
+            if (reason == Desktop::FOCUS_REASON_FFM && Mosaic::vetoHoverFocus(w))
+                return;
+            rc<origRawWindowFocus>(g_rawFocusHook->m_original)(thisptr, w, reason, surface);
         }
 
         // `focuswindow` switches the desktop BEFORE it focuses (ConfigActions'
@@ -359,6 +373,9 @@ namespace ScrollOverview::DesktopSwitch {
         g_fullFocusHook = hookByMangledName(
             "_ZN7Desktop11CFocusState15fullWindowFocusEN9Hyprutils6Memory14CSharedPointerINS_4View7CWindowEEENS_12eFocusReasonENS3_I18CWLSurfaceResourceEEb",
             rc<void*>(hkFullWindowFocus));
+        g_rawFocusHook = hookByMangledName(
+            "_ZN7Desktop11CFocusState14rawWindowFocusEN9Hyprutils6Memory14CSharedPointerINS_4View7CWindowEEENS_12eFocusReasonENS3_I18CWLSurfaceResourceEE",
+            rc<void*>(hkRawWindowFocus));
         g_actionFocusHook = hookByMangledName("_ZN6Config7Actions5focusEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View7CWindowEEE", rc<void*>(hkActionsFocus));
 
         // Every wheel event, ahead of scroll_event_delay's throttle (which only
@@ -402,7 +419,7 @@ namespace ScrollOverview::DesktopSwitch {
     void shutdown() {
         DesktopStrip::shutdown();
         g_axis.reset();
-        for (auto** hook : {&g_startAnimHook, &g_fullFocusHook, &g_actionFocusHook}) {
+        for (auto** hook : {&g_startAnimHook, &g_fullFocusHook, &g_rawFocusHook, &g_actionFocusHook}) {
             if (*hook)
                 (*hook)->unhook();
             *hook = nullptr;

@@ -27,7 +27,7 @@ if hyprdrive_loaded and hyprdrive_loaded() then
     end)
 
     -- 3-finger swipe up opens the overview and follows the fingers; swipe
-    -- down closes it. Reversing mid-gesture undoes the motion. Super tap
+    -- down closes it (and on a canvas desktop zooms it out, like holding Super). Reversing mid-gesture undoes the motion. Super tap
     -- still toggles. When the settings panel has written 35-gestures.lua it
     -- owns the whole map (including workspace / close / zoom), so skip these
     -- factory defaults or they would double-register on reload.
@@ -37,6 +37,7 @@ if hyprdrive_loaded and hyprdrive_loaded() then
         owned:close()
     else
         hl.plugin.hyprdrive.gesture({ fingers = 3, direction = "up" })
-        hl.plugin.hyprdrive.gesture({ fingers = 3, direction = "down" })
+        -- Down zooms a canvas desktop out (the overview's swipe elsewhere).
+        hl.plugin.hyprdrive.gesture({ fingers = 3, direction = "down", action = "canvas_zoom" })
     end
 end
