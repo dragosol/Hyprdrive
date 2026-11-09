@@ -4,6 +4,7 @@
 #include "OverviewInternal.hpp"
 
 #include "DockStacks.hpp"
+#include "Locations.hpp"
 #include "DebugPaths.hpp"
 #include <unordered_set>
 #include "Thumbs.hpp"
@@ -1968,7 +1969,12 @@ namespace ScrollOverview::Stacks {
     std::string themePrefix(const std::string& which) {
         if (which != "omarchy" && which != "auto")
             return "";
-        const auto T = AppSearch::omarchyIconTheme();
+        // No icons in the Omarchy theme (user, 2026-11-08: a theme without an
+        // icons.theme left every dock folder in Adwaita's): the file
+        // manager's theme, as the network drives already do.
+        auto T = AppSearch::omarchyIconTheme();
+        if (T.empty())
+            T = Locations::nautilusIconTheme();
         return T.empty() ? "" : "@" + T + ":";
     }
 
