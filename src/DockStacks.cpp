@@ -17,10 +17,12 @@
 #include "AppSearch.hpp"
 #include "Compat.hpp"
 #include "Config.hpp"
+#include "Launch.hpp"
 #include "LauncherEntry.hpp"
 #include "OverviewRender.hpp"
 #include "OverviewPassElement.hpp"
 #include "StackReader.hpp"
+#include "StoreFile.hpp"
 #include "TextInput.hpp"
 #include "SearchLetters.hpp"
 
@@ -28,7 +30,9 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -53,6 +57,7 @@
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
+#include <hyprutils/os/Process.hpp>
 
 using namespace ScrollOverview;
 
@@ -218,17 +223,17 @@ namespace {
 
         std::error_code ec;
         std::filesystem::create_directories(PATH.parent_path(), ec);
-        const auto TMP = PATH.string() + ".tmp";
-        {
-            std::ofstream f(TMP, std::ios::trunc);
-            f << StackModel::formatStore(out);
-            if (!f)
-                return;
+        // Whole or not at all (StoreFile.hpp): on a full disk the old write
+        // renamed an empty temp file over this one, and every pinned stack was
+        // gone at the next login. A failed save leaves the file as it was; the
+        // edit still shows, for this session only.
+        if (const int ERR = StoreFile::replace(PATH.string(), StackModel::formatStore(out)); ERR != 0) {
+            std::fprintf(stderr, "[hyprdrive] stacks: could not save %s (%s); the file on disk is unchanged\n", PATH.c_str(), std::strerror(ERR));
+        } else {
+            // Adopt our own mtime so the next poll does not read our output
+            // back -- which is why the generation moves HERE too.
+            store().stamp = std::filesystem::last_write_time(PATH, ec);
         }
-        std::filesystem::rename(TMP, PATH, ec); // atomic on one filesystem: a crash leaves the old file or the new one
-        // Adopt our own mtime so the next poll does not read our output back --
-        // which is why the generation moves HERE too.
-        store().stamp = std::filesystem::last_write_time(PATH, ec);
         ++g_storeGeneration;
         // And a frame: a pin or an unpin from a bind or hyprctl (stack("pin
         // ...")) touches no pointer, and an idle dock never redrew -- the new
@@ -622,6 +627,67 @@ namespace {
     // Stack path -> browser partial files in it at the last listing. Only
     // folders with a download in flight are kept.
     std::unordered_map<std::string, size_t> g_downloads;
+
+    // A PARTIAL FILE IS A DOWNLOAD ONLY WHILE IT GROWS (review 2026-11-09). A
+    // `.part` left behind by a browser that crashed or was killed counted for
+    // as long as it sat there: its bar slid on the cell, and animating() kept
+    // the dock repainting at full rate, forever. Now only a partial file
+    // written in the last few seconds (StackModel::partialLive) draws a bar or
+    // asks for frames. Nothing reports a file growing (the inotify watch is on
+    // the folder, not on writes into its files -- a download is thousands of
+    // them), so a folder holding one is listed again, by StackReader off this
+    // thread, on g_partialTimer: every 2 s while a download grows, backing off
+    // to once a minute for a file nobody writes.
+    //
+    // Stack path -> the mtime (unix s) of each partial file at the last listing.
+    std::unordered_map<std::string, std::vector<int64_t>> g_partialMtimes;
+    wl_event_source*                                      g_partialTimer = nullptr;
+
+    int64_t unixNow() {
+        return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    size_t livePartials(const std::vector<int64_t>& mtimes) {
+        const int64_t NOW = unixNow();
+        return sc<size_t>(std::ranges::count_if(mtimes, [&](int64_t m) { return StackModel::partialLive(m, NOW); }));
+    }
+
+    // List the folders holding a partial file again; onReaderReady() sees the
+    // fresh mtimes when the reads land, redraws, and re-arms this. While a
+    // download grows, only the folders it grows in: a folder being re-read is
+    // unready, and a listing landing meanwhile for another one blanks the
+    // re-read folder's pile until its own read lands (newestFour, StackIcon).
+    int onPartialTimer(void*) {
+        const bool ANYLIVE = std::ranges::any_of(g_partialMtimes, [](const auto& kv) { return livePartials(kv.second) > 0; });
+        for (const auto& [PATH, COUNT] : g_downloads) {
+            const auto IT = g_partialMtimes.find(PATH);
+            if (ANYLIVE && (IT == g_partialMtimes.end() || livePartials(IT->second) == 0))
+                continue;
+            StackReader::invalidate(PATH);
+            StackReader::status(PATH); // queues the read
+        }
+        return 0;
+    }
+
+    void armPartialTimer() {
+        if (g_downloads.empty()) {
+            if (g_partialTimer)
+                wl_event_source_timer_update(g_partialTimer, 0);
+            return;
+        }
+        if (!g_partialTimer && g_pCompositor && g_pCompositor->m_wlEventLoop)
+            g_partialTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onPartialTimer, nullptr);
+        if (!g_partialTimer)
+            return;
+        // 2 s while one grows, so a bar whose download stalls goes a few
+        // seconds after it stops counting; a minute for one written long ago.
+        int64_t newest = 0;
+        for (const auto& [PATH, MTIMES] : g_partialMtimes)
+            for (const int64_t M : MTIMES)
+                newest = std::max(newest, M);
+        wl_event_source_timer_update(g_partialTimer, StackModel::partialRecheckMs(newest, unixNow()));
+    }
+
     // Stack path -> the entry names its folder had at the last listing (for the
     // arrival bounce).
     std::unordered_map<std::string, std::unordered_set<std::string>> g_seenNames;
@@ -629,6 +695,18 @@ namespace {
 
     float elapsed(const Time::steady_tp& since) {
         return std::chrono::duration<float, std::milli>(Time::steadyNow() - since).count();
+    }
+
+    // Hops and shakes that have run their course. Only Stacks::render() used
+    // to retire them, and the HIDDEN dock never reaches it: a file landing
+    // while the dock was away kept animating() true, and every monitor
+    // repainted at full rate until the dock was next shown (review
+    // 2026-11-09). Retired before every answer about frames now. The hop is
+    // kept for the hidden dock's longer peek (Dock::STACK_PEEK_MS); on the
+    // dock it is over at HOP_MS and draws nothing after.
+    void retireHops() {
+        std::erase_if(g_bounces, [](const SHop& h) { return elapsed(h.startedAt) > std::max(Dock::HOP_MS, Dock::STACK_PEEK_MS); });
+        std::erase_if(g_shakes, [](const SHop& h) { return elapsed(h.startedAt) > SHAKE_MS; });
     }
 
     // Rows the fan shows at once: every visible entry, up to its slots -- and
@@ -1100,18 +1178,25 @@ namespace {
         stack.label      = stack.customLabel.empty() ? BASE : stack.customLabel;
     }
 
+    // A file opens in the app the desktop has for it -- GIO's choice, made by
+    // `gio open` in a process of its own, started through Launch::wrap like
+    // every other launch (review 2026-11-09). g_app_info_launch_default_for_uri
+    // in here spawned a handler that is not D-Bus activated as a child of
+    // Hyprland, inside its unit under uwsm, and never told Intent a launch was
+    // coming, so with quiet_new_windows a slow app opened without the focus.
+    // `gio open` keeps the same handler choice, terminal apps and D-Bus
+    // activation included.
     void launchPath(const std::string& path) {
         if (path.empty())
             return;
-        GError* err  = nullptr;
-        char*   uri  = g_filename_to_uri(path.c_str(), nullptr, &err);
-        if (!uri) {
-            if (err)
-                g_error_free(err);
+        char* uri = g_filename_to_uri(path.c_str(), nullptr, nullptr);
+        if (!uri)
             return;
-        }
-        g_app_info_launch_default_for_uri(uri, nullptr, nullptr);
+        std::string              binary = "gio";
+        std::vector<std::string> args   = {"open", uri};
         g_free(uri);
+        Launch::wrap(binary, args);
+        Hyprutils::OS::CProcess(binary, args).runAsync();
     }
 
     // ---------------------------------------------------------- the preview --
@@ -1667,8 +1752,13 @@ namespace ScrollOverview::Stacks {
                 if (L.ready && !L.missing) {
                     std::unordered_set<std::string> now;
                     now.reserve(L.entries.size());
-                    for (const auto& E : L.entries)
+                    auto& partial = g_partialMtimes[S.path];
+                    partial.clear();
+                    for (const auto& E : L.entries) {
                         now.insert(E.name);
+                        if (StackModel::isPartialDownload(E.name))
+                            partial.push_back(E.mtime);
+                    }
                     auto [IT, FIRST] = g_seenNames.try_emplace(S.path);
                     if (!FIRST) {
                         for (const auto& N : now) {
@@ -1685,7 +1775,10 @@ namespace ScrollOverview::Stacks {
                 LauncherEntry::start(); // Chromium's progress arrives on the session bus
             was = ST.downloads;
         }
-        std::erase_if(g_downloads, [](const auto& kv) { return kv.second == 0; });
+        // A folder unpinned mid-download is not the dock's to watch any more.
+        std::erase_if(g_downloads, [](const auto& kv) { return kv.second == 0 || !find(kv.first); });
+        std::erase_if(g_partialMtimes, [](const auto& kv) { return !g_downloads.contains(kv.first); });
+        armPartialTimer();
 
         ++g_storeGeneration; // the dock's item cache (and the pile) key on this
         for (const auto& M : State::monitorState()->monitors())
@@ -1698,6 +1791,10 @@ namespace ScrollOverview::Stacks {
         if (g_inotifySource) {
             wl_event_source_remove(g_inotifySource);
             g_inotifySource = nullptr;
+        }
+        if (g_partialTimer) {
+            wl_event_source_remove(g_partialTimer);
+            g_partialTimer = nullptr;
         }
         g_sushiOpen.reset();
         g_sushiResize.reset();
@@ -1985,8 +2082,10 @@ namespace ScrollOverview::Stacks {
     }
 
     size_t downloadsIn(const std::string& stackPath) {
-        const auto IT = g_downloads.find(canonical(stackPath));
-        return IT == g_downloads.end() ? 0 : IT->second;
+        // Still being written: a partial file nobody writes any more is not a
+        // download (g_partialMtimes).
+        const auto IT = g_partialMtimes.find(canonical(stackPath));
+        return IT == g_partialMtimes.end() ? 0 : livePartials(IT->second);
     }
 
     std::string tooltipSuffix(const std::string& stackPath) {
@@ -2404,10 +2503,11 @@ namespace ScrollOverview::Stacks {
     }
 
     bool anyDownloading() {
-        return !g_downloads.empty();
+        return std::ranges::any_of(g_partialMtimes, [](const auto& kv) { return livePartials(kv.second) > 0; });
     }
 
     bool animating() {
+        retireHops();
         // A download's bar moves every frame (the indeterminate slide, or the
         // browser's progress arriving over D-Bus), so it keeps the dock drawing.
         return !g_bounces.empty() || !g_shakes.empty() || anyDownloading();
@@ -2528,10 +2628,7 @@ namespace ScrollOverview::Stacks {
     }
 
     void render(PHLMONITOR monitor, const Dock::SLayout& layout) {
-        // Kept for the hidden dock's longer peek too (Dock::STACK_PEEK_MS); the
-        // on-dock hop itself is over at HOP_MS and draws nothing after.
-        std::erase_if(g_bounces, [](const SHop& h) { return elapsed(h.startedAt) > std::max(Dock::HOP_MS, Dock::STACK_PEEK_MS); });
-        std::erase_if(g_shakes, [](const SHop& h) { return elapsed(h.startedAt) > SHAKE_MS; });
+        retireHops();
 
         if (!g_popup || !monitor || g_popup->monitor != monitor->m_id)
             return;

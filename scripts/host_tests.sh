@@ -14,6 +14,18 @@
 #                     twin scripts/hyprdrive-integration, case for case.
 #   search_providers_nobus_test  the GNOME search worker with no session bus
 #                     (the std::terminate that took the compositor down).
+#   trash_dirs_test   TrashDirs.hpp: /proc/mounts decoding (a backslash in a
+#                     drive's label threw on the render thread), and Empty
+#                     Trash's walk, which never follows a disk's symlinks.
+#   store_file_test   StoreFile.hpp: the stacks store survives a full disk
+#                     (a short write, /dev/full) byte for byte.
+#   search_providers_deadbus_test  the search worker when a private
+#                     dbus-daemon dies under it: no 100% CPU spin, and it
+#                     reconnects (skipped without dbus-daemon).
+#   file_uri_test     FileUri.hpp: file names with ' \ # % ? and spaces as
+#                     URIs, and Show in Files reaching a stand-in FileManager1.
+#   launcher_states_test  LauncherStates.hpp: badge and progress state is its
+#                     sender's, and goes when the sender leaves the bus.
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
@@ -77,8 +89,12 @@ run workspace_plan_test scripts/workspace_plan_test.cpp
 run strip_layout_test scripts/strip_layout_test.cpp
 run tool_search_test scripts/tool_search_test.cpp
 run stack_model_test scripts/stack_model_test.cpp src/StackModel.cpp
+run store_file_test scripts/store_file_test.cpp
 run mount_sort_test scripts/mount_sort_test.cpp
 run gvfs_mount_test scripts/gvfs_mount_test.cpp
+run trash_dirs_test scripts/trash_dirs_test.cpp
+# shellcheck disable=SC2046
+run file_uri_test scripts/file_uri_test.cpp $(pkg-config --cflags --libs glib-2.0 libsystemd)
 run mosaic_pack_test scripts/mosaic_pack_test.cpp
 run preview_grid_test scripts/preview_grid_test.cpp
 run motion_spacing_test scripts/motion_spacing_test.cpp
@@ -97,6 +113,10 @@ run builtin_icons_test scripts/builtin_icons_test.cpp src/BuiltinIcons.cpp --emb
 # shellcheck disable=SC2046
 run stack_reader_test scripts/stack_reader_test.cpp src/StackReader.cpp src/StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
 run omarchy_search_test scripts/omarchy_search_test.cpp src/OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
+# shellcheck disable=SC2046
+run search_providers_deadbus_test scripts/search_providers_deadbus_test.cpp src/SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
+# shellcheck disable=SC2046
+run launcher_states_test scripts/launcher_states_test.cpp $(pkg-config --cflags libsystemd)
 run app_info_test scripts/app_info_test.cpp src/AppInfo.cpp
 run icon_score_test scripts/icon_score_test.cpp
 # shellcheck disable=SC2046

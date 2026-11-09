@@ -1,4 +1,5 @@
 #include "LauncherEntry.hpp"
+#include "LauncherStates.hpp"
 
 #include <systemd/sd-bus.h>
 #include <wayland-server.h>
@@ -20,9 +21,12 @@ namespace ScrollOverview::LauncherEntry {
 
 namespace {
 
-    std::unordered_map<std::string, SState> g_states;
-    sd_bus*                                 g_bus    = nullptr;
-    wl_event_source*                        g_source = nullptr;
+    SStates          g_states; // per sender (LauncherStates.hpp)
+    sd_bus*          g_bus    = nullptr;
+    wl_event_source* g_source = nullptr;
+    // A connect that failed, or a connection the bus dropped: start() tries
+    // again 5 s later, not on the next dock frame.
+    std::chrono::steady_clock::time_point g_failedAt{};
 
     // "application://org.gnome.Nautilus.desktop" -> "org.gnome.Nautilus".
     // Anything that is not that shape is not addressed at an app we can draw.
@@ -113,9 +117,28 @@ namespace {
         return OK;
     }
 
+    // An idle desktop produces no frames, so the dock would not notice a badge
+    // change until something else happened to repaint -- measured 2026-08-03:
+    // an urgent app did not pull the dock out until an unrelated config reload
+    // damaged the screen. The dock's own damageIfChanged decides what actually
+    // changes; this only guarantees it gets asked.
+    //
+    // Through damageIfChanged and not a bare damageMonitor (user, 2026-09-14):
+    // a count that moved on an app NOT on the dock, or one whose badge is
+    // switched off, used to repaint both whole outputs anyway. damageIfChanged
+    // compares the pill's appearance and damages only the monitors where
+    // something actually changed.
+    void askDocks() {
+        for (const auto& MONITOR : State::monitorState()->monitors()) {
+            if (MONITOR)
+                Dock::damageIfChanged(MONITOR);
+        }
+    }
+
     // Update(s app_uri, a{sv} properties). A sender may send ONE property, so
-    // this starts from what is already known rather than from a blank state --
-    // an app that pushes only `count` must not have its `urgent` cleared.
+    // this starts from what that sender published before rather than from a
+    // blank state -- an app that pushes only `count` must not have its
+    // `urgent` cleared.
     int onUpdate(sd_bus_message* m, void*, sd_bus_error*) {
         const char* uri = nullptr;
         if (sd_bus_message_read_basic(m, 's', &uri) < 0)
@@ -125,8 +148,9 @@ namespace {
         if (ID.empty())
             return 0;
 
-        SState       state  = g_states.contains(ID) ? g_states[ID] : SState{};
-        const SState BEFORE = state;
+        const char*       SENDER = sd_bus_message_get_sender(m);
+        const std::string FROM   = SENDER ? SENDER : "";
+        SState            state  = g_states.of(FROM, ID);
 
         if (sd_bus_message_enter_container(m, 'a', "{sv}") <= 0)
             return 0;
@@ -158,54 +182,54 @@ namespace {
         }
         sd_bus_message_exit_container(m);
 
-        if (BEFORE.count == state.count && BEFORE.countVisible == state.countVisible && BEFORE.urgent == state.urgent && BEFORE.progress == state.progress &&
-            BEFORE.progressVisible == state.progressVisible)
-            return 0;
-
-        g_states[ID] = state;
-
-        // An idle desktop produces no frames, so the dock would not notice this
-        // until something else happened to repaint -- measured 2026-08-03: an
-        // urgent app did not pull the dock out until an unrelated config reload
-        // damaged the screen. The dock's own damageIfChanged decides what
-        // actually changes; this only guarantees it gets asked.
-        //
-        // Through damageIfChanged and not a bare damageMonitor (user,
-        // 2026-09-14): a count that moved on an app NOT on the dock, or one
-        // whose badge is switched off, used to repaint both whole outputs
-        // anyway. damageIfChanged compares the pill's appearance and damages
-        // only the monitors where something actually changed.
-        for (const auto& MONITOR : State::monitorState()->monitors()) {
-            if (MONITOR)
-                Dock::damageIfChanged(MONITOR);
-        }
-
+        if (g_states.set(FROM, ID, state))
+            askDocks();
         return 0;
     }
 
-    int onBusReadable(int, uint32_t, void*) {
-        while (sd_bus_process(g_bus, nullptr) > 0) { }
+    // NameOwnerChanged(name, old, new) with no new owner: `name` left the bus,
+    // and the badges, urgency and progress it published go with it (review
+    // 2026-11-09). A killed browser's download bar no longer freezes at its
+    // last value, and an app restarted after a crash starts clean.
+    int onOwnerChanged(sd_bus_message* m, void*, sd_bus_error*) {
+        const char *name = nullptr, *from = nullptr, *to = nullptr;
+        if (sd_bus_message_read(m, "sss", &name, &from, &to) < 0 || !name || (to && *to))
+            return 0;
+        if (g_states.drop(name))
+            askDocks();
+        return 0;
+    }
+
+    int onBusReadable(int, uint32_t mask, void*) {
+        int r = 0;
+        while ((r = sd_bus_process(g_bus, nullptr)) > 0) { }
+        // THE BUS WENT AWAY (review 2026-11-09): the session bus restarted, or
+        // the session is ending. sd-bus closes its own descriptor, but the
+        // event loop watches a DUPLICATE (wl_event_loop_add_fd dups it), which
+        // stays readable at end-of-file for good -- so this ran on every turn
+        // of the compositor's loop, at 100% CPU, and every call failed. Drop
+        // the dead connection instead: stop() removes this source, and a
+        // start() (Dock::damageIfChanged asks on every dock frame) connects
+        // again 5 s later -- not on the next frame, which a bus that accepts
+        // and then drops would turn into a connect per frame -- and at most
+        // once per 5 s while there is no bus at all.
+        if (r < 0 || (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR))) {
+            stop();
+            g_failedAt = std::chrono::steady_clock::now();
+        }
         return 0;
     }
 
 }
 
 std::optional<double> anyProgress() {
-    std::optional<double> out;
-    for (const auto& [ID, S] : g_states)
-        if (S.progressVisible)
-            out = std::max(out.value_or(0.0), std::clamp(S.progress, 0.0, 1.0));
-    return out;
+    return g_states.anyProgress();
 }
 
 SState state(const std::string& desktopId) {
     if (desktopId.empty())
         return {};
-
-    if (const auto IT = g_states.find(desktopId); IT != g_states.end())
-        return IT->second;
-
-    return {};
+    return g_states.app(desktopId);
 }
 
 sd_bus* sessionBus() {
@@ -226,24 +250,35 @@ void start() {
     // socket(), a failed connect() and an allocation -- per frame, on the
     // render thread, forever. One attempt per 5 s instead; a bus that comes up
     // later (a session started before its bus) is still picked up.
-    static auto failedAt = std::chrono::steady_clock::time_point{};
-    if (failedAt != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() - failedAt < std::chrono::seconds(5))
+    if (g_failedAt != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() - g_failedAt < std::chrono::seconds(5))
         return;
 
-    // Blocking, but only here: sd_bus_open_user's handshake and AddMatch are
-    // both round trips on a local socket, and this runs once, when the dock is
-    // first drawn.
+    // NOTHING HERE WAITS FOR THE BUS (review 2026-11-09). sd_bus_open_user
+    // only connects and queues its handshake, and both matches go out with
+    // sd_bus_add_match_async, answered on the event loop below. They were
+    // round trips on the render thread, once a session; now a bus that went
+    // away is reconnected from here, possibly while it is still starting, and
+    // a blocking AddMatch would wait for it. A match the bus refuses closes
+    // the connection (sd-bus's default), and onBusReadable drops it.
     if (sd_bus_open_user(&g_bus) < 0) {
-        g_bus    = nullptr;
-        failedAt = std::chrono::steady_clock::now();
+        g_bus      = nullptr;
+        g_failedAt = std::chrono::steady_clock::now();
         return;
     }
-    failedAt = {};
+    g_failedAt = {};
 
+    // Senders leaving the bus FIRST: the bus installs matches in order, so no
+    // Update can arrive from a sender whose leaving would then be missed. Every
+    // NameOwnerChanged, filtered in onOwnerChanged: only departures matter,
+    // and on a desktop they come a handful a minute.
+    //
     // No well-known name is taken: this only LISTENS. Taking
     // com.canonical.Unity would make the dock the Unity API's owner, which is a
     // claim about the whole session, not about drawing a badge.
-    if (sd_bus_add_match(g_bus, nullptr, "type='signal',interface='com.canonical.Unity.LauncherEntry',member='Update'", onUpdate, nullptr) < 0) {
+    if (sd_bus_add_match_async(g_bus, nullptr,
+                               "type='signal',sender='org.freedesktop.DBus',path='/org/freedesktop/DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged'",
+                               onOwnerChanged, nullptr, nullptr) < 0 ||
+        sd_bus_add_match_async(g_bus, nullptr, "type='signal',interface='com.canonical.Unity.LauncherEntry',member='Update'", onUpdate, nullptr, nullptr) < 0) {
         stop();
         return;
     }
@@ -270,7 +305,7 @@ void stop() {
         g_bus = nullptr;
     }
 
-    g_states.clear();
+    g_states = {};
 }
 
 }

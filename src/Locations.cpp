@@ -5,6 +5,8 @@
 #include "MountSort.hpp"
 #include "GvfsMount.hpp"
 #include "StackModel.hpp"
+#include "TrashDirs.hpp"
+#include "FileUri.hpp"
 
 #include <gio/gio.h>
 #include <gio/gunixmounts.h>
@@ -150,30 +152,28 @@ namespace {
     // each mounted device `$top/.Trash/$uid` or `$top/.Trash-$uid`. Only
     // mounts of a real device (/dev/...) that are not network filesystems:
     // the dock reads this once a POLL_MS on the compositor thread, and a stat
-    // of a stale share would hang it. Only ones that exist (have files/).
+    // of a stale share would hang it. A disk's trash only when it is a real
+    // one of this user's (TrashDirs::volumeTrashes: never through a symlink).
     std::vector<std::filesystem::path> trashRoots() {
         std::vector<std::filesystem::path> out;
         if (const auto FILES = trashFilesDir(); !FILES.empty())
             out.push_back(std::filesystem::path(FILES).parent_path());
-        const std::string UID = std::to_string(getuid());
+        std::string table;
         if (FILE* m = std::fopen("/proc/self/mounts", "re")) {
-            char dev[512], dir[1024], type[128];
-            while (std::fscanf(m, "%511s %1023s %127s %*s %*d %*d", dev, dir, type) == 3) {
-                if (std::string_view{dev}.substr(0, 5) != "/dev/" || networkFs(type))
-                    continue;
-                std::string top = dir;
-                // /proc/mounts escapes spaces and the like as \ooo.
-                for (size_t i; (i = top.find('\\')) != std::string::npos && i + 3 < top.size();)
-                    top.replace(i, 4, 1, sc<char>(std::stoi(top.substr(i + 1, 3), nullptr, 8)));
-                if (top == "/")
-                    top.clear();
-                for (const auto& T : {std::filesystem::path(top + "/.Trash") / UID, std::filesystem::path(top + "/.Trash-" + UID)}) {
-                    std::error_code ec;
-                    if (std::filesystem::is_directory(T / "files", ec) && std::ranges::find(out, T) == out.end())
-                        out.push_back(T);
-                }
-            }
+            char   buf[4096];
+            size_t n = 0;
+            while ((n = std::fread(buf, 1, sizeof(buf), m)) > 0)
+                table.append(buf, n);
             std::fclose(m);
+        }
+        // Decoded by TrashDirs (the \ooo escapes, in one pass): a drive whose
+        // label holds a backslash used to make the decode here throw.
+        for (const auto& M : TrashDirs::parseMounts(table)) {
+            if (!M.device.starts_with("/dev/") || networkFs(M.type.c_str()))
+                continue;
+            for (const auto& T : TrashDirs::volumeTrashes(M.dir, getuid()))
+                if (std::ranges::find(out, std::filesystem::path(T)) == out.end())
+                    out.emplace_back(T);
         }
         return out;
     }
@@ -279,7 +279,7 @@ namespace {
             GIcon* icon  = g_unix_mount_point_guess_icon(point);
 
             SLocation loc;
-            loc.uri       = std::string{"file://"} + PATH;
+            loc.uri       = FileUri::of(PATH); // as Nautilus reports it: openWindows() compares the two
             loc.mountPath = PATH;
             loc.name      = label ? std::string{label} : std::string{PATH};
             loc.icon      = iconName(icon);
@@ -303,12 +303,28 @@ namespace {
     // One connection for the lifetime of the process. Opening a user bus means
     // a connect and an auth handshake, and doing that once a second on the
     // render thread is a cost with no reason to exist.
+    //
+    // ...unless the bus went away (review 2026-11-09). A connection the bus
+    // daemon dropped stays dead, and Show in Files now rides this one rather
+    // than a gdbus process of its own: a closed one is let go and another
+    // opened, at most once per 5 s while there is no bus to be had.
+    // A connection of its own (sd_bus_open_user), not the thread's default:
+    // Quick Look (OmarchySearch.cpp) keeps a reference to that one, so letting
+    // it go here did not free it, and asking for the default again handed the
+    // same dead connection back.
     sd_bus* userBus() {
-        static sd_bus* bus = [] {
-            sd_bus* b = nullptr;
-            return sd_bus_default_user(&b) < 0 ? nullptr : b;
-        }();
-
+        static sd_bus* bus      = nullptr;
+        static auto    failedAt = std::chrono::steady_clock::time_point{};
+        if (bus && sd_bus_is_open(bus) <= 0)
+            bus = sd_bus_flush_close_unref(bus);
+        const auto NOW = std::chrono::steady_clock::now();
+        if (!bus && (failedAt == std::chrono::steady_clock::time_point{} || NOW - failedAt >= std::chrono::seconds(5))) {
+            if (sd_bus_open_user(&bus) < 0) {
+                bus      = nullptr;
+                failedAt = NOW;
+            } else
+                failedAt = {};
+        }
         return bus;
     }
 
@@ -754,7 +770,7 @@ void activate(const std::string& uri) {
     std::string target = uri;
     if (app && uri == TRASH_URI && !opensTrashUri(app))
         if (const auto DIR = trashFilesDir(); !DIR.empty())
-            target = "file://" + DIR;
+            target = FileUri::of(DIR);
     const bool OK = app && launchWith(app, target);
     if (app)
         g_object_unref(app);
@@ -771,13 +787,12 @@ void reveal(const std::string& path) {
         return;
     GAppInfo* app = fileManagerApp();
     // Nautilus (or nothing chosen at all): FileManager1.ShowItems, the parent
-    // folder with this one selected.
+    // folder with this one selected. Over sd-bus, not as gdbus's GVariant text,
+    // which a ' or \ in the name broke (FileUri.hpp).
     if (!app || isNautilus(app)) {
         if (app)
             g_object_unref(app);
-        Hyprutils::OS::CProcess("gdbus", {"call", "--session", "--dest", "org.freedesktop.FileManager1", "--object-path", "/org/freedesktop/FileManager1", "--method",
-                                          "org.freedesktop.FileManager1.ShowItems", "['file://" + path + "']", ""})
-            .runAsync();
+        FileUri::showItems(userBus(), FileUri::of(path));
         return;
     }
     // Another file manager: Dolphin selects it (--select); the rest open the
@@ -787,29 +802,35 @@ void reveal(const std::string& path) {
     std::ranges::transform(id, id.begin(), [](unsigned char c) { return std::tolower(c); });
     const bool        DOLPHIN = id.find("dolphin") != std::string::npos;
     const std::string PARENT  = std::filesystem::path(path).parent_path().string();
-    const bool        OK      = DOLPHIN ? launchWith(app, "file://" + path, {"--select"}) : launchWith(app, "file://" + (PARENT.empty() ? path : PARENT));
+    const bool        OK      = DOLPHIN ? launchWith(app, FileUri::of(path), {"--select"}) : launchWith(app, FileUri::of(PARENT.empty() ? path : PARENT));
     g_object_unref(app);
     if (!OK)
-        activate("file://" + (PARENT.empty() ? path : PARENT));
+        activate(FileUri::of(PARENT.empty() ? path : PARENT));
 }
 
 // Every trash this user has (the spec's home trash, and each mount's
 // $topdir/.Trash/$uid and $topdir/.Trash-$uid), emptied on a thread of its own:
-// a big trash takes seconds and this is called from a click. Each top-level
-// entry of files/, info/ and expunged/ is removed; remove_all deletes a
-// symlink itself, never what it points to. The dock's poll sees it empty.
+// a big trash takes seconds and this is called from a click. Everything inside
+// files/, info/ and expunged/ is removed, and no symlink is ever followed
+// (TrashDirs::empty). The old walk listed `T/files` through a link: a disk
+// carrying `.Trash-1000/files -> /home/u` had Empty Trash delete the home
+// folder's contents (review 2026-11-09). The dock's poll sees it empty.
 static void emptyTrashDirs() {
-    const auto trashes = trashRoots();
-    std::thread([trashes] {
-        for (const auto& T : trashes)
-            for (const char* SUB : {"files", "info", "expunged"}) {
-                std::error_code ec;
-                for (auto it = std::filesystem::directory_iterator(T / SUB, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
-                    std::error_code rm;
-                    std::filesystem::remove_all(it->path(), rm);
-                }
-            }
-    }).detach();
+    const auto  TRASHES = trashRoots();
+    const auto  FILES   = trashFilesDir();
+    const auto  HOME    = FILES.empty() ? std::filesystem::path{} : std::filesystem::path(FILES).parent_path();
+    const uid_t UID     = getuid();
+    // A thread that throws is std::terminate, and so is one that cannot be
+    // started: either would take the compositor with it. No thread, no
+    // emptying -- the trash stays full and the row can be clicked again.
+    try {
+        std::thread([TRASHES, HOME, UID] {
+            try {
+                for (const auto& T : TRASHES)
+                    TrashDirs::empty(T.string(), T == HOME, UID);
+            } catch (...) {}
+        }).detach();
+    } catch (...) {}
 }
 
 bool emptyTrashAsksFirst() {
