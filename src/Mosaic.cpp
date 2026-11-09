@@ -347,6 +347,10 @@ namespace ScrollOverview::Mosaic {
     // under the pointer must not pull the view back to it mid-pan.
     static bool g_canvasPanning = false;
     // rideCursor is warping the pointer: that motion is not the hand's.
+    // ONE FLAG (2026-11-09): a class member of the same name used to hide
+    // this one inside CMosaicAlgorithm, so rideCursor set the member and the
+    // checks out here (superMove, focusUnderBar, hoverRefresh) never saw a
+    // ride, from the day each was written.
     static bool g_cursorRiding = false;
     // PUSH THROUGH THE EDGE (user, 2026-11-06): the hand pushing at an outer
     // screen edge pans the canvas by the motion the edge swallows, when the
@@ -364,14 +368,9 @@ namespace ScrollOverview::Mosaic {
     // nothing except show the dock, it's if i push more"): a push starts only
     // once the hand has pushed PUSH_PRESSURE past the edge in one go -- the
     // dock (or a bar) reveals on the touch, the canvas on the push. A pause of
-    // EDGE_PAN_HOLD, or turning, starts the count again.
-    struct SEdgePressure {
-        const void*                           who  = nullptr;
-        int                                   axis = 0;
-        double                                sign = 0, sum = 0;
-        std::chrono::steady_clock::time_point at{};
-    };
-    static SEdgePressure g_edgePressure;
+    // EDGE_PAN_HOLD, or turning, starts the count again. One count per axis,
+    // or a push into a corner never gives way (MosaicCanvas.hpp).
+    static MosaicPack::SEdgePressure g_edgePressure;
     // How far (logical px) the hand pushes past the edge before the canvas
     // gives way: mosaic:edge_push_resistance (user, 2026-11-09: "too easy to
     // push through, especially going down"), half again at the bottom, where
@@ -408,6 +407,9 @@ namespace ScrollOverview::Mosaic {
     // a sliver at the edge), the window the pointer is in never gets it back
     // by moving within it. Set then; the next motion over a window that is not
     // the focused one focuses it (hoverRefresh, from onMove).
+    // Over at any focus that is not a hover (2026-11-09: g_focusReasonHook):
+    // a key, a click or the dock put the focus where the user wants it, and
+    // the next motion inside the window under the pointer took it back.
     static bool g_hoverStale = false;
     static bool hoverRefresh(bool blocked);
     static bool pointerAtOuterEdge(const Vector2D& p);
@@ -763,14 +765,8 @@ namespace ScrollOverview::Mosaic {
                 if (!GOING) {
                     if (!pushMayStart(axis, SIGN, CUR, *AREA))
                         continue;
-                    auto& P = g_edgePressure;
-                    if (P.who != this || P.axis != axis || P.sign != SIGN || NOW - P.at >= EDGE_PAN_HOLD)
-                        P = {this, axis, SIGN, 0.0, NOW};
-                    P.sum += std::abs(D);
-                    P.at = NOW;
-                    if (P.sum < pushPressure(axis, SIGN))
+                    if (!g_edgePressure.press(axis, this, SIGN, D, pushPressure(axis, SIGN), NOW, EDGE_PAN_HOLD))
                         continue;
-                    P = {};
                 }
                 const double MAX = axis ? VIEW->maxY : VIEW->maxX;
                 double&      w   = axis ? want.y : want.x;
@@ -2224,7 +2220,9 @@ namespace ScrollOverview::Mosaic {
                 // The window just moved is the one you are working with: it has
                 // focus, and letting go of Super zooms in on it (the hover on
                 // the way had handed focus to whatever the pointer crossed).
-                Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
+                // A drop is the hand's choice, not a hover: CLICK, so the
+                // hover veto never refuses it (vetoHoverFocus).
+                Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_CLICK);
                 if (m_asCanvas && m_zoomed) {
                     // The new places go to the layout at once (unseen: every
                     // window is drawn zoomed), then the glide.
@@ -2802,7 +2800,6 @@ namespace ScrollOverview::Mosaic {
         Vector2D                  m_lastLaid;       // the offset the windows were last laid out at
         PHLWINDOWREF              m_lastFocus;      // this desktop's last focused window (smart pan's "from")
         PHLWINDOWREF              m_prevFocus;      // the one before it
-        bool                      g_cursorRiding = false; // rideCursor is warping the pointer
         double                    m_zoomZ  = 0.0;   // 0 = the layout, 1 = the whole canvas on screen
         Vector2D                  m_zoomShift;      // zooming in toward a view this far from the layout's
         // A DRAG IN THE ZOOMED-OUT VIEW (zoomPress/Move/Release).
@@ -3385,6 +3382,20 @@ namespace ScrollOverview::Mosaic {
         superEnd(false);
     }
 
+    // AN OVERVIEW OPENS, THE ZOOM ENDS (2026-11-09). The fingers' zoom stays
+    // up after they lift, and a Super zoom is still up when a Super chord or a
+    // hot corner opens the overview. Nothing ended either: the overview took
+    // each press, and so did the zoom under it (onButton, which runs first) --
+    // a press grabbed or picked the canvas window under that spot, a tile
+    // dragged in the overview carried a canvas window along, and the zoom came
+    // back in on the wrong window. superEnd(true): a Super still held for the
+    // zoom stays spent, so the canvas does not zoom out again the moment the
+    // overview closes (the fingers' zoom goes back to idle either way).
+    void onOverviewOpen() {
+        if (g_super == ESuper::ZOOMED || liveZoomed())
+            superEnd(true);
+    }
+
     static CMosaicAlgorithm* canvasOf(const PHLWORKSPACE& ws);
 
     // ---- THE THREE-FINGER ZOOM (CCanvasZoomGesture, OverviewGesture.cpp)
@@ -3572,9 +3583,11 @@ namespace ScrollOverview::Mosaic {
             auto*          A = liveZoomed();
             const Vector2D P = g_pInputManager->getMouseCoordsInternal();
             // A right click that never moved resizes nothing: still zoomed out.
+            // A click picks, as CLICK: passed as a hover it met the dock band's
+            // veto, and a pick below the dock's top edge was refused (2026-11-09).
             if (A && !A->zoomRelease(P) && e.button == BTN_LEFT) {
                 if (const auto W = A->zoomedWindowAt(P))
-                    Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
+                    Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_CLICK);
                 superEnd(true);
             }
             return true;
@@ -3582,7 +3595,7 @@ namespace ScrollOverview::Mosaic {
         if (PRESSED && g_super == ESuper::ZOOMED) {
             if (auto* A = liveZoomed()) {
                 if (const auto W = A->zoomedWindowAt(g_pInputManager->getMouseCoordsInternal()))
-                    Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
+                    Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_CLICK);
             }
             superEnd(true);
             g_swallowRelease = true;
@@ -3694,8 +3707,18 @@ namespace ScrollOverview::Mosaic {
     // only peeks in at the screen's edge, nor to anything while the pointer is
     // on the dock, a dock menu or a folder's fan. A click, a key or the dock
     // still focuses it.
+    // ZOOMED OUT, NONE OF IT APPLIES (2026-11-09): the pointer is the zoom's
+    // (zoomOwnsPointer), and its hover picks a window drawn small, not the
+    // one under the pointer at full size. The dock still reveals over the
+    // zoomed canvas, and its band refused every pick below the pill's top
+    // edge -- the zoom then came back in on the window focused before.
+    // NO PASS FOR A RIDE (2026-11-09): a focus that rideCursor's warp caused
+    // is the hand's even less than a hover is, so the ride does not let it
+    // past the dock and the edge rules. (The old `g_cursorRiding` pass here
+    // never fired: the flag it read was shadowed. Hyprland's warpTo sends no
+    // motion, so today no focus comes of a ride at all.)
     bool vetoHoverFocus(const PHLWINDOW& w) {
-        if (!w || g_cursorRiding)
+        if (!w || zoomOwnsPointer())
             return false;
         if (pointerOnChrome(g_pInputManager->getMouseCoordsInternal()) || pointerInDockBand(g_pInputManager->getMouseCoordsInternal())) {
             g_hoverStale = true;
@@ -3704,14 +3727,11 @@ namespace ScrollOverview::Mosaic {
         // Only while the pointer is pressed against an outer edge -- pushing.
         // A window showing a strip at the side is hovered as any other
         // (user, 2026-11-09: the left-edge windows could not be focused).
-        const Vector2D P   = g_pInputManager->getMouseCoordsInternal();
-        const auto     MON = State::monitorState()->query().vec(P).run();
-        if (!MON)
-            return false;
-        const CBox B    = MON->logicalBox();
-        const bool EDGE = P.x <= B.x + 1 || P.y <= B.y + 1 || P.x >= B.x + B.w - 2 || P.y >= B.y + B.h - 2;
-        const auto* C   = EDGE && w->m_workspace ? canvasOf(w->m_workspace) : nullptr;
-        const bool  V   = C && C->isSliver(w);
+        // The edge hoverRefresh and the focus hook's push test use too
+        // (pointerAtOuterEdge), so the three cannot drift apart.
+        const bool  EDGE = pointerAtOuterEdge(g_pInputManager->getMouseCoordsInternal());
+        const auto* C    = EDGE && w->m_workspace ? canvasOf(w->m_workspace) : nullptr;
+        const bool  V    = C && C->isSliver(w);
         g_hoverStale |= V;
         return V;
     }
@@ -4480,6 +4500,12 @@ namespace ScrollOverview::Mosaic {
             return false;
         if (g_layoutManager && g_layoutManager->dragController()->target())
             return false;
+        // A BUTTON HELD (2026-11-09): Hyprland keeps the focus where a press
+        // landed until every button is up -- a text selection dragged into
+        // the window beside it stays in its own. This runs from the motion
+        // listener, ahead of that rule, and moved the keyboard focus mid-drag.
+        if (g_pInputManager->hasHeldButtons())
+            return false;
         const Vector2D P = g_pInputManager->getMouseCoordsInternal();
         if (pointerOnChrome(P) || pointerInDockBand(P) || pointerAtOuterEdge(P))
             return false;
@@ -4719,6 +4745,8 @@ namespace ScrollOverview::Mosaic {
         }
     }
 
+    static CHyprSignalListener g_focusReasonHook; // a focus that is not a hover: g_hoverStale is over
+
     void registerLayout(HANDLE handle) {
         // Before the algo exists: windows re-arrive inside addTiledAlgo.
         loadKept();
@@ -4731,12 +4759,20 @@ namespace ScrollOverview::Mosaic {
         g_openLateHook = Event::bus()->m_events.window.openLate.listen([](PHLWINDOW w) { adoptFloating(w); });
         g_desktopShownHook = Event::bus()->m_events.workspace.active.listen([](PHLWORKSPACE ws) { zoomFollowsDesktop(ws); });
         g_floatingHook = Event::bus()->m_events.window.floating.listen([](PHLWINDOW w) { onFloating(w); });
+        // Every desktop, not just the canvas: the dock's veto marks a hover
+        // stale anywhere (focusUnderPush, which focuses by KEYBIND, marks it
+        // again after its own focus).
+        g_focusReasonHook = Event::bus()->m_events.window.active.listen([](PHLWINDOW, Desktop::eFocusReason reason) {
+            if (reason != Desktop::FOCUS_REASON_FFM)
+                g_hoverStale = false;
+        });
     }
 
     void unregisterLayout(HANDLE handle) {
         g_openLateHook.reset();
         g_desktopShownHook.reset();
         g_floatingHook.reset();
+        g_focusReasonHook.reset();
         // Before the algo goes: removing it hands the desktops to dwindle.
         saveKept();
         HyprlandAPI::removeAlgo(handle, "mosaic");

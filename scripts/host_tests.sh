@@ -35,6 +35,9 @@
 #                     (directory names only), as the icon index walks a theme.
 #   icon_size_test    IconSize.hpp: icon texture sizes (bucketed to the drawn
 #                     size, never upscaled) and a downscale that filters.
+#   thumbs_test       Thumbs.cpp against a stand-in thumbnailer: a file still
+#                     being written waits until it settles and keeps the
+#                     thumbnail it had meanwhile; a future mtime gets one.
 #   desktop_switch_test  DesktopSwitchModel.hpp: Super+scroll's step and clamp,
 #                     one step per wheel notch, and the desktop-switch cause.
 #
@@ -98,6 +101,8 @@ run app_info_test scripts/app_info_test.cpp src/AppInfo.cpp
 run icon_score_test scripts/icon_score_test.cpp
 # shellcheck disable=SC2046
 run icon_size_test scripts/icon_size_test.cpp $(pkg-config --cflags --libs cairo)
+# shellcheck disable=SC2046
+run thumbs_test scripts/thumbs_test.cpp src/Thumbs.cpp -DTHUMBS_SETTLE_MS=250 -pthread $(pkg-config --cflags --libs glib-2.0)
 run integration_test scripts/integration_test.cpp
 run native_search_test scripts/native_search_test.cpp
 # shellcheck disable=SC2046
