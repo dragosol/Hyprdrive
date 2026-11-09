@@ -17,6 +17,8 @@
 #   trash_dirs_test   TrashDirs.hpp: /proc/mounts decoding (a backslash in a
 #                     drive's label threw on the render thread), and Empty
 #                     Trash's walk, which never follows a disk's symlinks.
+#   store_file_test   StoreFile.hpp: the stacks store survives a full disk
+#                     (a short write, /dev/full) byte for byte.
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
@@ -77,6 +79,7 @@ run workspace_plan_test scripts/workspace_plan_test.cpp
 run strip_layout_test scripts/strip_layout_test.cpp
 run tool_search_test scripts/tool_search_test.cpp
 run stack_model_test scripts/stack_model_test.cpp src/StackModel.cpp
+run store_file_test scripts/store_file_test.cpp
 run mount_sort_test scripts/mount_sort_test.cpp
 run gvfs_mount_test scripts/gvfs_mount_test.cpp
 run trash_dirs_test scripts/trash_dirs_test.cpp
