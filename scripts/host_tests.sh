@@ -24,6 +24,8 @@
 #                     reconnects (skipped without dbus-daemon).
 #   file_uri_test     FileUri.hpp: file names with ' \ # % ? and spaces as
 #                     URIs, and Show in Files reaching a stand-in FileManager1.
+#   launcher_states_test  LauncherStates.hpp: badge and progress state is its
+#                     sender's, and goes when the sender leaves the bus.
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
@@ -110,6 +112,8 @@ run stack_reader_test scripts/stack_reader_test.cpp src/StackReader.cpp src/Stac
 run omarchy_search_test scripts/omarchy_search_test.cpp src/OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
 # shellcheck disable=SC2046
 run search_providers_deadbus_test scripts/search_providers_deadbus_test.cpp src/SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
+# shellcheck disable=SC2046
+run launcher_states_test scripts/launcher_states_test.cpp $(pkg-config --cflags libsystemd)
 run app_info_test scripts/app_info_test.cpp src/AppInfo.cpp
 run icon_score_test scripts/icon_score_test.cpp
 # shellcheck disable=SC2046
