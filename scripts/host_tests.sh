@@ -19,6 +19,9 @@
 #                     Trash's walk, which never follows a disk's symlinks.
 #   store_file_test   StoreFile.hpp: the stacks store survives a full disk
 #                     (a short write, /dev/full) byte for byte.
+#   search_providers_deadbus_test  the search worker when a private
+#                     dbus-daemon dies under it: no 100% CPU spin, and it
+#                     reconnects (skipped without dbus-daemon).
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
@@ -101,6 +104,8 @@ run builtin_icons_test scripts/builtin_icons_test.cpp src/BuiltinIcons.cpp --emb
 # shellcheck disable=SC2046
 run stack_reader_test scripts/stack_reader_test.cpp src/StackReader.cpp src/StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
 run omarchy_search_test scripts/omarchy_search_test.cpp src/OmarchySearch.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
+# shellcheck disable=SC2046
+run search_providers_deadbus_test scripts/search_providers_deadbus_test.cpp src/SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
 run app_info_test scripts/app_info_test.cpp src/AppInfo.cpp
 run icon_score_test scripts/icon_score_test.cpp
 # shellcheck disable=SC2046
