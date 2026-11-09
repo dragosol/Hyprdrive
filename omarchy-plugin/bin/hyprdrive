@@ -370,7 +370,7 @@ def checkout_dir(info):
     if info.get("source"):
         candidates.append(pathlib.Path(info["source"]))
     if FLAVOR == "omarchy":
-        candidates.append(HOME / ".config/omarchy/plugins" / PLUGIN_ID)
+        candidates.append(pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "omarchy/plugins" / PLUGIN_ID)
     candidates.append(CLONE_DIR)
     for c in candidates:
         url = git(c, "remote", "get-url", "origin", capture=True) if (c / ".git").exists() else None
