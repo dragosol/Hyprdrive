@@ -14,6 +14,8 @@
 #                     twin scripts/hyprdrive-integration, case for case.
 #   search_providers_nobus_test  the GNOME search worker with no session bus
 #                     (the std::terminate that took the compositor down).
+#   trash_dirs_test   TrashDirs.hpp: /proc/mounts decoding (a backslash in a
+#                     drive's label threw on the render thread).
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
@@ -76,6 +78,7 @@ run tool_search_test scripts/tool_search_test.cpp
 run stack_model_test scripts/stack_model_test.cpp src/StackModel.cpp
 run mount_sort_test scripts/mount_sort_test.cpp
 run gvfs_mount_test scripts/gvfs_mount_test.cpp
+run trash_dirs_test scripts/trash_dirs_test.cpp
 run mosaic_pack_test scripts/mosaic_pack_test.cpp
 run preview_grid_test scripts/preview_grid_test.cpp
 run motion_spacing_test scripts/motion_spacing_test.cpp
