@@ -15,7 +15,8 @@
 #   search_providers_nobus_test  the GNOME search worker with no session bus
 #                     (the std::terminate that took the compositor down).
 #   trash_dirs_test   TrashDirs.hpp: /proc/mounts decoding (a backslash in a
-#                     drive's label threw on the render thread).
+#                     drive's label threw on the render thread), and Empty
+#                     Trash's walk, which never follows a disk's symlinks.
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
