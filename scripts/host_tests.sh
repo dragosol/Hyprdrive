@@ -22,6 +22,8 @@
 #   search_providers_deadbus_test  the search worker when a private
 #                     dbus-daemon dies under it: no 100% CPU spin, and it
 #                     reconnects (skipped without dbus-daemon).
+#   file_uri_test     FileUri.hpp: file names with ' \ # % ? and spaces as
+#                     URIs, and Show in Files reaching a stand-in FileManager1.
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
@@ -86,6 +88,8 @@ run store_file_test scripts/store_file_test.cpp
 run mount_sort_test scripts/mount_sort_test.cpp
 run gvfs_mount_test scripts/gvfs_mount_test.cpp
 run trash_dirs_test scripts/trash_dirs_test.cpp
+# shellcheck disable=SC2046
+run file_uri_test scripts/file_uri_test.cpp $(pkg-config --cflags --libs glib-2.0 libsystemd)
 run mosaic_pack_test scripts/mosaic_pack_test.cpp
 run preview_grid_test scripts/preview_grid_test.cpp
 run motion_spacing_test scripts/motion_spacing_test.cpp
