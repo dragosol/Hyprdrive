@@ -3,7 +3,7 @@
 // `stacks`. Here the disk "fills" two ways -- a file size limit that cuts the
 // write short (EFBIG), and the temp file landing on /dev/full (ENOSPC) -- and
 // the old file must come through byte for byte, with no temp file left.
-#include "../src/StoreFile.hpp"
+#include "StoreFile.hpp"
 
 #include <csignal>
 #include <cstdio>

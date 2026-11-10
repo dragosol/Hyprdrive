@@ -1,5 +1,5 @@
 // Host test for DesktopStripModel.hpp: the spring and what the wheel asks of it.
-#include "../src/DesktopStripModel.hpp"
+#include "DesktopStripModel.hpp"
 
 #include <cmath>
 #include <cstdio>

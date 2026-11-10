@@ -1,5 +1,5 @@
 // Host test for PreviewGrid.hpp (the dock's hover previews in rows).
-#include "../src/PreviewGrid.hpp"
+#include "PreviewGrid.hpp"
 
 #include <cstdio>
 

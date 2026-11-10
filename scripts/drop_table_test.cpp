@@ -15,7 +15,7 @@
 //
 // Needs nothing from Hyprland; DropDecision.hpp includes nothing at all.
 
-#include "../src/DropDecision.hpp"
+#include "DropDecision.hpp"
 
 #include <cstdio>
 #include <string>

@@ -1,5 +1,5 @@
 // SubmapBorrow: which binds stay live in the overview's submap (O5/B19).
-#include "../src/SubmapBorrow.hpp"
+#include "SubmapBorrow.hpp"
 
 #include <cstdio>
 

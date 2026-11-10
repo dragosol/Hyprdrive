@@ -7,7 +7,7 @@
 // call is a fresh start/fail/join cycle) and checks the rest of the contract:
 // no crash, no fd leak, nothing queued runs later, shutdown is clean, and the
 // default 5 s retry means repeated keystrokes cost one attempt, not one each.
-#include "../src/SearchProviders.hpp"
+#include "SearchProviders.hpp"
 
 #include <algorithm>
 #include <chrono>

@@ -5,7 +5,7 @@
 // and never connected again. Here its CPU time over half a second must stay
 // near zero, and once a bus is back at the same address the next search must
 // reconnect. Skipped (passes) where dbus-daemon is not installed.
-#include "../src/SearchProviders.hpp"
+#include "SearchProviders.hpp"
 
 #include <systemd/sd-bus.h>
 

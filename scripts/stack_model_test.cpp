@@ -1,7 +1,7 @@
 // StackModel: the stacks' pure core -- sort, filter, the store format, the fan's
 // fit decision, relative ages. No compositor, no GLib.
-#include "../src/StackModel.hpp"
-#include "../src/TextInputUtf8.hpp"
+#include "StackModel.hpp"
+#include "TextInputUtf8.hpp"
 
 #include <algorithm>
 #include <cstdio>

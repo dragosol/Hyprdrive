@@ -1,6 +1,6 @@
 // ToolSearch's parser: what the search field asks the dictionary and the
 // translator for. Pure, so it is held to its cases here rather than on screen.
-#include "../src/ToolSearchParse.hpp"
+#include "ToolSearchParse.hpp"
 
 #include <cstdio>
 #include <string>

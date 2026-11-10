@@ -2,7 +2,7 @@
 // parser -- and, through FingerSwipeModel, that the raw-finger macros really
 // produce what keep_swipe and swipe_while_dragging act on: the same model
 // FingerSwipe.cpp runs is fed the parsed steps here, in order.
-#include "../src/DebugGestureScript.hpp"
+#include "DebugGestureScript.hpp"
 
 #include <cstdio>
 #include <string>

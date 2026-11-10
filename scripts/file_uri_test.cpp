@@ -4,7 +4,7 @@
 // survive the trip to a URI and back, and must reach a stand-in
 // FileManager1.ShowItems on a private dbus-daemon exactly (that half is
 // skipped where dbus-daemon is not installed).
-#include "../src/FileUri.hpp"
+#include "FileUri.hpp"
 
 #include <cctype>
 #include <chrono>

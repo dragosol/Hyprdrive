@@ -7,7 +7,7 @@
 // The source scan is the point: a glyph added to Dock.cpp next month without
 // an entry in Glyphs.cpp fails HERE, on the build machine, not as a box on
 // someone's screen.
-#include "../src/Glyphs.hpp"
+#include "Glyphs.hpp"
 
 #include <librsvg/rsvg.h>
 
@@ -70,7 +70,7 @@ static double coverage(const std::string& svg, bool* tinted) {
 static std::set<char32_t> sourceGlyphs() {
     std::set<char32_t> out;
     static const std::regex ESC{R"(\\u([0-9A-Fa-f]{4})|\\U([0-9A-Fa-f]{8}))"};
-    for (const auto& E : std::filesystem::directory_iterator{"src"}) {
+    for (const auto& E : std::filesystem::recursive_directory_iterator{"src"}) {
         const auto P = E.path();
         if (P.extension() != ".cpp" && P.extension() != ".hpp")
             continue;

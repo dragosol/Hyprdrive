@@ -5,7 +5,7 @@
 // before the other-monitor strips existed, copied verbatim in shape: with no
 // alternate strips the new layout must reproduce it exactly.
 
-#include "../src/StripLayout.hpp"
+#include "StripLayout.hpp"
 
 #include <cmath>
 #include <cstdio>

@@ -3,7 +3,7 @@
 // Downloads stack's bar for good, and an app relaunched after a crash took
 // back its dead instance's count and urgency. Senders are unique bus names;
 // drop() is what NameOwnerChanged calls when one leaves the bus.
-#include "../src/LauncherStates.hpp"
+#include "LauncherStates.hpp"
 
 #include <cstdio>
 #include <string>

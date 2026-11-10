@@ -1,5 +1,5 @@
 // MountSort (dock:mount_sort): the smart order a drive list is shown in.
-#include "../src/MountSort.hpp"
+#include "MountSort.hpp"
 
 #include <algorithm>
 #include <cstdio>

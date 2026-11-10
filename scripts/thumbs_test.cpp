@@ -5,7 +5,7 @@
 // grows, a rewrite of a file whose thumbnail is on show, a file dated in the
 // future, and one put back to an older copy (our thumbnails carry the mtime
 // of the version they show).
-#include "../src/Thumbs.hpp"
+#include "Thumbs.hpp"
 
 #include <chrono>
 #include <cstdio>

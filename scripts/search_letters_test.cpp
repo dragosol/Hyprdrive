@@ -7,7 +7,7 @@
 //
 // `make check` runs exactly that.
 
-#include "../src/SearchLetters.hpp"
+#include "SearchLetters.hpp"
 
 #include <cmath>
 #include <cstdio>

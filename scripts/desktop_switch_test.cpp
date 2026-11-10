@@ -1,7 +1,7 @@
 // Host test for DesktopSwitchModel.hpp: Super+scroll's stepping and clamping
 // (empty desktops visited, no wrap, other monitors' numbers skipped), the
 // one-step-per-notch accumulator, and the desktop-switch cause / snap decision.
-#include "../src/DesktopSwitchModel.hpp"
+#include "DesktopSwitchModel.hpp"
 
 #include <cstdio>
 #include <set>

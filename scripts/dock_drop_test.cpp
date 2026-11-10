@@ -1,6 +1,6 @@
 // DockDropModel: what a drop onto the dock means -- the file list a drag
 // source hands over, a free name in the destination, and the decision table.
-#include "../src/DockDropModel.hpp"
+#include "DockDropModel.hpp"
 
 #include <cstdio>
 #include <set>

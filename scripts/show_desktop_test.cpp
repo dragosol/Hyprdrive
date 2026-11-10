@@ -2,7 +2,7 @@
 // spring that takes it there and back, reversible at any point (user,
 // 2026-11-10: "moves all windows in the active workspace completely out of view
 // with an animation, reversable at any point of course").
-#include "../src/ShowDesktopMath.hpp"
+#include "ShowDesktopMath.hpp"
 #include <cstdio>
 #include <string>
 #include <vector>

@@ -1,7 +1,7 @@
 // MotionSpacing: no two consecutive motion-blur copies more than MAX_GAP device
 // px apart, on any edge, for any move or resize -- the rule that keeps the
 // smear a smear.
-#include "../src/MotionSpacing.hpp"
+#include "MotionSpacing.hpp"
 
 #include <cstdio>
 #include <random>

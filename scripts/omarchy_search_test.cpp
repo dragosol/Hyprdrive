@@ -1,5 +1,5 @@
-#include "../src/OmarchySearch.hpp"
-#include "../src/SearchIntent.hpp"
+#include "OmarchySearch.hpp"
+#include "SearchIntent.hpp"
 #include <cassert>
 #include <chrono>
 #include <iostream>

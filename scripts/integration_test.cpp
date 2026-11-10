@@ -4,7 +4,7 @@
 // rule is a drift waiting to happen, so the second half of this test runs the
 // shell script (offline) over EVERY combination of inputs and requires it to
 // print exactly what decide() returns: name, source and reason.
-#include "../src/IntegrationRule.hpp"
+#include "IntegrationRule.hpp"
 
 #include <array>
 #include <cstdio>

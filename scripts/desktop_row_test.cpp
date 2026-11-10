@@ -1,5 +1,5 @@
 // Host test for DesktopRowModel.hpp: which desktops the wheel's row holds.
-#include "../src/DesktopRowModel.hpp"
+#include "DesktopRowModel.hpp"
 
 #include <cstdio>
 #include <vector>

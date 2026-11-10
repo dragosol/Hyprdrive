@@ -32,10 +32,24 @@ OPT ?= -O2
 PKGS := pixman-1 libdrm hyprland pangocairo fontconfig libinput libudev wayland-server \
         xkbcommon libsystemd gio-2.0 gio-unix-2.0 $(LUA_PC)
 
+# The sources live in src/<area>/ (one folder per subsystem; see src/README.md).
+# Every #include is still a bare name: each folder is on the include path, and no
+# two files share a name, so the objects stay flat in .build/. --embed-dir=. is
+# for BuiltinIcons.cpp's #embed "assets/icons/...", which resolves from the root.
+SRC_DIRS := $(sort $(dir $(wildcard src/*/*.cpp src/*/*.hpp)))
+SRC_INC  := $(addprefix -I,$(SRC_DIRS:/=))
+SRCS := $(wildcard src/*/*.cpp)
+OBJS := $(addprefix .build/,$(notdir $(SRCS:.cpp=.o)))
+DEPS := $(OBJS:.o=.d)
+vpath %.cpp $(SRC_DIRS)
+ifneq ($(words $(SRCS)),$(words $(sort $(notdir $(SRCS)))))
+$(error two source files share a name: $(filter-out $(sort $(notdir $(SRCS))),$(notdir $(SRCS))) -- objects are flat in .build/)
+endif
+
 # Goals that compile nothing ask pkg-config nothing: install-only runs as a user
 # who may not have the SDK on PKG_CONFIG_PATH at all (see install-only).
 ifneq ($(if $(MAKECMDGOALS),$(filter-out install-only uninstall clean,$(MAKECMDGOALS)),all),)
-CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build -Isrc --embed-dir=. \
+CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build $(SRC_INC) --embed-dir=. \
             $(shell pkg-config --cflags $(PKGS))
 # fontconfig: Fonts.cpp asks it which family "monospace" is and whether an icon
 # font covers the UI glyphs. Hyprland's pango already loads it; linking it
@@ -46,12 +60,6 @@ endif
 ifeq ($(CXX),g++)
     CXXFLAGS += -fno-gnu-unique
 endif
-
-# The sources live in src/ (flat: every #include is a bare name). --embed-dir=. is for
-# BuiltinIcons.cpp's #embed "assets/icons/...", which resolves from the root.
-SRCS := $(wildcard src/*.cpp)
-OBJS := $(SRCS:src/%.cpp=.build/%.o)
-DEPS := $(OBJS:.o=.d)
 
 VERSION_HEADER = .build/PluginVersion.hpp
 VERSION_SCRIPT = scripts/generate-plugin-version.sh
@@ -73,7 +81,7 @@ hyprdrive.so: $(OBJS)
 # dock stacks C: the icons are #embed-ded, so their object depends on them.
 .build/BuiltinIcons.o: $(wildcard assets/icons/*.svg) assets/scratchpad-symbolic.svg
 
-.build/%.o: src/%.cpp | $(VERSION_HEADER)
+.build/%.o: %.cpp | $(VERSION_HEADER)
 	@mkdir -p .build
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
@@ -144,6 +152,9 @@ clean:
 # across 1.9.50 at "No rule to make target 'AppInfo.cpp'" until a make clean
 # (2026-11-09). An empty rule for each old name lets make rebuild those objects
 # from src/ instead, the way -MP already treats a header that is gone.
+# The move into src/<area>/ did the same to every .d written between 1.9.50 and
+# then ("src/AppInfo.cpp", "src/Dock.hpp"), so those names get the empty rule too.
 $(notdir $(SRCS)):
+$(addprefix src/,$(notdir $(wildcard src/*/*.cpp src/*/*.hpp))):
 
 -include $(DEPS)

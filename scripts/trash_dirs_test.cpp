@@ -5,7 +5,7 @@
 //     the render thread, and `a\134123` was decoded twice;
 //   - a disk whose `.Trash-UID/files` is a symlink had Empty Trash delete what
 //     it pointed to. Every canary here must survive emptying.
-#include "../src/TrashDirs.hpp"
+#include "TrashDirs.hpp"
 
 #include <cstdio>
 #include <filesystem>
