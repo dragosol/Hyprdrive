@@ -135,9 +135,16 @@ install: hyprdrive.so check
 # every header as missing, so `make install` rebuilt the plugin there and
 # failed. This target never compiles: it refuses when there is no .so, and it
 # does not run `check` (the builder runs `make`, which does, first).
+# The installed copy carries no debug information (it is most of the file: about
+# 240 MB with it, 9 MB without). Function names stay, so a crash report still
+# names where it died; KEEP_DEBUG=1 make install keeps line numbers for gdb.
+# The build's own hyprdrive.so is left as it is.
 install-only:
 	@[ -s hyprdrive.so ] || { echo "install-only: no hyprdrive.so -- run make (build + check) first" >&2; exit 1; }
 	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/hyprdrive.so
+ifeq ($(KEEP_DEBUG),)
+	strip --strip-debug $(PREFIX)/lib/hyprdrive/hyprdrive.so
+endif
 	install -Dm644 assets/scratchpad-symbolic.svg $(PREFIX)/lib/hyprdrive/scratchpad-symbolic.svg
 	install -Dm755 ui/bin/agent-run $(PREFIX)/lib/hyprdrive/agent-run
 	PREFIX="$(PREFIX)" bash scripts/install-fragments.sh
