@@ -85,6 +85,15 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
   the overview or a new window, or picking one of them in the dock brings them
   back too. On by default; Settings > Keybinds > Show desktop turns it off or
   moves it to another key.
+- **Fixed-size windows tile at their own size:** Super+T (Hyprland's float
+  toggle, any bind of it) on a window that cannot be resized -- a Wine login, a
+  game in a window, Minesweeper -- puts it in the layout at exactly its size,
+  centred in its tile, and the next press floats it again. Dwindle used to
+  refuse such a window, and scrolling and Mosaic stretched it, which a Wine
+  program answers with a storm of resizes (Battle.net's login flickering white,
+  the wheel lost in GTK apps). A tile smaller than the window lets it overflow
+  rather than squeeze it, which is what Hyprland's `misc:size_limits_tiled` (set
+  in 20-layout.lua) does for windows with a minimum size.
 
 ### Dock
 
