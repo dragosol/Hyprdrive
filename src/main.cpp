@@ -64,6 +64,7 @@ using namespace Hyprutils::String;
 #include "Intent.hpp"
 #include "GameApps.hpp"
 #include "FullscreenDesktop.hpp"
+#include "ShowDesktop.hpp"
 #include "Mosaic.hpp"
 #include <hyprland/src/managers/SessionLockManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
@@ -2313,6 +2314,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         ScrollOverview::Intent::preRender(monitor);
         // After Mosaic's: a live swipe's place, for its release (DesktopStrip.hpp).
         ScrollOverview::DesktopStrip::sampleSwipe(monitor);
+        // Show desktop's slide, after every module that places windows (it has
+        // the last word on where they are drawn) and before the motion blur
+        // reads where they went (ShowDesktop.hpp).
+        ScrollOverview::ShowDesktop::preRender(monitor);
 
         // Layout motion blur (FlightBlur.hpp). The overview draws its own
         // windows; there, only the sweep runs.
@@ -2715,6 +2720,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Config::registerDispatcher("settings", ScrollOverview::SettingsApp::dispatch);
     // Super+scroll's next / previous desktop (DesktopSwitch.hpp).
     ScrollOverview::Config::registerDispatcher("desktop", ScrollOverview::DesktopSwitch::dispatch);
+    ScrollOverview::Config::registerDispatcher("show_desktop", ScrollOverview::ShowDesktop::dispatch);
     ScrollOverview::Config::registerGesture(::onRegisterOverviewGesture, ::overviewGestureKeyword);
     ScrollOverview::Config::registerConfig();
     // The Omarchy-or-not answer, now that its key exists, and the hyprctl
@@ -2739,6 +2745,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     ScrollOverview::Intent::init();
     ScrollOverview::GameApps::init();
     ScrollOverview::FullscreenDesktop::init();
+    ScrollOverview::ShowDesktop::init();
     // dock:cpu_pulse's sampler (CpuPulse.hpp): idle unless the option is on.
     ScrollOverview::CpuPulse::init();
     // The animation:curve preset onto Hyprland's named house beziers -- only
@@ -2820,6 +2827,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    // First: no window may stay hidden behind a plugin that is gone.
+    ScrollOverview::ShowDesktop::shutdown();
     ScrollOverview::Integration::shutdown(); // its hyprctl lambda lives in this .so
     ScrollOverview::SettingsApp::shutdown(); // likewise
     // FIRST: Hyprland hands every mosaic desktop back to its default layout and

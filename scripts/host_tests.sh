@@ -96,6 +96,7 @@ run trash_dirs_test scripts/trash_dirs_test.cpp
 # shellcheck disable=SC2046
 run file_uri_test scripts/file_uri_test.cpp $(pkg-config --cflags --libs glib-2.0 libsystemd)
 run mosaic_pack_test scripts/mosaic_pack_test.cpp
+run show_desktop_test scripts/show_desktop_test.cpp
 run preview_grid_test scripts/preview_grid_test.cpp
 run motion_spacing_test scripts/motion_spacing_test.cpp
 run icon_overrides_test scripts/icon_overrides_test.cpp

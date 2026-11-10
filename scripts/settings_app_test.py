@@ -184,13 +184,19 @@ check("schema: every bind row id is one hdpanel fills",
 # press: "Not bound by default: bind ... in your config").
 check("keybinds: every toggle row is an hdpanel bind switch",
       set(re.findall(r'toggle: "(\w+)"', schema)) == set(na.BIND_SWITCHES))
-check("keybinds: bind switches off by default -> no binds", na.keybinds_lua({}) == [])
+# Off by default, but show desktop (user, 2026-11-10: "leave it on by
+# default"): untouched settings bind Super+D to it, and only that.
+txt = "\n".join(na.keybinds_lua({}))
+check("keybinds: by default only show desktop binds -- Super+D, guarded",
+      txt.count("hl.bind(") == 1 and "pcall(function() return hl.plugin.hyprdrive.show_desktop() end)" in txt
+      and "hl.unbind('SUPER + D')" in txt and "hl.bind('SUPER + D', a0, { description = 'Show desktop' })" in txt)
+check("keybinds: show desktop off -> no binds", na.keybinds_lua({"binds": {"show_desktop": False}}) == [])
 txt = "\n".join(na.keybinds_lua({"binds": {"minimize": True, "settings": True}}))
 check("keybinds: minimize on = guarded unbind-then-bind of Super+H",
       "pcall(function() return hl.plugin.hyprdrive.minimize('window') end)" in txt
       and "hl.unbind('SUPER + H')" in txt and "hl.bind('SUPER + H', a0, { description = 'Minimize window' })" in txt)
 check("keybinds: settings on = Super+Comma", "hl.bind('SUPER + COMMA', a0, { description = 'Hyprdrive settings' })" in txt)
-txt = "\n".join(na.keybinds_lua({"keys": {na.HOT_KEYS: True}}))
+txt = "\n".join(na.keybinds_lua({"keys": {na.HOT_KEYS: True}, "binds": {"show_desktop": False}}))
 check("keybinds: dock hotkeys on = Super+1..0 to hotkey()",
       "hl.unbind('SUPER + code:10')" in txt and "hl.plugin.hyprdrive.hotkey('10')" in txt and txt.count("hl.bind(") == 10)
 check("keybinds: dock hotkeys rebind (reload)", meta[na.HOT_KEYS].get("reload") is True)
@@ -203,11 +209,36 @@ with tempfile.TemporaryDirectory() as d:
     frag = (pathlib.Path(d) / na.PANEL_FRAG).read_text()
     check("bind-set minimize on: 40-panel.lua binds it under hyprdrive_loaded(), reloads",
           "if hyprdrive_loaded and hyprdrive_loaded() then" in frag and "hl.bind('SUPER + H'" in frag and ("reload",) in reloads)
-    check("bind-set: the dump reports it", na.bind_switches(na.load_store()) == {"minimize": True, "settings": False})
+    check("bind-set: the dump reports it", na.bind_switches(na.load_store()) == {"minimize": True, "settings": False, "show_desktop": True})
     reloads.clear()
     na.cmd_bind_set(["minimize", "off"])
     check("bind-set minimize off: gone, and reloads",
           "SUPER + H" not in (pathlib.Path(d) / na.PANEL_FRAG).read_text() and ("reload",) in reloads)
+
+# REFRESH (make install's): 40-panel.lua as this version writes it, from the
+# settings already saved, panel.json untouched -- so a switch a release turns
+# on by default (Super+D) is bound without a visit to the settings, and one
+# turned off stays off.
+import contextlib as _cl, io as _io
+with tempfile.TemporaryDirectory() as d:
+    na.FRAGDIR = pathlib.Path(d)
+    na.STORE = pathlib.Path(d) / "panel.json"
+    reloads = []
+    na.hyprctl = lambda *a: reloads.append(a) or ""
+    with _cl.redirect_stdout(_io.StringIO()):
+        na.cmd_refresh([])
+    frag = (pathlib.Path(d) / na.PANEL_FRAG).read_text()
+    check("refresh, settings never touched: 40-panel.lua binds Super+D to show desktop",
+          "hl.bind('SUPER + D', a0, { description = 'Show desktop' })" in frag)
+    check("refresh: panel.json not written, nothing reloaded", not na.STORE.exists() and reloads == [])
+    na.STORE.write_text('{"binds": {"show_desktop": false, "minimize": true}}')
+    before = na.STORE.read_text()
+    with _cl.redirect_stdout(_io.StringIO()):
+        na.cmd_refresh([])
+    frag = (pathlib.Path(d) / na.PANEL_FRAG).read_text()
+    check("refresh: a switch turned off stays off, one turned on stays on",
+          "SUPER + D" not in frag and "hl.bind('SUPER + H'" in frag)
+    check("refresh: panel.json byte for byte as it was", na.STORE.read_text() == before)
 
 # ------------------------------------------------------- the chord editor
 # Settings -> Keybinds edits chords: click a key, press the new one (the QML),

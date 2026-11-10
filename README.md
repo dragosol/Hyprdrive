@@ -78,6 +78,13 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
 - Desktop changes made by a key and those made by focus moving to another
   desktop can each be made instant (`animation:desktop_keyboard`,
   `animation:desktop_focus`).
+- **Show desktop:** Super+D slides every window on the desktop off the screen,
+  each by its nearest edge, and brings them back on a second press -- at any
+  point, even halfway, where they turn round on the same spring. Nothing is
+  retiled: they come back to the places they left. Switching desktops, opening
+  the overview or a new window, or picking one of them in the dock brings them
+  back too. On by default; Settings > Keybinds > Show desktop turns it off or
+  moves it to another key.
 
 ### Dock
 
@@ -454,6 +461,7 @@ a line there overrides the generated one above it.
 | `gesture` | a gesture spec | bind a trackpad gesture to a Hyprdrive action (see Gestures) |
 | `desktop` | `next`, `prev` | the next / previous desktop along the focused monitor's row (`binds:scroll_desktops_stop_at_empty` / `_populated_only`; Super+scroll, `binds:scroll_desktops`) |
 | `settings` | `open`, `toggle`, `close`, `pane <id>`, `icons <app>` | open the settings |
+| `show_desktop` | `toggle`, `on`, `off` | slide the desktop's windows out of view and back (Super+D) |
 | `debug` | `frames`, `mem`, `gesture <script>`, ... | diagnostics and test hooks, see [docs/DEBUG.md](docs/DEBUG.md) |
 
 ```lua

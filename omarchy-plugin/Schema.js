@@ -394,6 +394,9 @@ var sections = [
         { type: "bind", bind: "minimize", toggle: "minimize", label: "Minimize", chordEdit: true,
           desc: "Minimizes the active window into the dock. Takes its key (Super+H unless you change it) from anything else bound to it; off gives it back.",
           confirm: { title: "Take a key to minimize?", body: "Its key will minimize the active window, replacing whatever that key does now. Turning this off gives it back.", allow: "Allow", glyph: "\uf11c" } },
+        { type: "bind", bind: "show_desktop", toggle: "show_desktop", label: "Show desktop", chordEdit: true,
+          desc: "Slides every window on the current desktop off the screen, each by its nearest edge, so the desktop shows. Press it again at any point, even halfway, and they turn round and come back to their places; so does switching desktops, opening the overview or a new window, or picking one of them in the dock. Takes its key (Super+D unless you change it) from anything else bound to it; off gives it back.",
+          confirm: { title: "Take a key to show the desktop?", body: "Its key will slide the current desktop's windows out of view and back, replacing whatever that key does now. Turning this off gives it back.", allow: "Allow", glyph: "\uf11c" } },
         { type: "bind", bind: "settings", toggle: "settings", label: "Open these settings", chordEdit: true,
           desc: "Opens these settings. Takes its key (Super+Comma unless you change it) from anything else bound to it; off gives it back.",
           confirm: { title: "Take a key for the settings?", body: "Its key will open the Hyprdrive settings, replacing whatever that key does now. Turning this off gives it back.", allow: "Allow", glyph: "\uf11c" } }

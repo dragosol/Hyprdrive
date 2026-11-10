@@ -267,6 +267,11 @@ HOT_KEYS = PLUGIN + "dock:hot_keys"
 BIND_SWITCHES = {
     "minimize": (False, "SUPER + H", "hl.plugin.hyprdrive.minimize('window')", "Minimize window"),
     "settings": (False, "SUPER + COMMA", "hl.plugin.hyprdrive.settings()", "Hyprdrive settings"),
+    # On by default (user, 2026-11-10: "a super + d keybind that moves all
+    # windows in the active workspace completely out of view ... leave it on by
+    # default"): ShowDesktop.hpp. Neither Omarchy nor plain Hyprland binds
+    # Super+D; a config that does lends it while this is on.
+    "show_desktop": (True, "SUPER + D", "hl.plugin.hyprdrive.show_desktop()", "Show desktop"),
 }
 
 MOSAIC_ON = PLUGIN + "mosaic:enabled"
@@ -1457,6 +1462,7 @@ BIND_ROWS = {
     "desktop": "desktop",
     "minimize": "minimize",
     "settings": "settings",
+    "show_desktop": "show_desktop",
     "focus": "focus",
     "swap": "focus",
     "hotkey": "hotkeys",
@@ -1754,6 +1760,7 @@ KEY_ROWS = {
 OWN_DESCS = {
     "Minimize window": "minimize",
     "Hyprdrive settings": "settings",
+    "Show desktop": "show_desktop",
     LAYOUT_CYCLE_DESC: "layout_cycle",
     "Next desktop (empty ones too)": "desktop",
     "Previous desktop (empty ones too)": "desktop",
@@ -1761,6 +1768,7 @@ OWN_DESCS = {
 ROW_NAMES = {
     "minimize": "Minimize",
     "settings": "Open these settings",
+    "show_desktop": "Show desktop",
     "layout_cycle": "Mosaic layout cycle",
     "focus": "Mosaic-aware focus and swap",
     "desktop": "Scroll through desktops",
@@ -2197,6 +2205,27 @@ def dump():
     }
 
 
+def cmd_refresh(_args):
+    """make install's: 40-panel.lua as this version writes it, from the
+    settings already saved -- panel.json is not touched. A switch a release
+    turns on by default (Super+D's show desktop, user 2026-11-10: "leave it on
+    by default") is bound without a visit to the settings. Hyprland reads the
+    fragment at its next config reload (`hyprdrive reload` does one)."""
+    store = load_store()
+    path = FRAGDIR / PANEL_FRAG
+    try:
+        before = path.read_text()
+    except OSError:
+        before = None
+    write_panel_fragment(store)
+    try:
+        after = path.read_text()
+    except OSError:
+        after = None
+    print(json.dumps({"ok": True, "changed": before != after}))
+    return 0
+
+
 def cmd_dump(_args):
     json.dump(dump(), sys.stdout, indent=1)
     sys.stdout.write("\n")
@@ -2589,7 +2618,7 @@ def migrate_gesture_fallbacks():
 
 def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
-        print("hdpanel dump|set|preview|reset GROUP|bind-set ID on|off|default|CHORD [--replace]|bind-check CHORD [ID]|capture on|off|gestures-set|profile-save|profile-apply|profile-mode|shell-stale")
+        print("hdpanel dump|set|preview|reset GROUP|bind-set ID on|off|default|CHORD [--replace]|bind-check CHORD [ID]|capture on|off|gestures-set|profile-save|profile-apply|profile-mode|refresh|shell-stale")
         return 0
     cmd = argv[1]
     args = argv[2:]
@@ -2610,6 +2639,7 @@ def main(argv):
         "bind-set": cmd_bind_set,
         "bind-check": cmd_bind_check,
         "capture": cmd_capture,
+        "refresh": cmd_refresh,
         "profile-auto": cmd_profile_auto,
     }.get(cmd)
     if not fn:
