@@ -8,7 +8,11 @@
 # Mosaic it checks Super+T tiles it at EXACTLY its size with no configure storm
 # (the bug: ~1765/s on Mosaic, dwindle refusing it), Super+T floats it back, a
 # crowded desktop overflows instead of squeezing it, a size change of its own is
-# followed, and an unloaded plugin leaves it floating. Exit status = failures.
+# followed, and an unloaded plugin leaves it floating. With misc:size_limits_tiled
+# OFF, as Hyprland ships it: 20-layout.lua turned it on for this, and under it
+# every tiled window is clamped into the screen -- it piled the infinite
+# canvas's windows up (user, 2026-11-10: "you broke it"); the canvas check runs
+# it once more as the control that must fail. Exit status = failures.
 #
 #   scripts/gates/own_size_tile/run.sh [path/to/hyprdrive.so]
 set -u
@@ -28,10 +32,29 @@ print('none' if not c else '%dx%d %s' % (c['size'][0], c['size'][1], 'FLOAT' if 
 start() {
     $H stop >/dev/null 2>&1
     $H start --so "$SO" >/dev/null 2>&1 || { echo "FAIL rig start"; exit 99; }
-    $H eval "hl.config({general={layout=\"$1\"}, misc={size_limits_tiled=true}})" >/dev/null
+    $H eval "hl.config({general={layout=\"$1\"}})" >/dev/null
     $H eval 'hl.bind("SUPER + T", hl.dsp.window.float({ action = "toggle" }))' >/dev/null
 }
-others() { for n in $(seq 1 "$1"); do $H eval "hl.dispatch(hl.dsp.exec_cmd(\"kitty --class hdtest.c$n --title c$n\"))" >/dev/null; sleep 0.9; done; }
+monitor() { $H h monitors -j > "$SHARE/mon.json"; }
+where() { # the insist window inside the screen: on, or off and where
+    monitor; $H h clients -j | python3 -c "
+import json,sys
+m = json.load(open('$SHARE/mon.json'))[0]; W, H = m['width'] / m['scale'], m['height'] / m['scale']
+c = next((c for c in json.load(sys.stdin) if c['class']=='hdtest.insist'), None)
+x, y, w, h = (c['at'] + c['size']) if c else (0, 0, 0, 0)
+print('none' if not c else 'on' if x >= 0 and y >= 0 and x + w <= W and y + h <= H else 'off %d,%d %dx%d' % (x, y, w, h))"; }
+canvas() { # the tiled hdtest.c* windows: how many lie past the screen, how many pairs overlap, how many there are
+    monitor; $H h clients -j | python3 -c "
+import json,sys
+m = json.load(open('$SHARE/mon.json'))[0]; W, H = m['width'] / m['scale'], m['height'] / m['scale']
+t = [c for c in json.load(sys.stdin) if c['class'].startswith('hdtest.c') and not c['floating']]
+past = sum(1 for c in t if c['at'][0] < 0 or c['at'][1] < 0 or c['at'][0] + c['size'][0] > W + 1 or c['at'][1] + c['size'][1] > H + 1)
+over = lambda a, b, i: min(a['at'][i] + a['size'][i], b['at'][i] + b['size'][i]) - max(a['at'][i], b['at'][i]) > 2
+print(past, sum(1 for i in range(len(t)) for j in range(i + 1, len(t)) if over(t[i], t[j], 0) and over(t[i], t[j], 1)), len(t))"; }
+# N kitty windows, each 1200x800 to start with -- never the size the last one
+# closed at (kitty remembers it, so a crowded run's small tiles made the next
+# run's canvas fit the screen and never spill).
+others() { for n in $(seq 1 "$1"); do $H eval "hl.dispatch(hl.dsp.exec_cmd(\"kitty --class hdtest.c$n --title c$n -o remember_window_size=no -o initial_window_width=1200 -o initial_window_height=800\"))" >/dev/null; sleep 0.9; done; }
 insist() { # SECONDS [GROW_AT]
     $H eval "hl.dispatch(hl.dsp.exec_cmd(\"python3 $SHARE/insist.py 362 677 $1 $OUT ${2:-}\"))" >/dev/null
     for _ in $(seq 1 30); do $H h clients -j | grep -q '"class": "hdtest.insist"' && break; sleep 0.3; done
@@ -54,10 +77,20 @@ for L in dwindle scrolling mosaic; do
 done
 for L in dwindle mosaic; do
     start $L; others 6; insist 8
-    $H tap Super+T; sleep 0.8; S1=$(state); sleep 6.5
+    $H tap Super+T; sleep 0.8; S1=$(state); P1=$(where); sleep 6.5
     check "$L, crowded: still its own size (overflows, not squeezed)" "$([ "$S1" = '362x677 TILED' ] && echo 1)" "$S1"
+    check "$L, crowded: kept on screen" "$([ "$P1" = on ] && echo 1)" "$P1"
     check "$L, crowded: no configure storm" "$([ "$(storm 3 7)" -le 5 ] && echo 1)" "$(storm 3 7)/s"
 done
+start mosaic
+$H eval 'hl.config({plugin={hyprdrive={mosaic={infinite_canvas=true}}}})' >/dev/null
+others 8; insist 9 # 8: seven windows still fit on the rig's screen
+$H tap Super+T; sleep 0.8; S1=$(state); sleep 4.5; C1=$(canvas)
+check "infinite canvas: Super+T tiles it at its own size" "$([ "$S1" = '362x677 TILED' ] && echo 1)" "$S1"
+check "infinite canvas: no configure storm" "$([ "$(storm 3 6)" -le 5 ] && echo 1)" "$(storm 3 6)/s"
+check "infinite canvas: its windows spill past the screen, none on another" "$(set -- $C1; [ "$1" -ge 1 ] && [ "$2" = 0 ] && [ "$3" = 8 ] && echo 1)" "past, overlapping, tiled: $C1"
+$H eval 'hl.config({misc={size_limits_tiled=true}, general={gaps_workspaces=0}})' >/dev/null; sleep 1.2; C2=$(canvas)
+check "control: misc:size_limits_tiled piles them up (20-layout.lua's mistake)" "$(set -- $C2; [ "$2" -ge 1 ] && echo 1)" "past, overlapping, tiled: $C2"
 start mosaic; others 1; insist 10 5
 $H tap Super+T; sleep 4.5; S1=$(state); sleep 5
 check "mosaic: a size change of its own is followed" "$([ "$S1" = '462x727 TILED' ] && echo 1)" "$S1"

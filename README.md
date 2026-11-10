@@ -92,8 +92,10 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
   refuse such a window, and scrolling and Mosaic stretched it, which a Wine
   program answers with a storm of resizes (Battle.net's login flickering white,
   the wheel lost in GTK apps). A tile smaller than the window lets it overflow
-  rather than squeeze it, which is what Hyprland's `misc:size_limits_tiled` (set
-  in 20-layout.lua) does for windows with a minimum size.
+  rather than squeeze it, kept on screen while its tile is. Only that window's
+  tile is touched: Hyprland's `misc:size_limits_tiled` would do the overflow but
+  also pulls every tiled window onto the screen, which piles up the infinite
+  canvas, so Hyprdrive leaves it off.
 
 ### Dock
 
