@@ -331,7 +331,10 @@ hl.config({
     animations = { enabled = true },
     misc     = { disable_hyprland_logo = true, disable_splash_rendering = true,
                  force_default_wallpaper = 0, background_color = 0x202830 },
-    xwayland = { enabled = false },
+    -- On (user, 2026-11-10: "why is xwayland disabled, enable it"): X11
+    -- clients -- Wine, Proton, Steam -- are where fixed-size windows and the
+    -- ConfigureRequest loop live, and only X11 reproduces them.
+    xwayland = { enabled = true },
     debug    = { disable_logs = false, enable_stdout_logs = false },
 })
 hl.env("XCURSOR_SIZE", "24")
