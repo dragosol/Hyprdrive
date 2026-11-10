@@ -726,7 +726,6 @@ Item {
       'm="$HOME/.config/omarchy/plugins/dragos.hyprdrive/ui/bin/hdpanel"; ' +
       'if [ -x "$c" ]; then echo "$c"; ' +
       'elif [ -x "$m" ]; then echo "$m"; ' +
-      'elif [ -x "$HOME/Projects/hyprdrive-omarchy/ui/bin/hdpanel" ]; then echo "$HOME/Projects/hyprdrive-omarchy/ui/bin/hdpanel"; ' +
       'else echo "$HOME/.local/lib/hyprdrive/hdpanel"; fi']
     stdout: StdioCollector {
       waitForEnd: true
