@@ -96,19 +96,20 @@ check: hyprdrive.so
 	bash scripts/symcheck.sh
 	bash scripts/keycheck.sh
 	bash scripts/gen_keys_table.sh --check
-	bash scripts/host_tests.sh
-	bash scripts/layout_cycle_test.sh
-	python3 scripts/manifest_check.py
-	python3 scripts/schema_keys_test.py
-	python3 scripts/private_modes_test.py
-	python3 scripts/hdicons_test.py
-	python3 scripts/settings_app_test.py
-	python3 scripts/update_cli_test.py
-	python3 scripts/fragment_test.py
-	python3 scripts/shell_restart_test.py
-	python3 scripts/agent_run_test.py
-	python3 scripts/tool_scripts_test.py
-	python3 scripts/integration_fallbacks_test.py
+	bash tests/host_tests.sh
+	bash tests/layout_cycle_test.sh
+	python3 tests/manifest_check.py
+	python3 tests/schema_keys_test.py
+	python3 tests/config_defaults_test.py
+	python3 tests/private_modes_test.py
+	python3 tests/hdicons_test.py
+	python3 tests/settings_app_test.py
+	python3 tests/update_cli_test.py
+	python3 tests/fragment_test.py
+	python3 tests/shell_restart_test.py
+	python3 tests/agent_run_test.py
+	python3 tests/tool_scripts_test.py
+	python3 tests/integration_fallbacks_test.py
 
 PREFIX ?= $(HOME)/.local
 
@@ -138,7 +139,7 @@ install-only:
 	@[ -s hyprdrive.so ] || { echo "install-only: no hyprdrive.so -- run make (build + check) first" >&2; exit 1; }
 	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/hyprdrive.so
 	install -Dm644 assets/scratchpad-symbolic.svg $(PREFIX)/lib/hyprdrive/scratchpad-symbolic.svg
-	install -Dm755 libexec/agent-run $(PREFIX)/lib/hyprdrive/agent-run
+	install -Dm755 ui/bin/agent-run $(PREFIX)/lib/hyprdrive/agent-run
 	PREFIX="$(PREFIX)" bash scripts/install-fragments.sh
 
 uninstall:

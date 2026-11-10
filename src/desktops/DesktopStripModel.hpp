@@ -2,7 +2,7 @@
 
 // THE DESKTOP STRIP, the pure half (user, 2026-11-02: "put on a senior
 // ux/product designer hat and refine the mechanics significantly"). No
-// Hyprland headers: scripts/desktop_strip_test.cpp runs it on the host.
+// Hyprland headers: tests/unit/desktop_strip_test.cpp runs it on the host.
 // DesktopStrip.cpp puts it on screen.
 //
 // The desktops of a monitor are cards in one row (DesktopRowModel.hpp), and the

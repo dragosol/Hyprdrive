@@ -2,7 +2,7 @@
 
 // SYNTHETIC TRACKPAD GESTURES, the pure half: `hyprdrive:debug gesture <script>`
 // parsed into the exact event sequence a touchpad would produce. No Hyprland
-// headers, so scripts/debug_gesture_test.cpp checks every expansion on the host;
+// headers, so tests/unit/debug_gesture_test.cpp checks every expansion on the host;
 // DebugGesture.cpp plays the steps into the compositor.
 //
 // Why: a headless (or nested) Hyprland has no touchpad, so no gesture of this

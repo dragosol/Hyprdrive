@@ -2,7 +2,7 @@
 
 // DESKTOP SWITCHES, the pure half (user, 2026-10-15). Three small decisions the
 // live half (DesktopSwitch.cpp) makes with Hyprland state in hand, kept free of
-// Hyprland headers so scripts/desktop_switch_test.cpp runs them on the host:
+// Hyprland headers so tests/unit/desktop_switch_test.cpp runs them on the host:
 //
 //   - where Super+scroll goes: the next / previous desktop BY NUMBER on the
 //     focused monitor, so empty desktops are visited too (Hyprland's own

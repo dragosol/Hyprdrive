@@ -16,7 +16,7 @@
 //                a symlink, and forces it to 0600 -- a log that already exists
 //                with a wider mode is narrowed before anything is written.
 //
-// Header-only, no Hyprland headers: scripts/debug_paths_test.cpp checks it.
+// Header-only, no Hyprland headers: tests/unit/debug_paths_test.cpp checks it.
 // docs/DEBUG.md lists every name.
 
 #include <cerrno>

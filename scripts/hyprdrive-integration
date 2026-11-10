@@ -17,7 +17,7 @@
 # script and the overview cannot disagree. Otherwise (install time, no
 # compositor, the plugin not loaded) the same rule is applied here.
 #
-# THE RULE is IntegrationRule.hpp's, line for line; scripts/integration_test.cpp
+# THE RULE is IntegrationRule.hpp's, line for line; tests/unit/integration_test.cpp
 # runs this script offline against decide() for every case, so the two cannot
 # drift silently:
 #   1. HYPRDRIVE_NO_OMARCHY=1                  -> none

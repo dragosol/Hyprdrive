@@ -1,7 +1,7 @@
 #pragma once
 
 // ToolSearch's PURE half: what the search field's text asks for. No config, no
-// Hyprland, no I/O -- header-only so scripts/tool_search_test.cpp can hold it
+// Hyprland, no I/O -- header-only so tests/unit/tool_search_test.cpp can hold it
 // to its cases without linking the compositor.
 
 #include "ToolSearch.hpp"

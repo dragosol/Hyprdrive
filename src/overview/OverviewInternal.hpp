@@ -120,7 +120,7 @@ float houseEase(bool decel, float t);
 // The pure transforms (getOverviewBox family, clamps, lerps) and the grid.
 // Both open OvInternal themselves, hence the same placement as the chrome
 // header. OverviewGeometry.hpp deliberately includes NO Hyprland header --
-// that is what lets scripts/geometry_test.cpp compile it on its own.
+// that is what lets tests/unit/geometry_test.cpp compile it on its own.
 #include "OverviewGeometry.hpp"
 #include "GridLayout.hpp"
 
@@ -1888,7 +1888,7 @@ inline float axisSize(const Vector2D& size, ScrollOverview::Config::ELayout layo
 
 // THE transform, and the reason B1 holds: render, hit-test and drag all place a
 // tile by calling this. The arithmetic itself is OverviewGeometry's and is
-// unit-tested in scripts/geometry_test.cpp; what stays here is the monitor
+// unit-tested in tests/unit/geometry_test.cpp; what stays here is the monitor
 // lookup, so no call site had to learn a new vocabulary.
 inline CBox getOverviewBox(CBox box, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
                            bool round = true) {

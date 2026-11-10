@@ -345,7 +345,7 @@ stacks all work from that alone. What hyprpm cannot install:
   as well. The fragments find hyprpm's build in
   `/var/cache/hyprpm/$USER/Hyprdrive/` and do not load it twice.
 - **The settings app.** It lives in `settings/`, which you can run from a
-  checkout as `settings/hyprdrive-settings`.
+  checkout as `ui/settings/hyprdrive-settings`.
 - **The `hyprdrive-integration` CLI.**
 
 hyprpm also needs `hyprpm reload` in your autostart to load the plugin at

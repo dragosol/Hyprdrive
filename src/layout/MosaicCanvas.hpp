@@ -5,7 +5,7 @@
 // go into the current tiled mode)"). With mosaic:infinite_canvas on, a desktop
 // whose windows no longer fit the screen does not tile: the windows keep their
 // mosaic sizes and the desktop grows past the screen into a canvas the view
-// pans across. Pure geometry, host-tested (scripts/mosaic_pack_test.cpp).
+// pans across. Pure geometry, host-tested (tests/unit/mosaic_pack_test.cpp).
 //
 // The canvas is ONE mosaic cluster (user, 2026-10-26: "per my clustering
 // rules on native windows shouldn't organize in rows ... there should be no

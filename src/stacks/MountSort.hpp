@@ -14,7 +14,7 @@
 //             Roman numeral -- compares as that number. KleOne < KleTwo <
 //             KleThree; "Disque deux" < "Disque trois"; "Backup II" < "Backup 3".
 //
-// Pure: no Hyprland, no GLib. scripts/mount_sort_test.cpp builds it on the host.
+// Pure: no Hyprland, no GLib. tests/unit/mount_sort_test.cpp builds it on the host.
 
 #include <algorithm>
 #include <cctype>

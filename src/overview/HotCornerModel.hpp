@@ -4,7 +4,7 @@
 // menu pop out if you hover on a corner ... I think GNOME does something
 // similar"). Which screen corner is armed, whether a point is in it, and where to
 // probe for a neighbouring monitor -- no Hyprland headers, so
-// scripts/hot_corner_test.cpp runs it on the host. HotCorner.cpp is the live half.
+// tests/unit/hot_corner_test.cpp runs it on the host. HotCorner.cpp is the live half.
 
 #include <array>
 #include <string_view>

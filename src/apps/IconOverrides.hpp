@@ -15,7 +15,7 @@
 // always a new path: the dock's texture cache is keyed on the name and would
 // keep an old picture under an unchanged one.
 //
-// parse() is pure (scripts/icon_overrides_test.cpp); the rest reads the file
+// parse() is pure (tests/unit/icon_overrides_test.cpp); the rest reads the file
 // the way the favourites store does -- polled, re-read when its mtime moves.
 
 #include <cstdint>

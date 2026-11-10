@@ -19,7 +19,7 @@
 #include <sys/resource.h>
 
 // How long a file's mtime must stand still before it is thumbnailed (SETTLE,
-// below). scripts/thumbs_test.cpp builds this file with a shorter one.
+// below). tests/unit/thumbs_test.cpp builds this file with a shorter one.
 #ifndef THUMBS_SETTLE_MS
 #define THUMBS_SETTLE_MS 2000
 #endif

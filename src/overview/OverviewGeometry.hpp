@@ -10,7 +10,7 @@
 // monitor, no config and no window: it is arithmetic on a box. Pulled out of
 // OverviewInternal.hpp -- which cannot be included outside the plugin, and
 // cannot be compiled without Hyprland -- it becomes the first module a host-side
-// unit test can hold. That test is scripts/geometry_test.cpp and `make check`
+// unit test can hold. That test is tests/unit/geometry_test.cpp and `make check`
 // runs it.
 //
 // THE RULE FOR WHAT MAY LIVE HERE: no Hyprland header, no config read, no

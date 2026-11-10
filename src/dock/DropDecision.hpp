@@ -6,7 +6,7 @@
 // that followed from them and the compositor calls that carried it out were the
 // same code. The ladder below is that choice and nothing else: no Hyprland
 // types, no state, no side effects, so it can be walked exhaustively off the
-// compositor -- scripts/drop_table_test.cpp compiles this header on the host and
+// compositor -- tests/unit/drop_table_test.cpp compiles this header on the host and
 // checks every reachable combination against the branch structure it replaced.
 //
 // The caller gathers facts in three stages and asks again after each, because
@@ -102,7 +102,7 @@ namespace ScrollOverview::Drop {
     // choice out, no compositor. The window drop above and this one are two
     // gestures that end on the same screen and had every reason to grow two
     // unrelated if-ladders inside two input hooks; they are one file so a
-    // reader can see both tables at once, and scripts/drop_table_test.cpp walks
+    // reader can see both tables at once, and tests/unit/drop_table_test.cpp walks
     // this one exhaustively beside it.
     //
     // The ORDER is the whole of the design and it is not free:

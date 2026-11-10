@@ -1,7 +1,7 @@
 #pragma once
 
 // A SWIPE THAT OUTLIVES ITS FINGERS, AND A SWIPE UNDER A HELD DRAG
-// (user, 2026-10-07). Pure: no Hyprland, so scripts/finger_swipe_test.cpp can
+// (user, 2026-10-07). Pure: no Hyprland, so tests/unit/finger_swipe_test.cpp can
 // drive it with made-up touch frames. FingerSwipe.cpp is the glue.
 //
 // Why it has to exist. libinput reports a touchpad gesture as a finger COUNT,

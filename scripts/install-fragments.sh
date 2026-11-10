@@ -108,10 +108,10 @@ fi
 install -Dm755 "$INTEGRATION_CLI" "$PREFIX/bin/hyprdrive-integration"
 echo "cli: $PREFIX/bin/hyprdrive-integration"
 
-# `hyprdrive update` (omarchy-plugin/bin/hyprdrive): on PATH, and beside hdpanel
+# `hyprdrive update` (ui/bin/hyprdrive): on PATH, and beside hdpanel
 # in lib/ where the settings app finds it. It reads what was installed, and from
 # where, in install.json -- the version, this checkout, PREFIX.
-install -Dm755 "$ROOT/omarchy-plugin/bin/hyprdrive" "$LIBDIR/hyprdrive"
+install -Dm755 "$ROOT/ui/bin/hyprdrive" "$LIBDIR/hyprdrive"
 rm -f "$PREFIX/bin/hyprdrive"
 ln -s ../lib/hyprdrive/hyprdrive "$PREFIX/bin/hyprdrive"
 python3 - "$ROOT" "$PREFIX" <<'PY'
@@ -126,7 +126,7 @@ tmp.replace(state / "install.json")
 PY
 echo "cli: $PREFIX/bin/hyprdrive (hyprdrive update)"
 
-PLUGIN_SRC=$ROOT/omarchy-plugin
+PLUGIN_SRC=$ROOT/ui
 PLUGIN_DEST=$CONFIG/omarchy/plugins/dragos.hyprdrive
 # THE PANEL IS AN OMARCHY SHELL PLUGIN: it imports qs.Commons/qs.Ui from the
 # Omarchy shell and cannot run anywhere else (audit B1). Off Omarchy it is not
@@ -152,7 +152,7 @@ if [ "$DESKTOP" != omarchy ]; then
     echo "omarchy plugin: skipped (integration: $DESKTOP)"
     SHARE=$PREFIX/share/hyprdrive
     for f in shell.qml SettingsPage.qml Schema.js Model.js hyprdrive-icon.png; do
-        install -Dm644 "$ROOT/settings/$f" "$SHARE/settings/$f"
+        install -Dm644 "$ROOT/ui/settings/$f" "$SHARE/settings/$f"
     done
     for f in hdpanel hdicons; do
         install -Dm755 "$PLUGIN_SRC/bin/$f" "$LIBDIR/$f"
@@ -164,14 +164,14 @@ if [ "$DESKTOP" != omarchy ]; then
     rm -f "$LIBDIR/hd-layout-cycle"
     ln -s ../../bin/hyprdrive-layout-cycle "$LIBDIR/hd-layout-cycle"
     echo "layout cycle: $PREFIX/bin/hyprdrive-layout-cycle"
-    install -Dm755 "$ROOT/settings/hyprdrive-power-watch" "$LIBDIR/hyprdrive-power-watch"
+    install -Dm755 "$ROOT/ui/settings/hyprdrive-power-watch" "$LIBDIR/hyprdrive-power-watch"
     subst() { # file mode dest -- @HYPRDRIVE_PREFIX@ -> PREFIX, as for the fragments
         python3 -c 'import sys; sys.stdout.write(sys.stdin.read().replace("@HYPRDRIVE_PREFIX@", sys.argv[1]))' "$PREFIX" < "$1" > "$3.tmp"
         chmod "$2" "$3.tmp" && mv -f "$3.tmp" "$3"
     }
     mkdir -p "$PREFIX/bin" "$PREFIX/share/applications"
-    subst "$ROOT/settings/hyprdrive-settings" 755 "$PREFIX/bin/hyprdrive-settings"
-    sed "s|^Exec=hyprdrive-settings\$|Exec=$PREFIX/bin/hyprdrive-settings|" "$ROOT/settings/hyprdrive-settings.desktop" \
+    subst "$ROOT/ui/settings/hyprdrive-settings" 755 "$PREFIX/bin/hyprdrive-settings"
+    sed "s|^Exec=hyprdrive-settings\$|Exec=$PREFIX/bin/hyprdrive-settings|" "$ROOT/ui/settings/hyprdrive-settings.desktop" \
         > "$PREFIX/share/applications/hyprdrive-settings.desktop"
     echo "settings app: $PREFIX/bin/hyprdrive-settings (QML in $SHARE)"
     # The search tools (`define`, `tr`) come switched ON with the native
@@ -207,8 +207,8 @@ fi
 
 # INSTALLED FROM THE MARKETPLACE: `omarchy plugin add` cloned this very
 # repository into $PLUGIN_DEST, and its root manifest.json points the shell at
-# omarchy-plugin/Panel.qml. The panel is already installed -- it IS this
-# checkout -- and copying omarchy-plugin/ over the clone's root would dirty it
+# ui/Panel.qml. The panel is already installed -- it IS this
+# checkout -- and copying ui/ over the clone's root would dirty it
 # and break `omarchy plugin update`.
 if [ -d "$PLUGIN_DEST" ] && [ "$(cd "$PLUGIN_DEST" && pwd -P)" = "$(cd "$ROOT" && pwd -P)" ]; then
     echo "omarchy plugin: $PLUGIN_DEST is this checkout (marketplace install) -- panel already in place"
@@ -285,7 +285,7 @@ fi
 # `hyprdrive update` sets HYPRDRIVE_SHELL_RESTART=0 and restarts it after the
 # plugin reload instead, so the new panel and the new plugin start together.
 if [ -d "$PLUGIN_DEST" ] && [ "$(cd "$PLUGIN_DEST" && pwd -P)" = "$(cd "$ROOT" && pwd -P)" ]; then
-    PANEL_CTL=$ROOT/omarchy-plugin/bin/hdpanel
+    PANEL_CTL=$ROOT/ui/bin/hdpanel
 else
     PANEL_CTL=$PLUGIN_DEST/bin/hdpanel
 fi

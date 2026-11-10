@@ -13,7 +13,7 @@
 // counts as well as a move. More samples when the motion is long; when even the
 // shader's maximum is not enough, the trail is SHORTENED (the previous box drawn
 // toward the current one) instead of spread thin. The configured sample count
-// stays the minimum. Pure: scripts/motion_spacing_test.cpp holds it to the rule.
+// stays the minimum. Pure: tests/unit/motion_spacing_test.cpp holds it to the rule.
 
 #include <algorithm>
 #include <cmath>

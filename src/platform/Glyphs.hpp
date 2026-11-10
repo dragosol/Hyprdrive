@@ -17,7 +17,7 @@
 // "↑ Drag here to exit scratchpad", "Name ↕"). OverviewRender::glyph() and
 // OverviewRender::text() choose between the font and these (Fonts.hpp decides
 // whether a font covers a codepoint); nothing in here touches fontconfig, cairo
-// or Hyprland, so scripts/glyphs_test.cpp checks it on the host.
+// or Hyprland, so tests/unit/glyphs_test.cpp checks it on the host.
 
 #include <cstdint>
 #include <functional>

@@ -693,7 +693,7 @@ static void registerConfigValuesFor() {
                                     Hyprlang::STRING{"auto"}));
     addKey(makeShared<CBoolValue>(KEY("search:browse_on_click"),
                                   "clicking the overview's search pill with nothing typed opens the results: the menu, folder shortcuts and AI & Tools rows", false));
-    addKey(makeShared<CBoolValue>(KEY("search:easter_egg"), "overview search: type a letter and backspace five times in four seconds and the pill plays search:easter_egg_video", true));
+    addKey(makeShared<CBoolValue>(KEY("search:easter_egg"), "overview search: type a letter and backspace five times in four seconds and the pill plays search:easter_egg_video (off unless you turn it on)", false));
     addKey(makeShared<CStringValue>(KEY("search:easter_egg_video"), "the video the overview's easter egg plays, with its sound (needs ffmpeg); a missing file turns the egg off",
                                     Hyprlang::STRING{"~/.local/share/hyprdrive/easter-egg.mp4"}));
     addKey(makeShared<CBoolValue>(KEY("search:translate"), "`tr <lang> <text>` in the overview search translates it (sends the text to the translate endpoint)", false));

@@ -1,4 +1,4 @@
-// See Glyphs.hpp. No Hyprland, cairo or fontconfig headers: scripts/glyphs_test.cpp
+// See Glyphs.hpp. No Hyprland, cairo or fontconfig headers: tests/unit/glyphs_test.cpp
 // links this file on the host.
 #include "Glyphs.hpp"
 

@@ -17,7 +17,7 @@
 // (auto_da_alloc) and btrfs both start writing a file's data when it is
 // renamed over an existing one.
 //
-// Pure POSIX: scripts/store_file_test.cpp runs it on the host.
+// Pure POSIX: tests/unit/store_file_test.cpp runs it on the host.
 
 #include <cerrno>
 #include <fcntl.h>

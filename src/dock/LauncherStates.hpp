@@ -7,7 +7,7 @@
 // dead instance's count and urgency -- each new Update merged into them. Now
 // every entry is keyed by the sender's unique bus name as well, and
 // LauncherEntry.cpp drops a sender's entries when NameOwnerChanged says it
-// left the bus, as Dash to Dock does. Pure: scripts/launcher_states_test.cpp
+// left the bus, as Dash to Dock does. Pure: tests/unit/launcher_states_test.cpp
 // builds it on the host.
 
 #include "LauncherEntry.hpp"

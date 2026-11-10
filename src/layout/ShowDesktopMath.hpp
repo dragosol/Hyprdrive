@@ -1,6 +1,6 @@
 #pragma once
 // SHOW DESKTOP's arithmetic (ShowDesktop.hpp), kept apart from Hyprland so a
-// host test can hold it (scripts/show_desktop_test.cpp): where each window
+// host test can hold it (tests/unit/show_desktop_test.cpp): where each window
 // goes to be out of view, and the spring that takes it there and back.
 #include <algorithm>
 #include <cmath>

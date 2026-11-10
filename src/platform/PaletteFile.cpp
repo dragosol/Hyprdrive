@@ -1,4 +1,4 @@
-// See PaletteFile.hpp. No Hyprland headers: scripts/palette_file_test.cpp links
+// See PaletteFile.hpp. No Hyprland headers: tests/unit/palette_file_test.cpp links
 // this file on the host.
 #include "PaletteFile.hpp"
 

@@ -1,4 +1,4 @@
-// See Fonts.hpp. fontconfig only: scripts/fonts_test.cpp links this file on
+// See Fonts.hpp. fontconfig only: tests/unit/fonts_test.cpp links this file on
 // the host with Glyphs.cpp.
 #include "Fonts.hpp"
 #include "Glyphs.hpp"

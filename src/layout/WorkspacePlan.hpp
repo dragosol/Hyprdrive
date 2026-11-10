@@ -15,7 +15,7 @@
 // rule binding that id to another output silently creates it THERE instead.
 //
 // So the rule lives here, where it can be tested without a compositor
-// (scripts/workspace_plan_test.cpp, run by `make`):
+// (tests/unit/workspace_plan_test.cpp, run by `make`):
 //
 //   1. An id that exists ANYWHERE is never created again. Only its own monitor
 //      may use it.

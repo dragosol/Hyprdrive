@@ -1,7 +1,7 @@
 #pragma once
 
 // WHAT A DROP ONTO THE DOCK MEANS (dock stacks B). Pure and header-only, so
-// scripts/dock_drop_test.cpp holds it to its cases on the host: the file list a
+// tests/unit/dock_drop_test.cpp holds it to its cases on the host: the file list a
 // drag source hands over (text/uri-list), a free name in the destination, and
 // the decision table (what lands where).
 

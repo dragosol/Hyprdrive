@@ -2,7 +2,7 @@
 
 // Which of the user's binds stay live while the overview holds its submap
 // (scrollOverview.cpp, borrowGlobalPassthroughBinds). Pure, so the rule is
-// host-tested: scripts/submap_borrow_test.cpp.
+// host-tested: tests/unit/submap_borrow_test.cpp.
 //
 // The submap exists for its click binds only -- inside it the global
 // SUPER+mouse:272 drag bind cannot eat a click -- but Hyprland then matches

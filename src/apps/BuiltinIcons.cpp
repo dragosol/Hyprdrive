@@ -1,4 +1,4 @@
-// See BuiltinIcons.hpp. No Hyprland headers: scripts/builtin_icons_test.cpp
+// See BuiltinIcons.hpp. No Hyprland headers: tests/unit/builtin_icons_test.cpp
 // links this file on the host.
 #include "BuiltinIcons.hpp"
 

@@ -7,7 +7,7 @@
 // missing or someone else's, and every row it produced did nothing when
 // activated (`bash -c omarchy-system-lock` -> "command not found", silently).
 // This header is the part of the replacement that has no state and no
-// Hyprland in it, so scripts/native_search_test.cpp checks it on the host:
+// Hyprland in it, so tests/unit/native_search_test.cpp checks it on the host:
 //
 //   * which program a name resolves to (PATH, then ~/.local/bin -- where most
 //     agent CLIs install themselves and where a display manager's PATH often

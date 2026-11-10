@@ -33,7 +33,7 @@
 //                   pixels, edges padded so an opaque square icon keeps
 //                   opaque edges.
 //
-// Pure: cairo only, no Hyprland. scripts/icon_size_test.cpp builds it on the
+// Pure: cairo only, no Hyprland. tests/unit/icon_size_test.cpp builds it on the
 // host.
 
 #include <cairo/cairo.h>

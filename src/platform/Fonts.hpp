@@ -18,7 +18,7 @@
 //     to Glyphs' own SVG. "JetBrainsMono Nerd Font" wins whenever it
 //     qualifies, so an Omarchy install renders exactly what it always did.
 //
-// fontconfig only -- no Hyprland, pango or cairo -- so scripts/fonts_test.cpp
+// fontconfig only -- no Hyprland, pango or cairo -- so tests/unit/fonts_test.cpp
 // runs it on the host against a FONTCONFIG_FILE it writes. Everything here is
 // called from the render thread (OverviewRender, Config.cpp), and caches: a
 // detection walks every installed font's charset (a few ms on a desktop with

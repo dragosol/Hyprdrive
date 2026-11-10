@@ -2,7 +2,7 @@
 
 // THE ROW OF DESKTOPS the wheel walks and the desktop strip draws (user,
 // 2026-11-02) -- the pure half: no Hyprland headers, so
-// scripts/desktop_row_test.cpp runs it on the host. DesktopStrip.cpp moves
+// tests/unit/desktop_row_test.cpp runs it on the host. DesktopStrip.cpp moves
 // along it; DesktopSwitch.cpp gathers the facts.
 //
 //   stopAtEmpty    the row ends at the FIRST EMPTY desktop past the last one

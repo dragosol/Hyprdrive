@@ -3,7 +3,7 @@
 // WHICH FILE OF AN ICON TO DRAW, when a theme has several: AppSearch's icon
 // index scores every candidate it walks and keeps the best per name.
 //
-// Pure: no Hyprland. scripts/icon_score_test.cpp builds it on the host.
+// Pure: no Hyprland. tests/unit/icon_score_test.cpp builds it on the host.
 
 #include <algorithm>
 #include <cctype>

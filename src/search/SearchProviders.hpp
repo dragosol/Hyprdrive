@@ -87,7 +87,7 @@ namespace SearchProviders {
     uint64_t busFailures();
 
     // After a failed connect, the next attempt waits this long (default 5 s).
-    // For scripts/search_providers_nobus_test.cpp, which sets 0 to drive the
+    // For tests/unit/search_providers_nobus_test.cpp, which sets 0 to drive the
     // worker through many start/fail/join cycles in a second.
     void setBusRetry(std::chrono::milliseconds retry);
 }

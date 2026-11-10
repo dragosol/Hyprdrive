@@ -4,7 +4,7 @@
 // windows open ... live previews on dock shows less than the total number of
 // windows ... add rows once number of windows exceeds ~50% screen width area.
 // once a row is added split windows evenly among rows"). Pure, so
-// scripts/preview_grid_test.cpp builds it on the host; Dock.cpp feeds it each
+// tests/unit/preview_grid_test.cpp builds it on the host; Dock.cpp feeds it each
 // preview's width at the panel's cell height.
 
 #include <algorithm>

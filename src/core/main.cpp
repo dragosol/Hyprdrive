@@ -1860,7 +1860,7 @@ static SDispatchResult onDebugDispatcher(std::string arg) {
         return {.success = false, .error = report};
     }
     // `lockstate`: the lock and the overview search, for the lock gate
-    // (scripts/headless/lock_gate.sh). The query's LENGTH, never its text.
+    // (tests/rig/headless/lock_gate.sh). The query's LENGTH, never its text.
     // `exclusive`: the layer surfaces holding the keyboard EXCLUSIVELY. While
     // any is mapped Hyprland refuses every window focus (rawWindowFocus) --
     // clicks and typing on windows go nowhere, the overview and dock still work

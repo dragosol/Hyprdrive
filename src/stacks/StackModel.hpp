@@ -2,7 +2,7 @@
 
 // THE STACKS' PURE CORE (dock stacks A, 2026-09-24): sorting, filtering, the
 // store's text format, the fan's fit decision and relative ages. No Hyprland,
-// no GLib -- scripts/stack_model_test.cpp builds it on the host.
+// no GLib -- tests/unit/stack_model_test.cpp builds it on the host.
 
 #include <cstdint>
 #include <optional>

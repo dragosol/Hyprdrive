@@ -2,7 +2,7 @@
 
 // INTEGRATION, the pure half: given what the environment, the config key and the
 // filesystem say, is this an Omarchy desktop? No Hyprland headers, so
-// scripts/integration_test.cpp runs every precedence case on the host.
+// tests/unit/integration_test.cpp runs every precedence case on the host.
 // Integration.hpp is the API the rest of the plugin calls; Integration.cpp
 // gathers the inputs (probe) and caches the answer.
 //

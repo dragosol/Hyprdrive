@@ -4,7 +4,7 @@
 //
 // There are two settings surfaces and the compositor never draws either:
 //   - on Omarchy, the dragos.hyprdrive bar panel inside the Omarchy shell
-//     (omarchy-plugin/Panel.qml), reached over the shell's IPC;
+//     (ui/Panel.qml), reached over the shell's IPC;
 //   - everywhere else, the standalone Quickshell app (settings/, launched by
 //     `hyprdrive-settings`), which talks to the same bin/hdpanel and
 //     bin/hdicons back ends the panel does.

@@ -9,7 +9,7 @@
 //
 // Locations.cpp asks gvfsd's MountTracker for its list over D-Bus (bounded, no
 // auto-start: it runs on the render thread). What it gets back is turned into
-// dock items here. Pure -- no GLib, no sd-bus -- scripts/gvfs_mount_test.cpp
+// dock items here. Pure -- no GLib, no sd-bus -- tests/unit/gvfs_mount_test.cpp
 // builds it on the host.
 
 #include <cstdint>

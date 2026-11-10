@@ -4,7 +4,7 @@
 // What plugin:hyprdrive:theme:palette_file points at, and Omarchy's
 // colors.toml, become one SPalette here. Pure -- no Hyprland, no file I/O (the
 // caller reads the file; Config.cpp caches it on path and mtime) -- so
-// scripts/palette_file_test.cpp checks every shape on the host.
+// tests/unit/palette_file_test.cpp checks every shape on the host.
 //
 // Three shapes:
 //   * colors.toml-style lines     `key = "#rrggbb"` -- Omarchy's background,

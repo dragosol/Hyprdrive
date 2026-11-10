@@ -3,7 +3,7 @@
 // THE FREEDESKTOP TRASH ON EVERY DISK, BY HAND (Locations.cpp: the dock's
 // Trash, its count, and Empty Trash when there is no Nautilus to ask). The
 // parts that read /proc/mounts and touch the trash directories live here,
-// apart from the GLib and Hyprland code, so scripts/trash_dirs_test.cpp can run
+// apart from the GLib and Hyprland code, so tests/unit/trash_dirs_test.cpp can run
 // them against real directories on the host. Pure POSIX.
 //
 // A DISK IS NOT TRUSTED (review 2026-11-09). Its trash is whatever the disk

@@ -1,7 +1,7 @@
 #pragma once
 
 // MOSAIC'S GEOMETRY (user, 2026-10-11; reworked 2026-10-14; the packer rebuilt
-// 2026-10-16), pure: no Hyprland, so scripts/mosaic_pack_test.cpp builds it on
+// 2026-10-16), pure: no Hyprland, so tests/unit/mosaic_pack_test.cpp builds it on
 // the host. Mosaic.cpp feeds the windows' sizes and the work area to
 // MosaicPackFinal.hpp's pack() / packEased() and places what comes back; this
 // file keeps the shared rect, the size each window arrives with, and the tiles.

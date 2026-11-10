@@ -9,7 +9,7 @@
 // manager spell it, and ShowItems is marshalled by sd-bus, so no file name
 // can break the call.
 //
-// scripts/file_uri_test.cpp runs both on the host; a private dbus-daemon and
+// tests/unit/file_uri_test.cpp runs both on the host; a private dbus-daemon and
 // a stand-in FileManager1 take the call.
 
 #include <glib.h>

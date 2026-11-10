@@ -10,7 +10,7 @@
 // together while the gaps between them keep their size.
 //
 // With both reveals at 0 this is exactly the strip-only layout scrollOverview.cpp
-// used before it (scripts/strip_layout_test.cpp holds the old formula and
+// used before it (tests/unit/strip_layout_test.cpp holds the old formula and
 // compares against it), so a strip on one monitor cannot move by a pixel.
 
 #include <algorithm>

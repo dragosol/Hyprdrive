@@ -81,12 +81,12 @@ behind it.
 
 Errors name the step: `'swipe 3 sideways 10': swipe F up|down|left|right DIST
 [STEPS [MS]] [hold]`. The parser is `DebugGestureScript.hpp`.
-`scripts/debug_gesture_test.cpp` checks it and runs the `keep` and `drag`
+`tests/unit/debug_gesture_test.cpp` checks it and runs the `keep` and `drag`
 macros through the real FingerSwipeModel.
 
 ### Recipes
 
-These were proven headless with `scripts/headless/hl.sh` (`hl.sh gesture '<script>'`
+These were proven headless with `tests/rig/headless/hl.sh` (`hl.sh gesture '<script>'`
 wraps the dispatch):
 
 ```sh
