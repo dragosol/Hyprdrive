@@ -365,7 +365,9 @@ files.
 Hyprdrive decides once per session, and again on every config reload, whether
 this is an Omarchy desktop. On Omarchy it:
 
-- installs the bar panel instead of the standalone settings app
+- installs the bar panel instead of the standalone settings app, and restarts
+  the Omarchy shell when an install changed it: the shell's own plugin reload
+  keeps running the old panel ([omacom/omarchy#6981](https://github.com/omacom/omarchy/issues/6981))
 - adds Omarchy's menu as a column in the search and launches terminal agents
   through `omarchy-launch-tui`
 - takes its colours from the Omarchy theme's `colors.toml`
