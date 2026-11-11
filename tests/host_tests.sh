@@ -55,6 +55,10 @@
 #   desktop_plan_test  DesktopPlan.hpp: a renumber plan is refused whole when
 #                     it would put two desktops on one number or one below 1
 #                     (shift(0, -1)); heal pulls apart desktops sharing one.
+#   fullscreen_book_test  FullscreenBook.hpp: a fullscreen trip's places are
+#                     kept by number (never place -1), the payback decision,
+#                     and random fullscreen sequences that must give back the
+#                     desktop numbers they started with.
 #   motion_math_test  MotionMath.hpp: each shared motion function against
 #                     verbatim copies of the definitions it replaced, bit for bit.
 #
@@ -118,6 +122,7 @@ run debug_paths_test tests/unit/debug_paths_test.cpp
 run hot_corner_test tests/unit/hot_corner_test.cpp
 run desktop_switch_test tests/unit/desktop_switch_test.cpp
 run desktop_plan_test tests/unit/desktop_plan_test.cpp
+run fullscreen_book_test tests/unit/fullscreen_book_test.cpp
 run desktop_row_test tests/unit/desktop_row_test.cpp
 run desktop_strip_test tests/unit/desktop_strip_test.cpp
 run submap_borrow_test tests/unit/submap_borrow_test.cpp
