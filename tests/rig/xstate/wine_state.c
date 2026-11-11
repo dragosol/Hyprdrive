@@ -12,6 +12,8 @@
 //     flap:          the storm-guard case: asks for the OPPOSITE of what it
 //                    reads (FULLSCREEN there -> REMOVE it, absent -> ADD it)
 //     seconds:       exit after this long (default 20)
+//   WINE_STATE_REMAP=<s>  unmap the window at s seconds and map it again 0.6 s
+//                    later, as a Wine game does on a mode change (gate fs_close_home)
 #include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -95,6 +97,9 @@ int main(int argc, char** argv) {
     double       tick  = START + 1;
     int          sent = 0, changes = 0, totalSent = 0, totalChanges = 0, last = -1, mapped = 0;
     struct pollfd pfd = {.fd = xcb_get_file_descriptor(c), .events = POLLIN};
+    const char*   REMAP_ENV = getenv("WINE_STATE_REMAP");
+    const double  REMAP     = REMAP_ENV ? START + atof(REMAP_ENV) : 0;
+    int           remapped  = 0;
     printf("wine_state: window 0x%x wants %s\n", w, FLAP ? "the opposite of FULLSCREEN, every time" : FS ? "FULLSCREEN" : "MAXIMIZED_VERT+HORZ");
     fflush(stdout);
     for (;;) {
@@ -109,7 +114,21 @@ int main(int argc, char** argv) {
             tick += 1;
             continue;
         }
-        poll(&pfd, 1, (int)((tick - t) * 1000) + 1);
+        if (REMAP > 0 && remapped == 0 && t >= REMAP) {
+            xcb_unmap_window(c, w);
+            xcb_flush(c);
+            remapped = 1;
+            printf("wine_state: unmapped\n");
+            fflush(stdout);
+        } else if (remapped == 1 && t >= REMAP + 0.6) {
+            xcb_map_window(c, w);
+            xcb_flush(c);
+            remapped = 2;
+            printf("wine_state: mapped again\n");
+            fflush(stdout);
+        }
+        const double WAKE = remapped < 2 && REMAP > 0 ? 0.05 : tick - t;
+        poll(&pfd, 1, (int)((WAKE < tick - t ? WAKE : tick - t) * 1000) + 1);
         xcb_generic_event_t* ev;
         while ((ev = xcb_poll_for_event(c))) {
             const int type = ev->response_type & 0x7f;
