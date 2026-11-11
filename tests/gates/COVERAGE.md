@@ -68,6 +68,7 @@ Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its r
 | A modal (Steam sign-in) never traps the cursor [11-01] | not covered: needs an XWayland modal fixture |
 | Dock ICON click minimizes/restores the app's windows on the active workspace, no cursor move [11-09] | `dock_click` (1-4) |
 | Dock PREVIEW click or Ctrl+click focuses [11-09] | not covered: `debug activate` takes no modifiers, previews have no hook |
+| Super+key over a dock PREVIEW acts on that window, as over an overview tile [11-11: "if I mouseover a window preview in the dock I should have access to all the same super+keybind functionality as I do in overview"] | `dock_preview_keys` (1: the pane stays while Super is held; 2-3: Super+F there and back, the focused window untouched; 4: between the cells -> the focused window; 5: Super+W closes it, one cell left; 6: `window close` on the last cell, the pane goes); the cells are found with `debug dockmenu` |
 | Attention: icon jumps/wiggles, preview darkens "Needs attention", XWayland requests count, pulls focus at most once [11-01, 11-04] | not covered: needs an urgent-hint fixture (wine_state could send DEMANDS_ATTENTION); pixels for the icon; next batch |
 
 ## Fullscreen
