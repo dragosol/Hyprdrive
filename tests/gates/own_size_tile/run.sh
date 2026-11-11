@@ -78,7 +78,7 @@ n=[int(m.group(2)) for m in re.finditer(r't=\s*(\d+)s configure=\s*(\d+)', open(
 print(max(n) if n else -1)"; }
 
 for L in dwindle scrolling mosaic; do
-    start $L; others 1; insist 10; float_first $L
+    start $L; others 1; insist 12; float_first $L # (12: the Mosaic float first takes 0.8 s more)
     $H tap Super+T; sleep 0.8; S1=$(state); sleep 4; $H tap Super+T; sleep 0.8; S2=$(state); sleep 4.5
     check "$L: Super+T tiles it at its own size" "$([ "$S1" = '362x677 TILED' ] && echo 1)" "$S1"
     check "$L: no configure storm while tiled" "$([ "$(storm 3 6)" -le 5 ] && echo 1)" "$(storm 3 6)/s"
