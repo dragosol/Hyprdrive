@@ -1,6 +1,7 @@
 // See DesktopSwitch.hpp; the decisions are DesktopSwitchModel.hpp.
 #include "FullscreenGuard.hpp"
 #include "DesktopSwitch.hpp"
+#include "Rows.hpp"
 #include "FunctionHooks.hpp"
 #include "DesktopSwitchModel.hpp"
 #include "DesktopRowModel.hpp"
@@ -61,23 +62,36 @@ namespace Hyprdrive::DesktopSwitch {
 
         // THE ROW the wheel walks on `monitor` (DesktopRowModel.hpp), `current`
         // shown: binds:scroll_desktops_stop_at_empty / _populated_only.
+        //
+        // ON THE MONITOR'S ROW (Rows.hpp): the model walks the row's PLACES
+        // (1, 2, ... -- a block's 10, then its overflow), and the ids come back
+        // from them; desktops outside the row (visitors, other blocks) are not
+        // in it. Blocks off: place == id, the global number line.
         std::vector<int> rowOn(const PHLMONITOR& monitor, int current) {
-            DesktopRow::SFacts f{.current       = current,
+            const Row ROW = Rows::of(monitor);
+            DesktopRow::SFacts f{.current       = ROW.contains(current) ? sc<int>(ROW.slot(current)) : 0,
                                  .stopAtEmpty   = Config::getValue<Hyprlang::INT>(KEY_STOP_EMPTY) != 0,
                                  .populatedOnly = Config::getValue<Hyprlang::INT>(KEY_POPULATED) != 0};
+            if (!ROW.bounded())
+                f.current = current;
             for (const auto& REF : State::workspaceState()->workspaces()) {
                 const auto WS = REF.lock();
-                if (!WS || WS->m_isSpecialWorkspace || WS->m_id < DesktopRow::FIRST)
+                if (!WS || WS->m_isSpecialWorkspace || WS->m_id < DesktopRow::FIRST || !ROW.contains(WS->m_id))
                     continue;
+                const int PLACE = sc<int>(ROW.slot(WS->m_id));
                 if (WS->m_monitor.lock() != monitor) {
-                    f.elsewhere.push_back(sc<int>(WS->m_id));
+                    f.elsewhere.push_back(PLACE);
                     continue;
                 }
-                f.existing.push_back(sc<int>(WS->m_id));
+                f.existing.push_back(PLACE);
                 if (WS->getWindowCount() > 0)
-                    f.populated.push_back(sc<int>(WS->m_id));
+                    f.populated.push_back(PLACE);
             }
-            return DesktopRow::row(f);
+            std::vector<int> out;
+            for (const int PLACE : DesktopRow::row(f))
+                if (const auto ID = ROW.idOf(PLACE); ID > 0 && PLACE >= 1)
+                    out.push_back(sc<int>(ID));
+            return out;
         }
 
         StripModel::SSettings stripSettings() {
