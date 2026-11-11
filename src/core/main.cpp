@@ -1,5 +1,6 @@
 #include "PluginParts.hpp"
 #include "FunctionHooks.hpp"
+#include "WindowPlacement.hpp"
 #include "Workers.hpp"
 #include "TerminateLog.hpp"
 using namespace PluginDetail;
@@ -697,6 +698,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     Hyprdrive::ShowDesktop::init();
     // Super+T on a fixed-size window: a tile at its own size (OwnSizeTile.hpp).
     Hyprdrive::OwnSizeTile::init();
+    // Where every new window goes: the one openEarly decision (Placement.hpp).
+    // After Intent, FullscreenDesktop and OwnSizeTile, which it calls.
+    Hyprdrive::WindowPlacement::init();
     // Super+F / Super+W on the hovered overview tile or dock preview (HoverActions.hpp).
     Hyprdrive::HoverActions::init();
     // dock:cpu_pulse's sampler (CpuPulse.hpp): idle unless the option is on.
@@ -792,6 +796,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     Hyprdrive::Workers::beginShutdown();
     // First: no window may stay hidden behind a plugin that is gone.
     Hyprdrive::ShowDesktop::shutdown();
+    Hyprdrive::WindowPlacement::shutdown();
     Hyprdrive::OwnSizeTile::shutdown();
     Hyprdrive::Integration::shutdown(); // its hyprctl lambda lives in this .so
     Hyprdrive::SettingsApp::shutdown(); // likewise
