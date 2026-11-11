@@ -75,6 +75,8 @@
 #                     and desktop only, malformed records skipped.
 #   overview_fullscreen_test  OverviewFullscreen.hpp: when Super+F in the overview
 #                     acts on the selected tile instead of the focused window.
+#   mosaic_trip_hold_test  MosaicTripHold.hpp: a window home from its fullscreen
+#                     trip goes back to its place only if its desktop is unchanged.
 #   motion_math_test  MotionMath.hpp: each shared motion function against
 #                     verbatim copies of the definitions it replaced, bit for bit.
 #
@@ -173,6 +175,7 @@ run desktop_row_test tests/unit/desktop_row_test.cpp
 run desktop_strip_test tests/unit/desktop_strip_test.cpp
 run submap_borrow_test tests/unit/submap_borrow_test.cpp
 run overview_fullscreen_test tests/unit/overview_fullscreen_test.cpp
+run mosaic_trip_hold_test tests/unit/mosaic_trip_hold_test.cpp
 # shellcheck disable=SC2046
 run builtin_icons_test tests/unit/builtin_icons_test.cpp src/apps/BuiltinIcons.cpp --embed-dir=. $(pkg-config --cflags --libs librsvg-2.0)
 # shellcheck disable=SC2046
