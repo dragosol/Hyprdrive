@@ -39,6 +39,8 @@
 #                     FingerSwipeModel.
 #   debug_paths_test  DebugPaths.hpp: debug logs under $XDG_RUNTIME_DIR, /tmp
 #                     only without one.
+#   workers_test      Workers.hpp: the owner of every worker thread -- start,
+#                     stop, join, the shutdown deadline and abandonment.
 #   native_search_test  NativeSearch.hpp: the leading-program parse and the
 #                     terminal choice the search uses off Omarchy.
 #   app_info_test     AppInfo.cpp's Get Info script against stand-in pacman,
@@ -122,6 +124,7 @@ run dock_drop_test tests/unit/dock_drop_test.cpp
 run finger_swipe_test tests/unit/finger_swipe_test.cpp
 run debug_gesture_test tests/unit/debug_gesture_test.cpp
 run debug_paths_test tests/unit/debug_paths_test.cpp
+run workers_test tests/unit/workers_test.cpp src/core/Workers.cpp -pthread
 run hot_corner_test tests/unit/hot_corner_test.cpp
 run desktop_switch_test tests/unit/desktop_switch_test.cpp
 run desktop_plan_test tests/unit/desktop_plan_test.cpp
@@ -132,18 +135,18 @@ run submap_borrow_test tests/unit/submap_borrow_test.cpp
 # shellcheck disable=SC2046
 run builtin_icons_test tests/unit/builtin_icons_test.cpp src/apps/BuiltinIcons.cpp --embed-dir=. $(pkg-config --cflags --libs librsvg-2.0)
 # shellcheck disable=SC2046
-run stack_reader_test tests/unit/stack_reader_test.cpp src/stacks/StackReader.cpp src/stacks/StackModel.cpp $(pkg-config --cflags --libs gio-2.0)
-run search_backend_test tests/unit/search_backend_test.cpp src/search/SearchBackend.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
+run stack_reader_test tests/unit/stack_reader_test.cpp src/stacks/StackReader.cpp src/stacks/StackModel.cpp src/core/Workers.cpp $(pkg-config --cflags --libs gio-2.0)
+run search_backend_test tests/unit/search_backend_test.cpp src/search/SearchBackend.cpp src/core/Workers.cpp $(pkg-config --cflags --libs hyprutils libsystemd glib-2.0)
 # shellcheck disable=SC2046
-run search_providers_deadbus_test tests/unit/search_providers_deadbus_test.cpp src/search/SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
+run search_providers_deadbus_test tests/unit/search_providers_deadbus_test.cpp src/search/SearchProviders.cpp src/core/Workers.cpp $(pkg-config --cflags --libs libsystemd)
 # shellcheck disable=SC2046
 run launcher_states_test tests/unit/launcher_states_test.cpp $(pkg-config --cflags libsystemd)
-run app_info_test tests/unit/app_info_test.cpp src/apps/AppInfo.cpp
+run app_info_test tests/unit/app_info_test.cpp src/apps/AppInfo.cpp src/core/Workers.cpp
 run icon_score_test tests/unit/icon_score_test.cpp
 # shellcheck disable=SC2046
 run icon_size_test tests/unit/icon_size_test.cpp $(pkg-config --cflags --libs cairo)
 # shellcheck disable=SC2046
-run thumbs_test tests/unit/thumbs_test.cpp src/stacks/Thumbs.cpp -DTHUMBS_SETTLE_MS=250 -pthread $(pkg-config --cflags --libs glib-2.0)
+run thumbs_test tests/unit/thumbs_test.cpp src/stacks/Thumbs.cpp src/core/Workers.cpp -DTHUMBS_SETTLE_MS=250 -pthread $(pkg-config --cflags --libs glib-2.0)
 run integration_test tests/unit/integration_test.cpp
 run native_search_test tests/unit/native_search_test.cpp
 # shellcheck disable=SC2046
@@ -152,7 +155,7 @@ run glyphs_test tests/unit/glyphs_test.cpp src/platform/Glyphs.cpp $(pkg-config 
 run fonts_test tests/unit/fonts_test.cpp src/platform/Fonts.cpp src/platform/Glyphs.cpp $(pkg-config --cflags --libs fontconfig)
 run palette_file_test tests/unit/palette_file_test.cpp src/platform/PaletteFile.cpp
 # shellcheck disable=SC2046
-run search_providers_nobus_test tests/unit/search_providers_nobus_test.cpp src/search/SearchProviders.cpp $(pkg-config --cflags --libs libsystemd)
+run search_providers_nobus_test tests/unit/search_providers_nobus_test.cpp src/search/SearchProviders.cpp src/core/Workers.cpp $(pkg-config --cflags --libs libsystemd)
 
 # The animation clocks are measured through MotionClock.hpp (msBetween /
 # secondsBetween against a `now` the site already holds) or Config's
