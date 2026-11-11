@@ -285,6 +285,7 @@ class COverview : public IOverview {
     void         performPrimaryClickAction() override;
     bool         moveSelection(const std::string& direction) override;
     bool         windowDispatcherAction(const std::string& action) override;
+    PHLWINDOW    actionTile() override;
 
   private:
     void   ensureTrailingWorkspace();

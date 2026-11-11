@@ -732,6 +732,13 @@ PHLWINDOW COverview::selectedOverviewTile(size_t* workspaceIdx) {
     return windowAtOverviewCursor(workspaceIdx);
 }
 
+PHLWINDOW COverview::actionTile() {
+    if (closing)
+        return {};
+    const auto WINDOW = selectedOverviewTile();
+    return WINDOW && shouldShowOverviewWindow(WINDOW) ? WINDOW : PHLWINDOW{};
+}
+
 // `window select|close` acts on the overview window under the cursor (README)
 // -- or the keyboard's tile after the arrows -- from a mouse bind, a keyboard
 // bind and hyprctl alike. A5: the keyboard/hyprctl path used closeOnWindow, so
