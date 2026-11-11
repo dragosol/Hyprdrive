@@ -122,7 +122,7 @@ namespace Hyprdrive::CpuPulse {
             }
 
             // Something started or stopped pulsing: one repaint starts or ends
-            // it (the dock's own pump keeps a pulse going -- Dock::needsFramesReason).
+            // it (the dock's own pump keeps a pulse going -- "cpu-pulse" in FramePump.cpp).
             if (busy != g_busy) {
                 g_busy = std::move(busy);
                 for (const auto& M : State::monitorState()->monitors())
