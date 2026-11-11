@@ -89,6 +89,7 @@ Covered: **34 of 73** rows (28 fully, 6 partly); 39 not covered, each with its r
 | Spam-proof (50 cycles at 1 Hz and at key-repeat speed, ids unique at every sample) | `fs_cycles` |
 | All animated; the card slides from UNDER the origin only during the transition | not covered: motion, needs filmed frames |
 | Display change removes empty desktops (21,22,28,29,30 -> 1..5), with a trip in flight, shown-empty kept [owner report 11-11] | `display_compact` |
+| Super held over the overview strip: a Clean Up button under it removes the empty desktops between (1,2,5,6 -> 1..4), the overview stays open, windows untouched [11-11: "hold super over the workspace strip ... a button under the strip near my cursor to clean up empty desktops"] | `strip_cleanup` (control: the setting off); the bump and the reflow animation: screenshots/film, not gated |
 | Returning to a fullscreen game leaves the pointer mapped correctly [10-19, 10-30] | not covered: XWayland pointer mapping needs an X client reading its own pointer (wine_state could; next batch) |
 | An X11 client insisting on maximized gets it once; user toggles work during a storm block (3558972) | `x11_state` |
 
