@@ -83,6 +83,7 @@ Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its r
 | Closing an app on its fullscreen desktop removes that desktop and returns to its origin [11-11] | `fs_close_home` (A closed, B killed, D beside, E home gone, F an X11 remap, G the dock's two chips); not driven: the dock's Quit (the same sendClose as A) |
 | A fullscreen window moved onto a populated desktop exits fullscreen and stays there [11-11: also by the dock menu, also a game] | `fs_move_close` (A dispatcher on a trip, C dock menu on a trip, D settled by dispatcher, E Mosaic settled by dock menu, G a game; F an empty desktop keeps it) |
 | A window opened from a fullscreen app opens beside it, visible at once; the app stays fullscreen | `fs_beside` |
+| A plugin reload (`hyprdrive reload`) leaves every fullscreen window fullscreen, on its desktop, trips and debts kept, with Mosaic in the config file, Omarchy blocks renumbering and a disabled panel coming and going; a plain config reload too [11-11] | `reload_blocks` (A the CLI's steps, B `hyprctl reload`, C the trip still goes home after); the client sees one exit + re-entry in the gap (Hyprland's own reload, see FullscreenCarry.hpp) |
 | Spam-proof (50 cycles at 1 Hz and at key-repeat speed, ids unique at every sample) | `fs_cycles` |
 | All animated; the card slides from UNDER the origin only during the transition | not covered: motion, needs filmed frames |
 | Display change removes empty desktops (21,22,28,29,30 -> 1..5), with a trip in flight, shown-empty kept [owner report 11-11] | `display_compact` |
