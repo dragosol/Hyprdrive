@@ -1,6 +1,7 @@
 #include "TileChrome.hpp"
 #include "MotionSites.hpp"
 #include "MotionClock.hpp"
+#include "MotionTween.hpp"
 #include "Motion.hpp"
 
 #include "Config.hpp"
@@ -140,11 +141,11 @@ static SP<Render::ITexture> closeGlyph(int px) {
     return tex;
 }
 
-struct SEase {
-    float           from  = 0.F;
-    float           to    = 0.F;
-    float           ms    = 1.F;
-    Time::steady_tp start = {};
+// A hover or press ease: an STween (from, to, start) plus its duration. The
+// DRAWN value is the eased one (eased / easedHover below, which pick the curve);
+// value() is the linear progress, used only to ask "has it arrived".
+struct SEase : Hyprdrive::Motion::STween<Time::steady_tp> {
+    float ms = 1.F;
 
     float value() const {
         // The animation clock (Motion::Clock): the speed setting stretches it
@@ -158,14 +159,15 @@ struct SEase {
 
     bool running() const { return Hyprdrive::Motion::Clock::animMs(start) < ms; }
 
-    void retarget(float target, float durationMs, float delayMs = 0.F) {
+    // A new leg toward `target`, from `shown` -- the value AS DRAWN (the eased
+    // one), so a turn mid-way carries on from where the tile is instead of
+    // popping to the linear progress (inventory O5/O6; it used to take value()).
+    void retarget(float shown, float target, float durationMs, float delayMs = 0.F) {
         if (std::abs(to - target) < 0.001F)
             return;
 
-        from  = value();
-        to    = target;
-        ms    = std::max(1.F, durationMs);
-        start = Time::steadyNow() + std::chrono::milliseconds(sc<int64_t>(std::max(0.F, delayMs)));
+        ms = std::max(1.F, durationMs);
+        STween::retarget(shown, target, Time::steadyNow() + std::chrono::milliseconds(sc<int64_t>(std::max(0.F, delayMs))));
     }
 
     // Drop a delay that has not started yet, keeping the same target. Used when
@@ -177,6 +179,9 @@ struct SEase {
         }
     }
 };
+
+float eased(const SEase& ease);
+float easedHover(const SEase& ease);
 
 struct SState {
     SEase hover;
@@ -313,7 +318,7 @@ void setHovered(const PHLWINDOW& window, bool lingerOnLeave) {
             // and the delayed ease froze it half-grown for the whole linger.
             const bool ARRIVED = !PREV->hover.running() && PREV->hover.value() >= 0.999F;
             const bool LINGER  = !window && lingerOnLeave && ARRIVED;
-            PREV->hover.retarget(0.F, HOVER_OUT_MS, LINGER ? HOVER_LINGER_MS : 0.F);
+            PREV->hover.retarget(easedHover(PREV->hover), 0.F, HOVER_OUT_MS, LINGER ? HOVER_LINGER_MS : 0.F);
             if (LINGER)
                 g_lingering = PREVWINDOW;
             else
@@ -324,13 +329,13 @@ void setHovered(const PHLWINDOW& window, bool lingerOnLeave) {
     g_hovered = window;
 
     if (auto* const STATE = stateFor(window, true))
-        STATE->hover.retarget(1.F, HOVER_IN_MS);
+        STATE->hover.retarget(easedHover(STATE->hover), 1.F, HOVER_IN_MS);
 }
 
 void setPressed(const PHLWINDOW& window, bool down) {
     if (!down) {
         if (auto* const STATE = stateFor(g_pressed.lock(), false))
-            STATE->press.retarget(0.F, PRESS_MS);
+            STATE->press.retarget(eased(STATE->press), 0.F, PRESS_MS);
 
         g_pressed.reset();
         return;
@@ -341,7 +346,7 @@ void setPressed(const PHLWINDOW& window, bool down) {
 
     g_pressed = window;
     if (auto* const STATE = stateFor(window, true))
-        STATE->press.retarget(1.F, PRESS_MS);
+        STATE->press.retarget(eased(STATE->press), 1.F, PRESS_MS);
 }
 
 void forget() {
