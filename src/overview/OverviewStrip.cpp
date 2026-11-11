@@ -1477,10 +1477,9 @@ void COverview::renderStrip(PHLMONITOR monitor, float renderScale, const Time::s
             drawCell(workspaceIdx);
     if (TOP < images.size())
         drawCell(TOP);
-    if (moving) {
-        damage();
-        requestInputFrame();
-    }
+    // Not a frame request from inside the pass: onPreRender reads this and
+    // joins the reflow pacer while the cells glide.
+    deskGlideMoving = moving;
     std::vector<CBox> cellBoxes;
     cellBoxes.reserve(placed.size());
     for (const auto& P : placed)
