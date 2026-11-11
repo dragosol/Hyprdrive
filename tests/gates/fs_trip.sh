@@ -11,6 +11,8 @@
 #   3. desktops 1:{a,b} 3:{d} (2 empty): a goes fullscreen -> it takes the free 2,
 #      d stays on 3 (nothing bumped, no new desktop); exit -> 1:{a,b} 3:{d}
 #   4. an app ALONE on its desktop stays there
+#   5. in Mosaic, a1 a2 on 1: a1's round trip leaves both at their boxes
+#      (KNOWN-FAIL on 3ad1da3: they come back swapped)
 # Control (GATE_CONTROL=1): fullscreen_desktop = "stay" -> a stays on 1, checks
 # 1 and 3 fail. Recorded 2026-11-11 on 3ad1da3: control FAILS as it must.
 source "$(dirname "$0")/lib.sh"
@@ -41,4 +43,14 @@ check "exit with 2 free: back to 1, 3 untouched" "$(is "$(ids)" "$S2")" "$(ids)"
 D=$(addr_of d); close_win "$(addr_of c)"; go 3; sleep 0.6; focus "$D"; fs "$D" set; sleep 1.2; settle 3 ids
 check "an app alone on its desktop stays there" "$(is "$(win d '"\(.workspace.id) \(.fullscreen)"')" '"3 2"')" "$(win d '"\(.workspace.id) \(.fullscreen)"') ids $(ids)"
 fs "$D" unset; sleep 0.5
+rig_stop
+
+# in Mosaic, "exit puts everything back" -- the windows too, at their boxes
+rig_start; cfg '{general={layout="mosaic"}}'
+[ "$CONTROL" = 1 ] && cfg '{plugin={hyprdrive={general={fullscreen_desktop="stay"}}}}'
+go 2; kw b1 700 450; go 1; kw a1 700 450; kw a2 600 400
+$R ptr move 700 1000 >/dev/null; settle 3 geom; G0=$(geom)
+A=$(addr_of a1); focus "$A"; fs "$A" set; sleep 1.5; fs "$A" unset; sleep 2; settle 3 geom
+check "mosaic: a round trip puts the windows back at their boxes" "$(is "$(geom)" "$G0")" "$(geom) -- was $G0" \
+    "KNOWN-FAIL on 3ad1da3: a1 and a2 come back with their places swapped (needs the owner's ruling: is the mosaic re-pack on return designed?)"
 gate_end

@@ -189,7 +189,7 @@ shot() { sleep "${SHOT_SETTLE:-0.6}"; $R shot "$1" "${2:-HEADLESS-1}" >/dev/null
 # pixdiff A B [THRESH] -- pixels differing by more than THRESH (default 24) in any channel,
 # and the largest connected blob of them (the feedback_pixel_ab_gates rule: blobs, not bboxes)
 pixdiff() {
-    python3 -I - "$1" "$2" "${3:-24}" <<'PY'
+    python3 -P - "$1" "$2" "${3:-24}" <<'PY'
 import sys
 from PIL import Image
 import numpy as np
