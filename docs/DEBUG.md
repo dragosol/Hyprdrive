@@ -23,6 +23,7 @@ From a hyprlang config: `hyprctl dispatch hyprdrive:debug frames`.
 | `motion` | which `animation:curve` preset is in use, sampled; then, per motion-blur site since the last `motion` read, how often it asked for a smear / got one / handed one to the renderer, the mean and longest trail (logical px), and the shutter factor (FlightBlur.hpp) |
 | `desktop` | Super+scroll and the per-cause desktop animations: the keys, what caused the last desktop switch and whether it snapped, the wheel's notch bank |
 | `dockmenu` | the dock's hover pane (its drawn box and each preview cell, with the window's title) and the open dock menu: app or window scope, its plate, every row's kind/label/box with its buttons, and the row previews with their fade level -- all in global logical px |
+| `rows` | each monitor's row of desktops (Rows.hpp): Omarchy's workspace blocks on or off and their slots, the block file as read (`connector=block`), pinned guests (merged records), then per monitor its row (base, capacity, overflow, PROVISIONAL), members as `id=label`, visitors, and the first empty id |
 | `scratchpad` | a click on the overview's Scratchpad cell |
 | `type [word]` | sets the open overview's search query (one word: the Lua pattern is `type \S+`) |
 | `press <evdev keycode>` | one key through the search's own press handler |

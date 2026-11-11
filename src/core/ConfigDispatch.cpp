@@ -1,4 +1,5 @@
 #include "ConfigParts.hpp"
+#include "Rows.hpp"
 using namespace ConfigDetail;
 
 namespace {
@@ -426,6 +427,10 @@ void registerLuaFunctions() {
     // hl.plugin.hyprdrive.integration() -> "omarchy"|"none", reason. New name
     // only: nothing written for the old namespace ever asked it.
     HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "integration", Integration::luaIntegration);
+    // hl.plugin.hyprdrive.workspace_blocks(slots): Omarchy's per-monitor
+    // workspace blocks are on (slots > 0) or off (0); 00-plugin.lua says it
+    // on every parse (Rows.hpp).
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "workspace_blocks", Rows::luaWorkspaceBlocks);
 
     // ONE RELEASE. `configure` under the old namespace still writes the NEW
     // table -- an alias that wrote the deprecated keys would keep re-arming the
