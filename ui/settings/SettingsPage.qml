@@ -303,6 +303,7 @@ Item {
     case "broken": return false // a feature that is in but not working: shown, never switchable
     case "hotCornerOn": return kb("plugin:hyprdrive:hot_corner:enabled")
     case "swapOn": return kb("plugin:hyprdrive:drag:hold_to_swap")
+    case "stripOn": return kb("plugin:hyprdrive:strip")
     case "isolateOvApplies": return !kb("plugin:hyprdrive:dock:isolate_workspaces")
     case "roomApplies": return kb("plugin:hyprdrive:dock:enabled") && !kb("plugin:hyprdrive:dock:autohide")
     case "motionOn": return kn("plugin:hyprdrive:anim_scale") > 0.001

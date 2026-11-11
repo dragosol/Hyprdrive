@@ -47,6 +47,11 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
 
   ![Drag a window to a new desktop](https://hyprdrive.shastasia.com/readme/new-desktop.gif)
 
+  Hold Super over the strip and, when there are empty desktops between the
+  others, a **Clean Up Empty Desktops** button appears under it, by the
+  pointer. Click it and the desktops with windows close ranks on that monitor
+  (`strip_cleanup_button`, on by default).
+
 - **Hold to swap:** drag a window over another one and hold it there. Let go
   and the two trade places (`drag:hold_to_swap`, on by default). Works between
   windows of the same desktop in every layout, the Mosaic canvas included.
