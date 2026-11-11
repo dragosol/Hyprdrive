@@ -17,6 +17,7 @@
 # compacted, A fails. Recorded 2026-11-11: the gate FAILS on it.
 source "$(dirname "$0")/lib.sh"
 gate_begin dsp
+control_build "8bb258c, e.g. the scratchpad p3t/old.so"
 scale() { ev "hl.monitor({ output = \"HEADLESS-1\", mode = \"preferred\", position = \"auto\", scale = $1 })"; }
 five() { for n in 21 22 28 29 30; do go $n; kw "w$n"; done; [ "${1:-}" ] && { go 21; kw w21b; }; }
 rank_ok() { # every window w<N> now sits on the rank of N among 21 22 28 29 30 (+offset for a trip)

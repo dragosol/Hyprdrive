@@ -64,7 +64,7 @@ endif
 VERSION_HEADER = .build/PluginVersion.hpp
 VERSION_SCRIPT = scripts/generate-plugin-version.sh
 
-.PHONY: all check check-asan clean install install-only uninstall FORCE
+.PHONY: all check check-asan gates clean install install-only uninstall FORCE
 
 # An undefined symbol is a lazy-bind compositor kill (three same-day incidents
 # recorded in symcheck.sh's header), so the check IS part of the build. So is
@@ -121,6 +121,14 @@ check-asan:
 	HOST_TEST_SANITIZE=1 bash tests/host_tests.sh
 
 PREFIX ?= $(HOME)/.local
+
+# gates: the behaviour gates on the headless rig (tests/gates/run.sh; see
+# tests/README.md). NOT part of all/check: they need the rig's user hyprtest via
+# passwordless sudo, mutter and kitty, and take ~6 min. Builds nothing: it tests
+# the hyprdrive.so already here (make first). GATES=name... runs some;
+# GATES_ARGS=--control runs each gate's control instead.
+gates:
+	bash tests/gates/run.sh $(GATES_ARGS) $(GATES)
 
 # check, not just hyprdrive.so: `make install` used to skip symcheck entirely,
 # which is how an undefined-symbol .so reached ~/.local/lib and killed every

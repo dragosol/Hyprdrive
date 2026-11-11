@@ -15,6 +15,7 @@
 # xprop never shows MAXIMIZED; B's toggles do nothing. Recorded 2026-11-11: FAILS.
 source "$(dirname "$0")/lib.sh"
 gate_begin x11
+control_build "8bb258c, e.g. the scratchpad p3t/old.so"
 cc -O2 -o "$GOUT/wine_state" "$ROOT/tests/rig/xstate/wine_state.c" $(pkg-config --cflags --libs xcb) || skip "cannot build wine_state (xcb headers?)"
 chmod 755 "$GOUT" "$GOUT/wine_state"
 st() { J clients | jq -r '.[] | select(.class=="wine_state.exe") | "\(.fullscreen)/\(.fullscreenClient)"'; }

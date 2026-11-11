@@ -12,6 +12,7 @@
 #   GATE_SO       absolute path of the hyprdrive.so under test (default: the tree's)
 #   GATE_CONTROL  1 = run the gate's CONTROL variant (the feature's option off, or a
 #                 build with the bug): the gate's checks must then FAIL
+#   GATE_CONTROL_SO  the build-with-the-bug for gates whose control is a build
 #   GATE_OUT      a directory for this gate's small evidence files (kept on FAIL)
 #   HL_NAME       the rig instance name (default g<gate tag>); always starts with g
 #
@@ -104,6 +105,13 @@ le() { [ "$1" -le "$2" ] 2>/dev/null && echo 1 || echo 0; }   # le A B
 ge() { [ "$1" -ge "$2" ] 2>/dev/null && echo 1 || echo 0; }
 
 skip() { echo "RESULT SKIP $*"; exit 77; }
+# control_build DESC -- this gate's control is a BUILD with the bug, not an option:
+# a control run uses GATE_CONTROL_SO (run.sh --control-so PATH), or skips saying which build
+control_build() {
+    [ "$CONTROL" = 1 ] || return 0
+    [ -n "${GATE_CONTROL_SO:-}" ] || skip "its control is a build: run.sh --control --control-so <$1> $(basename "$0" .sh)"
+    SO=$GATE_CONTROL_SO
+}
 # subskip NAME REASON -- one check that cannot apply to this build; named in the verdict
 subskip() { echo "SKIP  $1 ($2)"; _skips="${_skips:+$_skips; }$1: $2"; }
 

@@ -14,6 +14,7 @@
 # "paying back place -1" (fsdesk README; recorded 2026-11-11: the gate FAILS on it).
 source "$(dirname "$0")/lib.sh"
 gate_begin fsm
+control_build "8bb258c, e.g. the scratchpad p3t/old.so"
 setup() { rig_start; trace_on; go 1; kw a; kw b; go 2; kw c; go 3; kw d; go 1; sleep 0.5; A=$(addr_of a); START=$(ids); }
 
 setup
