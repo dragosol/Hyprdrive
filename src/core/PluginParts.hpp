@@ -105,7 +105,7 @@ using namespace Hyprutils::String;
 #include "LauncherEntry.hpp"
 #include "Minimize.hpp"
 #include "PluginVersion.hpp"
-#include "scrollOverview.hpp"
+#include "Overview.hpp"
 #include "SearchSession.hpp"
 #include "OverviewGesture.hpp"
 #include "OverviewRender.hpp"
@@ -125,7 +125,7 @@ typedef void (*origSendWindowSize)(void*, bool);
 // Declared in OverviewInternal.hpp, which this file does not include.
 namespace OvInternal {
     void overviewQueryEdited();
-    void cancelPointerHandoff(); // scrollOverview.cpp
+    void cancelPointerHandoff(); // Overview.cpp
     bool pointerOnTopLayer(PHLMONITOR monitor); // OverviewInput.cpp
 }
 

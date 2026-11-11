@@ -1,11 +1,11 @@
-// CScrollOverview: hit-testing, hover, click actions.
-// Cut from scrollOverview.cpp by pure code motion.
+// COverview: hit-testing, hover, click actions.
+// Cut from Overview.cpp by pure code motion.
 #include "OverviewParts.hpp"
 
 using namespace OverviewDetail;
 
 
-PHLWINDOW CScrollOverview::windowAtOverviewPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
+PHLWINDOW COverview::windowAtOverviewPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
     size_t activeIdx = activeWorkspaceIndex();
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
@@ -62,14 +62,14 @@ PHLWINDOW CScrollOverview::windowAtOverviewPoint(const Vector2D& point, size_t* 
     return nullptr;
 }
 
-PHLWINDOW CScrollOverview::windowAtOverviewCursor(size_t* hoveredWorkspaceIdx) {
+PHLWINDOW COverview::windowAtOverviewCursor(size_t* hoveredWorkspaceIdx) {
     return windowAtOverviewPoint(lastMousePosLocal, hoveredWorkspaceIdx);
 }
 
 // The tile as DRAWN -- grown by the hover ease, shrunk by the press ease -- so
 // the close button the user aims at and the circle that gets hit-tested are the
 // same circle.
-CBox CScrollOverview::tileBox(const PHLWINDOW& window) const {
+CBox COverview::tileBox(const PHLWINDOW& window) const {
     const auto MONITOR = pMonitor.lock();
     if (!window || !MONITOR)
         return {};
@@ -94,7 +94,7 @@ CBox CScrollOverview::tileBox(const PHLWINDOW& window) const {
     return TileChrome::scaledBox(window, getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout));
 }
 
-CBox CScrollOverview::overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const {
+CBox COverview::overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return {};
@@ -114,7 +114,7 @@ CBox CScrollOverview::overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& 
     return getOverviewGlobalBox(globalBox, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout);
 }
 
-bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
+bool COverview::selectAndClose(const PHLWINDOW& window) {
     if (!window)
         return false;
 
@@ -146,7 +146,7 @@ bool CScrollOverview::selectAndClose(const PHLWINDOW& window) {
     return true;
 }
 
-CBox CScrollOverview::tileCloseButtonBox(const PHLWINDOW& window) const {
+CBox COverview::tileCloseButtonBox(const PHLWINDOW& window) const {
     const auto MONITOR = pMonitor.lock();
     // The HIT box, not the drawn one: this is used for the hover keep-alive and
     // for clicks, and the drawn box empties itself as the button fades.
@@ -159,7 +159,7 @@ CBox CScrollOverview::tileCloseButtonBox(const PHLWINDOW& window) const {
 // The close button is the single exception: it is drawn on the grown box, so it
 // pokes a few px past the slot, and without this the hover (and the button with
 // it) would vanish exactly as the cursor arrived on it.
-void CScrollOverview::updateTileHover() {
+void COverview::updateTileHover() {
     // The pointer moved, so the pointer owns the ring again. Whatever the
     // arrows had selected keeps its role for Return and for close(); it just
     // stops being the thing drawn.
@@ -227,7 +227,7 @@ void CScrollOverview::updateTileHover() {
 
 // See SHoverSignature. Read AFTER updateTileHover, so the tile half is the
 // answer that frame would draw rather than the one before it.
-CScrollOverview::SHoverSignature CScrollOverview::hoverSignature() const {
+COverview::SHoverSignature COverview::hoverSignature() const {
     SHoverSignature sig;
 
     const auto MONITOR = pMonitor.lock();
@@ -278,7 +278,7 @@ CScrollOverview::SHoverSignature CScrollOverview::hoverSignature() const {
     return sig;
 }
 
-bool CScrollOverview::hoverSignatureChanged() {
+bool COverview::hoverSignatureChanged() {
     const auto SIG = hoverSignature();
     if (lastHoverSignatureValid && SIG == lastHoverSignature)
         return false;
@@ -288,7 +288,7 @@ bool CScrollOverview::hoverSignatureChanged() {
     return true;
 }
 
-PHLWINDOW CScrollOverview::windowClosestToWorkspaceCenter(size_t workspaceIdx) const {
+PHLWINDOW COverview::windowClosestToWorkspaceCenter(size_t workspaceIdx) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || workspaceIdx >= images.size() || !images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
         return {};
@@ -323,8 +323,8 @@ PHLWINDOW CScrollOverview::windowClosestToWorkspaceCenter(size_t workspaceIdx) c
     return bestWindow;
 }
 
-CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow,
-                                                                                   CScrollOverview* dragContext) {
+CDropIndicator::SDropAnchor COverview::dropAnchorAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow,
+                                                                                   COverview* dragContext) {
     CDropIndicator::SDropAnchor result;
     const auto                  DRAGCONTEXT = dragContext ? dragContext : this;
 
@@ -517,7 +517,7 @@ CDropIndicator::SDropAnchor CScrollOverview::dropAnchorAtOverviewCursorOnWorkspa
     return result;
 }
 
-PHLWORKSPACE CScrollOverview::workspaceAtOverviewPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
+PHLWORKSPACE COverview::workspaceAtOverviewPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return nullptr;
@@ -542,7 +542,7 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewPoint(const Vector2D& point, si
     return nullptr;
 }
 
-PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx, const PHLWINDOW& draggedWindow) const {
+PHLWORKSPACE COverview::workspaceAtOverviewDropPoint(const Vector2D& point, size_t* hoveredWorkspaceIdx, const PHLWINDOW& draggedWindow) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return nullptr;
@@ -608,11 +608,11 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
     return nullptr;
 }
 
-PHLWORKSPACE CScrollOverview::workspaceAtOverviewCursor(size_t* hoveredWorkspaceIdx) const {
+PHLWORKSPACE COverview::workspaceAtOverviewCursor(size_t* hoveredWorkspaceIdx) const {
     return workspaceAtOverviewPoint(lastMousePosLocal, hoveredWorkspaceIdx);
 }
 
-bool CScrollOverview::selectOverviewWindow(PHLWINDOW window, size_t workspaceIdx, bool syncFocus) {
+bool COverview::selectOverviewWindow(PHLWINDOW window, size_t workspaceIdx, bool syncFocus) {
     if (!window)
         return false;
 
@@ -625,7 +625,7 @@ bool CScrollOverview::selectOverviewWindow(PHLWINDOW window, size_t workspaceIdx
     return true;
 }
 
-bool CScrollOverview::selectWindowAtOverviewCursor(bool syncFocus) {
+bool COverview::selectWindowAtOverviewCursor(bool syncFocus) {
     lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
     size_t    workspaceIdx = viewportCurrentWorkspace;
@@ -634,7 +634,7 @@ bool CScrollOverview::selectWindowAtOverviewCursor(bool syncFocus) {
     return selectOverviewWindow(window, workspaceIdx, syncFocus);
 }
 
-void CScrollOverview::focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx) {
+void COverview::focusOverviewWorkspace(const PHLWORKSPACE& workspace, size_t workspaceIdx) {
     if (!workspace)
         return;
 
@@ -652,7 +652,7 @@ void CScrollOverview::focusOverviewWorkspace(const PHLWORKSPACE& workspace, size
 
 // The full default click action, shared between the plain mouse path and the
 // submap's `window click` dispatcher so SUPER-held clicks behave identically.
-void CScrollOverview::performPrimaryClickAction() {
+void COverview::performPrimaryClickAction() {
     // E6: the strip band floats above the main tiles, so it has to be
     // tested before them, exactly as the drop path does.
     //
@@ -707,7 +707,7 @@ void CScrollOverview::performPrimaryClickAction() {
     close();
 }
 
-void CScrollOverview::selectHoveredWorkspace() {
+void COverview::selectHoveredWorkspace() {
     lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
 
     // workspaceAtOverviewCursor writes workspaceIdx; reading it in the same call
@@ -724,7 +724,7 @@ void CScrollOverview::selectHoveredWorkspace() {
 // mouse the tile under the pointer, and over empty space nothing at all --
 // never closeOnWindow on its own, which the pointer hover does not update and
 // which still names the window focused when the overview opened.
-PHLWINDOW CScrollOverview::selectedOverviewTile(size_t* workspaceIdx) {
+PHLWINDOW COverview::selectedOverviewTile(size_t* workspaceIdx) {
     if (g_search.nav.keyboardTile && g_search.nav.zone == EOverviewNavZone::Tile)
         return getOverviewWindowToShow(closeOnWindow.lock());
 
@@ -737,7 +737,7 @@ PHLWINDOW CScrollOverview::selectedOverviewTile(size_t* workspaceIdx) {
 // bind and hyprctl alike. A5: the keyboard/hyprctl path used closeOnWindow, so
 // `window close` closed the window that was focused when the overview opened,
 // not the one hovered.
-bool CScrollOverview::windowDispatcherAction(const std::string& action) {
+bool COverview::windowDispatcherAction(const std::string& action) {
     const auto CURRENTKEYBIND = g_pKeybindManager ? g_pKeybindManager->m_currentKeybind : SP<SKeybind>{};
     const bool FROMMOUSEBIND  = CURRENTKEYBIND && CURRENTKEYBIND->key.starts_with("mouse:");
 

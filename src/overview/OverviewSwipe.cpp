@@ -1,11 +1,11 @@
-// CScrollOverview: trackpad tape swipe, selection/viewport sync, workspace swipe gestures and detents.
-// Cut from scrollOverview.cpp by pure code motion.
+// COverview: trackpad tape swipe, selection/viewport sync, workspace swipe gestures and detents.
+// Cut from Overview.cpp by pure code motion.
 #include "OverviewParts.hpp"
 
 using namespace OverviewDetail;
 
 
-void CScrollOverview::moveViewportWorkspace(bool up) {
+void COverview::moveViewportWorkspace(bool up) {
     if (images.empty())
         return;
 
@@ -40,13 +40,13 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
     damage();
 }
 
-bool CScrollOverview::stepDesktop(bool next) {
+bool COverview::stepDesktop(bool next) {
     const size_t BEFORE = viewportCurrentWorkspace;
     moveViewportWorkspace(next);
     return viewportCurrentWorkspace != BEFORE;
 }
 
-bool CScrollOverview::scrollStepAllowed(uint32_t timeMs) {
+bool COverview::scrollStepAllowed(uint32_t timeMs) {
     const uint32_t DELAY = sc<uint32_t>(Hyprdrive::Config::getScrollEventDelay());
 
     // throttle discrete scroll steps so a single notch / a burst of high-res events only steps once
@@ -57,7 +57,7 @@ bool CScrollOverview::scrollStepAllowed(uint32_t timeMs) {
     return true;
 }
 
-void CScrollOverview::trackpadSwipeLayout(const PHLWORKSPACE target, const double delta) {
+void COverview::trackpadSwipeLayout(const PHLWORKSPACE target, const double delta) {
     const float SCALE = std::max<float>(scale->value(), 0.01F);
     const auto ALGO = overviewScrollingAlgorithmForWorkspace(target);
 
@@ -81,7 +81,7 @@ void CScrollOverview::trackpadSwipeLayout(const PHLWORKSPACE target, const doubl
     damage();
 }
 
-bool CScrollOverview::onTapeSwipeUpdate(double delta) {
+bool COverview::onTapeSwipeUpdate(double delta) {
     if (closing || images.empty() || viewportCurrentWorkspace >= images.size() || !images[viewportCurrentWorkspace])
         return false;
 
@@ -95,13 +95,13 @@ bool CScrollOverview::onTapeSwipeUpdate(double delta) {
     return true;
 }
 
-void CScrollOverview::onTapeSwipeEnd() {
+void COverview::onTapeSwipeEnd() {
     if (images.empty() || viewportCurrentWorkspace >= images.size() || !images[viewportCurrentWorkspace])
         return;
     trackpadSwipeLayout(images[viewportCurrentWorkspace]->pWorkspace, 0.0);
 }
 
-void CScrollOverview::trackpadSwipeWorkspace(const double delta) {
+void COverview::trackpadSwipeWorkspace(const double delta) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return;
@@ -121,7 +121,7 @@ void CScrollOverview::trackpadSwipeWorkspace(const double delta) {
     damage();
 }
 
-double CScrollOverview::trackpadWorkspaceScrollOffset(PHLMONITOR monitor, float renderScale) {
+double COverview::trackpadWorkspaceScrollOffset(PHLMONITOR monitor, float renderScale) {
     const float RENDEREDLOGICALUNIT = renderScale * std::max<float>(monitor->m_scale, 0.01F);
     const float LOGICALPITCH        = getWorkspaceLogicalPitch(monitor, renderScale, layout);
 
@@ -144,7 +144,7 @@ double CScrollOverview::trackpadWorkspaceScrollOffset(PHLMONITOR monitor, float 
     return offset;
 }
 
-void CScrollOverview::finishWorkspaceScrollFollow() {
+void COverview::finishWorkspaceScrollFollow() {
     if (!trackpadWorkspaceFollowing)
         return;
 
@@ -212,7 +212,7 @@ void CScrollOverview::finishWorkspaceScrollFollow() {
     }
 }
 
-void CScrollOverview::syncSelectionToViewport() {
+void COverview::syncSelectionToViewport() {
     if (images.empty() || viewportCurrentWorkspace >= images.size()) {
         closeOnWindow.reset();
         return;
@@ -287,7 +287,7 @@ PHLWINDOW fullscreenCoverOf(const PHLWINDOW& window) {
 }
 }
 
-void CScrollOverview::syncFocusedSelection() {
+void COverview::syncFocusedSelection() {
     const auto window = getOverviewWindowToShow(closeOnWindow.lock());
     if (!shouldShowOverviewWindow(window))
         return;
@@ -332,7 +332,7 @@ void CScrollOverview::syncFocusedSelection() {
         focusSyncedFromWorkspaceID = PREVIOUSWORKSPACE ? PREVIOUSWORKSPACE->m_id : WORKSPACE_INVALID;
 }
 
-size_t CScrollOverview::dragWorkspaceIndex(PHLWINDOW window) const {
+size_t COverview::dragWorkspaceIndex(PHLWINDOW window) const {
     if (viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] && images[viewportCurrentWorkspace]->pWorkspace)
         return viewportCurrentWorkspace;
 
@@ -376,7 +376,7 @@ namespace {
     constexpr int64_t DETENT_TICK_MIN_MS = 55;
 }
 
-void CScrollOverview::onWorkspaceSwipeBegin() {
+void COverview::onWorkspaceSwipeBegin() {
     trackpadWorkspaceFollowing = true;
     trackpadTapeFollowing      = false;
     // Logical units, same as viewOffset — a slow swipe must not have to cover
@@ -396,7 +396,7 @@ void CScrollOverview::onWorkspaceSwipeBegin() {
     trackpadDetentTickedIdx = viewportCurrentWorkspace;
 }
 
-void CScrollOverview::maybeTickDetent(size_t workspaceIdx) {
+void COverview::maybeTickDetent(size_t workspaceIdx) {
     if (workspaceIdx == trackpadDetentTickedIdx)
         return;
 
@@ -425,7 +425,7 @@ void CScrollOverview::maybeTickDetent(size_t workspaceIdx) {
     process.runAsync();
 }
 
-void CScrollOverview::onWorkspaceSwipeUpdate(double delta) {
+void COverview::onWorkspaceSwipeUpdate(double delta) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || !viewOffset)
         return;
@@ -508,7 +508,7 @@ void CScrollOverview::onWorkspaceSwipeUpdate(double delta) {
     damage();
 }
 
-void CScrollOverview::onWorkspaceSwipeEnd() {
+void COverview::onWorkspaceSwipeEnd() {
     // Drop the highlight and the pill with the gesture. finishWorkspaceScrollFollow
     // animates the settle from trackpadScrollAccum, which is already the warped
     // value the cards are sitting at, so the release does not jump.
@@ -519,7 +519,7 @@ void CScrollOverview::onWorkspaceSwipeEnd() {
     finishWorkspaceScrollFollow();
 }
 
-void CScrollOverview::onSwipeUpdate(double delta) {
+void COverview::onSwipeUpdate(double delta) {
     const int DISTANCE = Hyprdrive::Config::getGestureDistance();
 
     m_isSwiping = true;
@@ -545,7 +545,7 @@ void CScrollOverview::onSwipeUpdate(double delta) {
     scale->setValueAndWarp(hyprlerp(1.F, Hyprdrive::Config::getScale(), PERC));
 }
 
-void CScrollOverview::onSwipeEnd() {
+void COverview::onSwipeEnd() {
     const bool DISMISS = m_swipeClosing;
     m_isSwiping        = false;
     m_swipeClosing     = false;
