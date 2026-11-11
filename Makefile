@@ -64,7 +64,7 @@ endif
 VERSION_HEADER = .build/PluginVersion.hpp
 VERSION_SCRIPT = scripts/generate-plugin-version.sh
 
-.PHONY: all check clean install install-only uninstall FORCE
+.PHONY: all check check-asan clean install install-only uninstall FORCE
 
 # An undefined symbol is a lazy-bind compositor kill (three same-day incidents
 # recorded in symcheck.sh's header), so the check IS part of the build. So is
@@ -110,6 +110,15 @@ check: hyprdrive.so
 	python3 tests/agent_run_test.py
 	python3 tests/tool_scripts_test.py
 	python3 tests/integration_fallbacks_test.py
+
+# The host tests again, every one built with AddressSanitizer + UBSan (leaks
+# included) and any report a failure (tests/host_tests.sh, HOST_TEST_SANITIZE).
+# Not part of `check`: it adds about 30 s to the host tests' 85 (measured
+# 2026-11-11 on fedora, 8 jobs busy elsewhere), past what every build should
+# pay. Run it after touching a pure function or a worker. Needs no compositor
+# and no hyprdrive.so; g++ without libasan falls back to clang++.
+check-asan:
+	HOST_TEST_SANITIZE=1 bash tests/host_tests.sh
 
 PREFIX ?= $(HOME)/.local
 

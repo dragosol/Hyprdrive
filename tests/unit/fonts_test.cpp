@@ -104,7 +104,9 @@ static int runMode(const std::string& mode) {
         CHECK(Fonts::familyCovers(ONLY, 0xF002));
         CHECK(!Fonts::familyCovers(ONLY, 0xF07C));
     } else if (mode == "host") {
-        const auto& FAM = Fonts::iconFamily("auto");
+        // A copy: iconFamily answers a reference into the cache reset() below
+        // empties (ASan, make check-asan: the comparison after it read freed memory).
+        const std::string FAM = Fonts::iconFamily("auto");
         if (!FAM.empty()) {
             CHECK(Fonts::installed(FAM));
             CHECK(Fonts::iconCovers("auto", 0xF07C));
