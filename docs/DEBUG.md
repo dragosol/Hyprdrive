@@ -157,3 +157,12 @@ headless harness, `$XDG_RUNTIME_DIR` is the instance's own `/tmp/hl-<name>/rt`.
 | `hyprdrive-profile.on` | if present at plugin load, the search profiler writes `hyprdrive-prof.log` (as do `HYPRDRIVE_PROFILE` / `SCROLLOVERVIEW_PROFILE`) |
 | `hyprdrive-stacklog.on` | if present, dock stacks write `hyprdrive-stack.log` |
 | `hyprdrive-mosaic.on` | if present (checked each second), Mosaic writes `hyprdrive-mosaic.log` |
+
+One file lives elsewhere, because it has to outlive a reboot:
+`$XDG_STATE_HOME/hyprdrive/terminate.log` (`~/.local/state/hyprdrive/` without
+it; `TerminateLog.hpp`). While the plugin is loaded, a `std::terminate` anywhere
+in the compositor -- the plugin's, Hyprland's or another plugin's -- appends the
+exception in flight (its type and `what()`) or that there was none, and a
+backtrace, and then aborts exactly as it would have. Nothing is written until
+that happens; the file is 0600 in a 0700 directory, never written through a
+symlink, and started over once it passes 64 KiB.
