@@ -31,7 +31,7 @@ CONTROL=${GATE_CONTROL:-0}
 K="kitty -o remember_window_size=no -o initial_window_width=900 -o initial_window_height=600"
 SU() { sudo -n -u hyprtest "$@"; }
 
-_fails=0; _known=0; _checks=0; _first_fail=; _first_known=; _started=0
+_fails=0; _known=0; _checks=0; _first_fail=; _first_known=; _started=0; _skips=
 
 # gate_begin TAG -- instance name g<TAG>, evidence dir, cleanup trap
 gate_begin() {
@@ -56,7 +56,8 @@ _gate_cleanup() {
 rig_start() {
     $R stop >/dev/null 2>&1 || true
     local a=(--so "$SO"); for x in "$@"; do [ "$x" = --no-plugin ] && a=(); done
-    case " $* " in *" --config "*) a=() ;; esac
+    # a config that loads the plugin itself: hl.sh must not load one more
+    case " $* " in *" --config "*) a=(--no-plugin) ;; esac
     if ! $R start "${a[@]}" "$@" > "$GOUT/start.log" 2>&1; then
         echo "rig start failed:"; tail -5 "$GOUT/start.log"; echo "RESULT FAIL rig did not start"; exit 1
     fi
@@ -103,6 +104,8 @@ le() { [ "$1" -le "$2" ] 2>/dev/null && echo 1 || echo 0; }   # le A B
 ge() { [ "$1" -ge "$2" ] 2>/dev/null && echo 1 || echo 0; }
 
 skip() { echo "RESULT SKIP $*"; exit 77; }
+# subskip NAME REASON -- one check that cannot apply to this build; named in the verdict
+subskip() { echo "SKIP  $1 ($2)"; _skips="${_skips:+$_skips; }$1: $2"; }
 
 gate_end() {
     if [ "$_started" = 1 ]; then rig_stop; check "no core dump of the instance" "$(is "$CORES" 0)" "$(cat "$GOUT/stop.log" | head -2 | tr '\n' ' ')"; fi
@@ -114,7 +117,7 @@ gate_end() {
     if [ $_fails -gt 0 ]; then echo "RESULT FAIL $_fails/$_checks: $_first_fail"; exit 1; fi
     SU rm -rf "$GOUT" 2>/dev/null; rm -rf "$GOUT" 2>/dev/null
     if [ $_known -gt 0 ]; then echo "RESULT KNOWN-FAIL $_first_known"; exit 78; fi
-    echo "RESULT PASS $_checks checks"; exit 0
+    echo "RESULT PASS $_checks checks${_skips:+ (skipped: $_skips)}"; exit 0
 }
 
 # ---------------------------------------------------------------- state
