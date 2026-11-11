@@ -42,6 +42,7 @@
 #include "CpuPulse.hpp"
 #include "Genie.hpp"
 #include "Motion.hpp"
+#include "MotionMath.hpp"
 #include "ConfigureHold.hpp"
 
 #include "Compat.hpp"
@@ -487,7 +488,6 @@ constexpr float DRAG_GLOW_ALPHA = 0.55F;
 // one hop; the shape below is what HOP_MS is the length of.
 constexpr float BOUNCE_HEIGHT   = 0.34F; // of one icon height
 constexpr float BOUNCE_UP_SHARE = 0.42F; // the hop is quicker up than down
-extern CBox lerpBox(const CBox& a, const CBox& b, float t);
 
 struct SMetrics {
     float icon   = 0.F;

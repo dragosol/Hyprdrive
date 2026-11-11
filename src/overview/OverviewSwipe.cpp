@@ -542,7 +542,7 @@ void COverview::onSwipeUpdate(double delta) {
         return;
     }
 
-    scale->setValueAndWarp(hyprlerp(1.F, Hyprdrive::Config::getScale(), PERC));
+    scale->setValueAndWarp(Hyprdrive::Motion::lerp(1.F, Hyprdrive::Config::getScale(), PERC));
 }
 
 void COverview::onSwipeEnd() {

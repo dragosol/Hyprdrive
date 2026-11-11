@@ -52,6 +52,8 @@
 #                     thumbnail it had meanwhile; a future mtime gets one.
 #   desktop_switch_test  DesktopSwitchModel.hpp: Super+scroll's step and clamp,
 #                     one step per wheel notch, and the desktop-switch cause.
+#   motion_math_test  MotionMath.hpp: each shared motion function against
+#                     verbatim copies of the definitions it replaced, bit for bit.
 #
 # Anything that needs a running Hyprland is a GATE (tests/gates/), not a host
 # test.
@@ -103,6 +105,8 @@ run mosaic_pack_test tests/unit/mosaic_pack_test.cpp
 run show_desktop_test tests/unit/show_desktop_test.cpp
 run preview_grid_test tests/unit/preview_grid_test.cpp
 run motion_spacing_test tests/unit/motion_spacing_test.cpp
+# shellcheck disable=SC2046
+run motion_math_test tests/unit/motion_math_test.cpp $(pkg-config --cflags --libs hyprutils)
 run icon_overrides_test tests/unit/icon_overrides_test.cpp
 run dock_drop_test tests/unit/dock_drop_test.cpp
 run finger_swipe_test tests/unit/finger_swipe_test.cpp
