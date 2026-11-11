@@ -11,7 +11,12 @@
 #   1. overview opened and closed: every client's geometry is unchanged and a
 #      settled screenshot matches the one taken before (largest differing blob
 #      < 40 px -- the blink of a text cursor at most)
-#   2. Super+F with the overview open: the focused window goes fullscreen; again: back
+#   2. Super+F with the overview open, the pointer on the focused window's tile:
+#      it goes fullscreen; again: back
+#   2b. (owner, 2026-11-11: "super+f should act on the hovered tile in overview")
+#      the pointer on the OTHER window's tile, Super+F: that one goes fullscreen,
+#      the focused one is untouched; Super+F over it again: back on 1. The
+#      pointer over no tile (a gap): the focused window goes fullscreen
 #   3. a click on a2's tile (`hyprdrive:debug tile a2`): the overview closes, a2
 #      has the focus, the pointer is on a2 -- at its centre (+-2 px) unless the
 #      click point was on a2 already (then it stays: OverviewLifecycle.cpp handoff)
@@ -21,9 +26,11 @@
 # card 1 spans x 592..834 at y 145..280, card 2 starts ~840 -- there is no debug
 # hook for cards (tile is for windows). If the strip layout changes, step 4
 # fails with "nothing moved" and the coordinates need re-measuring (COVERAGE.md).
-# Control (--control): a2 is resized by 20 px while the overview is open, and
-# the card drag is done without Super -- 1 (geometry and pixels) and 4 fail.
-# Recorded 2026-11-11 on 3ad1da3: control FAILS as it must.
+# Control (--control): a2 is resized by 20 px while the overview is open, the
+# hovered tile's fullscreen is asked for the FOCUSED window by name (what Super+F
+# did before the fix), and the card drag is done without Super -- 1 (geometry
+# and pixels), 2b and 4 fail. Recorded 2026-11-11 on 3ad1da3: control FAILS as
+# it must (2b and its control added and recorded the same day on the fix).
 source "$(dirname "$0")/lib.sh"
 gate_begin ovw
 rig_start
@@ -39,10 +46,45 @@ pd=$(pixdiff "$GOUT/before.png" "$GOUT/after.png"); set -- $pd
 check "1: overview open/close: pixels untouched (largest blob < 40 px)" "$([ "${2:-99999}" -lt 40 ] 2>/dev/null && echo 1)" "differing px, largest blob: $pd"
 
 $R overview >/dev/null; sleep 1.2
-F=$(J activewindow | jq -r .class); $R tap Super+F >/dev/null; sleep 1.5
+# the pointer on the focused window's tile: since 2b's ruling Super+F acts on
+# the tile under the pointer, and 700,1000 is b1's on desktop 2's card
+tile_of() { dbg tile "$1" | grep -o "tile $1 [0-9 -]*" | awk '{print $3, $4, $5, $6}'; }
+F=$(J activewindow | jq -r .class); TF=$(tile_of "$F")
+[ -n "$TF" ] && { set -- $TF; $R ptr move $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )) >/dev/null; sleep 0.4; }
+$R tap Super+F >/dev/null; sleep 1.5
 check "2: Super+F in the overview: the focused window goes fullscreen" "$(is "$(win "$F" .fullscreen)" 2)" "$F fullscreen=$(win "$F" .fullscreen)"
 $R tap Super+F >/dev/null; sleep 1.8
 check "2: Super+F again: back where it was" "$(is "$(win "$F" .fullscreen) $(win "$F" .workspace.id)" "0 1")" "$F fullscreen=$(win "$F" .fullscreen) on $(win "$F" .workspace.id)"
+# 2b. Super+F acts on the HOVERED tile (owner, 2026-11-11: "super+f should act
+# on the hovered tile in overview"); over no tile, on the focused window.
+H=$([ "$F" = a1 ] && echo a2 || echo a1)
+TH=$(tile_of "$H"); TF=$(tile_of "$F")
+if [ -n "$TH" ] && [ -n "$TF" ]; then
+    set -- $TH; $R ptr move $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )) >/dev/null; sleep 0.4
+    if [ "$CONTROL" = 1 ]; then ev "hl.dispatch(hl.dsp.window.fullscreen({ window = [[address:$(addr_of "$F")]], action = \"toggle\" }))"
+    else $R tap Super+F >/dev/null; fi
+    sleep 1.5
+    check "2b: Super+F over $H's tile ($F focused): $H goes fullscreen" "$(is "$(win "$H" .fullscreen)" 2)" "$H fullscreen=$(win "$H" .fullscreen)"
+    check "2b: ... and $F is untouched" "$(is "$(win "$F" '"\(.fullscreen) \(.workspace.id)"')" '"0 1"')" "$F $(win "$F" '"\(.fullscreen) \(.workspace.id)"')"
+    # back, the same way: Super+F over its tile (it is on its own desktop's card now)
+    TH=$(tile_of "$H")
+    if [ -n "$TH" ]; then set -- $TH; $R ptr move $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )) >/dev/null; sleep 0.4; $R tap Super+F >/dev/null
+    else fs "$(addr_of "$H")" unset; fi
+    wait_for 3 "[ \"\$(win $H .workspace.id) \$(win $H .fullscreen)\" = '1 0' ]"; settle 3 geom
+    check "2b: Super+F over it again: $H is back on 1" "$(is "$(win "$H" '"\(.fullscreen) \(.workspace.id)"')" '"0 1"')" "$H $(win "$H" '"\(.fullscreen) \(.workspace.id)"')"
+    # over no tile (the gap under the shorter of the two): the focused window
+    focus "$(addr_of "$F")"; sleep 0.3
+    TH=$(tile_of "$H"); TF=$(tile_of "$F"); set -- $TH $TF
+    if [ $(( $2 + $4 )) -lt $(( $6 + $8 )) ]; then GX=$(( $1 + $3 / 2 )); GY=$(( $2 + $4 + ($6 + $8 - $2 - $4) / 2 ))
+    else GX=$(( $5 + $7 / 2 )); GY=$(( $6 + $8 + ($2 + $4 - $6 - $8) / 2 )); fi
+    $R ptr move $GX $GY >/dev/null; sleep 0.4; FOC=$(J activewindow | jq -r .class)
+    $R tap Super+F >/dev/null; sleep 1.5
+    check "2b: Super+F over no tile ($GX,$GY): the focused window ($FOC) goes fullscreen" "$(is "$(win "$FOC" .fullscreen)" 2)" "$(geom)"
+    fs "$(addr_of "$FOC")" unset; wait_for 3 "[ \"\$(win $FOC .workspace.id) \$(win $FOC .fullscreen)\" = '1 0' ]"; settle 3 geom
+else
+    check "2b: debug tile answers for a1 and a2" 0 "$(dbg tile a1 | tail -1) / $(dbg tile a2 | tail -1)"
+fi
+
 T=$(dbg tile a2 | grep -o 'tile a2 [0-9 ]*'); set -- $T
 if [ $# -ge 6 ]; then
     PX=$(( $3 + $5 / 2 )); PY=$(( $4 + $6 / 2 )); $R ptr tap $PX $PY >/dev/null; sleep 1.5

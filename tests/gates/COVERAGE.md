@@ -93,7 +93,7 @@ Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its r
 | --- | --- |
 | Real windows: open/close leaves every window untouched | `overview` (1: geometry and settled pixels) |
 | Grid hover fades border inactive->active; hover zooms a tile with a tooltip, reverses if abandoned [10-16, 11-06] | not covered: pixels over time |
-| Super+F works on an overview window, both trees [11-06] | partly: `overview` (2: the focused window, overview open); a hovered (not focused) tile is not targeted by Super+F on 3ad1da3 -- whether it should be needs the owner's ruling; Omarchy tree not run |
+| Super+F works on an overview window, both trees [11-06]; on the HOVERED tile [11-11: "super+f should act on the hovered tile in overview"] | `overview` (2: the focused window's tile; 2b: another tile hovered -> that one, the focused one untouched, and back; over no tile -> the focused window); Omarchy tree: `--so` run of `overview` |
 | Strip: Super+hover highlights/grows a desktop [11-06] | not covered: pixels |
 | Strip: drag to reorder, renumbered without duplicates [11-06] | `overview` (4; card coordinates measured on the rig) |
 | Moving cards pass smaller, underneath the main one [11-06] | not covered: motion |
