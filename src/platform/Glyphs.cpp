@@ -42,6 +42,8 @@ namespace {
         SGlyph{0xF05A, "info-circle", "M8 7.2v4.2", "M8.95 4.9a.95.95 0 1 1-1.9 0 .95.95 0 0 1 1.9 0z", ""},
         SGlyph{0xF05E, "ban", "M3.9 3.9l8.2 8.2", "", ""},
         SGlyph{0xF062, "arrow-up", "M8 13.6V2.8M3.6 7.2L8 2.8l4.4 4.4", "", "↑"},
+        SGlyph{0xF065, "expand", "M2.6 6.2V2.6h3.6M9.8 2.6h3.6v3.6M13.4 9.8v3.6H9.8M6.2 13.4H2.6V9.8", "", ""},
+        SGlyph{0xF066, "compress", "M6.2 2.6v3.6H2.6M13.4 6.2H9.8V2.6M9.8 13.4V9.8h3.6M2.6 9.8h3.6v3.6", "", ""},
         SGlyph{0xF067, "plus", "M8 2.8v10.4M2.8 8h10.4", "", "+"},
         SGlyph{0xF077, "chevron-up", "M2.8 10.2L8 5l5.2 5.2", "", "˄"},
         SGlyph{0xF078, "chevron-down", "M2.8 5.8L8 11l5.2-5.2", "", "˅"},

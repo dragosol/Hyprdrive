@@ -65,6 +65,7 @@
 #include "SettingsApp.hpp"
 #include "DesktopSwitch.hpp"
 #include "DockDrop.hpp"
+#include "DockMenuModel.hpp"
 #include "DockStacks.hpp"
 #include "DockTilt.hpp"
 #include "Locations.hpp"
@@ -104,6 +105,7 @@
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/helpers/MiscFunctions.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
@@ -546,6 +548,8 @@ struct SEmptyDesktopStore {
 };
 extern bool opensInEmptyDesktop(const std::string& id);
 extern void toggleEmptyDesktop(const std::string& id);
+extern bool opensInFullscreen(const std::string& id);
+extern void toggleOpenFullscreen(const std::string& id);
 extern void toggleFavorite(const std::string& id);
 
 // X33. The reference's `getInterestingWindows()`: the one filter every list the
@@ -1036,6 +1040,15 @@ enum class ERow : uint8_t {
     StackEmptyCancel,
     // Empty Trash with no Nautilus to show its dialog: the dock asks, in place.
     EmptyTrashConfirm,
+    // user, 2026-11-11: "add a maximize and fullscreen option and always open
+    // in fullscreen in the context menu ... intuitive and space saving". Two
+    // SEGMENTED rows (SRow::segmented): the window's Maximize | Fullscreen, and
+    // "Always Open in" with its Empty Workspace | Fullscreen chips.
+    WindowSize,       // the split row; its segments are Maximize and Fullscreen
+    Maximize,         // segment: toggles FSMODE_MAXIMIZED on the row's window
+    Fullscreen,       // segment: toggles FSMODE_FULLSCREEN on the row's window
+    AlwaysOpenIn,     // the chips row; its chips are AlwaysEmptyWorkspace and AlwaysFullscreen
+    AlwaysFullscreen, // chip: the app's main windows open fullscreen
 };
 namespace MenuGlyph {
 
@@ -1081,6 +1094,8 @@ namespace MenuGlyph {
     inline constexpr const char* HERE     = "\uf0ab"; // arrow-circle-down: onto this desktop
     inline constexpr const char* UP       = "\uf077"; // chevron-up
     inline constexpr const char* DOWN     = "\uf078"; // chevron-down
+    inline constexpr const char* EXPAND   = "\uf065"; // expand: fullscreen
+    inline constexpr const char* COMPRESS = "\uf066"; // compress: exit fullscreen
 }
 
 struct SRow {
@@ -1102,8 +1117,14 @@ struct SRow {
         std::string glyph;
         std::string label; // shown in the hint's place while the button is hovered
         CBox        box;   // filled by renderMenu
+        bool        on = false; // a segmented row's segment: lit (maximized, fullscreen, the chip set)
     };
     std::vector<SInline> inlines;
+    // SEGMENTED (ERow::WindowSize, ERow::AlwaysOpenIn): `inlines` are wide
+    // segments drawn with their glyph and label. Without a label of its own the
+    // row is split into equal halves; with one, the segments are chips at its
+    // right end. A segment acts as its kind; the row itself does nothing.
+    bool segmented = false;
 };
 
 struct SMenu {
