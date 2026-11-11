@@ -77,9 +77,10 @@ Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its r
 | Non-game apps leave fullscreen when another window on that desktop is chosen; games stay, the other goes on top [10-30, 10-19] | partly: `x11_state` (B: a game's fullscreen toggles); the choose-another-window rule not covered (next) |
 | Going fullscreen moves the app to n if free, else n+1 [11-05..11-09] | `fs_trip` (1, 3, 4) |
 | ... reusing an adjacent empty desktop instead of creating one | `fs_trip` (3) |
-| Exit puts everything back and removes the desktop it made | `fs_trip` (2, 3; 5 = the windows' boxes in Mosaic, KNOWN-FAIL), `fs_cycles` |
-| Exit by closing the app while its desktop is off screen (the old "-1" debt) | `fs_move_close` (B) |
-| A fullscreen window moved onto a populated desktop exits fullscreen and stays there | `fs_move_close` (A) |
+| Exit puts everything back and removes the desktop it made | `fs_trip` (2, 3; 5, 5b, 6 = the windows' boxes in Mosaic, three windows, hybrid tiling; 5c = a change meanwhile: the normal rules), `fs_cycles` |
+| Exit by closing the app while its desktop is off screen (the old "-1" debt) | `fs_move_close` (B), `fs_close_home` (C) |
+| Closing an app on its fullscreen desktop removes that desktop and returns to its origin [11-11] | `fs_close_home` (A closed, B killed, D beside, E home gone, F an X11 remap, G the dock's two chips); not driven: the dock's Quit (the same sendClose as A) |
+| A fullscreen window moved onto a populated desktop exits fullscreen and stays there [11-11: also by the dock menu, also a game] | `fs_move_close` (A dispatcher on a trip, C dock menu on a trip, D settled by dispatcher, E Mosaic settled by dock menu, G a game; F an empty desktop keeps it) |
 | A window opened from a fullscreen app opens beside it, visible at once; the app stays fullscreen | `fs_beside` |
 | Spam-proof (50 cycles at 1 Hz and at key-repeat speed, ids unique at every sample) | `fs_cycles` |
 | All animated; the card slides from UNDER the origin only during the transition | not covered: motion, needs filmed frames |

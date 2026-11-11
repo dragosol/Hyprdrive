@@ -22,9 +22,10 @@
 #      launched from 1 it opens alone on an empty desktop, fullscreen; closed ->
 #      1 is shown and that desktop is gone
 # Control: --control-so a build before the fix (fa18ef6): E (the view stays on the
-# emptied desktop, home gone), G (the view stays on the emptied desktop the chips
-# opened it on) and F (the 0.6 s unmap is taken for a close) fail. Recorded
-# 2026-11-11. A..D pass on fa18ef6 too: they pin the behaviour that worked.
+# emptied desktop, home gone) and G (the view stays on the emptied desktop the
+# chips opened it on) fail. Recorded 2026-11-11. A..D and F pass on fa18ef6 too:
+# A..D pin the behaviour that worked; F does not tell the builds apart on the rig
+# (the remapped game goes fullscreen again and gets the same desktop back).
 source "$(dirname "$0")/lib.sh"
 gate_begin fch
 control_build "fa18ef6 (the build before this fix)"
