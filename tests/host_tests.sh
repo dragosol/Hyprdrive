@@ -26,7 +26,8 @@
 #                     URIs, and Show in Files reaching a stand-in FileManager1.
 #   launcher_states_test  LauncherStates.hpp: badge and progress state is its
 #                     sender's, and goes when the sender leaves the bus.
-#   dock_menu_model_test  DockMenuModel.hpp: "Always Open in" lists, open-fullscreen rule, segment boxes
+#   dock_menu_model_test  DockMenuModel.hpp: "Always Open in" lists, open-fullscreen rule, segment boxes,
+#                     window-row buttons
 #   glyphs_test       Glyphs.cpp -- every UI glyph the source names has an SVG
 #                     that renders, and labels never keep an uncovered PUA
 #                     codepoint (no tofu on a desktop without a Nerd Font).
