@@ -446,9 +446,21 @@ void COverview::renderClosingTiles(PHLMONITOR monitor, size_t cardIdx, const Tim
     if (closingTiles.empty() || !monitor)
         return;
 
-    const float     DURMS    = closingTileDurationMs();
+    // The windowsOut leaf, read once per overview frame rather than once per
+    // card (the memo the overview's other per-frame reads use): a live change
+    // to it still shows on the next frame, as before.
+    static uint64_t memoFrame  = 0;
+    static bool     memoFilled = false;
+    static float    memoDur = 0.F, memoPopin = 1.F;
+    if (!memoFilled || memoFrame != g_overviewFrame) {
+        memoFrame  = g_overviewFrame;
+        memoDur    = closingTileDurationMs();
+        memoPopin  = closingTilePopin();
+        memoFilled = true;
+    }
+    const float     DURMS    = memoDur;
     constexpr float WAITMS   = 1000.F; // longest a still-mapped window may take to actually go
-    const float     POPIN    = closingTilePopin();
+    const float     POPIN    = memoPopin;
     bool            animating = false;
 
     for (auto& tile : closingTiles) {
