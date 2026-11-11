@@ -82,6 +82,8 @@ Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its r
 | Exit by closing the app while its desktop is off screen (the old "-1" debt) | `fs_move_close` (B), `fs_close_home` (C) |
 | Closing an app on its fullscreen desktop removes that desktop and returns to its origin [11-11] | `fs_close_home` (A closed, B killed, D beside, E home gone, F an X11 remap, G the dock's two chips); not driven: the dock's Quit (the same sendClose as A) |
 | A fullscreen window moved onto a populated desktop exits fullscreen and stays there [11-11: also by the dock menu, also a game] | `fs_move_close` (A dispatcher on a trip, C dock menu on a trip, D settled by dispatcher, E Mosaic settled by dock menu, G a game; F an empty desktop keeps it) |
+| A MAXIMIZED window moved onto a populated desktop is un-maximized; onto an empty one it stays [11-11: "yes"] | `fs_move_close` (H dock menu, I dispatcher, J empty desktop, K Mosaic at its own size, L an X11 client that maximizes itself: held out) |
+| A window moved onto a fullscreen/maximized app's desktop takes the app out [11-11: "if I move a window into a desktop with a fullscreen app it should un-fullscreen the app in the target desktop"] | `fs_move_close` (P settled app by dock menu, Q a trip's app by dispatcher: the trip ends there, R maximized, S a game, T Mosaic sizes; all still out 3 s later); not driven: the overview drag path |
 | A window opened from a fullscreen app opens beside it, visible at once; the app stays fullscreen | `fs_beside` |
 | A plugin reload (`hyprdrive reload`) leaves every fullscreen window fullscreen, on its desktop, trips and debts kept, with Mosaic in the config file, Omarchy blocks renumbering and a disabled panel coming and going; a plain config reload too [11-11] | `reload_blocks` (A the CLI's steps, B `hyprctl reload`, C the trip still goes home after); the client sees one exit + re-entry in the gap (Hyprland's own reload, see FullscreenCarry.hpp) |
 | Spam-proof (50 cycles at 1 Hz and at key-repeat speed, ids unique at every sample) | `fs_cycles` |
@@ -97,6 +99,8 @@ Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its r
 | Real windows: open/close leaves every window untouched | `overview` (1: geometry and settled pixels) |
 | Grid hover fades border inactive->active; hover zooms a tile with a tooltip, reverses if abandoned [10-16, 11-06] | not covered: pixels over time |
 | Super+F works on an overview window, both trees [11-06]; on the HOVERED tile [11-11: "super+f should act on the hovered tile in overview"] | `overview` (2: the focused window's tile; 2b: another tile hovered -> that one, the focused one untouched, and back; over no tile -> the focused window); Omarchy tree: `--so` run of `overview` |
+| Super+T, pin, Super+Alt+F, Super+Shift+N (also Omarchy's address-of-active-window move), Super+H act on the hovered tile / dock preview [11-11: "yes"] | `overview` 2c, `dock_preview_keys` 4b (lib.sh `hover_actions`: H hovered -> H, F untouched; no target -> F); Super+H over a minimized preview restores it (4b) |
+| The app menu's row preview travels from row to row like the hover pane between apps [11-11] | not covered: motion over time; filmed once (wf-recorder in the rig, contact sheets) |
 | Strip: Super+hover highlights/grows a desktop [11-06] | not covered: pixels |
 | Strip: drag to reorder, renumbered without duplicates [11-06] | `overview` (4; card coordinates measured on the rig) |
 | Moving cards pass smaller, underneath the main one [11-06] | not covered: motion |
