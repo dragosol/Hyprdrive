@@ -43,6 +43,8 @@
 #                     stop, join, the shutdown deadline and abandonment.
 #   terminate_log_test  TerminateLog.hpp, in children that really terminate:
 #                     the record, the chain to the previous handler, the cap.
+#   demangle_test     Demangle.hpp: `debug hooks` names and signatures read
+#                     as C++, not as mangled symbols.
 #   native_search_test  NativeSearch.hpp: the leading-program parse and the
 #                     terminal choice the search uses off Omarchy.
 #   app_info_test     AppInfo.cpp's Get Info script against stand-in pacman,
@@ -151,6 +153,7 @@ run debug_gesture_test tests/unit/debug_gesture_test.cpp
 run debug_paths_test tests/unit/debug_paths_test.cpp
 run workers_test tests/unit/workers_test.cpp src/core/Workers.cpp -pthread
 run terminate_log_test tests/unit/terminate_log_test.cpp src/debug/TerminateLog.cpp
+run demangle_test tests/unit/demangle_test.cpp
 run hot_corner_test tests/unit/hot_corner_test.cpp
 run desktop_switch_test tests/unit/desktop_switch_test.cpp
 run desktop_plan_test tests/unit/desktop_plan_test.cpp
