@@ -54,12 +54,12 @@ extern "C" {
 }
 
 namespace ConfigDetail {
-    extern ScrollOverview::Config::TGestureRegistrar g_gestureRegistrar;
+    extern Hyprdrive::Config::TGestureRegistrar g_gestureRegistrar;
     extern lua_State* g_bindLua;
     extern std::unordered_map<const void*, std::pair<std::string, std::string>> g_bindActions;
 } // namespace ConfigDetail
 
-namespace ScrollOverview::Config::ConfigPart {
+namespace Hyprdrive::Config::ConfigPart {
     extern uint64_t g_themeGeneration;
     extern void registerLuaFunctions();
-} // namespace ScrollOverview::Config::ConfigPart
+} // namespace Hyprdrive::Config::ConfigPart

@@ -30,7 +30,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace ScrollOverview::PaletteFile {
+namespace Hyprdrive::PaletteFile {
     struct SPalette {
         bool     valid           = false;
         bool     isLight         = false;

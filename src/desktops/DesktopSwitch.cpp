@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-namespace ScrollOverview::DesktopSwitch {
+namespace Hyprdrive::DesktopSwitch {
     namespace {
         CFunctionHook* g_startAnimHook  = nullptr;
         CFunctionHook* g_fullFocusHook  = nullptr;

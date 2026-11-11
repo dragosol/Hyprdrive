@@ -22,7 +22,7 @@
 #include <hyprland/src/render/pass/TransformedWindowPassElement.hpp>
 #include <hyprland/src/render/transformer/Transformer.hpp>
 
-namespace ScrollOverview::Genie {
+namespace Hyprdrive::Genie {
     namespace {
         // Strips about STRIP_PX render px tall: the sides are a staircase of
         // them, and at ~3 px the steps read as a curve.

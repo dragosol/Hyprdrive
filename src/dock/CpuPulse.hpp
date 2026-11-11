@@ -15,7 +15,7 @@
 
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 
-namespace ScrollOverview::CpuPulse {
+namespace Hyprdrive::CpuPulse {
     // Arms the once-a-second sampler (PLUGIN_INIT, after the config keys exist).
     void init();
     // PLUGIN_EXIT: the timer goes before the code it calls.

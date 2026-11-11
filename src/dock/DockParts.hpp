@@ -140,7 +140,7 @@
 #include <csignal>
 #include "Placement.hpp"
 
-namespace ScrollOverview::Dock {
+namespace Hyprdrive::Dock {
 namespace DockDetail {}
 using namespace DockDetail;
 namespace DockDetail {

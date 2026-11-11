@@ -172,7 +172,7 @@ void normalizeAllScrollingCameras();
 // scrolling-layout desktop's windows first, and only past either end of them
 // hands over to switching desktops. OverviewGesture drives it; this is the
 // window onto the layout's private tape (OverviewInternal.hpp has the access).
-namespace ScrollOverview::DesktopTape {
+namespace Hyprdrive::DesktopTape {
     struct STape {
         bool   usable    = false; // scrolling, horizontal tape, wider than the screen
         double offset    = 0.0;   // px along the tape; 0 = first column at the start
@@ -457,7 +457,7 @@ class CScrollOverview : public IOverview {
     void      gatherDropAnchor(SOverviewDropSite& site);
     void      commitDropMinimize(const SOverviewDropSite& site);
     void      commitDropCancel(const SOverviewDropSite& site);
-    void      commitDrop(const SOverviewDropSite& site, const ScrollOverview::Drop::SDecision& decision);
+    void      commitDrop(const SOverviewDropSite& site, const Hyprdrive::Drop::SDecision& decision);
     float     dragMiniProgress() const;
     float     dragRecentreProgress() const;
     Vector2D  dragEffectiveGrabRatio() const;
@@ -567,7 +567,7 @@ class CScrollOverview : public IOverview {
     // BY REFERENCE, into the memo below: the cell-box accessor asks for one
     // cell at a time and the output carries three vectors. Safe for every
     // caller because none of them holds the reference across another stripRow.
-    const ScrollOverview::StripLayout::SOutput& stripRow(float scratchRevealOverride, float altRevealOverride) const;
+    const Hyprdrive::StripLayout::SOutput& stripRow(float scratchRevealOverride, float altRevealOverride) const;
 
     // THE STRIP ROW, MEMOISED FOR THE FRAME IT WAS DRAWN IN. Every cell box,
     // every mini, the scratchpad cell, both reveal zones and the alt strips all
@@ -595,7 +595,7 @@ class CScrollOverview : public IOverview {
         size_t   altSignature = 0;
         bool     filled       = false;
 
-        ScrollOverview::StripLayout::SOutput out;
+        Hyprdrive::StripLayout::SOutput out;
     };
     mutable SStripRowMemo stripRowMemo;
 
@@ -878,7 +878,7 @@ class CScrollOverview : public IOverview {
     PHLWORKSPACEREF                  pendingRemovedWorkspace;
     PHLWORKSPACE                     trailingWorkspace;
     std::vector<PHLWORKSPACE>        gapWorkspaces;
-    ScrollOverview::Config::ELayout  layout = ScrollOverview::Config::ELayout::VERTICAL;
+    Hyprdrive::Config::ELayout  layout = Hyprdrive::Config::ELayout::VERTICAL;
 
     CForcedVisibility forced;
 
@@ -1043,7 +1043,7 @@ bool overviewHandleCtrlTap();
 // keyboard left in the results. False when there is no submenu to leave.
 bool overviewMenuBack();
 
-namespace ScrollOverview {
+namespace Hyprdrive {
     // The wallpaper caches kept between opens (scrollOverview.cpp).
     // EGL context current. std::nullopt = every monitor (unload).
     void releaseWallpaperStash(std::optional<MONITORID> monitor);

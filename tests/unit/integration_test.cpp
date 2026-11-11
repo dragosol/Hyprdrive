@@ -15,7 +15,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-using namespace ScrollOverview::Integration;
+using namespace Hyprdrive::Integration;
 
 static int g_checks = 0, g_failed = 0;
 #define CHECK(c)                                                                                                                                                                   \

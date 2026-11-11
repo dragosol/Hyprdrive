@@ -26,7 +26,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         const auto       AT = rest.find("gesture");
         rest                = rest.substr(AT + 7);
         bool       report   = false;
-        const auto OUT      = ScrollOverview::DebugGesture::run(rest, report);
+        const auto OUT      = Hyprdrive::DebugGesture::run(rest, report);
         if (OUT.empty())
             return {};
         // A report rides on .error like every other topic's (see above).
@@ -36,7 +36,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
     // nested test rig (whose dock no real pointer can reach).
     if (TOPIC == "activate") {
         const std::string CLASS = data.size() > 1 ? std::string{data[1]} : std::string{};
-        if (!ScrollOverview::Dock::debugActivate(Desktop::focusState()->monitor(), CLASS))
+        if (!Hyprdrive::Dock::debugActivate(Desktop::focusState()->monitor(), CLASS))
             return {.success = false, .error = std::format("hyprdrive:debug activate: no dock item for class {}", CLASS)};
         return {};
     }
@@ -61,7 +61,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
     }
     // `xgeom`: XGeometry's view of the focused window right now.
     if (TOPIC == "xgeom")
-        return {.success = false, .error = "xgeom " + ScrollOverview::XGeometry::status()};
+        return {.success = false, .error = "xgeom " + Hyprdrive::XGeometry::status()};
     // `ripple [x y]`: the hot corner's ripple on the focused monitor, from its
     // top-left corner or from global logical (x, y) -- the rig has no pointer
     // that can reach a corner.
@@ -79,14 +79,14 @@ SDispatchResult onDebugDispatcher(std::string arg) {
                 if (M && M->m_enabled && M->logicalBox().copy().expand(1).containsPoint(origin))
                     MONITOR = M;
         }
-        ScrollOverview::Ripple::trigger(MONITOR, origin);
+        Hyprdrive::Ripple::trigger(MONITOR, origin);
         return {};
     }
     // `scratchpad`: exactly a click on the overview's Scratchpad cell -- show
     // the default scratchpad, then close the overview (the test rig's trigger).
     if (TOPIC == "scratchpad") {
         const auto MONITOR = Desktop::focusState()->monitor();
-        ScrollOverview::Scratchpad::show(ScrollOverview::Scratchpad::ensureDefault(MONITOR));
+        Hyprdrive::Scratchpad::show(Hyprdrive::Scratchpad::ensureDefault(MONITOR));
         if (const auto OV = scrollOverviewForMonitor(MONITOR))
             OV->close();
         return {};
@@ -99,25 +99,25 @@ SDispatchResult onDebugDispatcher(std::string arg) {
     // `desktop`: Super+scroll's and the per-cause animation toggles' state --
     // what caused the last desktop switch, and whether it snapped.
     if (TOPIC == "desktop")
-        return {.success = false, .error = ScrollOverview::DesktopSwitch::debugReport()};
+        return {.success = false, .error = Hyprdrive::DesktopSwitch::debugReport()};
     if (TOPIC == "glass") {
-        const auto C = ScrollOverview::Config::dockBackgroundColor();
+        const auto C = Hyprdrive::Config::dockBackgroundColor();
         return {.success = false, .error = std::format("hyprdrive glass: tint #{:02x}{:02x}{:02x} alpha {:.3f}", sc<int>(std::round(C.r * 255)), sc<int>(std::round(C.g * 255)),
                                                        sc<int>(std::round(C.b * 255)), C.a)};
     }
     if (TOPIC == "windows")
-        return {.success = false, .error = ScrollOverview::SizeAck::report()};
+        return {.success = false, .error = Hyprdrive::SizeAck::report()};
     if (TOPIC == "motion") {
-        using ScrollOverview::Motion::ERole;
-        const auto E = [](ERole r, float t) { return ScrollOverview::Motion::ease(r, t); };
+        using Hyprdrive::Motion::ERole;
+        const auto E = [](ERole r, float t) { return Hyprdrive::Motion::ease(r, t); };
         return {.success = false,
                 .error   = std::format("hyprdrive motion: house={} decel(.25)={:.3f} decel(.5)={:.3f} accel(.5)={:.3f} pop(.5)={:.3f} | blur minimize {:.3f}@.25 swipe {:.3f}@.25",
-                                       ScrollOverview::Motion::housePreset(), E(ERole::DECEL, 0.25F), E(ERole::DECEL, 0.5F), E(ERole::ACCEL, 0.5F), E(ERole::POP, 0.5F),
-                                       ScrollOverview::FlightBlur::amount(ScrollOverview::FlightBlur::ESite::MINIMIZE, 0.25F),
-                                       ScrollOverview::FlightBlur::amount(ScrollOverview::FlightBlur::ESite::SWIPE, 0.25F)) +
+                                       Hyprdrive::Motion::housePreset(), E(ERole::DECEL, 0.25F), E(ERole::DECEL, 0.5F), E(ERole::ACCEL, 0.5F), E(ERole::POP, 0.5F),
+                                       Hyprdrive::FlightBlur::amount(Hyprdrive::FlightBlur::ESite::MINIMIZE, 0.25F),
+                                       Hyprdrive::FlightBlur::amount(Hyprdrive::FlightBlur::ESite::SWIPE, 0.25F)) +
                        // Per blur site since the last `motion` read (which resets them):
                        // asked / smeared / drawn, trail length, shutter (FlightBlur.hpp).
-                       " || " + ScrollOverview::FlightBlur::debugReport(true)};
+                       " || " + Hyprdrive::FlightBlur::debugReport(true)};
     }
     // `mem`: what hyprdrive holds on the GPU, as far as it can count it.
     if (TOPIC == "mem") {
@@ -127,7 +127,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
             if (M)
                 report += std::format("  | {} {}x{} full-screen RGBA8 = {:.1f} MiB", M->m_name, (int)M->m_transformedSize.x, (int)M->m_transformedSize.y,
                                       M->m_transformedSize.x * M->m_transformedSize.y * 4.0 / 1048576.0);
-        report += ScrollOverview::wallpaperStashReport();
+        report += Hyprdrive::wallpaperStashReport();
         return {.success = false, .error = report};
     }
     // `lockstate`: the lock and the overview search, for the lock gate
@@ -176,8 +176,8 @@ SDispatchResult onDebugDispatcher(std::string arg) {
             return {.success = false, .error = "press needs an evdev keycode"};
         try {
             const auto CODE = sc<uint32_t>(std::stoul(std::string{data[1]}));
-            if (ScrollOverview::KeyboardCat::active())
-                ScrollOverview::KeyboardCat::handleKey(CODE);
+            if (Hyprdrive::KeyboardCat::active())
+                Hyprdrive::KeyboardCat::handleKey(CODE);
             else
                 handleSearchPress(CODE);
         } catch (...) { return {.success = false, .error = "press needs an evdev keycode"}; }
@@ -202,7 +202,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         }
 
         std::string line = "\n  " + monitor->m_name + " [desktop]";
-        if (const auto DOCK = ScrollOverview::Dock::frameReason(monitor))
+        if (const auto DOCK = Hyprdrive::Dock::frameReason(monitor))
             line += std::string(" dock:") + DOCK;
         else
             line += " idle";

@@ -14,7 +14,7 @@
 #include <deque>
 #include <format>
 
-namespace ScrollOverview::DebugGesture {
+namespace Hyprdrive::DebugGesture {
     namespace {
         using DebugGestureScript::EKind;
         using DebugGestureScript::SStep;

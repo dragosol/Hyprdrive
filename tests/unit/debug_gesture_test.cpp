@@ -7,8 +7,8 @@
 #include <cstdio>
 #include <string>
 
-using namespace ScrollOverview;
-using namespace ScrollOverview::DebugGestureScript;
+using namespace Hyprdrive;
+using namespace Hyprdrive::DebugGestureScript;
 
 static int g_checks = 0, g_failed = 0;
 #define CHECK(c)                                                                                                                                                                   \

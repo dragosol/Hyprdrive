@@ -23,7 +23,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace ScrollOverview::SettingsApp {
+namespace Hyprdrive::SettingsApp {
     namespace {
         SP<SHyprCtlCommand> g_hyprctl;
         SP<SHyprCtlCommand> g_hyprctlBinds;

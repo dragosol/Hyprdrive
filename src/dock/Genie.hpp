@@ -17,7 +17,7 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/helpers/math/Math.hpp>
 
-namespace ScrollOverview::Genie {
+namespace Hyprdrive::Genie {
     bool enabled();
 
     // A minimize (or overview restore) frame: draws the proxy via `drawAtWindow`

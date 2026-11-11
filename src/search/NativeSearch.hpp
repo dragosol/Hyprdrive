@@ -35,7 +35,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace ScrollOverview::NativeSearch {
+namespace Hyprdrive::NativeSearch {
 
     // ---- program lookup ------------------------------------------------------
 

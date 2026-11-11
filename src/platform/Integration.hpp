@@ -18,7 +18,7 @@
 // ---- C++ (this header) -----------------------------------------------------
 //
 //   #include "Integration.hpp"
-//   if (ScrollOverview::Integration::omarchy()) { ...Omarchy-only path... }
+//   if (Hyprdrive::Integration::omarchy()) { ...Omarchy-only path... }
 //
 //   omarchy()    the cached answer. Cheap (one load), callable from a render
 //                pass, from any thread after init, and -- unlike a config read --
@@ -70,7 +70,7 @@
 
 struct lua_State; // lua.h's, at global scope -- not a new one in this namespace
 
-namespace ScrollOverview::Integration {
+namespace Hyprdrive::Integration {
     bool             omarchy();
     EDesktop         desktop();
     const SDecision& decision();

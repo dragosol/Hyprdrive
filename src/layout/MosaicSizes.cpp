@@ -2,7 +2,7 @@
 // Split out of Mosaic.cpp; the state is still there (MosaicParts.hpp).
 #include "MosaicParts.hpp"
 
-namespace ScrollOverview::Mosaic {
+namespace Hyprdrive::Mosaic {
 
     using namespace MosaicDetail;
 
@@ -122,7 +122,7 @@ namespace ScrollOverview::Mosaic {
             return SIG ? SIG : "";
         }
         void saveKept() {
-            std::ofstream f(ScrollOverview::DebugPaths::path("hyprdrive-mosaic-kept"), std::ios::trunc);
+            std::ofstream f(Hyprdrive::DebugPaths::path("hyprdrive-mosaic-kept"), std::ios::trunc);
             if (!f)
                 return;
             f << keptStamp() << '\n';
@@ -131,7 +131,7 @@ namespace ScrollOverview::Mosaic {
                     f << std::format("{:x} {} {} {}\n", (uintptr_t)W.get(), e.size.x, e.size.y, e.trusted ? 1 : 0);
         }
         void loadKept() {
-            const auto     PATH = ScrollOverview::DebugPaths::path("hyprdrive-mosaic-kept");
+            const auto     PATH = Hyprdrive::DebugPaths::path("hyprdrive-mosaic-kept");
             std::ifstream  f(PATH);
             std::string    stamp;
             if (!f || !std::getline(f, stamp) || stamp != keptStamp() || stamp.empty())

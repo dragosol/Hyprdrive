@@ -49,7 +49,7 @@
 #include <string>
 #include <typeinfo>
 
-namespace ScrollOverview::Compat {
+namespace Hyprdrive::Compat {
 
 // ------------------------------------------------------------- identity --
 inline constexpr const char* NAME       = "hyprdrive";

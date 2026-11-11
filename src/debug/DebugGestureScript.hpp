@@ -83,7 +83,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ScrollOverview::DebugGestureScript {
+namespace Hyprdrive::DebugGestureScript {
 
     enum class EKind : uint8_t {
         SwipeBegin,

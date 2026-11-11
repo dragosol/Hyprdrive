@@ -4,7 +4,7 @@
 // call launchApp/activateItem with default arguments.
 #include "DockParts.hpp"
 
-namespace ScrollOverview::Dock {
+namespace Hyprdrive::Dock {
 using namespace DockDetail;
 namespace DockDetail {
 
@@ -212,7 +212,7 @@ void activateWindow(const PHLWINDOW& window) {
     // A desktop switch from here is focus moving to a window on another
     // desktop (animation:desktop_focus), not a key -- even when a hotkey bind
     // got us here, which DesktopSwitch's classify() still calls a key.
-    ScrollOverview::DesktopSwitch::CFocusScope focusing;
+    Hyprdrive::DesktopSwitch::CFocusScope focusing;
 
     if (Minimize::isMinimized(window)) {
         Minimize::showOriginalWorkspace(window);

@@ -101,7 +101,7 @@ namespace {
     }
 }
 
-namespace ScrollOverview::Glyphs {
+namespace Hyprdrive::Glyphs {
     bool mayContainPrivateUse(std::string_view utf8) {
         return std::ranges::any_of(utf8, [](char c) {
             const auto B = static_cast<unsigned char>(c);

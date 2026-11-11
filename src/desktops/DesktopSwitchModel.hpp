@@ -21,7 +21,7 @@
 #include <cstdlib>
 #include <functional>
 
-namespace ScrollOverview::DesktopSwitch {
+namespace Hyprdrive::DesktopSwitch {
 
     // The lowest and highest desktop Super+scroll walks between on a monitor
     // whose highest existing desktop is `highestOnMonitor` (0 when it has none).

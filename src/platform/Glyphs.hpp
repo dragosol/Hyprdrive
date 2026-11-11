@@ -25,7 +25,7 @@
 #include <string>
 #include <string_view>
 
-namespace ScrollOverview::Glyphs {
+namespace Hyprdrive::Glyphs {
     // The Private Use Areas: BMP (U+E000..U+F8FF) and planes 15-16 (Nerd Fonts'
     // Material Design icons live at U+F0000+).
     constexpr bool isPrivateUse(char32_t cp) {

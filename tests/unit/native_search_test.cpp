@@ -9,7 +9,7 @@
 #include <map>
 #include <string>
 
-using namespace ScrollOverview::NativeSearch;
+using namespace Hyprdrive::NativeSearch;
 
 static int g_checks = 0, g_failed = 0;
 #define CHECK(c)                                                                                                                                                                   \

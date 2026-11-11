@@ -27,7 +27,7 @@
 #include <string>
 #include <string_view>
 
-namespace ScrollOverview::Fonts {
+namespace Hyprdrive::Fonts {
     // The family fontconfig resolves `pattern` ("monospace", "sans-serif",
     // "Iosevka") to. Empty if fontconfig cannot initialise or matches nothing.
     std::string matchFamily(const std::string& pattern);

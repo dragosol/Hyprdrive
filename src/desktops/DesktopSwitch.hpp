@@ -33,7 +33,7 @@
 // Config::Actions::focus, the dock's activation; hooked or scoped) -- see
 // classify(). With the overview up, for special workspaces, and when
 // Hyprland's workspaces animation is off anyway, nothing is changed.
-namespace ScrollOverview::DesktopSwitch {
+namespace Hyprdrive::DesktopSwitch {
     // After Config::registerConfig() (the keys must exist), shutdown() at PLUGIN_EXIT.
     void init();
     void shutdown();

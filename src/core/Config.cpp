@@ -3,7 +3,7 @@ using namespace ConfigDetail;
 
 namespace ConfigDetail {
 
-ScrollOverview::Config::TGestureRegistrar g_gestureRegistrar   = nullptr;
+Hyprdrive::Config::TGestureRegistrar g_gestureRegistrar   = nullptr;
 
 } // namespace ConfigDetail
 
@@ -19,7 +19,7 @@ std::deque<std::string> g_keyNames;   // stable: IValue keeps the char*, it does
 std::vector<SP<::Config::Values::IValue>> g_modernValues, g_legacyValues;
 
 const char* KEY(const std::string_view tail) {
-    const auto* PREFIX = g_legacyPass ? ScrollOverview::Compat::LEGACY_KEY_PREFIX : ScrollOverview::Compat::KEY_PREFIX;
+    const auto* PREFIX = g_legacyPass ? Hyprdrive::Compat::LEGACY_KEY_PREFIX : Hyprdrive::Compat::KEY_PREFIX;
     return g_keyNames.emplace_back(std::string{PREFIX} + std::string{tail}).c_str();
 }
 
@@ -49,7 +49,7 @@ std::unordered_map<const void*, std::pair<std::string, std::string>> g_bindActio
 
 } // namespace ConfigDetail
 
-namespace ScrollOverview::Config {
+namespace Hyprdrive::Config {
 
 using namespace ConfigPart;
 
@@ -654,7 +654,7 @@ static void registerConfigValues() {
     g_legacyPass = false;
 
     for (size_t i = 0; i < g_modernValues.size() && i < g_legacyValues.size(); ++i)
-        ScrollOverview::Compat::pairKey(g_modernValues[i]->name(), g_legacyValues[i]->name(), g_modernValues[i]->underlying());
+        Hyprdrive::Compat::pairKey(g_modernValues[i]->name(), g_legacyValues[i]->name(), g_modernValues[i]->underlying());
 }
 
 void registerConfig() {

@@ -1,7 +1,7 @@
 #include "ConfigParts.hpp"
 using namespace ConfigDetail;
 
-namespace ScrollOverview::Config {
+namespace Hyprdrive::Config {
 
 using namespace ConfigPart;
 
@@ -23,7 +23,7 @@ static CHyprColor colorFromArgb(uint32_t argb, float alphaOverride = -1.F) {
 // SOmarchyThemeColors initialisers), and the file counts as having it. A
 // palette_file does NOT: a role it omits falls through to the derivation, so a
 // pywal file with no "selection" still gets a sensible one.
-using SPalette = ScrollOverview::PaletteFile::SPalette;
+using SPalette = Hyprdrive::PaletteFile::SPalette;
 
 static float relLuma(const CHyprColor& c) {
     return (0.2126F * c.r) + (0.7152F * c.g) + (0.0722F * c.b);
@@ -113,7 +113,7 @@ static std::string paletteFilePath(bool& omarchy) {
     omarchy = false;
     if (auto file = expandHome(pluginString("plugin:hyprdrive:theme:palette_file")); !file.empty())
         return file;
-    if (!ScrollOverview::Integration::omarchy())
+    if (!Hyprdrive::Integration::omarchy())
         return {};
     omarchy                 = true;
     const char* const STATE = std::getenv("XDG_STATE_HOME");
@@ -176,7 +176,7 @@ static const SPalette& palette() {
     const std::string TEXT{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
     // Omarchy's file is colors.toml by definition; a palette_file may be any
     // of the three shapes (PaletteFile.hpp sniffs which).
-    cachedTheme = omarchy ? ScrollOverview::PaletteFile::parseKeyValues(TEXT, explicitMode) : ScrollOverview::PaletteFile::parse(TEXT, explicitMode);
+    cachedTheme = omarchy ? Hyprdrive::PaletteFile::parseKeyValues(TEXT, explicitMode) : Hyprdrive::PaletteFile::parse(TEXT, explicitMode);
 
     if (!explicitMode && cachedTheme.hasBg) {
         const float r = sc<float>((cachedTheme.background >> 16) & 0xFF) / 255.F;
@@ -415,7 +415,7 @@ CHyprColor highlightColor() {
     static auto& ACCENT = valueRef<::Config::IComplexConfigValue>("general:col.active_border");
     const auto*  G      = gradientPtr(ACCENT);
     static SSetByUser ACTIVESET{"general:col.active_border"};
-    if (G && !G->m_colors.empty() && (ScrollOverview::Integration::omarchy() || setByUser(ACTIVESET)))
+    if (G && !G->m_colors.empty() && (Hyprdrive::Integration::omarchy() || setByUser(ACTIVESET)))
         return G->m_colors[0];
 
     if (const auto& T = palette(); T.valid && T.hasAccent)
@@ -511,10 +511,10 @@ const std::string& themeFontFamily() {
 
     resolved = "monospace";
 
-    if (!ScrollOverview::Integration::omarchy()) {
+    if (!Hyprdrive::Integration::omarchy()) {
         if (matchedGeneration != g_themeGeneration) {
             matchedGeneration = g_themeGeneration;
-            matched           = ScrollOverview::Fonts::matchFamily("monospace");
+            matched           = Hyprdrive::Fonts::matchFamily("monospace");
         }
         if (!matched.empty())
             resolved = matched;
@@ -600,7 +600,7 @@ static float chromeWindowOpacity() {
     static constexpr float OMARCHY_DEFAULT_OPACITY = 0.85F;
     static auto& VAL      = valueRef<Hyprlang::FLOAT>("decoration:inactive_opacity");
     const float  INACTIVE = std::clamp(sc<float>(*VAL), 0.F, 1.F);
-    if (!ScrollOverview::Integration::omarchy())
+    if (!Hyprdrive::Integration::omarchy())
         return INACTIVE;
     return std::clamp(OMARCHY_DEFAULT_OPACITY * INACTIVE, 0.F, 1.F);
 }

@@ -96,7 +96,7 @@ namespace {
     }
 }
 
-namespace ScrollOverview::BuiltinIcons {
+namespace Hyprdrive::BuiltinIcons {
     std::string trashName(bool empty, std::string_view style, std::string_view papers) {
         const std::string_view TINT = style == "dark" ? "dark" : style == "clear" ? "clear" : "light";
         return std::string(TRASH_PREFIX) + (empty ? "empty-" : "full-") + std::string(TINT) + (papers == "color" ? "-color" : "-white");

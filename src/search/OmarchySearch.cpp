@@ -46,7 +46,7 @@ namespace fs = std::filesystem;
 
 namespace OmarchySearch {
 
-namespace Native = ScrollOverview::NativeSearch;
+namespace Native = Hyprdrive::NativeSearch;
 
 // ============================================================================
 // The plugin's answers (OmarchySearch.hpp, SHost)
@@ -549,7 +549,7 @@ std::string agentRunner() {
 
 // `cmd` (the agent and its arguments) run by agent-run with the prompt file.
 static std::string viaRunner(const std::string& cmd) {
-    return ScrollOverview::shellQuote(agentRunner()) + " --prompt-file " + std::string{PROMPT_FILE_MARK} + " -- " + cmd;
+    return Hyprdrive::shellQuote(agentRunner()) + " --prompt-file " + std::string{PROMPT_FILE_MARK} + " -- " + cmd;
 }
 
 std::string agentLaunch(const std::string& tmpl, bool withPrompt) {
@@ -746,7 +746,7 @@ static std::string agentCommand(const SAgentDef& AG, bool withPrompt) {
     const auto TERM = agentTerminal();
     if (PATH.empty() || !TERM.ok())
         return {};
-    std::string cmd = ScrollOverview::shellQuote(PATH);
+    std::string cmd = Hyprdrive::shellQuote(PATH);
     if (const auto ARGS = agentArgs(*REAL); !ARGS.empty())
         cmd += " " + ARGS;
     while (!cmd.empty() && cmd.back() == ' ')
@@ -2397,7 +2397,7 @@ bool activate(const SSearchItem& item) {
         // The opened app is a child of this: its own scope (Launch.hpp).
         std::string              binary = "/usr/bin/xdg-open";
         std::vector<std::string> args   = {item.filePath};
-        ScrollOverview::Launch::wrap(binary, args);
+        Hyprdrive::Launch::wrap(binary, args);
         CProcess proc(binary, args);
         return proc.runAsync();
     }
@@ -2416,7 +2416,7 @@ bool activate(const SSearchItem& item) {
         // An action can start an app (an agent opens a terminal): its own scope.
         std::string              binary = "/bin/bash";
         std::vector<std::string> args   = {"-c", command};
-        ScrollOverview::Launch::wrap(binary, args);
+        Hyprdrive::Launch::wrap(binary, args);
         CProcess proc(binary, args);
         return proc.runAsync();
     }

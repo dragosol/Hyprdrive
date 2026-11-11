@@ -17,7 +17,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 
-namespace ScrollOverview::CpuPulse {
+namespace Hyprdrive::CpuPulse {
     namespace {
         using Clock = std::chrono::steady_clock;
 

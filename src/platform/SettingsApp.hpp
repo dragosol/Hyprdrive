@@ -30,7 +30,7 @@
 
 #include <hyprland/src/SharedDefs.hpp>
 
-namespace ScrollOverview::SettingsApp {
+namespace Hyprdrive::SettingsApp {
 
     // The standalone app's launcher, or "" when it is not installed: the first
     // executable `hyprdrive-settings` on PATH, then ~/.local/bin (a session

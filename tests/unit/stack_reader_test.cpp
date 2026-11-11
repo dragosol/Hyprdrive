@@ -26,7 +26,7 @@ int main() {
     std::ofstream(DIR / "a.png") << "x";
     std::ofstream(DIR / "b.txt") << "x";
 
-    auto L = ScrollOverview::StackReader::readNow(DIR.string());
+    auto L = Hyprdrive::StackReader::readNow(DIR.string());
     check(L.ready && !L.truncated && !L.missing, "small dir ready");
     check(L.entries.size() == 3, "hidden skipped: " + std::to_string(L.entries.size()));
     bool sawDir = false, sawPng = false;
@@ -42,10 +42,10 @@ int main() {
     fs::create_directories(BIG);
     for (int i = 0; i < 6000; ++i)
         std::ofstream(BIG / ("f" + std::to_string(i))) << "";
-    auto B = ScrollOverview::StackReader::readNow(BIG.string());
-    check(B.entries.size() == ScrollOverview::StackReader::MAX_ENTRIES && B.truncated, "cap at 5000");
+    auto B = Hyprdrive::StackReader::readNow(BIG.string());
+    check(B.entries.size() == Hyprdrive::StackReader::MAX_ENTRIES && B.truncated, "cap at 5000");
 
-    auto M = ScrollOverview::StackReader::readNow((DIR / "nope").string());
+    auto M = Hyprdrive::StackReader::readNow((DIR / "nope").string());
     check(M.ready && M.missing && M.entries.empty(), "missing dir");
 
     // Dock stacks B: move into a folder, never overwriting, never into itself.
@@ -54,21 +54,21 @@ int main() {
     std::ofstream(DEST / "one.txt") << "old";
     std::ofstream(DIR / "one.txt") << "new";
     std::ofstream(DIR / "two.txt") << "two";
-    auto R = ScrollOverview::StackReader::moveOrCopyNow(DEST.string(), {(DIR / "one.txt").string(), (DIR / "two.txt").string()});
+    auto R = Hyprdrive::StackReader::moveOrCopyNow(DEST.string(), {(DIR / "one.txt").string(), (DIR / "two.txt").string()});
     check(R.error.empty() && R.moved == 2, "moved 2: " + R.error);
     check(fs::exists(DEST / "one (2).txt") && fs::exists(DEST / "two.txt") && !fs::exists(DIR / "one.txt"), "conflict renamed, sources gone");
     std::ifstream kept(DEST / "one.txt");
     std::string   keptText;
     kept >> keptText;
     check(keptText == "old", "the existing file was not overwritten");
-    auto SELF = ScrollOverview::StackReader::moveOrCopyNow((DEST).string(), {DIR.string()});
+    auto SELF = Hyprdrive::StackReader::moveOrCopyNow((DEST).string(), {DIR.string()});
     check(!SELF.error.empty() && SELF.moved == 0, "a folder into its own child refused");
 
     // H1. Unpin, a file lands, pin again: the listing is read afresh rather than
     // served from the cache the folder had before it stopped being watched.
     const auto settled = [](const std::string& dir, size_t want) {
         for (int i = 0; i < 300; ++i) {
-            const auto LS = ScrollOverview::StackReader::listing(dir);
+            const auto LS = Hyprdrive::StackReader::listing(dir);
             if (LS.ready && LS.entries.size() == want)
                 return true;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -77,14 +77,14 @@ int main() {
     };
     const auto PIN = DIR / "pinned";
     fs::create_directories(PIN);
-    ScrollOverview::StackReader::watch({PIN.string()});
+    Hyprdrive::StackReader::watch({PIN.string()});
     check(settled(PIN.string(), 0), "pinned empty folder lists 0");
-    ScrollOverview::StackReader::watch({});
+    Hyprdrive::StackReader::watch({});
     std::ofstream(PIN / "t1.txt") << "t";
-    ScrollOverview::StackReader::drainInotify();
-    ScrollOverview::StackReader::watch({PIN.string()});
+    Hyprdrive::StackReader::drainInotify();
+    Hyprdrive::StackReader::watch({PIN.string()});
     check(settled(PIN.string(), 1), "re-pinned folder lists the file that arrived while unpinned");
-    ScrollOverview::StackReader::shutdown();
+    Hyprdrive::StackReader::shutdown();
 
     fs::remove_all(DIR);
     std::printf("stack_reader_test: %d checks, %d failed\n", g_checks, g_fail);

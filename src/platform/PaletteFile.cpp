@@ -8,7 +8,7 @@
 #include <regex>
 #include <sstream>
 
-namespace ScrollOverview::PaletteFile {
+namespace Hyprdrive::PaletteFile {
 
 // A "#rrggbb" / "rrggbb" / "#rrggbbaa" string's RGB as opaque ARGB.
 std::optional<uint32_t> parseHex(std::string_view v) {

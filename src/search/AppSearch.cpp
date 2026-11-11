@@ -1052,7 +1052,7 @@ namespace AppSearch {
         // that once ran it keeps the state file, and fedora's hyprtest has one
         // with no Omarchy at all. Empty = the caller's GTK theme, which is what
         // dock:stack_icon_theme = auto means off Omarchy.
-        if (HOME && *HOME && ScrollOverview::Integration::omarchy()) {
+        if (HOME && *HOME && Hyprdrive::Integration::omarchy()) {
             std::ifstream f(std::string{HOME} + "/.local/state/omarchy/current/theme/icons.theme");
             std::getline(f, name);
             name = trim(name);
@@ -1281,7 +1281,7 @@ namespace AppSearch {
 
         auto binary = args.front();
         args.erase(args.begin());
-        ScrollOverview::Launch::wrap(binary, args); // its own scope, not Hyprland's (Launch.hpp)
+        Hyprdrive::Launch::wrap(binary, args); // its own scope, not Hyprland's (Launch.hpp)
 
         CProcess process(binary, args);
         return process.runAsync();
@@ -1296,7 +1296,7 @@ namespace AppSearch {
             return false;
 
         // The rule rides the environment, which uwsm-app keeps (Launch.hpp).
-        std::string cmd = "[" + execRule + "] " + ScrollOverview::Launch::prefix();
+        std::string cmd = "[" + execRule + "] " + Hyprdrive::Launch::prefix();
         for (const auto& WORD : ARGS)
             cmd += " " + shellQuote(WORD);
 
@@ -1597,7 +1597,7 @@ namespace AppSearch {
 
         auto binary = args.front();
         args.erase(args.begin());
-        ScrollOverview::Launch::wrap(binary, args); // its own scope, not Hyprland's (Launch.hpp)
+        Hyprdrive::Launch::wrap(binary, args); // its own scope, not Hyprland's (Launch.hpp)
 
         CProcess process(binary, args);
         return process.runAsync();

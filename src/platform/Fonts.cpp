@@ -65,7 +65,7 @@ namespace {
 
     size_t coverage(FcCharSet* cs) {
         size_t n = 0;
-        for (const char32_t CP : ScrollOverview::Glyphs::named())
+        for (const char32_t CP : Hyprdrive::Glyphs::named())
             n += FcCharSetHasChar(cs, CP) ? 1 : 0;
         return n;
     }
@@ -126,8 +126,8 @@ namespace {
             }
         });
 
-        const size_t WANT = ScrollOverview::Glyphs::named().size();
-        const auto   NEED = static_cast<size_t>(static_cast<double>(WANT) * ScrollOverview::Fonts::MIN_COVERAGE + 0.999);
+        const size_t WANT = Hyprdrive::Glyphs::named().size();
+        const auto   NEED = static_cast<size_t>(static_cast<double>(WANT) * Hyprdrive::Fonts::MIN_COVERAGE + 0.999);
         for (auto& [family, c] : cands) {
             // The legacy family whenever it qualifies at all (Omarchy: the
             // exact glyphs it always drew), then the most coverage, then
@@ -171,7 +171,7 @@ namespace {
     }
 }
 
-namespace ScrollOverview::Fonts {
+namespace Hyprdrive::Fonts {
     std::string matchFamily(const std::string& pattern) {
         if (pattern.empty() || !fcReady())
             return {};

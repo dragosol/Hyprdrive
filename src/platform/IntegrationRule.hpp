@@ -43,7 +43,7 @@
 #include <optional>
 #include <string_view>
 
-namespace ScrollOverview::Integration {
+namespace Hyprdrive::Integration {
 
     enum class EDesktop { None, Omarchy };
 

@@ -20,7 +20,7 @@ extern "C" {
 #include <lua.h>
 }
 
-namespace ScrollOverview::Integration {
+namespace Hyprdrive::Integration {
     namespace {
         constexpr const char* KEY = "plugin:hyprdrive:integration";
 
