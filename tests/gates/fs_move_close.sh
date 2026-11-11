@@ -10,8 +10,17 @@
 #   B. fresh start; a fullscreen (on 2), look back at 1, close a: 1:1 2:1 3:1
 #      (desktop 2 paid back), the trace never says "place -1" or "a debt with no
 #      place", no desktop shares a number at any sample
+#   C..G. (owner, 2026-11-11) a fullscreen window moved onto a populated desktop
+#      leaves fullscreen and stays there: C a trip's window by the dock menu's
+#      "Move to this workspace" (`debug movehere`), D a settled one (alone on its
+#      desktop) by the dispatcher, E Mosaic: a settled one by the dock menu, at
+#      its own size, the target's windows not resized, G a fullscreen game
+#      (wine_state.exe) -- still out 2.5 s later; F moved onto an EMPTY desktop
+#      it stays fullscreen
 # Control: --so the pre-fix build 8bb258c (scratchpad p3t/old.so): case B prints
 # "paying back place -1" (fsdesk README; recorded 2026-11-11: the gate FAILS on it).
+# C..G: --control-so fa18ef6 (before the move fix): D, E and G stay fullscreen
+# (C passes there: a trip's move was handled). Recorded 2026-11-11.
 source "$(dirname "$0")/lib.sh"
 gate_begin fsm
 control_build "8bb258c, e.g. the scratchpad p3t/old.so"
@@ -37,4 +46,51 @@ check "B: closed off screen: its desktop paid back" "$(is "$(ids)" '1:1 2:1 3:1'
 bad=$(trace | grep -c 'place -1\|debt with no place')
 check "B: never a debt at place -1" "$(is "$bad" 0)" "$(trace | grep -m1 'place -1\|no place' | cut -d' ' -f3-)"
 check "B: ids unique at all $n samples" "$(is "$(grep -c DUP "$GOUT/ids.samp")" 0)" "$(grep -m1 DUP "$GOUT/ids.samp")"
+rig_stop
+
+# MOVED ONTO A POPULATED DESKTOP, A FULLSCREEN WINDOW LEAVES FULLSCREEN, however
+# it got there (owner, 2026-11-11: "if I move a fullscreen window 'to this
+# workspace' and there's other apps on that workspace it should un-fullscreen it";
+# "Fullscreen game moved to a populated desktop yes should also leave fullscreen")
+setup
+focus "$A"; fs "$A" set; sleep 1.2; go "$(win c .workspace.id)"; sleep 0.8
+dbg movehere a >/dev/null; sleep 1.5; settle 3 ids
+check "C: a trip's window, dock menu 'Move to this workspace' onto c's desktop: there, not fullscreen" "$(is "$(win a '"\(.workspace.id) \(.fullscreen)"')" "\"$(win c .workspace.id) 0\"")" "$(win a '"\(.workspace.id) \(.fullscreen)"'), c on $(win c .workspace.id)"
+check "C: ... its trip's desktop given back: 1:{b} 2:{c,a} 3:{d}" "$(is "$(ids)" '1:1 2:2 3:1')" "$(ids)"
+D=$(addr_of d); go 3; sleep 0.5; focus "$D"; fs "$D" set; sleep 1.2
+check "D: d alone on 3 goes fullscreen there (settled)" "$(is "$(win d '"\(.workspace.id) \(.fullscreen)"')" '"3 2"')" "$(win d '"\(.workspace.id) \(.fullscreen)"')"
+move_to "$D" 1; sleep 1.5; settle 3 ids
+check "D: settled, moved by the dispatcher onto 1: not fullscreen, on 1, 3 gone" "$(is "$(win d '"\(.workspace.id) \(.fullscreen)"') $(ids)" '"1 0" 1:2 2:2')" "$(win d '"\(.workspace.id) \(.fullscreen)"') $(ids)"
+B=$(addr_of b); move_to "$B" 4; sleep 0.8; go 4; focus "$B"; fs "$B" set; sleep 1.2; move_to "$B" 7; sleep 1.5
+check "F: settled, moved onto an EMPTY desktop: still fullscreen, alone there" "$(is "$(win b '"\(.workspace.id) \(.fullscreen)"')" '"7 2"')" "$(win b '"\(.workspace.id) \(.fullscreen)"') $(ids)"
+rig_stop
+
+# Mosaic: the windows already on the target are not resized; the moved one is at its size
+rig_start; trace_on; cfg '{general={layout="mosaic"}}'
+go 2; kw m3 700 450; go 1; kw m1 700 450; kw m2 600 400; $R ptr move 700 1000 >/dev/null; settle 3 geom
+SZ=$(J clients | jq -r '[.[] | select(.class == "m1" or .class == "m2") | "\(.class) \(.size[0])x\(.size[1])"] | sort | join(" ")')
+M3=$(addr_of m3); go 2; sleep 0.4; focus "$M3"; fs "$M3" set; sleep 1.2; go 1; sleep 0.8
+dbg movehere m3 >/dev/null; sleep 1.5; settle 3 geom
+SZ2=$(J clients | jq -r '[.[] | select(.class == "m1" or .class == "m2") | "\(.class) \(.size[0])x\(.size[1])"] | sort | join(" ")')
+check "E: Mosaic, settled m3 moved here by the dock menu: on 1, not fullscreen, at its 696x446" "$(is "$(win m3 '"\(.workspace.id) \(.fullscreen) \(.size[0])x\(.size[1])"')" '"1 0 696x446"')" "$(geom)"
+check "E: ... m1 and m2 not resized" "$(is "$SZ2" "$SZ")" "$SZ2 (was $SZ)"
+rig_stop
+
+# a fullscreen GAME (an .exe under XWayland) moved onto a populated desktop leaves
+# fullscreen too, and stays out: not put back, not sent to the dock
+xdisplay() { hlog 4000 | grep -o 'DISPLAY: :[0-9]*' | tail -1 | grep -o ':[0-9]*$'; }
+cc -O2 -o "$GOUT/wine_state" "$ROOT/tests/rig/xstate/wine_state.c" $(pkg-config --cflags --libs xcb) 2>/dev/null && chmod 755 "$GOUT" "$GOUT/wine_state"
+if [ -x "$GOUT/wine_state" ]; then
+    rig_start; trace_on; go 1; kw a; kw b
+    wait_for 6 '[ -n "$(xdisplay)" ]' || { $R win env DISPLAY=:99 true >/dev/null 2>&1; wait_for 6 '[ -n "$(xdisplay)" ]'; }
+    go 3; $R win env DISPLAY="$(xdisplay)" "$GOUT/wine_state" fs 14 >/dev/null
+    wait_for 5 "[ \"\$(win wine_state.exe .fullscreen)\" = 2 ]"; sleep 1
+    check "G: the game alone on 3, fullscreen" "$(is "$(win wine_state.exe '"\(.workspace.id) \(.fullscreen)"')" '"3 2"')" "$(geom)"
+    go 1; sleep 0.6; dbg movehere wine_state.exe >/dev/null; sleep 1; G1=$(win wine_state.exe '"\(.workspace.id) \(.fullscreen)"'); sleep 2.5
+    G2=$(win wine_state.exe '"\(.workspace.id) \(.fullscreen)"')
+    check "G: moved onto 1 by the dock menu: out of fullscreen, there, and still so 2.5 s later" "$(is "$G1 $G2" '"1 0" "1 0"')" "$G1 then $G2, $(ids)"
+    rig_stop
+else
+    subskip "G: the game" "cannot build wine_state (xcb headers?)"
+fi
 gate_end
