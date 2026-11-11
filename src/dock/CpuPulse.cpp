@@ -1,6 +1,7 @@
 // See CpuPulse.hpp.
 #include "CpuPulse.hpp"
 #include "Config.hpp"
+#include "MotionClock.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -182,7 +183,9 @@ namespace Hyprdrive::CpuPulse {
             }
         if (!busy)
             return 0.F;
+        // The animation clock's loop: the speed setting stretches the breath;
+        // a snapping clock holds it at its peak (phase 0.5), lit and still.
         const double T = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
-        return sc<float>(0.5 - 0.5 * std::cos(2.0 * M_PI * std::fmod(T, PERIOD_S) / PERIOD_S));
+        return sc<float>(0.5 - 0.5 * std::cos(2.0 * M_PI * Hyprdrive::Motion::Clock::loopPhase<double>(T, PERIOD_S, 0.5)));
     }
 }

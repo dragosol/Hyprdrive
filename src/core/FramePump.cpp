@@ -2,6 +2,7 @@
 // is for and where to add one). Moved out of the dock, unchanged.
 
 #include "FramePump.hpp"
+#include "MotionClock.hpp"
 
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
@@ -90,7 +91,9 @@ constexpr std::array SOURCES{
     SSource{"stacks", [](const PHLMONITOR& monitor) { return Stacks::needsFrames(monitor->m_id); }, ESlot::AFTER_GHOST_FLIGHT},
 
     SSource{"flight", [](const PHLMONITOR& monitor) { return Flight::anyOn(monitor); }, ESlot::AFTER_ARRANGE},
-    SSource{"cpu-pulse", [](const PHLMONITOR&) { return CpuPulse::anyBusy(); }, ESlot::AFTER_ARRANGE},
+    // A snapping clock holds the pulse still (CpuPulse::pulseFor): nothing to
+    // pump; the sampler damages when the busy set changes.
+    SSource{"cpu-pulse", [](const PHLMONITOR&) { return CpuPulse::anyBusy() && Motion::Clock::enabled(); }, ESlot::AFTER_ARRANGE},
 
     // The pill's and the preview rings' border fade (BorderFade.hpp): a
     // pointer resting on the pill emits no motion to repaint it.

@@ -1552,7 +1552,7 @@ namespace Hyprdrive::Mosaic {
                 }
             }
             if (m_pan.on) {
-                const double T = m_pan.ms > 0 ? Hyprdrive::Motion::msBetween<double>(now, m_pan.start) / m_pan.ms : 1.0;
+                const double T = m_pan.ms > 0 ? Hyprdrive::Motion::Clock::animMsBetween<double>(now, m_pan.start) / m_pan.ms : 1.0;
                 if (T >= 1.0) {
                     m_pan.on       = false;
                     m_canvasOffset = m_pan.to;
@@ -1570,7 +1570,7 @@ namespace Hyprdrive::Mosaic {
                 }
             }
             if (m_morph.on && !m_zoom.on) {
-                const bool DONE = Hyprdrive::Motion::msBetween<double>(now, m_morph.start) >= m_morph.ms;
+                const bool DONE = Hyprdrive::Motion::Clock::animMsBetween<double>(now, m_morph.start) >= m_morph.ms;
                 drawZoom();
                 if (DONE)
                     m_morph.on = false;
@@ -1578,7 +1578,7 @@ namespace Hyprdrive::Mosaic {
                     busy = true;
             }
             if (m_zoom.on) {
-                const double T = m_zoom.ms > 0 ? Hyprdrive::Motion::msBetween<double>(now, m_zoom.start) / m_zoom.ms : 1.0;
+                const double T = m_zoom.ms > 0 ? Hyprdrive::Motion::Clock::animMsBetween<double>(now, m_zoom.start) / m_zoom.ms : 1.0;
                 m_zoomZ        = T >= 1.0 ? m_zoom.to : m_zoom.from + (m_zoom.to - m_zoom.from) * canvasEase(T);
                 drawZoom();
                 if (T >= 1.0) {
@@ -1661,7 +1661,7 @@ namespace Hyprdrive::Mosaic {
         }
         void drawZoom() {
             const auto  DRAGGED = m_zDrag.lock();
-            const float ME      = m_morph.on ? canvasEase(std::clamp(Hyprdrive::Motion::msBetween<double>(std::chrono::steady_clock::now(), m_morph.start) /
+            const float ME      = m_morph.on ? canvasEase(std::clamp(Hyprdrive::Motion::Clock::animMsBetween<double>(std::chrono::steady_clock::now(), m_morph.start) /
                                                                          std::max(1.0, m_morph.ms),
                                                                      0.0, 1.0))
                                              : 1.F;

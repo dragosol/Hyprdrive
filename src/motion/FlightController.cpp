@@ -25,6 +25,7 @@
 
 #include "Locations.hpp"
 #include "FlightController.hpp"
+#include "MotionClock.hpp"
 #include "DebugPaths.hpp"
 #include "Motion.hpp"
 #include "MotionMath.hpp"
@@ -876,7 +877,10 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
         if (!monitor || it->monitor != monitor->m_id) {
             const auto OWNER = State::monitorState()->query().id(it->monitor).run();
             const int  DURATION = Config::getValue<int>(KEY_MINIMIZE_MS);
-            if (!OWNER || Hyprdrive::Config::realElapsedMs(it->startedAt) > sc<float>(std::max(0, DURATION)) + FLIGHT_ORPHAN_GRACE_MS) {
+            // "Over" is the flight's end in real time (its animated duration at
+            // the speed setting); the grace after it is a timeout.
+            const float OVERAT = Hyprdrive::Motion::scaleDuration(sc<float>(std::max(0, DURATION)), Hyprdrive::Motion::Clock::scale());
+            if (!OWNER || Hyprdrive::Config::realElapsedMs(it->startedAt) > OVERAT + FLIGHT_ORPHAN_GRACE_MS) {
                 completeAndErase(it, nullptr, OWNER ? "orphaned" : "monitor-gone");
                 continue;
             }
