@@ -19,8 +19,8 @@
 -- opacity and blur to the desktop's own window rules so a preview is not the
 -- one surface that ignores the theme. The `hyprdrive-float` tag keeps it out
 -- of a Mosaic desktop: a passing preview, not a member that re-packs the rest.
--- (Tag any other app the same way to keep it floating over a mosaic, and
--- with general:open_tiled on, over any desktop.)
+-- (A float rule alone already keeps a window floating everywhere; the tag
+-- floats one that no rule floats -- tag any other app the same way.)
 hl.window_rule({
     match = { class = [[^(org\.gnome\.NautilusPreviewer)$]] },
     float = true,
