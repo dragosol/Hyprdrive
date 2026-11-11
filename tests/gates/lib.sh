@@ -215,3 +215,91 @@ if n:
 print(n, big)
 PY
 }
+
+# ---------------------------------------------------------------- hover actions
+# The Super+key actions that follow the hover target (HoverActions.hpp), as the
+# user binds them (Lua, as Omarchy's): Super+T float toggle, Super+P pin,
+# Super+Alt+F maximize, Super+Shift+3 move to desktop 3, Super+Shift+4 the
+# Omarchy way (a Lua function naming the ACTIVE window's address, as
+# o.workspaces.move_window does), Super+H the plugin's minimize.
+hover_binds() {
+    ev 'hl.bind("SUPER + T", hl.dsp.window.float({ action = "toggle" }))'
+    ev 'hl.bind("SUPER + P", hl.dsp.window.pin({ action = "toggle" }))'
+    ev 'hl.bind("SUPER + ALT + F", hl.dsp.window.fullscreen({ mode = "maximized" }))'
+    ev 'hl.bind("SUPER + SHIFT + 3", hl.dsp.window.move({ workspace = "3" }))'
+    ev 'hl.bind("SUPER + SHIFT + 4", function() local w = hl.get_active_window(); if w then hl.dispatch(hl.dsp.window.move({ workspace = "4", follow = true, window = "address:" .. w.address })) end end)'
+    ev 'hl.bind("SUPER + H", hl.plugin.hyprdrive.minimize())'
+}
+# hover_actions STEP HOVER NOHOVER H F -- each action with the pointer on H (HOVER H:
+# a function putting it there; non-zero when it cannot) and F focused: H is acted
+# on, F untouched; then with the pointer on no target (NOHOVER): F is acted on.
+# The gate defines hst NAME ("<desktop> f<floating> p<pinned> fs<fullscreen>") and
+# had NAME (the address); every change is put back by address before the next.
+hover_actions() {
+    local S=$1 HOVER=$2 NOHOVER=$3 H=$4 F=$5 HA FA h0 f0 V0
+    HA=$(had "$H"); FA=$(had "$F"); h0=$(hst "$H"); f0=$(hst "$F"); V0=$(shown)
+    local HW=${h0%% *} FW=${f0%% *}
+    local open=1; [ -n "${HOVER_OPEN:-}" ] || open=0
+    on() { focus "$FA"; sleep 0.3; $HOVER "$1" || echo "warn: cannot hover $1"; }
+    back() {  # every state of H and F as it was, by address, and the view
+        local a w
+        for a in "$HA:$HW" "$FA:$FW"; do
+            w=${a#*:}; a=${a%%:*}
+            ev "hl.dispatch(hl.dsp.window.fullscreen({ window = [[address:$a]], mode = \"maximized\", action = \"unset\" }))"
+            [ "$(J clients | jq -r ".[] | select(.address == \"$a\") | .pinned")" = true ] && ev "hl.dispatch(hl.dsp.window.pin({ window = [[address:$a]], action = \"toggle\" }))"
+            ev "hl.dispatch(hl.dsp.window.float({ window = [[address:$a]], action = \"disable\" }))"
+            [ "$(J clients | jq -r ".[] | select(.address == \"$a\") | .workspace.id")" = "$w" ] || ev "hl.dispatch(hl.dsp.window.move({ window = [[address:$a]], workspace = \"$w\", follow = false }))"
+        done
+        go "$V0"; focus "$FA"; settle 3 geom
+    }
+    ovw() { [ "$open" = 0 ] || dbg gesture state | grep -q ' 1 overview' && echo 1; }
+    # Super+T: floats, and back
+    on "$H"; $R tap Super+T >/dev/null; sleep 1
+    check "$S T: Super+T over $H ($F focused): $H floats" "$(is "$(hst "$H" | cut -d' ' -f2)" f1)" "$H $(hst "$H")"
+    check "$S T: ... $F untouched${HOVER_OPEN:+, the overview open, $H still a tile}" "$(is "$(hst "$F")$(ovw)$([ "$open" = 0 ] || $HOVER "$H" && echo 1)" "${f0}11")" "$F $(hst "$F") overview $(ovw)"
+    $HOVER "$H"; $R tap Super+T >/dev/null; sleep 1
+    check "$S T: Super+T over it again: tiled" "$(is "$(hst "$H" | cut -d' ' -f2)" f0)" "$H $(hst "$H")"
+    back
+    # Super+P: pins a floating H (Hyprland pins floating windows only)
+    ev "hl.dispatch(hl.dsp.window.float({ window = [[address:$HA]], action = \"enable\" }))"; settle 3 geom
+    on "$H"; $R tap Super+P >/dev/null; sleep 0.8
+    check "$S P: Super+P over the floating $H: pinned, $F not" "$(is "$(hst "$H" | cut -d' ' -f3) $(hst "$F" | cut -d' ' -f3)" "p1 p0")" "$H $(hst "$H"), $F $(hst "$F")"
+    back
+    # Super+Alt+F: maximized, and back
+    on "$H"; $R tap Super+Alt+F >/dev/null; sleep 1
+    check "$S M: Super+Alt+F over $H: maximized, $F untouched" "$(is "$(hst "$H" | cut -d' ' -f4) $(hst "$F")" "fs1 $f0")" "$H $(hst "$H"), $F $(hst "$F")"
+    $HOVER "$H"; $R tap Super+Alt+F >/dev/null; sleep 1
+    check "$S M: Super+Alt+F over it again: not maximized" "$(is "$(hst "$H" | cut -d' ' -f4)" fs0)" "$H $(hst "$H")"
+    back
+    # Super+Shift+3: H to 3, silently (F keeps the focus, the view stays)
+    on "$H"; local V1 TB; V1=$(shown); TB=$([ "$open" = 0 ] || tile_of "$H"); $R tap Super+Shift+3 >/dev/null; sleep 1
+    check "$S N: Super+Shift+3 over $H: $H on 3, $F on $FW and focused, still looking at $V1" "$(is "$(hst "$H" | cut -d' ' -f1) $(hst "$F" | cut -d' ' -f1) $(J activewindow | jq -r .address) $(shown)" "3 $FW $FA $V1")" "$H $(hst "$H"), $F $(hst "$F"), focus $(J activewindow | jq -r .address), shown $(shown)"
+    [ "$open" = 0 ] || check "$S N: ... the overview open, relaid out: $H's tile is not where it was" "$(is "$(ovw)$([ "$(tile_of "$H")" != "$TB" ] && echo 1)" 11)" "overview $(ovw), $H's tile $TB -> $(tile_of "$H")"
+    back
+    # Super+Shift+4 the Omarchy way (the bind names the active window): the same
+    on "$H"; $R tap Super+Shift+4 >/dev/null; sleep 1
+    check "$S O: Omarchy's move (active window by address) over $H: $H on 4, $F on $FW" "$(is "$(hst "$H" | cut -d' ' -f1) $(hst "$F" | cut -d' ' -f1)" "4 $FW")" "$H $(hst "$H"), $F $(hst "$F")"
+    back
+    # Super+H: H minimized, F untouched
+    on "$H"; $R tap Super+H >/dev/null; sleep 1.2
+    check "$S H: Super+H over $H: minimized, $F untouched" "$(is "$([ "$(hst "$H" | cut -d' ' -f1)" -lt 0 ] && echo min) $(hst "$F")" "min $f0")" "$H $(hst "$H"), $F $(hst "$F")"
+    hq dispatch 'hl.plugin.hyprdrive.minimize("restore")' >/dev/null 2>&1; wait_for 3 "[ \"\$(hst $H | cut -d' ' -f1)\" = $HW ]"; sleep 0.6
+    back
+    # no target: the focused window, every action
+    on "$F" >/dev/null 2>&1; $NOHOVER; sleep 0.3
+    $R tap Super+T >/dev/null; sleep 1
+    check "$S 0: Super+T over no target: $F floats, $H untouched" "$(is "$(hst "$F" | cut -d' ' -f2) $(hst "$H")" "f1 $h0")" "$F $(hst "$F"), $H $(hst "$H")"
+    $R tap Super+P >/dev/null; sleep 0.8
+    check "$S 0: Super+P over no target: $F pinned" "$(is "$(hst "$F" | cut -d' ' -f3)" p1)" "$F $(hst "$F")"
+    back; focus "$FA"; $NOHOVER; sleep 0.3
+    $R tap Super+Alt+F >/dev/null; sleep 1
+    check "$S 0: Super+Alt+F over no target: $F maximized, $H untouched" "$(is "$(hst "$F" | cut -d' ' -f4) $(hst "$H")" "fs1 $h0")" "$F $(hst "$F"), $H $(hst "$H")"
+    back; focus "$FA"; $NOHOVER; sleep 0.3
+    $R tap Super+H >/dev/null; sleep 1.2
+    check "$S 0: Super+H over no target: $F minimized" "$([ "$(hst "$F" | cut -d' ' -f1)" -lt 0 ] 2>/dev/null && echo 1)" "$F $(hst "$F")"
+    hq dispatch 'hl.plugin.hyprdrive.minimize("restore")' >/dev/null 2>&1; wait_for 3 "[ \"\$(hst $F | cut -d' ' -f1)\" = $FW ]"; sleep 0.6
+    back; focus "$FA"; $NOHOVER; sleep 0.3
+    $R tap Super+Shift+3 >/dev/null; sleep 1
+    check "$S 0: Super+Shift+3 over no target: $F on 3, $H untouched" "$(is "$(hst "$F" | cut -d' ' -f1) $(hst "$H")" "3 $h0")" "$F $(hst "$F"), $H $(hst "$H")"
+    back
+}

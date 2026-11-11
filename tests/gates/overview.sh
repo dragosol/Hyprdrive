@@ -17,6 +17,12 @@
 #      the pointer on the OTHER window's tile, Super+F: that one goes fullscreen,
 #      the focused one is untouched; Super+F over it again: back on 1. The
 #      pointer over no tile (a gap): the focused window goes fullscreen
+#   2c. (owner, 2026-11-11: "yes") the same for Super+T (float, the overview stays
+#      open and the window stays a tile), Super+P (pin), Super+Alt+F (maximize),
+#      Super+Shift+3 (moved to 3 silently: the focus and the view stay, the tile
+#      moves to 3's card), Omarchy's move (its bind names the ACTIVE window by
+#      address), Super+H (minimize); each over no tile: the focused window
+#      (lib.sh hover_actions)
 #   3. a click on a2's tile (`hyprdrive:debug tile a2`): the overview closes, a2
 #      has the focus, the pointer is on a2 -- at its centre (+-2 px) unless the
 #      click point was on a2 already (then it stays: OverviewLifecycle.cpp handoff)
@@ -31,6 +37,8 @@
 # did before the fix), and the card drag is done without Super -- 1 (geometry
 # and pixels), 2b and 4 fail. Recorded 2026-11-11 on 3ad1da3: control FAILS as
 # it must (2b and its control added and recorded the same day on the fix).
+# 2c: --so <a4d6892 build> (Super+F/W only): every "over $H" check fails (the
+# focused window is acted on); the "no target" ones pass on both.
 source "$(dirname "$0")/lib.sh"
 gate_begin ovw
 rig_start
@@ -84,6 +92,18 @@ if [ -n "$TH" ] && [ -n "$TF" ]; then
 else
     check "2b: debug tile answers for a1 and a2" 0 "$(dbg tile a1 | tail -1) / $(dbg tile a2 | tail -1)"
 fi
+
+# 2c. (owner, 2026-11-11: "yes" -- the other Super+key actions follow the hover
+# target too) Super+T, Super+P, Super+Alt+F, Super+Shift+3, Omarchy's move,
+# Super+H over the other window's tile: that one; over no tile: the focused one.
+hst() { J clients | jq -r ".[] | select(.class == \"$1\") | \"\(.workspace.id) f\(if .floating then 1 else 0 end) p\(if .pinned then 1 else 0 end) fs\(.fullscreen)\"" | head -1; }
+had() { addr_of "$1"; }
+hov() { local t; t=$(tile_of "$1"); [ -n "$t" ] || return 1; set -- $t; $R ptr move $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )) >/dev/null; sleep 0.4; }
+nohov() { $R ptr move 3 540 >/dev/null; sleep 0.4; }   # the overview's left edge: no tile
+hover_binds
+H=$([ "$F" = a1 ] && echo a2 || echo a1)
+HOVER_OPEN=1 hover_actions 2c hov nohov "$H" "$F"
+$R ptr move 700 1000 >/dev/null; sleep 0.3
 
 T=$(dbg tile a2 | grep -o 'tile a2 [0-9 ]*'); set -- $T
 if [ $# -ge 6 ]; then

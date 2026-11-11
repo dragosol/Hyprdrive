@@ -14,10 +14,16 @@
 #   3. Super+F again (the pointer on pB's cell): pB is back on 1, not fullscreen
 #   4. the pointer on the pane but in the gap between the cells, pA focused:
 #      Super+F fullscreens pA (the focused window, as without the pane), pB untouched
+#   4b. (owner, 2026-11-11: "yes") the same for Super+T (float), Super+P (pin),
+#      Super+Alt+F (maximize), Super+Shift+3 (moved to 3 silently), Omarchy's move
+#      (its bind names the ACTIVE window by address), Super+H (minimize; over a
+#      minimized window's preview: restored); each with the pointer on no
+#      preview: pA (lib.sh hover_actions)
 #   5. Super+W over pB's cell: pB closes, pA stays, the pane shows pA's cell only
 #   6. `hyprdrive:window close` over pA's cell (the last): pA closes, the pane is gone
 # Control (--control --control-so <e8e89e7's build: the dockmenu icons, not the
-# feature>): 2 fails (pA goes fullscreen), 5 fails (pA closes).
+# feature>): 2 fails (pA goes fullscreen), 5 fails (pA closes). 4b: --so <a4d6892
+# build>: every "over pB" check fails, the "no target" ones pass.
 source "$(dirname "$0")/lib.sh"
 gate_begin dpk
 control_build "a build without the dock-preview hover target (e8e89e7)"
@@ -84,6 +90,19 @@ if [ -n "$CA" ] && [ -n "$CB" ]; then
 else
     check "4: the pane shows both cells" 0 "$(dm | tr '\n' ' ')"
 fi
+
+# 4b. (owner, 2026-11-11: "yes") the other Super+key actions over pB's cell:
+# pB; with the pointer on no preview: pA (lib.sh hover_actions)
+hst() { J clients | jq -r ".[] | select(.title == \"$1\") | \"\(.workspace.id) f\(if .floating then 1 else 0 end) p\(if .pinned then 1 else 0 end) fs\(.fullscreen)\"" | head -1; }
+had() { J clients | jq -r ".[] | select(.title == \"$1\") | .address" | head -1; }
+nohov() { $R ptr move 900 300 >/dev/null; sleep 0.8; }   # off the dock: the pane goes
+hover_binds
+hover_actions 4b hover_cell nohov pB pA
+# Super+H over a MINIMIZED window's preview brings it back
+focus "$A"; sleep 0.3; hover_cell pB; $R tap Super+H >/dev/null; wait_for 3 "[ \"\$(hst pB | cut -d' ' -f1)\" -lt 0 ]"; sleep 0.8
+hover_cell pB; $R tap Super+H >/dev/null; wait_for 3 "[ \"\$(hst pB | cut -d' ' -f1)\" = 1 ]"; sleep 0.8
+check "4b H: Super+H over pB's preview while it is minimized: back on 1" "$(is "$(hst pB | cut -d' ' -f1)" 1)" "pB $(hst pB)"
+focus "$A"; sleep 0.3
 
 # 5. Super+W over pB's cell: pB closes, pA stays, one cell left
 focus "$A"; sleep 0.3
