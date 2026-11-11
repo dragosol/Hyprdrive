@@ -1,4 +1,4 @@
-#include "OmarchySearch.hpp"
+#include "SearchBackend.hpp"
 #include "Launch.hpp"
 #include "NativeSearch.hpp"
 #include "ShellQuote.hpp"
@@ -44,12 +44,12 @@ extern char** environ;
 
 namespace fs = std::filesystem;
 
-namespace OmarchySearch {
+namespace SearchBackend {
 
 namespace Native = Hyprdrive::NativeSearch;
 
 // ============================================================================
-// The plugin's answers (OmarchySearch.hpp, SHost)
+// The plugin's answers (SearchBackend.hpp, SHost)
 // ============================================================================
 static SHost g_host;
 
@@ -2423,4 +2423,4 @@ bool activate(const SSearchItem& item) {
     return false;
 }
 
-} // namespace OmarchySearch
+} // namespace SearchBackend

@@ -6,7 +6,7 @@
 #include <optional>
 #include <functional>
 
-namespace OmarchySearch {
+namespace SearchBackend {
 
 enum class EItemKind : uint8_t {
     App,
@@ -42,7 +42,7 @@ void init();
 void shutdown();
 
 // WHAT THIS FILE ASKS THE PLUGIN (native port, docs/native/OMARCHY-AUDIT.md
-// A4-A11). OmarchySearch.cpp is linked into a host test with no Hyprland in it,
+// A4-A11). SearchBackend.cpp is linked into a host test with no Hyprland in it,
 // so it cannot call Integration or Config itself: main.cpp hands it these at
 // PLUGIN_INIT, and the test hands it its own. Every one may be null.
 //
@@ -70,7 +70,7 @@ void setHost(const SHost& host);
 std::string menuRootTitle();
 
 // Forget every cached "is this program installed?" answer now rather than at
-// the end of its few-second window (OmarchySearch.cpp, resolveCached). For
+// the end of its few-second window (SearchBackend.cpp, resolveCached). For
 // tests that change PATH, and harmless anywhere else.
 void invalidateProgramLookups();
 
@@ -99,7 +99,7 @@ bool isDefaultAgent(const SSearchItem& item);
 bool setDefaultAgent(const SSearchItem& item);
 std::optional<SSearchItem> evaluateCalculator(const std::string& query);
 // A prompt for an agent is typed into it by agent-run, never passed as an
-// argument (OmarchySearch.cpp, A PROMPT IS TYPED). Host-tested.
+// argument (SearchBackend.cpp, A PROMPT IS TYPED). Host-tested.
 std::string agentRunner();
 std::string agentLaunch(const std::string& tmpl, bool withPrompt);
 std::string writePromptFile(const std::string& prompt);
@@ -153,4 +153,4 @@ void updateSushiIfActive(const std::string& filePath);
 bool isOverviewSushiWindow(const std::string& windowClass, uint32_t pid = 0);
 std::vector<SSearchItem> recentFiles();
 
-} // namespace OmarchySearch
+} // namespace SearchBackend

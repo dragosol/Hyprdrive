@@ -2,7 +2,7 @@
 // parse every off-Omarchy menu row is filtered on, and the terminal choice
 // every off-Omarchy agent row is launched through. The resolver is a stand-in
 // table, so this is about the rules, not about what fedora has installed;
-// omarchy_search_test.cpp covers the same paths end to end with real stubs.
+// search_backend_test.cpp covers the same paths end to end with real stubs.
 #include "NativeSearch.hpp"
 
 #include <cstdio>

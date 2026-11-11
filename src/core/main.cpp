@@ -687,11 +687,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // command scripts ask it through (Integration.hpp).
     Hyprdrive::Integration::init();
     // ...which the search asks on every row build, through plain function
-    // pointers because OmarchySearch.cpp and SearchProviders.cpp are linked
-    // into host tests that have no Integration or Config (OmarchySearch.hpp
+    // pointers because SearchBackend.cpp and SearchProviders.cpp are linked
+    // into host tests that have no Integration or Config (SearchBackend.hpp
     // SHost; SearchProviders.hpp setActivation). Live reads, not a snapshot:
     // a reload that flips plugin:hyprdrive:integration is on the next frame.
-    OmarchySearch::setHost({
+    SearchBackend::setHost({
         .omarchy          = [] { return Hyprdrive::Integration::omarchy(); },
         .terminalTemplate = [] { return Hyprdrive::Config::getSearchTerminal(); },
         .appTerminal      = [] { return Hyprdrive::Config::getTerminal(); },
@@ -746,7 +746,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_fileWakeFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
         if (g_fileWakeFd >= 0) {
             g_fileWakeSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, g_fileWakeFd, WL_EVENT_READABLE, onFileResultsReady, nullptr);
-            OmarchySearch::setResultsCallback([]() {
+            SearchBackend::setResultsCallback([]() {
                 if (g_fileWakeFd >= 0) {
                     uint64_t one = 1;
                     ::write(g_fileWakeFd, &one, sizeof(one));
@@ -812,7 +812,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         wl_event_source_remove(g_letterTickTimer);
         g_letterTickTimer = nullptr;
     }
-    OmarchySearch::setResultsCallback(nullptr);
+    SearchBackend::setResultsCallback(nullptr);
     ToolSearch::shutdown();
     // BEFORE the wake fd below is closed: the reader's worker writes to it when
     // a job lands, and a job landing after the close would write to a reused fd
@@ -872,7 +872,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // plugin in-process.
     AppSearch::shutdownIconIndex();
     SearchProviders::shutdown();
-    OmarchySearch::shutdown();
+    SearchBackend::shutdown();
     Hyprdrive::LauncherEntry::stop();
     clearScrollOverviews();
     // AGAIN, after the overviews are gone: their teardown hands focus back and

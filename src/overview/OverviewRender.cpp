@@ -28,7 +28,7 @@
 #include "globals.hpp"
 #include "IOverview.hpp"
 #include "SearchSession.hpp"
-#include "OmarchySearch.hpp"
+#include "SearchBackend.hpp"
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <unordered_set>
@@ -409,14 +409,14 @@ namespace {
     // refill (the menu search is an in-memory scan).
     // Cached per inventory generation: the 3 s recheck would otherwise run the
     // 26 menu searches every time (~2.5 ms).
-    const std::vector<OmarchySearch::SSearchItem>& warmSearchItems() {
-        static std::vector<OmarchySearch::SSearchItem> items;
+    const std::vector<SearchBackend::SSearchItem>& warmSearchItems() {
+        static std::vector<SearchBackend::SSearchItem> items;
         static uint64_t                                 builtFor = 0;
         if (const auto GEN = AppSearch::inventoryGeneration(); GEN != builtFor || items.empty()) {
             builtFor = GEN;
-            items    = OmarchySearch::promptAllAgents("x");
+            items    = SearchBackend::promptAllAgents("x");
             for (char c = 'a'; c <= 'z'; ++c) {
-                auto menu = OmarchySearch::searchMenu(std::string(1, c));
+                auto menu = SearchBackend::searchMenu(std::string(1, c));
                 items.insert(items.end(), std::make_move_iterator(menu.begin()), std::make_move_iterator(menu.end()));
             }
         }
@@ -434,7 +434,7 @@ namespace {
         for (const auto& E : AppSearch::inventory())
             push(E.icon);
         for (const auto& I : warmSearchItems())
-            if (!OmarchySearch::isGlyphIcon(I.icon))
+            if (!SearchBackend::isGlyphIcon(I.icon))
                 push(I.icon);
         for (const char* SECTION : {"utilities-terminal", "folder", "system-run"}) // overviewSearchSections
             push(SECTION);
@@ -472,7 +472,7 @@ namespace {
         for (const auto& M : State::monitorState()->monitors())
             if (M)
                 key += std::format("|{}", M->m_scale);
-        key += "|" + OmarchySearch::menuRootTitle(); // column 0's heading follows Integration
+        key += "|" + SearchBackend::menuRootTitle(); // column 0's heading follows Integration
         return key;
     }
 
@@ -497,7 +497,7 @@ namespace {
                 g_warmTexts.push_back({TOOL, FG, px(13.F, S), 500});
             for (int n = 30; n >= 1; --n)
                 g_warmTexts.push_back({"+" + std::to_string(n), MUTED, px(11.F, S), 500}); // a card's "+N more"
-            for (const std::string& TITLE : {std::string{"Files & Folders"}, std::string{"AI & Tools"}, OmarchySearch::menuRootTitle()})
+            for (const std::string& TITLE : {std::string{"Files & Folders"}, std::string{"AI & Tools"}, SearchBackend::menuRootTitle()})
                 g_warmTexts.push_back({TITLE, HEADING, px(12.F, S), 600}); // the card headings
         }
         for (const float S : scales) {

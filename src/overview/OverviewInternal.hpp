@@ -18,7 +18,7 @@
 #include <cstdio>
 
 #include "AppSearch.hpp"
-#include "OmarchySearch.hpp"
+#include "SearchBackend.hpp"
 #include "ToolSearch.hpp"
 #include "SearchSession.hpp"
 #include "TileChrome.hpp"
@@ -495,7 +495,7 @@ struct SSearchRow {
     std::string                  iconFont;
     const AppSearch::SEntry*     app = nullptr;
     SearchProviders::SResult     provider;
-    std::optional<OmarchySearch::SSearchItem> omarchy;
+    std::optional<SearchBackend::SSearchItem> omarchy;
     int                          column = 0; // 0 = Left (Apps, Actions, Calc, Agents), 1 = Right (Files, Settings)
 
     // THE TOOL PANE (ToolSearch.hpp). Non-zero on every row of a `define` /
@@ -533,7 +533,7 @@ inline std::vector<SSearchRow> overviewSearchRows() {
         return {};
 
     const std::string& Q           = g_search.query.text;
-    const bool         MENU_BROWSE = OmarchySearch::canNavigateMenuBack();
+    const bool         MENU_BROWSE = SearchBackend::canNavigateMenuBack();
     const bool         ROOT_BROWSE = Q.empty() && !MENU_BROWSE;
 
     struct SRowMemo {
@@ -554,8 +554,8 @@ inline std::vector<SSearchRow> overviewSearchRows() {
     const auto NOW   = std::chrono::steady_clock::now();
     const bool FRESH = !ROOT_BROWSE || NOW - MEMO.builtAt < std::chrono::seconds(1);
 
-    const auto     ROUTE   = OmarchySearch::menuCurrentRoute();
-    const uint64_t INPUTS  = OmarchySearch::searchInputsGeneration();
+    const auto     ROUTE   = SearchBackend::menuCurrentRoute();
+    const uint64_t INPUTS  = SearchBackend::searchInputsGeneration();
     const uint64_t MEMBERS = Membership::generation();
     const uint64_t APPS    = AppSearch::inventoryGeneration();
 
@@ -625,8 +625,8 @@ inline std::vector<SSearchRow> overviewToolRows(const ToolSearch::SQuery& TQ) {
 
         // Enter copies it: the Calculator row's activation, which is wl-copy of
         // actionCommand with no shell in between.
-        OmarchySearch::SSearchItem item;
-        item.kind          = OmarchySearch::EItemKind::Calculator;
+        SearchBackend::SSearchItem item;
+        item.kind          = SearchBackend::EItemKind::Calculator;
         item.id            = "tool:" + std::to_string(i);
         item.name          = S.text;
         item.description   = S.tag;
@@ -643,7 +643,7 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     Prof::Timer PROF{Prof::rowsNs, Prof::rowsCalls};
 
     const std::string& Q           = g_search.query.text;
-    const bool         MENU_BROWSE = OmarchySearch::canNavigateMenuBack();
+    const bool         MENU_BROWSE = SearchBackend::canNavigateMenuBack();
 
     // A `define` / `tr` query owns the whole panel (user, 2026-09-22: "turns the
     // results box into dictionary definitions").
@@ -669,7 +669,7 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // answered by the AI & Tools column alone. Fed to the app and menu
     // matchers it found every .desktop file whose Exec is an absolute path --
     // Boxes, Virtual Machine Manager, Rygel Preferences -- under a `/`.
-    const bool AGENT_COMMAND = OmarchySearch::isAgentQuery(Q);
+    const bool AGENT_COMMAND = SearchBackend::isAgentQuery(Q);
 
     if (!Q.empty() && !MENU_BROWSE && !AGENT_COMMAND) {
         for (const auto* E : AppSearch::search(Q, 6)) {
@@ -689,7 +689,7 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // (user, 2026-09-23).
     const size_t MENU_LIMIT = (Q.empty() || MENU_BROWSE) ? 24 : OVERVIEW_RESULT_ROWS_ALONE;
     if (!AGENT_COMMAND) {
-        for (const auto& item : OmarchySearch::searchMenu(Q, MENU_LIMIT))
+        for (const auto& item : SearchBackend::searchMenu(Q, MENU_LIMIT))
             menuRows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 0});
     }
 
@@ -702,11 +702,11 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // ------------------------------------------------------------------------
     if (!MENU_BROWSE) {
         if (Q.empty()) {
-            for (const auto& f : OmarchySearch::recentFiles()) {
+            for (const auto& f : SearchBackend::recentFiles()) {
                 rows.push_back({f.name, f.description, f.icon, "", nullptr, {}, f, 1});
             }
         } else {
-            for (const auto& f : OmarchySearch::fileResults()) {
+            for (const auto& f : SearchBackend::fileResults()) {
                 rows.push_back({f.name, f.description, f.icon, "", nullptr, {}, f, 1});
             }
         }
@@ -716,23 +716,23 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
     // COLUMN 2: AI AGENTS & TOOLS
     // ------------------------------------------------------------------------
     if (!Q.empty()) {
-        if (const auto calc = OmarchySearch::evaluateCalculator(Q); calc) {
+        if (const auto calc = SearchBackend::evaluateCalculator(Q); calc) {
             rows.push_back({calc->name, calc->description, calc->icon, "", nullptr, {}, *calc, 2});
         }
     }
 
-    if (OmarchySearch::isAgentQuery(Q)) {
-        for (const auto& item : OmarchySearch::searchAgents(Q))
+    if (SearchBackend::isAgentQuery(Q)) {
+        for (const auto& item : SearchBackend::searchAgents(Q))
             rows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 2});
     } else if (!Q.empty() && !MENU_BROWSE) {
-        for (const auto& item : OmarchySearch::promptAllAgents(Q))
+        for (const auto& item : SearchBackend::promptAllAgents(Q))
             rows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 2});
 
         // The tools, offered for whatever is typed. Activating one rewrites the
         // query into the tool's own syntax, so the panel turns into it.
         const auto toolRow = [&](const std::string& id, const std::string& name, const std::string& icon, const std::string& rewrite) {
-            OmarchySearch::SSearchItem t;
-            t.kind          = OmarchySearch::EItemKind::Action;
+            SearchBackend::SSearchItem t;
+            t.kind          = SearchBackend::EItemKind::Action;
             t.id            = id;
             t.name          = name;
             t.description   = Q;
@@ -746,8 +746,8 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
         if (ToolSearch::enabled(ToolSearch::EKind::Translate))
             toolRow("tool:translate", "Translate", "preferences-desktop-locale", "translate " + Q);
 
-        OmarchySearch::SSearchItem webItem;
-        webItem.kind          = OmarchySearch::EItemKind::Action;
+        SearchBackend::SSearchItem webItem;
+        webItem.kind          = SearchBackend::EItemKind::Action;
         webItem.id            = "web:google";
         webItem.name          = "Search Google";
         webItem.description   = Q;
@@ -768,7 +768,7 @@ inline std::vector<SSearchRow> overviewSearchRowsLive() {
         webItem.actionCommand = "xdg-open 'https://www.google.com/search?q=" + qenc + "'";
         rows.push_back({webItem.name, webItem.description, webItem.icon, "", nullptr, {}, webItem, 2});
     } else if (!MENU_BROWSE) {
-        for (const auto& item : OmarchySearch::agentHelpItems())
+        for (const auto& item : SearchBackend::agentHelpItems())
             rows.push_back({item.name, item.description, item.icon, item.iconFont, nullptr, {}, item, 2});
     }
 
@@ -787,9 +787,9 @@ struct SSearchSection {
 
 inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSearchRow>& rows) {
     std::vector<SSearchSection> out;
-    std::string menuTitle = OmarchySearch::menuCurrentRouteTitle();
+    std::string menuTitle = SearchBackend::menuCurrentRouteTitle();
     // "Omarchy Menu" on Omarchy, "System" on plain Hyprland (native port A6).
-    out.push_back({menuTitle.empty() ? OmarchySearch::menuRootTitle() : menuTitle, "system-run", {}, 0, false, 0});
+    out.push_back({menuTitle.empty() ? SearchBackend::menuRootTitle() : menuTitle, "system-run", {}, 0, false, 0});
     out.push_back({"Files & Folders", "folder", {}, 0, false, 1});
     out.push_back({"AI & Tools", "utilities-terminal", {}, 0, false, 2});
 
@@ -814,7 +814,7 @@ inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry) {
             continue;
         if (WINDOW->isHidden())
             continue;
-        if (OmarchySearch::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
+        if (SearchBackend::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
             continue;
 
         const auto CLASS = AppSearch::identityClass(WINDOW->m_class, WINDOW->m_title);
@@ -847,7 +847,7 @@ inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry) {
 // The focused-and-empty browse is search:browse_on_click (off by default,
 // user 2026-11-04): off, the pane is up only for a query or a submenu.
 inline bool overviewSearchPaneUp() {
-    return !g_search.query.text.empty() || (g_search.query.active && Hyprdrive::Config::getSearchBrowseOnClick()) || OmarchySearch::canNavigateMenuBack();
+    return !g_search.query.text.empty() || (g_search.query.active && Hyprdrive::Config::getSearchBrowseOnClick()) || SearchBackend::canNavigateMenuBack();
 }
 
 // After ANY step through the menu tree -- a drill, the Back row, Esc, Backspace
@@ -859,7 +859,7 @@ inline bool overviewSearchPaneUp() {
 // The walk up ends in the root browse, not in an empty pane: at the root the
 // search counts as focused-and-empty, which lists the menu's root.
 inline void overviewSettleMenuStep(const std::string& from = {}) {
-    if (!OmarchySearch::canNavigateMenuBack()) {
+    if (!SearchBackend::canNavigateMenuBack()) {
         if (!Hyprdrive::Config::getSearchBrowseOnClick()) {
             // No root browse to land in: back to the bare search field.
             g_search.nav.zone              = EOverviewNavZone::Search;
@@ -882,14 +882,14 @@ inline void overviewSettleMenuStep(const std::string& from = {}) {
     for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
         if (NEXT[sc<size_t>(i)].column != 0)
             continue;
-        if (NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == OmarchySearch::EItemKind::Back)
+        if (NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == SearchBackend::EItemKind::Back)
             continue;
         sel = i;
         break;
     }
     if (!from.empty()) {
         for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
-            if (NEXT[sc<size_t>(i)].column == 0 && NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == OmarchySearch::EItemKind::Menu &&
+            if (NEXT[sc<size_t>(i)].column == 0 && NEXT[sc<size_t>(i)].omarchy && NEXT[sc<size_t>(i)].omarchy->kind == SearchBackend::EItemKind::Menu &&
                 NEXT[sc<size_t>(i)].omarchy->id == from) {
                 sel = i;
                 break;
@@ -914,7 +914,7 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
 
     // A tool row that rewrites the query (AI & Tools "Define" / "Translate"):
     // the panel turns into the tool, and the overview stays up to show it.
-    if (ROW.omarchy && ROW.omarchy->kind == OmarchySearch::EItemKind::Action && ROW.omarchy->actionCommand.starts_with(OVERVIEW_QUERY_REWRITE)) {
+    if (ROW.omarchy && ROW.omarchy->kind == SearchBackend::EItemKind::Action && ROW.omarchy->actionCommand.starts_with(OVERVIEW_QUERY_REWRITE)) {
         g_search.query.text             = ROW.omarchy->actionCommand.substr(OVERVIEW_QUERY_REWRITE.size());
         g_search.query.active           = true;
         g_search.nav.zone               = EOverviewNavZone::Search;
@@ -934,10 +934,10 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
         return false;
 
     if (ROW.omarchy) {
-        if (ROW.omarchy->kind == OmarchySearch::EItemKind::Menu || ROW.omarchy->kind == OmarchySearch::EItemKind::Back) {
-            const bool DRILL = ROW.omarchy->kind == OmarchySearch::EItemKind::Menu;
-            const auto LEFT  = DRILL ? std::string{} : OmarchySearch::menuCurrentRoute();
-            OmarchySearch::activate(*ROW.omarchy);
+        if (ROW.omarchy->kind == SearchBackend::EItemKind::Menu || ROW.omarchy->kind == SearchBackend::EItemKind::Back) {
+            const bool DRILL = ROW.omarchy->kind == SearchBackend::EItemKind::Menu;
+            const auto LEFT  = DRILL ? std::string{} : SearchBackend::menuCurrentRoute();
+            SearchBackend::activate(*ROW.omarchy);
             if (DRILL && !g_search.query.text.empty()) {
                 // The drill clears the query the windows were filtered by, so
                 // the membership gate has to hear about it like any other edit:
@@ -951,7 +951,7 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
             overviewSettleMenuStep(LEFT);
             return false;
         }
-        return OmarchySearch::activate(*ROW.omarchy);
+        return SearchBackend::activate(*ROW.omarchy);
     } else if (ROW.app) {
         if (!newInstance) {
             if (const auto W = overviewWindowForApp(*ROW.app)) {
@@ -1230,7 +1230,7 @@ inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     if (!WINDOW)
         return false;
 
-    if (OmarchySearch::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
+    if (SearchBackend::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
         return false;
 
     if (!validMapped(WINDOW))

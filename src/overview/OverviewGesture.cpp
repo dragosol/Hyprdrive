@@ -7,7 +7,7 @@
 #include "DebugPaths.hpp"
 #include "IOverview.hpp"
 #include "Overview.hpp"
-#include "OmarchySearch.hpp"
+#include "SearchBackend.hpp"
 #include "SearchProviders.hpp"
 #include "Scratchpad.hpp"
 #include "DockStacks.hpp"
@@ -85,7 +85,7 @@ void COverviewGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e) {
         resetSearchSession();
         // No SearchProviders::warm() here: see X54 in main.cpp. The first
         // keystroke starts cold providers; an open never launches GTK apps.
-        OmarchySearch::init();
+        SearchBackend::init();
 
         for (const auto& MONITOR : State::monitorState()->monitors()) {
             if (!MONITOR || !MONITOR->m_enabled || !MONITOR->m_activeWorkspace || scrollOverviewForMonitor(MONITOR))

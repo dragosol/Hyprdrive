@@ -152,11 +152,11 @@ void afterQueryEdit() {
     // X20: every keystroke starts a new provider generation. Non-blocking, so
     // this costs the keystroke nothing; results land over the next frames.
     SearchProviders::query(g_search.query.text);
-    OmarchySearch::query(g_search.query.text);
+    SearchBackend::query(g_search.query.text);
     if (!g_search.query.text.empty())
-        OmarchySearch::resetMenuRoute();
-    if (OmarchySearch::isSushiActive())
-        OmarchySearch::closeSushi();
+        SearchBackend::resetMenuRoute();
+    if (SearchBackend::isSushiActive())
+        SearchBackend::closeSushi();
 
     // The ranking changes under any edit, so a held index would point at a
     // different app than the one the user saw highlighted.
@@ -188,8 +188,8 @@ bool handleSearchPress(uint32_t keycode) {
     // X5: ESC is always ours while the overview is open -- it either clears the
     // query or exits -- so it must never fall through to the window underneath.
     if (keycode == EVDEV_KEY_ESC) {
-        if (OmarchySearch::isSushiActive()) {
-            OmarchySearch::closeSushi();
+        if (SearchBackend::isSushiActive()) {
+            SearchBackend::closeSushi();
             for (const auto& overview : scrollOverviews())
                 if (overview)
                     overview->damage();
@@ -219,8 +219,8 @@ bool handleSearchPress(uint32_t keycode) {
     }
 
     if (keycode == EVDEV_KEY_BACKSPACE) {
-        if (OmarchySearch::isSushiActive()) {
-            OmarchySearch::closeSushi();
+        if (SearchBackend::isSushiActive()) {
+            SearchBackend::closeSushi();
             for (const auto& overview : scrollOverviews())
                 if (overview)
                     overview->damage();
@@ -259,8 +259,8 @@ bool handleSearchPress(uint32_t keycode) {
     if (!KEY.consume)
         return false;
 
-    if (OmarchySearch::isSushiActive()) {
-        OmarchySearch::closeSushi();
+    if (SearchBackend::isSushiActive()) {
+        SearchBackend::closeSushi();
         for (const auto& overview : scrollOverviews())
             if (overview)
                 overview->damage();

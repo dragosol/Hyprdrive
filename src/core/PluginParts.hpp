@@ -82,7 +82,7 @@ using namespace Hyprutils::String;
 #include "Integration.hpp"
 #include "SettingsApp.hpp"
 #include "AppSearch.hpp"
-#include "OmarchySearch.hpp"
+#include "SearchBackend.hpp"
 #include "Config.hpp"
 #include "DockTilt.hpp"
 #include "Dock.hpp"
