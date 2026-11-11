@@ -108,10 +108,10 @@ SDispatcher* findDispatcher(const std::string_view name) {
             .name            = "debug",
             // `gesture .+`: the script is parsed by the topic itself
             // (DebugGestureScript.hpp), which reports a bad step precisely.
-            .argPattern      = std::regex{"^(frames|mem|motion|lockstate|exclusive|windows|glass|desktop|rows|dockmenu|stripclean|scratchpad|type|type \\S+|activate \\S+|movehere \\S+|tile \\S+|xgeom|hooks|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
+            .argPattern      = std::regex{"^(frames|mem|motion|lockstate|exclusive|windows|glass|desktop|rows|dockmenu|stripclean|scratchpad|type|type \\S+|activate \\S+|movehere \\S+|tile \\S+|xgeom|hooks|identity|press [0-9]+|ripple|ripple -?[0-9.]+ -?[0-9.]+|gesture [^\\n]+)$"},
             .defaultArg      = "frames",
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: frames | mem | motion | lockstate | exclusive | desktop | rows | dockmenu | stripclean | scratchpad | type [text] | activate <class> | movehere <class> | tile <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
+            .invalidArgError = "expected: frames | mem | motion | lockstate | exclusive | desktop | rows | dockmenu | stripclean | identity | scratchpad | type [text] | activate <class> | movehere <class> | tile <class> | press <keycode> | ripple [x y] | gesture <script>|state|stop",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "debug"); },
             .luaLegacy       = [](lua_State* L) {
                 Hyprdrive::Compat::noteLegacyUse(Hyprdrive::Compat::ELegacy::LUA, "hl.plugin.scrolloverview.debug");

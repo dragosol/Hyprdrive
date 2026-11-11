@@ -1,6 +1,7 @@
 // The dock: its small renderers, render(), the frame pump and damage, and the
 // entry points other modules call. Split from one file; see DockParts.hpp.
 #include "DockParts.hpp"
+#include "IdentityLive.hpp"
 #include "MotionSites.hpp"
 #include "FullscreenDesktop.hpp"
 
@@ -353,7 +354,7 @@ void renderWindowPeek(PHLMONITOR monitor, float alpha) {
             continue;
         }
 
-        std::string app = AppSearch::appNameForClass(AppSearch::identityClass(WINDOW->m_class, WINDOW->m_title));
+        std::string app = AppSearch::appNameForClass(Hyprdrive::AppIdentity::groupKey(WINDOW));
         if (app.empty())
             app = WINDOW->m_class;
         std::string title = WINDOW->m_title;
@@ -867,7 +868,7 @@ void onWindowOpen(const PHLWINDOW& window) {
     std::erase_if(s_sentFullscreen, [](const PHLWINDOWREF& r) { return !r.lock(); });
     if (!window)
         return;
-    const auto ID      = AppSearch::idForClass(window->m_class);
+    const auto ID      = AppSearch::idForClass(Hyprdrive::AppIdentity::groupKey(window));
     const bool SPECIAL = !window->m_workspace || window->m_workspace->m_isSpecialWorkspace;
     const bool MAIN    = !window->m_isFloating && !window->parent() && !window->isModal() && !SPECIAL;
     const bool EMPTY   = MAIN && opensInEmptyDesktop(ID);
