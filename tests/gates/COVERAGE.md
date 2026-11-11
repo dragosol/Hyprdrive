@@ -9,7 +9,7 @@ the part named, not all of the row. "Not covered" says why.
 Run all: `make gates` (or `tests/gates/run.sh`). Each gate's header comment
 lists its asserts and the control that makes it fail.
 
-Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its reason.
+Covered: **34 of 73** rows (28 fully, 6 partly); 39 not covered, each with its reason.
 
 ## Mosaic (pure)
 
@@ -119,6 +119,7 @@ Covered: **33 of 72** rows (27 fully, 6 partly); 39 not covered, each with its r
 | `hyprdrive load|unload|update|reload` CLI [10-24, 11-04] | partly: `lifecycle` (the unload/load the CLI does, three times, no core); the CLI script itself is host-tested (`update_cli_test.py`) |
 | "Update available!" marketplace-aware flow [11-04] | not covered: network + Omarchy |
 | Speed setting 0 / animations off: frame sources idle at once | `anim_off` |
+| Tooltips fade as one surface: the body never flashes the border colour [11-11] | `tooltip_flash` (the dock tooltip, filmed at speed 8; every label pill and the tile's close button share its ring drawing) |
 
 ## The older gates (`scripts/gates/` in the pre-split tree, `hyprdrive-fix-native`)
 
