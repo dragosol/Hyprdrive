@@ -29,7 +29,7 @@ Covered: **34 of 73** rows (28 fully, 6 partly); 39 not covered, each with its r
 | Corner resize always available; Super+right-drag resizes [10-11, 10-27] | not covered: as above |
 | Dragging past the screen edge expands only as far as the cursor moves [10-27] | not covered: as above |
 | Floating arrivals join the mosaic unless tagged `hyprdrive-float`; Sushi never rearranges [10-14, 10-28] | not covered: needs a floating-by-rule fixture + a tagged one (easy next) |
-| General option "never load windows in floating mode" (`general:open_tiled`) [11-10] | not covered: next batch |
+| Windows float only when the user floats them (`general:open_tiled`, off by default; always on Mosaic; rules, the tag, splash/palettes honoured; Wine/X11 dialogs and fixed-size windows tiled; the user's float survives a remap) [11-10, 11-11] | `placement` |
 | Super+T toggles a fixed-size window between tiled-at-own-size and floating [11-10] | `own_size_tile` (older gate, still run by `run.sh`) |
 | Spawn animation matches dwindle's (right size from frame one) [10-29] | not covered: needs a filmed first frame (wf-recorder); a one-shot grim returns stale frames |
 | "Maximize from dock" keeps its own animation [10-29] | not covered: motion |
@@ -86,6 +86,7 @@ Covered: **34 of 73** rows (28 fully, 6 partly); 39 not covered, each with its r
 | A window moved onto a fullscreen/maximized app's desktop takes the app out [11-11: "if I move a window into a desktop with a fullscreen app it should un-fullscreen the app in the target desktop"] | `fs_move_close` (P settled app by dock menu, Q a trip's app by dispatcher: the trip ends there, R maximized, S a game, T Mosaic sizes; all still out 3 s later); not driven: the overview drag path |
 | A window opened from a fullscreen app opens beside it, visible at once; the app stays fullscreen | `fs_beside` |
 | A plugin reload (`hyprdrive reload`) leaves every fullscreen window fullscreen, on its desktop, trips and debts kept, with Mosaic in the config file, Omarchy blocks renumbering and a disabled panel coming and going; a plain config reload too [11-11] | `reload_blocks` (A the CLI's steps, B `hyprctl reload`, C the trip still goes home after); the client sees one exit + re-entry in the gap (Hyprland's own reload, see FullscreenCarry.hpp) |
+| Floats and dialogs over a fullscreen app go beside it too: prompted -> view + focus, closed -> back to the app, the made desktop given back; unprompted -> quiet, the view stays; a second one joins [11-11] | `beside` |
 | Spam-proof (50 cycles at 1 Hz and at key-repeat speed, ids unique at every sample) | `fs_cycles` |
 | All animated; the card slides from UNDER the origin only during the transition | not covered: motion, needs filmed frames |
 | Display change removes empty desktops (21,22,28,29,30 -> 1..5), with a trip in flight, shown-empty kept [owner report 11-11] | `display_compact` |

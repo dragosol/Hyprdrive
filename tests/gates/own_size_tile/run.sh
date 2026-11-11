@@ -62,6 +62,15 @@ insist() { # SECONDS [GROW_AT]
     A=$($H h clients -j | python3 -c "import json,sys; print(next(c['address'] for c in json.load(sys.stdin) if c['class']=='hdtest.insist'))")
     $H eval "hl.dispatch(hl.dsp.focus({ window = [[address:$A]] }))" >/dev/null; sleep 0.2
 }
+# ON MOSAIC IT OPENS TILED (the enforcer, WindowPlacement.cpp: a fixed-size
+# window tiles at its own size as it maps); floated first by Super+T there, so
+# every layout's steps below start from the same floating window.
+float_first() { # LAYOUT
+    [ "$1" = mosaic ] || return 0
+    local s0; s0=$(state)
+    check "$1: opens tiled at its own size" "$([ "$s0" = '362x677 TILED' ] && echo 1)" "$s0"
+    $H tap Super+T; sleep 0.8
+}
 storm() { # FROM TO: the most ConfigureNotify in one second of that span
     python3 -c "
 import re,sys
@@ -69,14 +78,14 @@ n=[int(m.group(2)) for m in re.finditer(r't=\s*(\d+)s configure=\s*(\d+)', open(
 print(max(n) if n else -1)"; }
 
 for L in dwindle scrolling mosaic; do
-    start $L; others 1; insist 10
+    start $L; others 1; insist 10; float_first $L
     $H tap Super+T; sleep 0.8; S1=$(state); sleep 4; $H tap Super+T; sleep 0.8; S2=$(state); sleep 4.5
     check "$L: Super+T tiles it at its own size" "$([ "$S1" = '362x677 TILED' ] && echo 1)" "$S1"
     check "$L: no configure storm while tiled" "$([ "$(storm 3 6)" -le 5 ] && echo 1)" "$(storm 3 6)/s"
     check "$L: Super+T floats it back at its size" "$([ "$S2" = '362x677 FLOAT' ] && echo 1)" "$S2"
 done
 for L in dwindle mosaic; do
-    start $L; others 6; insist 8
+    start $L; others 6; insist 8; float_first $L
     $H tap Super+T; sleep 0.8; S1=$(state); P1=$(where); sleep 6.5
     check "$L, crowded: still its own size (overflows, not squeezed)" "$([ "$S1" = '362x677 TILED' ] && echo 1)" "$S1"
     check "$L, crowded: kept on screen" "$([ "$P1" = on ] && echo 1)" "$P1"
@@ -84,14 +93,14 @@ for L in dwindle mosaic; do
 done
 start mosaic
 $H eval 'hl.config({plugin={hyprdrive={mosaic={infinite_canvas=true}}}})' >/dev/null
-others 8; insist 9 # 8: seven windows still fit on the rig's screen
+others 8; insist 9; float_first mosaic # 8: seven windows still fit on the rig's screen
 $H tap Super+T; sleep 0.8; S1=$(state); sleep 4.5; C1=$(canvas)
 check "infinite canvas: Super+T tiles it at its own size" "$([ "$S1" = '362x677 TILED' ] && echo 1)" "$S1"
 check "infinite canvas: no configure storm" "$([ "$(storm 3 6)" -le 5 ] && echo 1)" "$(storm 3 6)/s"
 check "infinite canvas: its windows spill past the screen, none on another" "$(set -- $C1; [ "$1" -ge 1 ] && [ "$2" = 0 ] && [ "$3" = 8 ] && echo 1)" "past, overlapping, tiled: $C1"
 $H eval 'hl.config({misc={size_limits_tiled=true}, general={gaps_workspaces=0}})' >/dev/null; sleep 1.2; C2=$(canvas)
 check "control: misc:size_limits_tiled piles them up (20-layout.lua's mistake)" "$(set -- $C2; [ "$2" -ge 1 ] && echo 1)" "past, overlapping, tiled: $C2"
-start mosaic; others 1; insist 10 5
+start mosaic; others 1; insist 10 5; float_first mosaic
 $H tap Super+T; sleep 4.5; S1=$(state); sleep 5
 check "mosaic: a size change of its own is followed" "$([ "$S1" = '462x727 TILED' ] && echo 1)" "$S1"
 check "mosaic: no storm after it changes size" "$([ "$(storm 6 9)" -le 5 ] && echo 1)" "$(storm 6 9)/s"
