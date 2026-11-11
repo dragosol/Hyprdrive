@@ -1,5 +1,6 @@
 #include "PluginParts.hpp"
 #include "FunctionHooks.hpp"
+#include "IdentityDebug.hpp"
 using namespace PluginDetail;
 
 namespace PluginDetail {
@@ -77,6 +78,10 @@ SDispatchResult onDebugDispatcher(std::string arg) {
             report += "\n" + L;
         return {.success = false, .error = report};
     }
+    // `identity`: per mapped window, what AppIdentity's fast tier resolves
+    // from Hyprland's in-memory fields (IdentityDebug.hpp). Inspection only.
+    if (TOPIC == "identity")
+        return {.success = false, .error = Hyprdrive::AppIdentity::debugReport()};
     // `xgeom`: XGeometry's view of the focused window right now.
     if (TOPIC == "xgeom")
         return {.success = false, .error = "xgeom " + Hyprdrive::XGeometry::status()};
@@ -216,6 +221,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
     }
     if (TOPIC != "frames")
         return {.success = false, .error = "hyprdrive:debug frames|mem|motion|activate <class>|movehere <class>|tile <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
+        return {.success = false, .error = "hyprdrive:debug frames|mem|motion|identity|activate <class>|tile <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
 
     std::string report = "hyprdrive frames:";
     for (const auto& monitor : State::monitorState()->monitors()) {

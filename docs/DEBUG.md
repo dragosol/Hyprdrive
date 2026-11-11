@@ -19,6 +19,7 @@ From a hyprlang config: `hyprctl dispatch hyprdrive:debug frames`.
 | --- | --- |
 | `frames` | why each monitor is repainting right now (cadence, open overview, previews) |
 | `mem` | what hyprdrive holds on the GPU, as far as it can count it |
+| `identity` | per mapped window, what AppIdentity's **fast tier** resolves (src/apps/identity/): the window's class, title, pid, X id, then key, name, icon (`theme:` / `file:`), family, confidence, which resolver answered, the dock group key it would use, NOT-PLACEABLE when it is, and the evidence. Built from Hyprland's in-memory window fields only, with whatever Steam/Lutris index is published -- no /proc, X property or disk read on the compositor thread, so a Wine or umu window shows today's class answer until the identity worker exists. Nothing consumes it yet |
 | `hooks` | every Hyprland function hyprdrive hooked, in creation order: owner, name, address, signature -- name and signature demangled, also for a hook asked for by its mangled symbol (FunctionHooks.hpp) |
 | `motion` | which `animation:curve` preset is in use, sampled; then, per motion-blur site since the last `motion` read, how often it asked for a smear / got one / handed one to the renderer, the mean and longest trail (logical px), and the shutter factor (FlightBlur.hpp) |
 | `desktop` | Super+scroll and the per-cause desktop animations: the keys, what caused the last desktop switch and whether it snapped, the wheel's notch bank |
