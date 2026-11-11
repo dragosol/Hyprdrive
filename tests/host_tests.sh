@@ -52,6 +52,9 @@
 #                     thumbnail it had meanwhile; a future mtime gets one.
 #   desktop_switch_test  DesktopSwitchModel.hpp: Super+scroll's step and clamp,
 #                     one step per wheel notch, and the desktop-switch cause.
+#   desktop_plan_test  DesktopPlan.hpp: a renumber plan is refused whole when
+#                     it would put two desktops on one number or one below 1
+#                     (shift(0, -1)); heal pulls apart desktops sharing one.
 #   motion_math_test  MotionMath.hpp: each shared motion function against
 #                     verbatim copies of the definitions it replaced, bit for bit.
 #
@@ -114,6 +117,7 @@ run debug_gesture_test tests/unit/debug_gesture_test.cpp
 run debug_paths_test tests/unit/debug_paths_test.cpp
 run hot_corner_test tests/unit/hot_corner_test.cpp
 run desktop_switch_test tests/unit/desktop_switch_test.cpp
+run desktop_plan_test tests/unit/desktop_plan_test.cpp
 run desktop_row_test tests/unit/desktop_row_test.cpp
 run desktop_strip_test tests/unit/desktop_strip_test.cpp
 run submap_borrow_test tests/unit/submap_borrow_test.cpp
