@@ -26,6 +26,7 @@ From a hyprlang config: `hyprctl dispatch hyprdrive:debug frames`.
 | `type [word]` | sets the open overview's search query (one word: the Lua pattern is `type \S+`) |
 | `press <evdev keycode>` | one key through the search's own press handler |
 | `activate <class>` | a left click on that app's dock icon |
+| `movehere <class>` | the dock menu's "Move to this workspace" on that app's window (the focused monitor's desktop) |
 | `ripple [x y]` | the hot-corner ripple, from the focused monitor's corner or from (x, y) |
 | `gesture <script>` | synthetic touchpad gestures (below) |
 | `gesture state` | one line: finger model mode, whether a trackpad gesture is active, steps queued and played, overviews open |
