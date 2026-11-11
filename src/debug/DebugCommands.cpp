@@ -116,6 +116,9 @@ SDispatchResult onDebugDispatcher(std::string arg) {
     // one here is not reaching the animations.
     // `desktop`: Super+scroll's and the per-cause animation toggles' state --
     // what caused the last desktop switch, and whether it snapped.
+    // `dockmenu`: the dock's hover pane cells and its open menu's row boxes.
+    if (TOPIC == "dockmenu")
+        return {.success = false, .error = Hyprdrive::Dock::debugMenuReport(Desktop::focusState()->monitor())};
     if (TOPIC == "desktop")
         return {.success = false, .error = Hyprdrive::DesktopSwitch::debugReport()};
     if (TOPIC == "glass") {
