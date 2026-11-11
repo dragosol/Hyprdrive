@@ -227,12 +227,12 @@ std::optional<std::pair<PHLMONITOR, Vector2D>> monitorUnderCursor() {
 }
 
 void failNotif(const std::string& reason) {
-    HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE, "[hyprdrive] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+    HyprlandAPI::addNotification(HYPRDRIVE_HANDLE, "[hyprdrive] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
 // Helper function to find a function by name and ensure it contains one of the requested substrings in its demangled name (to disambiguate overloads).
 void* findFnOrThrow(const std::string& name, std::initializer_list<std::string_view> demangledNeedles) {
-    auto fns = HyprlandAPI::findFunctionsByName(SCROLLOVERVIEW_HANDLE, name);
+    auto fns = HyprlandAPI::findFunctionsByName(HYPRDRIVE_HANDLE, name);
     // A15's test hook: the hook named here reads as missing, as it would on a
     // Hyprland that renamed it -- the one way to see the failure toast, and
     // the unload after a PARTIAL init (the hooks before it already live),

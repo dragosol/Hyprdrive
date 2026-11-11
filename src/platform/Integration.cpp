@@ -172,7 +172,7 @@ namespace Hyprdrive::Integration {
 
     void init() {
         reevaluate();
-        g_hyprctl = HyprlandAPI::registerHyprCtlCommand(SCROLLOVERVIEW_HANDLE,
+        g_hyprctl = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE,
                                                         SHyprCtlCommand{
                                                             .name  = "hyprdrive-integration",
                                                             .exact = true,
@@ -189,7 +189,7 @@ namespace Hyprdrive::Integration {
 
     void shutdown() {
         if (g_hyprctl)
-            HyprlandAPI::unregisterHyprCtlCommand(SCROLLOVERVIEW_HANDLE, g_hyprctl);
+            HyprlandAPI::unregisterHyprCtlCommand(HYPRDRIVE_HANDLE, g_hyprctl);
         g_hyprctl.reset();
     }
 }

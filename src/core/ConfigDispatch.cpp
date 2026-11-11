@@ -382,12 +382,12 @@ namespace Hyprdrive::Config {
 using namespace ConfigPart;
 
 void registerDispatcher(const std::string& name, TDispatcher dispatcher) {
-    HyprlandAPI::addDispatcherV2(SCROLLOVERVIEW_HANDLE, std::string{Compat::NAME} + ":" + name, dispatcher);
+    HyprlandAPI::addDispatcherV2(HYPRDRIVE_HANDLE, std::string{Compat::NAME} + ":" + name, dispatcher);
 
     // ONE RELEASE. The old spelling dispatches into the very same handler; the
     // wrapper exists only to notice that it was used.
     const std::string LEGACY = std::string{Compat::LEGACY_NAME} + ":" + name;
-    HyprlandAPI::addDispatcherV2(SCROLLOVERVIEW_HANDLE, LEGACY, [dispatcher, LEGACY](std::string arg) {
+    HyprlandAPI::addDispatcherV2(HYPRDRIVE_HANDLE, LEGACY, [dispatcher, LEGACY](std::string arg) {
         Compat::noteLegacyUse(Compat::ELegacy::DISPATCHER, LEGACY);
         return dispatcher(std::move(arg));
     });
@@ -400,20 +400,20 @@ void registerDispatcher(const std::string& name, TDispatcher dispatcher) {
         return;
 
     DISPATCHER->dispatcher = dispatcher;
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::NAME, std::string{DISPATCHER->name}, DISPATCHER->luaFunction);
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::LEGACY_NAME, std::string{DISPATCHER->name}, DISPATCHER->luaLegacy);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, std::string{DISPATCHER->name}, DISPATCHER->luaFunction);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::LEGACY_NAME, std::string{DISPATCHER->name}, DISPATCHER->luaLegacy);
 }
 
 void registerGesture(TGestureRegistrar gestureRegistrar, TGestureKeyword gestureKeyword) {
-    HyprlandAPI::addConfigKeyword(SCROLLOVERVIEW_HANDLE, std::string{Compat::NAME} + "-gesture", gestureKeyword, {});
-    HyprlandAPI::addConfigKeyword(SCROLLOVERVIEW_HANDLE, std::string{Compat::LEGACY_NAME} + "-gesture", gestureKeyword, {});   // ONE RELEASE
+    HyprlandAPI::addConfigKeyword(HYPRDRIVE_HANDLE, std::string{Compat::NAME} + "-gesture", gestureKeyword, {});
+    HyprlandAPI::addConfigKeyword(HYPRDRIVE_HANDLE, std::string{Compat::LEGACY_NAME} + "-gesture", gestureKeyword, {});   // ONE RELEASE
 
     if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
         return;
 
     g_gestureRegistrar = gestureRegistrar;
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::NAME, "gesture", ::gestureLua);
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::LEGACY_NAME, "gesture", ::gestureLegacyLua);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "gesture", ::gestureLua);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::LEGACY_NAME, "gesture", ::gestureLegacyLua);
 }
 
 namespace ConfigPart {
@@ -421,17 +421,17 @@ void registerLuaFunctions() {
     if (::Config::mgr()->type() != ::Config::CONFIG_LUA)
         return;
 
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::NAME, "_dispatch", ::runDispatcherActionLua);
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::NAME, "configure", ::configureLua);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "_dispatch", ::runDispatcherActionLua);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "configure", ::configureLua);
     // hl.plugin.hyprdrive.integration() -> "omarchy"|"none", reason. New name
     // only: nothing written for the old namespace ever asked it.
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::NAME, "integration", Integration::luaIntegration);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::NAME, "integration", Integration::luaIntegration);
 
     // ONE RELEASE. `configure` under the old namespace still writes the NEW
     // table -- an alias that wrote the deprecated keys would keep re-arming the
     // deprecation it exists to retire.
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::LEGACY_NAME, "_dispatch", ::runDispatcherActionLegacyLua);
-    HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, Compat::LEGACY_NAME, "configure", ::configureLegacyLua);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::LEGACY_NAME, "_dispatch", ::runDispatcherActionLegacyLua);
+    HyprlandAPI::addLuaFunction(HYPRDRIVE_HANDLE, Compat::LEGACY_NAME, "configure", ::configureLegacyLua);
 }
 } // namespace ConfigPart
 
@@ -457,7 +457,7 @@ std::optional<std::pair<std::string, std::string>> boundAction(const std::string
         static bool warned = false;
         if (!std::exchange(warned, true)) {
             const int RUN = sc<int>(lua_version(g_bindLua));
-            HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE,
+            HyprlandAPI::addNotification(HYPRDRIVE_HANDLE,
                                          std::format("[hyprdrive] built against Lua {}.{}, but Hyprland runs Lua {}.{}: rebuild hyprdrive (make) to list Lua binds",
                                                      LUA_VERSION_NUM / 100, LUA_VERSION_NUM % 100, RUN / 100, RUN % 100),
                                          CHyprColor{1.0, 0.6, 0.2, 1.0}, 8000);

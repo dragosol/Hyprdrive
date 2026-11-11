@@ -276,15 +276,15 @@ namespace Hyprdrive::DesktopSwitch {
         }
 
         CFunctionHook* hookByMangledName(const std::string& mangled, void* destination) {
-            const auto FNS = HyprlandAPI::findFunctionsByName(SCROLLOVERVIEW_HANDLE, mangled);
+            const auto FNS = HyprlandAPI::findFunctionsByName(HYPRDRIVE_HANDLE, mangled);
             if (FNS.empty()) {
                 // Not fatal: the switches then animate as Hyprland decides,
                 // which is what both toggles' defaults ask for anyway.
-                HyprlandAPI::addNotification(SCROLLOVERVIEW_HANDLE, std::format("[hyprdrive] desktop animation toggles unavailable: no {}", mangled),
+                HyprlandAPI::addNotification(HYPRDRIVE_HANDLE, std::format("[hyprdrive] desktop animation toggles unavailable: no {}", mangled),
                                              CHyprColor{1.0, 0.6, 0.2, 1.0}, 5000);
                 return nullptr;
             }
-            auto* hook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, FNS[0].address, destination);
+            auto* hook = HyprlandAPI::createFunctionHook(HYPRDRIVE_HANDLE, FNS[0].address, destination);
             if (hook && !hook->hook())
                 return nullptr;
             return hook;

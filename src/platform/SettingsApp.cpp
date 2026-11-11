@@ -244,14 +244,14 @@ namespace Hyprdrive::SettingsApp {
     }
 
     void init() {
-        g_hyprctl = HyprlandAPI::registerHyprCtlCommand(SCROLLOVERVIEW_HANDLE, SHyprCtlCommand{
+        g_hyprctl = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE, SHyprCtlCommand{
                                                                                    .name  = "hyprdrive-theme",
                                                                                    .exact = true,
                                                                                    .fn    = [](eHyprCtlOutputFormat format, std::string) -> std::string {
                                                                                        return themeReply(format);
                                                                                    },
                                                                                });
-        g_hyprctlBinds = HyprlandAPI::registerHyprCtlCommand(SCROLLOVERVIEW_HANDLE, SHyprCtlCommand{
+        g_hyprctlBinds = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE, SHyprCtlCommand{
                                                                                         .name  = "hyprdrive-binds",
                                                                                         .exact = true,
                                                                                         .fn    = [](eHyprCtlOutputFormat format, std::string) -> std::string {
@@ -264,10 +264,10 @@ namespace Hyprdrive::SettingsApp {
 
     void shutdown() {
         if (g_hyprctl)
-            HyprlandAPI::unregisterHyprCtlCommand(SCROLLOVERVIEW_HANDLE, g_hyprctl);
+            HyprlandAPI::unregisterHyprCtlCommand(HYPRDRIVE_HANDLE, g_hyprctl);
         g_hyprctl.reset();
         if (g_hyprctlBinds)
-            HyprlandAPI::unregisterHyprCtlCommand(SCROLLOVERVIEW_HANDLE, g_hyprctlBinds);
+            HyprlandAPI::unregisterHyprCtlCommand(HYPRDRIVE_HANDLE, g_hyprctlBinds);
         g_hyprctlBinds.reset();
         g_preReload.reset();
         Config::forgetBindActions();
