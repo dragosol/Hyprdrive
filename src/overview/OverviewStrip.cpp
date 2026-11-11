@@ -1,6 +1,7 @@
 // COverview: top strip, scratchpad cell, alt strips, detent badge.
 // Cut from Overview.cpp by pure code motion.
 #include "OverviewParts.hpp"
+#include "MotionClock.hpp"
 
 using namespace OverviewDetail;
 
@@ -1187,7 +1188,7 @@ Time::steady_tp COverview::badgeBornAt() const {
 }
 
 bool COverview::detentBadgeVisible() const {
-    const bool   KEYS = keyBadgeLive && SearchLetters::msSince(Time::steadyNow(), keyBadgeBornAt) < KEY_BADGE_MS;
+    const bool   KEYS = keyBadgeLive && Hyprdrive::Motion::msBetween(Time::steadyNow(), keyBadgeBornAt) < KEY_BADGE_MS;
     const size_t IDX  = badgeWorkspace();
     return (trackpadDetentActive || KEYS) && Hyprdrive::Config::getGestureDetentLabel() && IDX < images.size() && images[IDX] && images[IDX]->pWorkspace;
 }
@@ -1198,7 +1199,7 @@ void COverview::updateRestingFade() {
     // A keyboard badge times out without any input to ask for the frame that
     // takes it down.
     if (keyBadgeLive) {
-        if (SearchLetters::msSince(Time::steadyNow(), keyBadgeBornAt) >= KEY_BADGE_MS)
+        if (Hyprdrive::Motion::msBetween(Time::steadyNow(), keyBadgeBornAt) >= KEY_BADGE_MS)
             keyBadgeLive = false;
         else
             requestInputFrame();
@@ -1215,7 +1216,7 @@ void COverview::updateRestingFade() {
     // Mid-fade the compositor has no other reason to draw -- the fade BACK in
     // runs after the gesture has ended, so there is no finger left to schedule
     // frames. Same pairing renderDetentBadge and renderSearch use.
-    if (SearchLetters::msSince(Time::steadyNow(), restingFadeAt) < RESTING_NUMBER_FADE_MS) {
+    if (Hyprdrive::Motion::msBetween(Time::steadyNow(), restingFadeAt) < RESTING_NUMBER_FADE_MS) {
         damage();
         requestInputFrame();
     }
@@ -1225,7 +1226,7 @@ float COverview::restingNumberFade(size_t workspaceIdx) const {
     if (workspaceIdx != restingFadeCell && workspaceIdx != restingFadePrevCell)
         return 1.F;
 
-    const float MS = SearchLetters::msSince(Time::steadyNow(), restingFadeAt);
+    const float MS = Hyprdrive::Motion::msBetween(Time::steadyNow(), restingFadeAt);
     const float E  = SearchLetters::easeOutCubic(SearchLetters::clamp01(MS / RESTING_NUMBER_FADE_MS));
 
     // The badged cell goes 1 -> 0; the one just vacated comes 0 -> 1.
@@ -1258,7 +1259,7 @@ void COverview::renderDetentBadge(PHLMONITOR monitor, float renderScale) {
     if (!TEX || !TEX->ok())
         return;
 
-    const float MS   = SearchLetters::msSince(Time::steadyNow(), badgeBornAt());
+    const float MS   = Hyprdrive::Motion::msBetween(Time::steadyNow(), badgeBornAt());
     const auto  POSE = SearchLetters::entrancePose(MS);
 
     // Scale about the glyph's own centre; POSE.y is logical px, +down, so it
@@ -1392,7 +1393,7 @@ void COverview::renderStrip(PHLMONITOR monitor, float renderScale, const Time::s
     // Eased per frame, by wall clock: the cells move like things with a little
     // weight -- the lifted one trails the pointer by a hair, the others glide.
     const auto  DESKNOW = Time::steadyNow();
-    const float DT      = std::clamp(std::chrono::duration<float>(DESKNOW - deskAnimAt).count(), 0.F, 0.05F);
+    const float DT      = std::clamp(Hyprdrive::Motion::secondsBetween(DESKNOW, deskAnimAt), 0.F, 0.05F);
     deskAnimAt          = DESKNOW;
     const float KFOLLOW = 1.F - std::exp(-DT / 0.035F);
     const float KGLIDE  = 1.F - std::exp(-DT / 0.085F);
@@ -1641,7 +1642,7 @@ void COverview::renderStripCellLabel(PHLMONITOR monitor, float renderScale, floa
         }
     }
 
-    const float MS = std::chrono::duration<float, std::milli>(Time::steadyNow() - T.since).count();
+    const float MS = Hyprdrive::Config::realElapsedMs(T.since);
     const float P  = std::clamp(MS / (T.out ? STRIPTIP_FADE_OUT_MS : STRIPTIP_FADE_MS), 0.F, 1.F);
     if (T.out && P >= 1.F) {
         T.text.clear();
@@ -1658,6 +1659,6 @@ void COverview::renderStripCellLabel(PHLMONITOR monitor, float renderScale, floa
 bool COverview::stripTipAnimating() const {
     if (stripTip.text.empty())
         return false;
-    const float MS = std::chrono::duration<float, std::milli>(Time::steadyNow() - stripTip.since).count();
+    const float MS = Hyprdrive::Config::realElapsedMs(stripTip.since);
     return MS < (stripTip.out ? STRIPTIP_FADE_OUT_MS : STRIPTIP_FADE_MS) + 16.F;
 }
