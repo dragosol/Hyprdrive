@@ -1,6 +1,7 @@
 // See DesktopSwitch.hpp; the decisions are DesktopSwitchModel.hpp.
 #include "FullscreenGuard.hpp"
 #include "DesktopSwitch.hpp"
+#include "FunctionHooks.hpp"
 #include "DesktopSwitchModel.hpp"
 #include "DesktopRowModel.hpp"
 #include "DesktopStrip.hpp"
@@ -276,15 +277,15 @@ namespace Hyprdrive::DesktopSwitch {
         }
 
         CFunctionHook* hookByMangledName(const std::string& mangled, void* destination) {
-            const auto FNS = HyprlandAPI::findFunctionsByName(HYPRDRIVE_HANDLE, mangled);
-            if (FNS.empty()) {
+            bool found = false;
+            auto* hook = FunctionHooks::firstMatch("DesktopSwitch", mangled, destination, {}, &found);
+            if (!found) {
                 // Not fatal: the switches then animate as Hyprland decides,
                 // which is what both toggles' defaults ask for anyway.
                 HyprlandAPI::addNotification(HYPRDRIVE_HANDLE, std::format("[hyprdrive] desktop animation toggles unavailable: no {}", mangled),
                                              CHyprColor{1.0, 0.6, 0.2, 1.0}, 5000);
                 return nullptr;
             }
-            auto* hook = HyprlandAPI::createFunctionHook(HYPRDRIVE_HANDLE, FNS[0].address, destination);
             if (hook && !hook->hook())
                 return nullptr;
             return hook;
