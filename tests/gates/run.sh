@@ -67,7 +67,7 @@ for n in "${names[@]}"; do
         sudo -n -u hyprtest rm -rf /tmp/hl-gown 2>/dev/null
         if [ $rc = 0 ]; then res="PASS $(grep -c '^ok' "$log") checks"; else res="FAIL $(grep -m1 '^FAIL' "$log")"; fi
     elif [ -f "$HERE/$n.sh" ]; then
-        GATE_SO=$SOD/hyprdrive.so GATE_CONTROL=$CONTROL GATE_CONTROL_SO=$CSO GATE_OUT=$OUT/$n.d timeout 180 bash "$HERE/$n.sh" > "$log" 2>&1; rc=$?
+        GATE_SO=$SOD/hyprdrive.so GATE_CONTROL=$CONTROL GATE_CONTROL_SO=$CSO GATE_OUT=$OUT/$n.d timeout 300 bash "$HERE/$n.sh" > "$log" 2>&1; rc=$?
         res=$(sed -n 's/^RESULT //p' "$log" | tail -1)
         [ -n "$res" ] || res="FAIL no verdict (exit $rc$([ $rc = 124 ] && echo ', timed out'))"
     else
