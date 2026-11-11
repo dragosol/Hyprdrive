@@ -110,6 +110,7 @@ run trash_dirs_test tests/unit/trash_dirs_test.cpp
 run file_uri_test tests/unit/file_uri_test.cpp $(pkg-config --cflags --libs glib-2.0 libsystemd)
 run mosaic_pack_test tests/unit/mosaic_pack_test.cpp
 run show_desktop_test tests/unit/show_desktop_test.cpp
+run x_state_request_test tests/unit/x_state_request_test.cpp
 run preview_grid_test tests/unit/preview_grid_test.cpp
 run motion_spacing_test tests/unit/motion_spacing_test.cpp
 # shellcheck disable=SC2046
