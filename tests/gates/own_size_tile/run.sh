@@ -19,7 +19,7 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 H=$ROOT/tests/rig/headless/hl.sh
 SO=${1:-$ROOT/hyprdrive.so}
-export HL_NAME=ownsize
+export HL_NAME=${HL_NAME:-ownsize}  # the gate runner passes gown
 SHARE=$(mktemp -d /tmp/hd-ownsize.XXXX); chmod 755 "$SHARE"
 cp "$(dirname "$0")/insist.py" "$SHARE/insist.py"; chmod 644 "$SHARE/insist.py"
 OUT=/tmp/hl-$HL_NAME/insist.txt
@@ -97,7 +97,8 @@ check "mosaic: a size change of its own is followed" "$([ "$S1" = '462x727 TILED
 check "mosaic: no storm after it changes size" "$([ "$(storm 6 9)" -le 5 ] && echo 1)" "$(storm 6 9)/s"
 start dwindle; others 1; insist 8
 $H tap Super+T; sleep 1
-$H h plugin unload "/tmp/hl-$HL_NAME/staged/hyprdrive.so" >/dev/null 2>&1; sleep 0.8; S1=$(state); sleep 5
+LOADED=$(sudo -n -u hyprtest test -r "$SO" && echo "$SO" || echo "/tmp/hl-$HL_NAME/staged/$(basename "$SO")")
+$H h plugin unload "$LOADED" >/dev/null 2>&1; sleep 0.8; S1=$(state); sleep 5
 check "unloaded while tiled: left floating at its size" "$([ "$S1" = '362x677 FLOAT' ] && echo 1)" "$S1"
 check "unloaded while tiled: no storm after" "$([ "$(storm 4 7)" -le 5 ] && echo 1)" "$(storm 4 7)/s"
 
