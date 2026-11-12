@@ -31,6 +31,9 @@ From a hyprlang config: `hyprctl dispatch hyprdrive:debug frames`.
 | `press <evdev keycode>` | one key through the search's own press handler |
 | `activate <class>` | a left click on that app's dock icon |
 | `movehere <class>` | the dock menu's "Move to this workspace" on that app's window (the focused monitor's desktop) |
+| `tile <class>` | where the focused monitor's open overview lays out that app's window (monitor-local render px: `tile <class> x y w h`), asked of the layout now |
+| `drawn <class>` | where the last tile pass DREW that app's window, same px (`drawn <class> x y w h`); differs from `tile` exactly when a frame drew a tile where its own layout would not put it |
+| `probe_draw on\|off` | test instrument: while on, every tile draw asks for the HOVERED tile's box from inside the draw (while the drawn window carries its tile geometry) -- the mid-draw box query some sessions make and the rig does not (#9, #7) |
 | `ripple [x y]` | the hot-corner ripple, from the focused monitor's corner or from (x, y) |
 | `gesture <script>` | synthetic touchpad gestures (below) |
 | `gesture state` | one line: finger model mode, whether a trackpad gesture is active, steps queued and played, overviews open |

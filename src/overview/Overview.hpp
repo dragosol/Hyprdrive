@@ -398,6 +398,7 @@ class COverview : public IOverview {
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     PHLWINDOW selectedOverviewTile(size_t* workspaceIdx = nullptr);
     CBox      tileBox(const PHLWINDOW& window) const;
+    CBox      drawnTileBox(const PHLWINDOW& window) const;
     CBox      overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& globalBox) const;
     void      refreshWindows() override;
     bool      selectAndClose(const PHLWINDOW& window);
