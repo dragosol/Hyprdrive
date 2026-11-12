@@ -856,6 +856,8 @@ void activateRow(PHLMONITOR monitor, const SItem& item, const SRow& row) {
             SettingsApp::open({}, row.exec);
             return;
 
+        case ERow::InfoHideDockFs: toggleHideDockInFullscreen(row.exec); return;
+
         case ERow::InfoReveal:
             // In the user's file manager (Locations::reveal).
             if (!row.exec.empty())
