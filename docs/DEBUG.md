@@ -34,6 +34,7 @@ From a hyprlang config: `hyprctl dispatch hyprdrive:debug frames`.
 | `tile <class>` | where the focused monitor's open overview lays out that app's window (monitor-local render px: `tile <class> x y w h`), asked of the layout now |
 | `drawn <class>` | where the last tile pass DREW that app's window, same px (`drawn <class> x y w h`); differs from `tile` exactly when a frame drew a tile where its own layout would not put it |
 | `probe_draw on\|off` | test instrument: while on, every tile draw asks for the HOVERED tile's box from inside the draw (while the drawn window carries its tile geometry) -- the mid-draw box query some sessions make and the rig does not (#9, #7) |
+| `probe_draw self` | the same instrument, but every draw asks for the box of the window it is DRAWING -- also in the strip, where that window carries its mini's geometry (#10) |
 | `ripple [x y]` | the hot-corner ripple, from the focused monitor's corner or from (x, y) |
 | `gesture <script>` | synthetic touchpad gestures (below) |
 | `gesture state` | one line: finger model mode, whether a trackpad gesture is active, steps queued and played, overviews open |
