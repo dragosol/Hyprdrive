@@ -220,8 +220,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         return {};
     }
     if (TOPIC != "frames")
-        return {.success = false, .error = "hyprdrive:debug frames|mem|motion|activate <class>|movehere <class>|tile <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
-        return {.success = false, .error = "hyprdrive:debug frames|mem|motion|identity|activate <class>|tile <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
+        return {.success = false, .error = "hyprdrive:debug frames|mem|motion|identity|activate <class>|movehere <class>|tile <class>|scratchpad|type [text]|press <keycode>|ripple [x y]|gesture <script>|state|stop"};
 
     std::string report = "hyprdrive frames:";
     for (const auto& monitor : State::monitorState()->monitors()) {
