@@ -161,7 +161,7 @@ headless harness, `$XDG_RUNTIME_DIR` is the instance's own `/tmp/hl-<name>/rt`.
 | `hyprdrive-openprof.ab` | if present, the open profiler alternates `render:new_render_scheduling` |
 | `hyprdrive-profile.on` | if present at plugin load, the search profiler writes `hyprdrive-prof.log` (as do `HYPRDRIVE_PROFILE` / `SCROLLOVERVIEW_PROFILE`) |
 | `hyprdrive-stacklog.on` | if present, dock stacks write `hyprdrive-stack.log` |
-| `hyprdrive-mosaic.on` | if present (checked each second), Mosaic writes `hyprdrive-mosaic.log` |
+| `hyprdrive-mosaic.on` | if present (checked each second), Mosaic writes `hyprdrive-mosaic.log`; the overview grid writes `grid` lines there too: every reflow retarget (window, old -> new slot, from where, the frame) and every size change it heard (`pending`, then `adopted` or `rejected`) |
 
 One file lives elsewhere, because it has to outlive a reboot:
 `$XDG_STATE_HOME/hyprdrive/terminate.log` (`~/.local/state/hyprdrive/` without
