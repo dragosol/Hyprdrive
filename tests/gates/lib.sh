@@ -15,6 +15,8 @@
 #   GATE_CONTROL_SO  the build-with-the-bug for gates whose control is a build
 #   GATE_OUT      a directory for this gate's small evidence files (kept on FAIL)
 #   HL_NAME       the rig instance name (default g<gate tag>); always starts with g
+#   RIG_SETTLE    seconds rig_start waits after the start for the load's desktop
+#                 compaction to pass (default 2; see rig_start)
 #
 # Rig rules kept here so no gate can forget them: every compositor command goes
 # through hl.sh (or `hq`, the same hyprctl as user hyprtest pinned to THIS
@@ -66,6 +68,14 @@ rig_start() {
     SIG=$(SU cat "$ST/sig")
     # the path Hyprland loaded (hl.sh stages a copy when hyprtest cannot read $SO)
     if SU test -r "$SO"; then LOADED=$SO; else LOADED=$ST/staged/$(basename "$SO"); fi
+    # The plugin's load reloads the config, and a config reload removes the
+    # empty desktops between (Rows.cpp, FullscreenDesktop::compactSoon) once
+    # it has settled: 700 ms after the reload, which lands up to ~0.5 s after
+    # hl.sh start returns. A gate that goes to desktop 2 before that loses its
+    # empty desktop 1 -- 2 is renumbered 1 and the windows meant for 2 share 1
+    # with the rest (dock_click "2: not the one on desktop 2", overview "b1/a1/a2
+    # on 1/1/1", 2026-11-11). So the setup starts once that has passed.
+    sleep "${RIG_SETTLE:-2}"
 }
 
 # rig_stop -- stops the instance; sets CORES=1 if hl.sh reported a core of it
