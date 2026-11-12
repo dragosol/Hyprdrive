@@ -1180,6 +1180,21 @@ bool pointerHeldByClient() {
     return g_pInputManager && g_pInputManager->isConstrained();
 }
 
+// m_solitaryClient is what the renderer itself branches on (recheckSolitary,
+// once per frame): no second opinion of "fullscreen and opaque" here. The
+// overview resets it while it is up, so the overview's dock is never inert.
+bool notDrawnOn(PHLMONITOR monitor) {
+    return monitor && !monitor->m_solitaryClient.expired();
+}
+
+bool inputInert(PHLMONITOR monitor) {
+    return pointerHeldByClient() || notDrawnOn(monitor);
+}
+
+bool seatHeld() {
+    return g_dockSeatHeld;
+}
+
 void noteRetiled(const PHLWINDOW& window) {
     if (!window)
         return;

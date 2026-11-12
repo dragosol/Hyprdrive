@@ -3,6 +3,7 @@
 #include "WindowPlacement.hpp"
 #include "Workers.hpp"
 #include "TerminateLog.hpp"
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 using namespace PluginDetail;
 
 namespace PluginDetail {
@@ -145,6 +146,9 @@ static CHyprSignalListener g_pDockHoverHook;
 static CHyprSignalListener g_pDockClickHook;
 static CHyprSignalListener g_pDockScrollHook;
 static CHyprSignalListener g_pDockRenderHook;
+static CHyprSignalListener g_pDockStandDownHook;
+// The doLater standDownSoon queued; 0 = none (cancelled at unload).
+static uint32_t            g_dockStandDownSeq = 0;
 static CHyprSignalListener g_pScratchExitRenderHook;
 static CHyprSignalListener g_pMonitorGoneHook;
 static CHyprSignalListener g_pScrollCameraActiveHook;
@@ -404,8 +408,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         // A pointer lock (a game) owns the cursor wherever its lock point sits.
         // Taking the seat here, or cancelling this motion, skips Hyprland's own
         // lock code -- the game lost the mouse whenever its lock point lay over
-        // the pill (Dock::pointerHeldByClient, user 2026-10-19).
-        const bool LOCKED = Hyprdrive::Dock::pointerHeldByClient();
+        // the pill (Dock::pointerHeldByClient, user 2026-10-19). And a dock
+        // that is not drawn (a fullscreen window on the solitary path) is not
+        // there to be on: same stand-down (Dock::notDrawnOn, issue #11).
+        const bool LOCKED = HIT ? Hyprdrive::Dock::inputInert(HIT->first) : Hyprdrive::Dock::pointerHeldByClient();
         // Mosaic's corner resize: the resize cursor over a grabbable corner.
         Hyprdrive::Mosaic::onMove(!HIT || LOCKED || Hyprdrive::Dock::occupiesPointer(HIT->first, HIT->second) || Hyprdrive::Stacks::ownsHover(HIT->first, HIT->second) ||
                                        g_pSessionLockManager->isSessionLocked());
@@ -541,6 +547,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             return;
         }
 
+        // A pointer lock's click, or a click where the dock is not drawn, is
+        // the window's (Dock::inputInert): the pill's ladder below would act on
+        // an icon the user cannot see, or under a game's lock point.
+        if (Hyprdrive::Dock::inputInert(MONITOR))
+            return;
+
         // Desktop never has a window drag in flight, and lets a menu miss through
         // (its menu may have no drawn geometry to hit-test); a let-through miss
         // then falls into the pill ladder, exactly as the overview's own dock does.
@@ -575,7 +587,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             return;
 
         const auto HIT = monitorUnderCursor();
-        if (!HIT || Hyprdrive::Dock::pointerHeldByClient()) // a game's wheel is the game's
+        if (!HIT || Hyprdrive::Dock::inputInert(HIT->first)) // a game's wheel is the game's; so is one over an undrawn dock
             return;
         const auto& [MONITOR, LOCAL] = *HIT;
 
@@ -603,6 +615,28 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         Hyprdrive::Dock::render(MONITOR);
         // A file dragged out of a fan: its icon under the pointer, over the dock.
         Hyprdrive::DockDrop::renderGhost(MONITOR);
+    });
+
+    // THE SEAT GOES BACK WHEN THE DOCK STANDS DOWN, not on the next motion
+    // (issue #11). The pointer resting on the dock holds the seat
+    // (syncPointerFocus); a window that then goes fullscreen on the solitary
+    // path, or takes a pointer lock, leaves it held -- under a lock no motion
+    // ever reaches the dock's test again, so the game had no keyboard and no
+    // mouse until the focus moved. render.preChecks fires for every frame,
+    // direct scanout included (RENDER_BEGIN does not), and is cheap here: two
+    // flags and a pointer compare unless the seat is held. The release itself
+    // runs outside the frame.
+    g_pDockStandDownHook = Event::bus()->m_events.render.preChecks.listen([](PHLMONITOR monitor) {
+        if (g_dockStandDownSeq || !Hyprdrive::Dock::seatHeld() || !g_pEventLoopManager || !Hyprdrive::Dock::inputInert(monitor))
+            return;
+        g_dockStandDownSeq = g_pEventLoopManager->doLater([] {
+            g_dockStandDownSeq = 0;
+            const auto HIT = monitorUnderCursor();
+            if (!Hyprdrive::Dock::seatHeld() || !(HIT ? Hyprdrive::Dock::inputInert(HIT->first) : Hyprdrive::Dock::pointerHeldByClient()))
+                return;
+            Hyprdrive::Dock::releasePointerFocus();
+            setDockCursor(false);
+        });
     });
 
     // The scratchpad's drag-out zone draws at the LAST moment, not with the
@@ -868,6 +902,10 @@ APICALL EXPORT void PLUGIN_EXIT() {
     Hyprdrive::DockDrop::shutdown();
     g_pDockScrollHook.reset();
     g_pDockRenderHook.reset();
+    g_pDockStandDownHook.reset();
+    if (g_pEventLoopManager && g_dockStandDownSeq)
+        g_pEventLoopManager->removeDoLater(g_dockStandDownSeq);
+    g_dockStandDownSeq = 0;
     g_pScratchExitRenderHook.reset();
     g_pMonitorGoneHook.reset();
     g_pScrollCameraActiveHook.reset();
