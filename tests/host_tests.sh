@@ -97,6 +97,8 @@
 #                     trip goes back to its place only if its desktop is unchanged.
 #   trip_sizes_test   TripSizes.hpp: a window's sizes wait between its fullscreen
 #                     change and its trip's move, and only then.
+#   trip_frame_rule_test  TripFrameRule.hpp: when a travelling window's live
+#                     picture is good again (until then: its last good frame).
 #   motion_math_test  MotionMath.hpp: each shared motion function against
 #                     verbatim copies of the definitions it replaced, bit for bit.
 #   plate_color_test  PlateColor.hpp: a ringed plate's body fades backdrop ->
@@ -247,6 +249,7 @@ run submap_borrow_test tests/unit/submap_borrow_test.cpp
 run hover_target_test tests/unit/hover_target_test.cpp
 run mosaic_trip_hold_test tests/unit/mosaic_trip_hold_test.cpp
 run trip_sizes_test tests/unit/trip_sizes_test.cpp
+run trip_frame_rule_test tests/unit/trip_frame_rule_test.cpp
 # shellcheck disable=SC2046
 run builtin_icons_test tests/unit/builtin_icons_test.cpp src/apps/BuiltinIcons.cpp --embed-dir=. $(pkg-config --cflags --libs librsvg-2.0)
 # shellcheck disable=SC2046
