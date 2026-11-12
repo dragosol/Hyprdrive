@@ -10,7 +10,8 @@
 # (general:col.active_border rgb(ff2000), border_size 4), grim crops as fast
 # as the rig gives them (~50/s). Per frame the plate is found as the pill-shaped
 # blob of accent-tinted pixels and its body (the middle third, text excluded)
-# is measured as accent chroma R - (G+B)/2.
+# is measured as accent chroma R - (G+B)/2. Only the band above the hovered
+# icon's cell is searched: on Omarchy that cell is accent-tinted at rest.
 # Asserts:
 #   1. the plate was filmed: some frame shows it, and it settles (chroma of the
 #      settled body > 10, i.e. the 10% accent the design keeps)
@@ -19,7 +20,9 @@
 #   3. exit: the same for the fade-out
 # Control (--control --control-so <a4d6892's build, the ring rect under the
 # body>): 2 and 3 fail (body chroma ~64 against a settled ~24). Recorded
-# 2026-11-11 on a4d6892: control FAILS as it must.
+# 2026-11-11 on a4d6892: control FAILS as it must. Omarchy: control = the
+# parent of "a ringed plate fades as one surface" (entrance peak 64.4 against
+# a settled 24.1, exit 64.9); the fixed build peaks at 24.1 against 23.1.
 source "$(dirname "$0")/lib.sh"
 gate_begin tfl
 control_build "a build that draws the label ring under the body (a4d6892)"
@@ -33,6 +36,11 @@ ICON=$(dbg dockmenu | grep -o 'icon appa [-0-9,]* [0-9x]*' | awk '{print $3, $4}
 set -- $(echo "$ICON" | tr ',x' '  '); IX=$(( $1 + $3 / 2 )); IY=$(( $2 + $4 / 2 ))
 # the band above the icon the plate (and the hover pane under it) occupies
 GX=$(( IX - 150 )); GY=$(( IY - 300 )); [ $GY -lt 0 ] && GY=0
+# Rows from CUT down are the hovered icon's cell (the icon less its 6 px hover
+# halo, and 2 px to spare). Omarchy tints that cell in the accent (22%, X56)
+# from the first hovered frame: a pill-shaped accent blob the plate finder
+# took for the tooltip while the plate itself was still too faint to find.
+CUT=$(( $2 - 8 - GY ))
 $R ptr move 960 300 >/dev/null; sleep 1.5
 
 # film NAME MS STEP -- STEP in the background, grim crops into $ST/burst/NAME_<ms>.png
@@ -53,7 +61,7 @@ from PIL import Image
 from scipy import ndimage
 vals = []
 for f in sorted(glob.glob(sys.argv[1] + "_*.png")):
-    a = np.asarray(Image.open(f).convert("RGB"), float)
+    a = np.asarray(Image.open(f).convert("RGB"), float)[: int(sys.argv[2])]
     ch = a[:, :, 0] - (a[:, :, 1] + a[:, :, 2]) / 2
     lab, n = ndimage.label(ch > 12)
     best = None
@@ -71,7 +79,7 @@ seen = [v for v in vals if v is not None]
 first = vals[0] if vals and vals[0] is not None else 0.0
 last = vals[-1] if vals and vals[-1] is not None else 0.0
 print("%.1f %.1f %.1f %d" % (first, max(seen) if seen else 0.0, last, len(vals)))
-' "$ST/burst/$1"
+' "$ST/burst/$1" "$CUT"
 }
 
 film in 2400 "move $IX $IY"; sleep 1
