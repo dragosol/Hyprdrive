@@ -16,7 +16,8 @@
 #               build with the bug via --control-so): PASS then means
 #               "the control failed as it must", FAIL means the gate is blind.
 #   --control-so PATH  the build with the bug, for the gates whose control is a
-#               build (fs_move_close, display_compact, x11_state: 8bb258c); without
+#               build (fs_move_close, display_compact, x11_state: 8bb258c;
+#               overview_rest: a4d6892); without
 #               it those gates SKIP in a --control run
 #   --keep      keep every gate's log (default: only those that did not PASS)
 #   --list      the gates and the first line of their header
