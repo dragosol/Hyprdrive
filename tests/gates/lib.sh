@@ -31,7 +31,7 @@ ROOT=$(cd "$GATES_DIR/../.." && pwd)
 R=$ROOT/tests/rig/headless/hl.sh
 SO=${GATE_SO:-$ROOT/hyprdrive.so}
 CONTROL=${GATE_CONTROL:-0}
-K="kitty -o remember_window_size=no -o initial_window_width=900 -o initial_window_height=600"
+K="kitty -o cursor_blink_interval=0 -o remember_window_size=no -o initial_window_width=900 -o initial_window_height=600"
 SU() { sudo -n -u hyprtest "$@"; }
 
 _fails=0; _known=0; _checks=0; _first_fail=; _first_known=; _started=0; _skips=
@@ -161,13 +161,13 @@ cfg() { ev "hl.config($*)"; }
 # kw CLASS [W H] -- a kitty fixture of an explicit size; waits until it is mapped
 kw() {
     local w=${2:-900} h=${3:-600} n0; n0=$(nclients)
-    $R win kitty -o remember_window_size=no -o initial_window_width="$w" -o initial_window_height="$h" --class "$1" >/dev/null
+    $R win kitty -o cursor_blink_interval=0 -o remember_window_size=no -o initial_window_width="$w" -o initial_window_height="$h" --class "$1" >/dev/null
     wait_for 5 "[ \$(J clients | jq '[.[] | select(.class == \"$1\")] | length') -ge 1 ]" || echo "warn: $1 never mapped"
 }
 # kexec CLASS [W H] -- the same, launched by the compositor (hl.dsp.exec_cmd), as an app would open it
 kexec() {
     local w=${2:-900} h=${3:-600}
-    ev "hl.dispatch(hl.dsp.exec_cmd(\"kitty -o remember_window_size=no -o initial_window_width=$w -o initial_window_height=$h --class $1\"))"
+    ev "hl.dispatch(hl.dsp.exec_cmd(\"kitty -o cursor_blink_interval=0 -o remember_window_size=no -o initial_window_width=$w -o initial_window_height=$h --class $1\"))"
     wait_for 5 "[ -n \"\$(addr_of $1)\" ]" || echo "warn: $1 never mapped"
 }
 
