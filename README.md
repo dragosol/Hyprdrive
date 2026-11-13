@@ -63,6 +63,13 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
 - On a scrolling-layout desktop, the 3-finger swipe first scrolls that
   desktop's windows, then carries on into the next or previous desktop past
   either end.
+- **Window order** (`overview_tile_order`): tiles go by last used (the
+  default), by the order the windows were opened, or laid out to match where
+  the windows sit on the desktop. The order holds still while the overview is
+  open.
+- **Keys act on what you point at:** Super+F, Super+T and the other window
+  shortcuts act on the hovered tile, and on a hovered window preview in the
+  dock.
 - **Hot corner** (off by default): rest the pointer in a screen corner to open
   the overview, and again to close it. Pick the corner and the delay; an
   optional ripple runs across the screen.
@@ -83,6 +90,14 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
 - Desktop changes made by a key and those made by focus moving to another
   desktop can each be made instant (`animation:desktop_keyboard`,
   `animation:desktop_focus`).
+- **Fullscreen gets its own desktop:** a window that goes fullscreen from a
+  desktop it shares moves to a desktop of its own beside it, and comes home
+  when it leaves fullscreen or closes. Moving a window onto a desktop with a
+  fullscreen app takes that app out of fullscreen. A plugin reload keeps
+  fullscreen windows fullscreen.
+- **No stray empty desktops:** when monitors, scale or layout change, the empty
+  desktops in between are removed and the later ones move down.
+- **Wine, Proton and Steam** windows show their real name and icon.
 - **Show desktop:** Super+D slides every window on the desktop off the screen,
   each by its nearest edge, and brings them back on a second press -- at any
   point, even halfway, where they turn round on the same spring. Nothing is
@@ -115,6 +130,15 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
 - **Minimize and restore** fly into the icon and back out, motion-blurred.
 - **Right-click** an app for its windows, its desktop actions and moving its
   windows to another desktop.
+- **Out of the way of fullscreen apps:** by default the dock keeps away from
+  fullscreen games and the screensaver, and it never takes the keyboard or the
+  mouse from a game. Settings > Dock > Visibility has "Hide dock over all
+  fullscreen windows" (`dock:hide_over_fullscreen`, off) and "Keep it away
+  from games and the screensaver" (`dock:hide_over_games`, on). For one app,
+  right-click its icon > Get Info > Hide Dock in Fullscreen.
+- **Open maximized or fullscreen:** an app's right-click menu can open it
+  maximized, fullscreen, or always in fullscreen. Window previews have their
+  own right-click menu and a close button.
 - **Stacks**, in the macOS style. A pinned folder shows its newest files as a
   pile. Click it and they fan out, or they open in a searchable grid when a fan
   would not fit. Space previews the hovered item through GNOME Sushi. Drop
