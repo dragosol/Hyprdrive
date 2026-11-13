@@ -9,7 +9,7 @@ the part named, not all of the row. "Not covered" says why.
 Run all: `make gates` (or `tests/gates/run.sh`). Each gate's header comment
 lists its asserts and the control that makes it fail.
 
-Covered: **36 of 75** rows (29 fully, 7 partly); 39 not covered, each with its reason.
+Covered: **37 of 76** rows (30 fully, 7 partly); 39 not covered, each with its reason.
 
 ## Mosaic (pure)
 
@@ -54,6 +54,7 @@ Covered: **36 of 75** rows (29 fully, 7 partly); 39 not covered, each with its r
 | Defaults "all directions" + "zoom out to every window" [10-27] | not covered: config defaults are host-tested (`tests/config_defaults_test.py`) |
 | Focusing pans into view with the curve; hover pans; cursor carried ON PURPOSE; a pan never turns instant [10-26, 11-01] | not covered: motion over time; needs filmed frames |
 | Zoomed out (Super held): hover selects, labels, drag, W closes, screenshots, swipes and Super+scroll switch desktops, edge-push to the next actual desktop [10-27..11-01] | not covered: needs Super held across pointer motion plus pixel checks; next batch for "W closes without leaving zoom" |
+| Zoomed out by the fingers (3-finger down): a desktop swipe past half lands on the next desktop, one called back leaves every window where it was drawn [11-09, 11-13] | `canvas_zoom_swipe` |
 | Super+scroll does not pan; panning past the last window changes desktop [10-26, 10-30] | not covered: next batch (`ptr scroll` with Super held) |
 | Overhanging windows slide with the switch; no gap between desktops in overview [10-29..11-02] | not covered: motion/pixels during a switch |
 | Push-through at an edge: light push = dock only, harder = moves on; no focus under the dock zone [11-09] | not covered: `ptr rel` pushes can drive it; thresholds are tuned values, next batch |
