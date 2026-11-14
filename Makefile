@@ -102,6 +102,7 @@ check: hyprdrive.so
 	python3 tests/manifest_check.py
 	python3 tests/schema_keys_test.py
 	python3 tests/config_defaults_test.py
+	bash tests/install_order_test.sh
 	python3 tests/private_modes_test.py
 	python3 tests/hdicons_test.py
 	python3 tests/settings_app_test.py
@@ -159,10 +160,11 @@ install: hyprdrive.so check
 # The build's own hyprdrive.so is left as it is.
 install-only:
 	@[ -s hyprdrive.so ] || { echo "install-only: no hyprdrive.so -- run make (build + check) first" >&2; exit 1; }
-	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/hyprdrive.so
+	install -Dm755 hyprdrive.so $(PREFIX)/lib/hyprdrive/.hyprdrive.so.new
 ifeq ($(KEEP_DEBUG),)
-	strip --strip-debug $(PREFIX)/lib/hyprdrive/hyprdrive.so
+	strip --strip-debug $(PREFIX)/lib/hyprdrive/.hyprdrive.so.new
 endif
+	mv -f $(PREFIX)/lib/hyprdrive/.hyprdrive.so.new $(PREFIX)/lib/hyprdrive/hyprdrive.so
 	install -Dm644 assets/scratchpad-symbolic.svg $(PREFIX)/lib/hyprdrive/scratchpad-symbolic.svg
 	install -Dm755 ui/bin/agent-run $(PREFIX)/lib/hyprdrive/agent-run
 	PREFIX="$(PREFIX)" bash scripts/install-fragments.sh

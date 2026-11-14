@@ -398,6 +398,9 @@ namespace Hyprdrive::DesktopSwitch {
         g_axis = Event::bus()->m_events.input.mouse.axis.listen([](IPointer::SAxisEvent e, Event::SCallbackInfo& info) {
             if (e.source != WL_POINTER_AXIS_SOURCE_WHEEL || e.axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
                 return;
+            // Locked: the wheel switches nothing at the lock screen.
+            if (g_pSessionLockManager && g_pSessionLockManager->isSessionLocked())
+                return;
             const int V120 = e.deltaDiscrete != 0 ? sc<int>(e.deltaDiscrete) : sc<int>(std::lround(e.delta * 8.0));
             // THE WHEEL MOVES THE ROW (DesktopStrip.hpp; user, 2026-11-02: "if
             // I do two ticks it needs to be able to quickly go through two

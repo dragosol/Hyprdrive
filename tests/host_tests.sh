@@ -265,6 +265,7 @@ run app_info_test tests/unit/app_info_test.cpp src/apps/AppInfo.cpp src/core/Wor
 run icon_score_test tests/unit/icon_score_test.cpp
 # shellcheck disable=SC2046
 run icon_size_test tests/unit/icon_size_test.cpp $(pkg-config --cflags --libs cairo)
+run image_guard_test tests/unit/image_guard_test.cpp
 # shellcheck disable=SC2046
 run thumbs_test tests/unit/thumbs_test.cpp src/stacks/Thumbs.cpp src/core/Workers.cpp -DTHUMBS_SETTLE_MS=250 -pthread $(pkg-config --cflags --libs glib-2.0)
 run integration_test tests/unit/integration_test.cpp
