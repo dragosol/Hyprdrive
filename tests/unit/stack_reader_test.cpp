@@ -93,6 +93,31 @@ int main() {
     Hyprdrive::StackReader::drainInotify();
     Hyprdrive::StackReader::watch({PIN.string()});
     check(settled(PIN.string(), 1), "re-pinned folder lists the file that arrived while unpinned");
+
+    // H2. AT THE INOTIFY LIMIT (2026-11-14: fedora's user held all 128
+    // instances, and H1 failed every install there). With no watch at all a
+    // pinned folder is still read afresh on a re-pin, and a file that lands
+    // while it is pinned shows once the listing has aged out.
+    Hyprdrive::StackReader::watch({});
+    Hyprdrive::StackReader::disableInotifyForTest();
+    const auto BARE = DIR / "unwatched";
+    fs::create_directories(BARE);
+    Hyprdrive::StackReader::watch({BARE.string()});
+    check(Hyprdrive::StackReader::inotifyFd() < 0, "the limit stand-in leaves no inotify instance");
+    check(settled(BARE.string(), 0), "no watch: the pinned empty folder lists 0");
+    Hyprdrive::StackReader::watch({});
+    std::ofstream(BARE / "u1.txt") << "u";
+    Hyprdrive::StackReader::watch({BARE.string()});
+    check(settled(BARE.string(), 1), "no watch: a re-pinned folder lists the file that arrived while unpinned");
+    std::ofstream(BARE / "u2.txt") << "u";
+    bool aged = false;
+    for (int i = 0; i < 60 && !aged; ++i) {
+        const auto LS = Hyprdrive::StackReader::listing(BARE.string());
+        aged          = LS.ready && LS.entries.size() == 2;
+        if (!aged)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    check(aged, "no watch: a file that lands while pinned shows after the listing ages out");
     Hyprdrive::StackReader::shutdown();
 
     fs::remove_all(DIR);
