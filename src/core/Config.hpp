@@ -245,6 +245,7 @@ CHyprColor    highlightForeground();
 int           themeRounding();
 float         themeRoundingPower();
 const std::string& themeFontFamily();
+float         themeTextScale(); // 1 = Hyprdrive's own sizes; Omarchy's [font] base-size / 12 (TextScale.hpp)
 const std::string& glyphFontSetting();
 CHyprColor    dockIndicatorColor();
 CHyprColor    cpuPulseColor(); // dock:cpu_pulse_color, what a busy app's dots pulse to

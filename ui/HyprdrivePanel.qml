@@ -207,6 +207,7 @@ Item {
     case "cpuPulseOn": return kb("plugin:hyprdrive:dock:cpu_pulse")
     case "broken": return false // a feature that is in but not working: shown, never switchable
     case "hotCornerOn": return kb("plugin:hyprdrive:hot_corner:enabled")
+    case "textCustom": return String(k("plugin:hyprdrive:general:text_size")) === "custom"
     case "swapOn": return kb("plugin:hyprdrive:drag:hold_to_swap")
     case "stripOn": return kb("plugin:hyprdrive:strip")
     case "isolateOvApplies": return !kb("plugin:hyprdrive:dock:isolate_workspaces")
