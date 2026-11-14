@@ -97,6 +97,12 @@ others 8; insist 9; float_first mosaic # 8: seven windows still fit on the rig's
 $H tap Super+T; sleep 0.8; S1=$(state); sleep 4.5; C1=$(canvas)
 check "infinite canvas: Super+T tiles it at its own size" "$([ "$S1" = '362x677 TILED' ] && echo 1)" "$S1"
 check "infinite canvas: no configure storm" "$([ "$(storm 3 6)" -le 5 ] && echo 1)" "$(storm 3 6)/s"
+# What was measured, for a failure's log: this check failed four runs in a row
+# while a game held the GPU (2026-11-13) and never without one.
+[ "$(set -- $C1; echo "$2")" = 0 ] || $H h clients -j | python3 -c "
+import json,sys
+for c in sorted(json.load(sys.stdin), key=lambda c: c['class']):
+    print('     ', c['class'], c['at'], c['size'], 'float' if c['floating'] else 'tiled')"
 check "infinite canvas: its windows spill past the screen, none on another" "$(set -- $C1; [ "$1" -ge 1 ] && [ "$2" = 0 ] && [ "$3" = 8 ] && echo 1)" "past, overlapping, tiled: $C1"
 $H eval 'hl.config({misc={size_limits_tiled=true}, general={gaps_workspaces=0}})' >/dev/null; sleep 1.2; C2=$(canvas)
 check "control: misc:size_limits_tiled piles them up (20-layout.lua's mistake)" "$(set -- $C2; [ "$2" -ge 1 ] && echo 1)" "past, overlapping, tiled: $C2"
