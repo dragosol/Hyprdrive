@@ -292,8 +292,22 @@ locally rather than downloaded.
 
 ### From source (recommended)
 
+Each Hyprland version has its own branch, and the build stops if the branch
+does not match the Hyprland you have:
+
+| Hyprland | Branch            | Release tags  |
+|----------|-------------------|---------------|
+| 0.56     | `hyprland-native` | `vX.Y.Z`      |
+| 0.57     | `hyprland-0.57`   | `vX.Y.Z-hl57` |
+
+The clone below picks the branch from `Hyprland --version`:
+
 ```bash
-git clone -b hyprland-native https://github.com/dragosol/Hyprdrive.git ~/Projects/Hyprdrive
+case $(Hyprland --version | grep -o 'Hyprland 0\.[0-9]*') in
+  "Hyprland 0.57") BRANCH=hyprland-0.57 ;;
+  *) BRANCH=hyprland-native ;;
+esac
+git clone -b $BRANCH https://github.com/dragosol/Hyprdrive.git ~/Projects/Hyprdrive
 cd ~/Projects/Hyprdrive
 make install PREFIX=~/.local
 hyprctl plugin load ~/.local/lib/hyprdrive/hyprdrive.so
@@ -324,7 +338,8 @@ before changing anything, then checks that release out in your checkout,
 builds it from scratch (`make clean && make install`) and reloads the plugin.
 The settings show **Update available!** beside the version when there is one;
 clicking it runs the same update in your terminal. `hyprdrive update --check`
-only reports. By hand, in your checkout:
+only reports. After a Hyprland upgrade (0.56 to 0.57, or back) it installs the
+newest release of the matching branch. By hand, in your checkout:
 
 ```bash
 git pull

@@ -11,6 +11,9 @@ CXX ?= g++
 # whose pkgconfig dir comes back here. Not for the goals that compile nothing.
 ifneq ($(if $(MAKECMDGOALS),$(filter-out install-only uninstall clean,$(MAKECMDGOALS)),all),)
 HYPRLAND_SDK_PC := $(shell bash scripts/prereqs.sh --make)
+ifeq ($(.SHELLSTATUS),3)
+$(error This checkout is for another Hyprland version (see above))
+endif
 ifneq ($(.SHELLSTATUS),0)
 $(error Hyprdrive cannot be built until the prerequisites above are installed)
 endif

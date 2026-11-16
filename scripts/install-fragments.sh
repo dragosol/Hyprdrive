@@ -124,7 +124,8 @@ echo "cli: $PREFIX/bin/hyprdrive-integration"
 
 # `hyprdrive update` (ui/bin/hyprdrive): on PATH, and beside hdpanel
 # in lib/ where the settings app finds it. It reads what was installed, and from
-# where, in install.json -- the version, this checkout, PREFIX.
+# where, in install.json -- the version, this checkout, PREFIX, and the
+# Hyprland minor it is built for (HYPRLAND_VERSION: its release line).
 install -Dm755 "$ROOT/ui/bin/hyprdrive" "$LIBDIR/hyprdrive"
 rm -f "$PREFIX/bin/hyprdrive"
 ln -s ../lib/hyprdrive/hyprdrive "$PREFIX/bin/hyprdrive"
@@ -134,8 +135,13 @@ root, prefix = sys.argv[1:3]
 state = pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state") / "hyprdrive"
 state.mkdir(parents=True, exist_ok=True)
 version = json.loads((pathlib.Path(root) / "manifest.json").read_text()).get("version", "")
+record = {"version": version, "source": root, "prefix": prefix}
+try:
+    record["hyprland"] = (pathlib.Path(root) / "HYPRLAND_VERSION").read_text().strip()
+except OSError:
+    pass
 tmp = state / "install.json.tmp"
-tmp.write_text(json.dumps({"version": version, "source": root, "prefix": prefix}) + "\n")
+tmp.write_text(json.dumps(record) + "\n")
 tmp.replace(state / "install.json")
 PY
 echo "cli: $PREFIX/bin/hyprdrive (hyprdrive update)"

@@ -23,7 +23,8 @@
 #   prereqs.sh --pc-path  only print that dir; never installs anything
 #   prereqs.sh --dry-run  say what would be installed or built, change nothing
 # HYPRLAND_BIN picks the Hyprland to build for; HYPRDRIVE_PREREQS=0 skips the
-# whole check (a packager's build root).
+# whole check (a packager's build root). Exit 3: this checkout's HYPRLAND_VERSION
+# is another Hyprland minor than the one installed (it names the branch to use).
 set -uo pipefail
 
 MODE=run YES=${HYPRDRIVE_YES:-0} DRY=0
@@ -68,6 +69,28 @@ if [ "$MODE" = pc ]; then
 fi
 [ -n "$HYPR" ] || die "Hyprland is not installed (no Hyprland on PATH): install it first."
 [ -n "$HVER" ] || die "$HYPR --version-json said nothing usable."
+
+# ---- the release line ---------------------------------------------------------
+# A checkout builds for ONE Hyprland minor, the one in its HYPRLAND_VERSION;
+# each minor has its own branch (ui/bin/hyprdrive's LINES). Built against
+# another Hyprland it fails, or does not load, so it stops here (exit 3).
+minor() { printf '%s\n' "$1" | sed -n 's/^\([0-9]\{1,4\}\)\.\([0-9]\{1,4\}\).*/\1.\2/p' | head -n 1; }
+WANT=$(minor "$HVER")
+HAVE=$(minor "$(cat "$HERE/HYPRLAND_VERSION" 2>/dev/null)")
+if [ -n "$WANT" ] && [ -n "$HAVE" ] && [ "$WANT" != "$HAVE" ]; then
+    FLAVOR=native
+    grep -q '^FLAVOR = "omarchy"' "$HERE/ui/bin/hyprdrive" 2>/dev/null && FLAVOR=omarchy
+    case $WANT in
+        0.56) [ $FLAVOR = omarchy ] && BR=new-release || BR=hyprland-native ;;
+        0.57) BR=hyprland-0.57 ;;
+        *) say "this checkout is for Hyprland $HAVE, and yours is $HVER: Hyprdrive does not support Hyprland $WANT yet."
+           exit 3 ;;
+    esac
+    say "this checkout is for Hyprland $HAVE, and yours is $HVER: build the $BR branch instead."
+    [ -e "$HERE/.git" ] && say "  cd $HERE && git fetch origin && git checkout $BR"
+    say "  or: hyprdrive update"
+    exit 3
+fi
 
 # ---- what is missing ------------------------------------------------------------
 PM=""
