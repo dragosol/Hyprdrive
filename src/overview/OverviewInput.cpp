@@ -851,9 +851,9 @@ void COverview::onWorkspaceLifecycle(PHLWORKSPACEREF) {
 // killactive/closewindow, or a Lua bind whose description says it closes a
 // window ("Close all windows" is not one) -- and SUPER+W only when the user has
 // no close bind and SUPER+W is not theirs for something else.
-static bool isOverviewCloseChord(xkb_keysym_t keysym, uint32_t mods) {
-    const bool SUPERW = (keysym == XKB_KEY_w || keysym == XKB_KEY_W) && mods == HL_MODIFIER_META;
-    if (Hyprdrive::Integration::omarchy() || !g_pKeybindManager)
+static bool isOverviewCloseChord(xkb_keysym_t keysym, Input::ModifierMask mods) {
+    const bool SUPERW = (keysym == XKB_KEY_w || keysym == XKB_KEY_W) && mods == Input::ModifierMask{HL_MODIFIER_META};
+    if (Hyprdrive::Integration::omarchy() || !Keybinds::mgr())
         return SUPERW;
     const auto LOWER = [](std::string t) {
         std::ranges::transform(t, t.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -861,18 +861,19 @@ static bool isOverviewCloseChord(xkb_keysym_t keysym, uint32_t mods) {
     };
     bool anyClose = false, superWTaken = false;
     const xkb_keysym_t WANT = xkb_keysym_to_lower(keysym);
-    for (const auto& k : g_pKeybindManager->m_keybinds) {
-        if (!k || !k->enabled || k->mouse || k->release || !k->submap.name.empty() || k->key.empty())
+    for (const auto& k : Keybinds::mgr()->registry().binds()) {
+        if (!k || !k->enabled() || k->hasFlag(Keybinds::BIND_FLAG_MOUSE) || k->hasFlag(Keybinds::BIND_FLAG_RELEASE) || !k->metadata().submap.empty() || k->keyNames().size() != 1)
             continue;
-        const xkb_keysym_t SYM  = xkb_keysym_to_lower(xkb_keysym_from_name(k->key.c_str(), XKB_KEYSYM_CASE_INSENSITIVE));
-        const auto         DESC = LOWER(k->description);
-        const bool CLOSE = k->handler == "killactive" || k->handler == "closewindow" ||
-            (k->handler == "__lua" && DESC.find("close") != std::string::npos && DESC.find("window") != std::string::npos && DESC.find("all") == std::string::npos);
+        const xkb_keysym_t SYM  = xkb_keysym_to_lower(xkb_keysym_from_name(k->keyNames()[0].c_str(), XKB_KEYSYM_CASE_INSENSITIVE));
+        const auto         DESC = LOWER(k->metadata().description.value_or(""));
+        const auto&        HANDLER = k->metadata().handler;
+        const bool CLOSE = HANDLER == "HL.Dispatcher(close)" || HANDLER == "HL.Dispatcher(kill)" ||
+            (HANDLER.starts_with("function:") && DESC.find("close") != std::string::npos && DESC.find("window") != std::string::npos && DESC.find("all") == std::string::npos);
         if (CLOSE) {
             anyClose = true;
-            if (k->modmask == mods && SYM == WANT)
+            if (k->modifierMask() == mods && SYM == WANT)
                 return true;
-        } else if (k->modmask == HL_MODIFIER_META && SYM == XKB_KEY_w)
+        } else if (k->modifierMask() == Input::ModifierMask{HL_MODIFIER_META} && SYM == XKB_KEY_w)
             superWTaken = true;
     }
     return !anyClose && !superWTaken && SUPERW;
@@ -896,22 +897,22 @@ void COverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallbackInfo& 
 
         const auto KEYSYM = getOverviewKeysym(event);
         const auto MODS   = g_pInputManager->getModsFromAllKBs() & ~(HL_MODIFIER_CAPS | HL_MODIFIER_MOD2);
-        const bool SHIFT_PRESSED = (MODS & HL_MODIFIER_SHIFT) != 0;
+        const bool SHIFT_PRESSED = bool(MODS & HL_MODIFIER_SHIFT);
         const auto BASE_MODS     = MODS & ~HL_MODIFIER_SHIFT;
 
         if ((KEYSYM == XKB_KEY_Left || KEYSYM == XKB_KEY_KP_Left || KEYSYM == XKB_KEY_Right ||
              KEYSYM == XKB_KEY_KP_Right || KEYSYM == XKB_KEY_Up || KEYSYM == XKB_KEY_KP_Up || KEYSYM == XKB_KEY_Down || KEYSYM == XKB_KEY_KP_Down) &&
-            MODS != 0)
+            bool(MODS))
             return;
 
-        if ((KEYSYM == XKB_KEY_Return || KEYSYM == XKB_KEY_KP_Enter) && BASE_MODS != 0)
+        if ((KEYSYM == XKB_KEY_Return || KEYSYM == XKB_KEY_KP_Enter) && bool(BASE_MODS))
             return;
 
         // Tab is the pane cycle only as a plain key (Shift+Tab included). A
         // chord -- SUPER+TAB is the README's suggested overview toggle -- is the
         // user's bind (borrowed into the submap, see borrowGlobalPassthroughBinds and SubmapBorrow.hpp);
         // taking it as a plain Tab cycled panes instead of closing (O5).
-        if ((KEYSYM == XKB_KEY_Tab || KEYSYM == XKB_KEY_ISO_Left_Tab) && BASE_MODS != 0)
+        if ((KEYSYM == XKB_KEY_Tab || KEYSYM == XKB_KEY_ISO_Left_Tab) && bool(BASE_MODS))
             return;
 
         // SUPER+W CLOSES THE HIGHLIGHTED TILE (user, 2026-09-23) -- on native,

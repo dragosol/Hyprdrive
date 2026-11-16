@@ -81,7 +81,7 @@ CBox COverview::tileBox(const PHLWINDOW& window) const {
     const WORKSPACEID HOME         = overviewGridHomeWorkspace(window);
     size_t            workspaceIdx = images.size();
     for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i] && images[i]->pWorkspace && images[i]->Hyprdrive::Compat::id(pWorkspace) == HOME) {
+        if (images[i] && images[i]->pWorkspace && Hyprdrive::Compat::id(images[i]->pWorkspace) == HOME) {
             workspaceIdx = i;
             break;
         }
@@ -108,7 +108,7 @@ CBox COverview::overviewBoxForGlobal(WORKSPACEID workspaceId, const CBox& global
 
     size_t workspaceIdx = images.size();
     for (size_t i = 0; i < images.size(); ++i) {
-        if (images[i] && images[i]->pWorkspace && images[i]->Hyprdrive::Compat::id(pWorkspace) == workspaceId) {
+        if (images[i] && images[i]->pWorkspace && Hyprdrive::Compat::id(images[i]->pWorkspace) == workspaceId) {
             workspaceIdx = i;
             break;
         }
@@ -752,8 +752,8 @@ PHLWINDOW COverview::actionTile() {
 // `window close` closed the window that was focused when the overview opened,
 // not the one hovered.
 bool COverview::windowDispatcherAction(const std::string& action) {
-    const auto CURRENTKEYBIND = g_pKeybindManager ? g_pKeybindManager->m_currentKeybind : SP<SKeybind>{};
-    const bool FROMMOUSEBIND  = CURRENTKEYBIND && CURRENTKEYBIND->key.starts_with("mouse:");
+    const auto CURRENTKEYBIND = Hyprdrive::Compat::currentBind();
+    const bool FROMMOUSEBIND  = CURRENTKEYBIND && !CURRENTKEYBIND->keyNames().empty() && CURRENTKEYBIND->keyNames()[0].starts_with("mouse:");
 
     // A mouse bind is the pointer's by definition, even right after the arrows.
     size_t    workspaceIdx = viewportCurrentWorkspace;
