@@ -10,6 +10,7 @@
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include "HyprCompat.hpp"
 #include <hyprland/src/desktop/state/WindowState.hpp>
+#include <hyprland/src/render/scene/SceneSelection.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/managers/input/UnifiedWorkspaceSwipeGesture.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
@@ -377,7 +378,7 @@ namespace Hyprdrive::DesktopStrip {
     // away; a real switch has its destination on top from its first frame.
     namespace {
         CFunctionHook* g_stackHook = nullptr;
-        using origRenderWorkspaceWindows = void (*)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&);
+        using origRenderWorkspaceWindows = void (*)(void*, Render::CRenderContext&, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, Render::eSceneMode);
 
         struct SStack {
             PHLMONITORREF                mon;
@@ -402,10 +403,10 @@ namespace Hyprdrive::DesktopStrip {
             return D - Mosaic::slideOverhang(ws, mon, -1, XAX) < SIZE && D + SIZE + Mosaic::slideOverhang(ws, mon, +1, XAX) > 0;
         }
 
-        void hkRenderWorkspaceWindows(void* self, PHLMONITOR mon, PHLWORKSPACE ws, const Time::steady_tp& time) {
+        void hkRenderWorkspaceWindows(void* self, Render::CRenderContext& ctx, PHLMONITOR mon, PHLWORKSPACE ws, const Time::steady_tp& time, Render::eSceneMode mode) {
             const auto ORIGINAL = rc<origRenderWorkspaceWindows>(g_stackHook->m_original);
-            if (!mon || !ws || Hyprdrive::Compat::isSpecial(ws)) {
-                ORIGINAL(self, mon, ws, time);
+            if (!mon || !ws || Hyprdrive::Compat::isSpecial(ws) || mode != Render::eSceneMode::MONITOR) {
+                ORIGINAL(self, ctx, mon, ws, time, mode);
                 return;
             }
             std::erase_if(g_stacks, [](const SStack& s) { return !s.mon.lock(); });
@@ -425,7 +426,7 @@ namespace Hyprdrive::DesktopStrip {
             if (shown.size() < 2) {
                 if (IT != g_stacks.end())
                     g_stacks.erase(IT); // one desktop again: the next switch starts afresh
-                ORIGINAL(self, mon, ws, time);
+                ORIGINAL(self, ctx, mon, ws, time, mode);
                 return;
             }
             if (IT == g_stacks.end())
@@ -460,7 +461,7 @@ namespace Hyprdrive::DesktopStrip {
                     ORDER.insert(ORDER.begin(), PHLWORKSPACEREF{WS});
             }
             if (ORDER.size() < 2) {
-                ORIGINAL(self, mon, ws, time);
+                ORIGINAL(self, ctx, mon, ws, time, mode);
                 return;
             }
 
@@ -476,7 +477,7 @@ namespace Hyprdrive::DesktopStrip {
             auto&      list  = const_cast<std::vector<PHLWINDOW>&>(Desktop::windowState()->windows());
             const auto SAVED = list;
             std::ranges::stable_sort(list, {}, RANK);
-            ORIGINAL(self, mon, ws, time);
+            ORIGINAL(self, ctx, mon, ws, time, mode);
             if (list.size() == SAVED.size())
                 list = SAVED;
         }
@@ -614,9 +615,11 @@ namespace Hyprdrive::DesktopStrip {
         g_row = std::move(row);
         g_go  = std::move(go);
         // Not fatal when missing: desktops then stack in Hyprland's order.
-        // The first match whose signature is renderWorkspaceWindows( -- not
-        // renderWorkspaceWindowsFullscreen.
-        g_stackHook = FunctionHooks::firstMatch("DesktopStrip", "renderWorkspaceWindows", rc<void*>(hkRenderWorkspaceWindows), "renderWorkspaceWindows(");
+        // 0.57: the overload with the scene mode -- the one renderAllClientsForWorkspace
+        // calls (the 4-argument one only forwards to it), not renderWorkspaceWindowsFullscreen.
+        g_stackHook = FunctionHooks::firstMatch("DesktopStrip",
+            "_ZN6Render13IHyprRenderer22renderWorkspaceWindowsERNS_14CRenderContextEN9Hyprutils6Memory14CSharedPointerIN7Monitor8CMonitorEEENS5_IN9Workspace12CHLWorkspaceEEERKNSt6chrono10time_pointINSC_3_V212steady_clockENSC_8durationIlSt5ratioILl1ELl1000000000EEEEEENS_10eSceneModeE",
+            rc<void*>(hkRenderWorkspaceWindows));
         if (g_stackHook && !g_stackHook->hook())
             g_stackHook = nullptr;
     }

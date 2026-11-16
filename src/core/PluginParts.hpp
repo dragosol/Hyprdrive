@@ -192,7 +192,7 @@ namespace PluginDetail {
     extern void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e);
     extern void hkOnMouseButton(void* thisptr, IPointer::SButtonEvent e, SP<IPointer> pointer);
     extern void hkScheduleFrame(void* thisptr, Aquamarine::IOutput::scheduleFrameReason reason);
-    extern void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry);
+    extern void hkRenderWorkspace(void* thisptr, Render::CRenderContext& ctx, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry);
     extern void hkDamageSurface(void* thisptr, SP<CWLSurfaceResource> surface, double x, double y, double scale);
     extern void hkSendFrameEventsToWorkspace(void* thisptr, PHLMONITOR monitor, PHLWORKSPACE workspace, const Time::steady_tp& now);
     extern void hkSurfaceFrame(void* thisptr, const Time::steady_tp& now);

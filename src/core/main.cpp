@@ -199,7 +199,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[he] Version mismatch");
     }
 
-    g_pScrollRenderWorkspaceHook = Hyprdrive::FunctionHooks::required("main", "renderWorkspace", {"CHyprRenderer::renderWorkspace(", "IHyprRenderer::renderWorkspace("}, rc<void*>(hkRenderWorkspace));
+    g_pScrollRenderWorkspaceHook = Hyprdrive::FunctionHooks::required("main", "renderWorkspace", {"IHyprRenderer::renderWorkspace(Render::CRenderContext&, Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>,"}, rc<void*>(hkRenderWorkspace));
 
     g_pScrollScheduleFrameHook = Hyprdrive::FunctionHooks::required("main", "_ZN7Monitor8CMonitor13scheduleFrameEN10Aquamarine7IOutput19scheduleFrameReasonE", {""}, rc<void*>(hkScheduleFrame));
 

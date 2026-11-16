@@ -1,7 +1,7 @@
 #include "PluginParts.hpp"
 using namespace PluginDetail;
 
-typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
+typedef void (*origRenderWorkspace)(void*, Render::CRenderContext&, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
 typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
 typedef void (*origDamageSurface)(void*, SP<CWLSurfaceResource>, double, double, double);
@@ -127,10 +127,10 @@ void hkScheduleFrame(void* thisptr, Aquamarine::IOutput::scheduleFrameReason rea
 }
 
 //
-void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
+void hkRenderWorkspace(void* thisptr, Render::CRenderContext& ctx, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
     const auto OVERVIEW = scrollOverviewForMonitor(pMonitor);
     if (!OVERVIEW || renderingOverview)
-        rc<origRenderWorkspace>(g_pScrollRenderWorkspaceHook->m_original)(thisptr, pMonitor, pWorkspace, now, geometry);
+        rc<origRenderWorkspace>(g_pScrollRenderWorkspaceHook->m_original)(thisptr, ctx, pMonitor, pWorkspace, now, geometry);
     else {
         const bool PREVRENDERINGOVERVIEW = renderingOverview;
         const auto PREVRENDERINGMONITOR  = renderingOverviewMonitor;
