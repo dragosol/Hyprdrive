@@ -108,6 +108,11 @@ namespace Hyprdrive::Compat {
     /// Fallback for Hyprland's own dispatchers: evaluates `return hl.dispatch(<luaExpr>)` (e.g.
     /// "hl.dsp.window.close()"), as `hyprctl dispatch` does. Lua's result/error text; nullopt when not on a Lua config.
     std::optional<std::string> dispatchLua(const std::string& luaExpr);
+    /// A dispatcher string that is already Lua ("hl.dsp.window.close()"): split it into name/arg never, run it whole.
+    bool isLuaDispatch(std::string_view s);
+    /// 0.56's dispatch by name: Hyprdrive's own, then Hyprland's legacy names (exec, workspace, ... as 0.56's
+    /// DispatcherTranslator parsed them), cursorzoom, or a Lua expression in `name`. Anything else: an error, notified once per name.
+    SDispatchResult dispatchNamed(const std::string& name, const std::string& arg);
 
     // ---- The bind Hyprland is running. 0.57 keeps no m_currentKeybind; a hook on
     // CKeybindManager::invokeBind records it for the duration of the call.

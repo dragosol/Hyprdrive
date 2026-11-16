@@ -42,10 +42,7 @@ class CDispatcherGesture : public ITrackpadGesture {
     void begin(const STrackpadGestureBegin& e) override {}
     void update(const STrackpadGestureUpdate& e) override {}
     void end(const STrackpadGestureEnd& e) override {
-        if (Hyprdrive::Compat::dispatchOwn(m_dispatcher, m_data))
-            return;
-        // Not ours: the dispatcher/data pair is a Lua dispatcher expression now.
-        Hyprdrive::Compat::dispatchLua(m_data.empty() ? m_dispatcher : m_dispatcher + "," + m_data);
+        Hyprdrive::Compat::dispatchNamed(m_dispatcher, m_data);
     }
 
   private:
@@ -148,7 +145,7 @@ std::expected<void, std::string> applyTrackpadGesture(size_t fingerCount, eTrack
             return std::unexpected("dispatcher gesture needs an arg, e.g. exec,notify-send hi");
         std::string dispatcher = arg;
         std::string data;
-        const auto  SEP = arg.find_first_of(", ");
+        const auto  SEP = Hyprdrive::Compat::isLuaDispatch(arg) ? std::string::npos : arg.find_first_of(", ");
         if (SEP != std::string::npos) {
             dispatcher = arg.substr(0, SEP);
             data       = arg.substr(SEP + 1);
