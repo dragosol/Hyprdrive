@@ -601,11 +601,11 @@ CBox restoreForFlight(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& i
     Minimize::restore(window);
     g_restoringForFlight = {};
     warpRestoredWindowAnims(window);
-    window->updateDecorationValues();
-    if (window->m_borderFadeAnimationProgress)
-        window->m_borderFadeAnimationProgress->warp();
-    if (window->m_dimPercent)
-        window->m_dimPercent->warp();
+    window->presentation().refreshValues();
+    if (const auto* BG = Hyprdrive::Priv::borderGradient(window); BG && BG->m_fadeProgress)
+        BG->m_fadeProgress->warp();
+    if (auto& dim = Hyprdrive::Priv::dimPercent(*window))
+        dim->warp();
 
     if (const auto OVERVIEW = overviewOpenFor(monitor)) {
         // Overview path: proxy machinery, window hidden for the flight (the tile
@@ -1124,7 +1124,8 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             transition(*it, EFlightPhase::Flying, "first-frame");
         it->drawn = SDrawn{.box = box, .alpha = alpha, .vel = VEL, .moving = T < 1.F};
         {
-            const auto& GC = WINDOW->m_realBorderColor.m_colors;
+            const auto* BG = Hyprdrive::Priv::borderGradient(WINDOW);
+            const auto  GC = BG ? BG->renderState().current.m_colors : decltype(BG->renderState().current.m_colors){};
             zdbg("draw r=%d id=%llu t=%f ms=%.3f box=%f,%f %fx%f a=%f bc=%02x%02x%02x\n", (int)it->isRestore(), (unsigned long long)it->id, T, Motion::msBetween<double>(now, Time::steady_tp{}), box.x, box.y, box.width, box.height, alpha, GC.empty() ? 0 : sc<int>(GC[0].r * 255.F),
                  GC.empty() ? 0 : sc<int>(GC[0].g * 255.F), GC.empty() ? 0 : sc<int>(GC[0].b * 255.F));
         }
@@ -1152,11 +1153,12 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             if (BORDERSIZE > 0 && alpha > 0.01F) {
                 CBorderPassElement::SBorderData border;
                 border.box        = box;
-                border.grad1      = WINDOW->m_realBorderColor;
+                if (const auto* BG = Hyprdrive::Priv::borderGradient(WINDOW))
+                    border.grad1 = BG->renderState().current;
                 border.a          = alpha;
                 border.borderSize = BORDERSIZE;
                 border.round      = sc<int>(sc<float>(Hyprdrive::Config::themeRounding()) * monitor->m_scale);
-                g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(border));
+                Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CBorderPassElement>(border));
             }
         };
         // Motion blur (FlightBlur.hpp): the whole proxy -- shadow, window,
