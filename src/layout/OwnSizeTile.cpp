@@ -4,6 +4,9 @@
 #include "DebugPaths.hpp"
 
 #include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/protocols/XDGShell.hpp>
+#include <hyprland/src/protocols/core/Compositor.hpp>
+#include <hyprland/src/protocols/types/SurfaceRole.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
@@ -137,7 +140,7 @@ namespace Hyprdrive::OwnSizeTile {
             auto* const SELF = sc<Desktop::View::CWindow*>(thisptr);
             const auto  W    = SELF ? SELF->m_self.lock() : PHLWINDOW{};
             if (W && W->mapped() && !W->isFloating() && owned(W)) {
-                if (std::abs(box.w - W->m_reportedSize.x) < 1 && std::abs(box.h - W->m_reportedSize.y) < 1)
+                if (std::abs(box.w - W->backend().reportedSize().x) < 1 && std::abs(box.h - W->backend().reportedSize().y) < 1)
                     return;
                 Vector2D size;
                 if (fixedSize(W, size))
@@ -199,20 +202,30 @@ namespace Hyprdrive::OwnSizeTile {
         }
     }
 
+    static SP<CXDGSurfaceResource> xdgOf(const PHLWINDOW& w) {
+        if (!w || w->backend().isX11())
+            return nullptr;
+        const auto S = w->backend().surface();
+        if (!S || !S->m_role || S->m_role->role() != SURFACE_ROLE_XDG_SHELL)
+            return nullptr;
+        return sc<CXDGSurfaceRole*>(S->m_role.get())->m_xdgSurface.lock();
+    }
+
     bool fixedSize(const PHLWINDOW& w, Vector2D& size) {
         if (!w)
             return false;
         if (w->backend().isX11()) {
-            const auto XS = w->m_xwaylandSurface.lock();
+            const auto XS = Hyprdrive::Priv::xsurface(w);
             if (!XS || !XS->m_sizeHints)
                 return false;
             const auto& H = *XS->m_sizeHints;
             if (H.min_width < 1 || H.min_height < 1 || H.min_width != H.max_width || H.min_height != H.max_height)
                 return false;
-            size = w->xwaylandSizeToReal(Vector2D{sc<double>(H.min_width), sc<double>(H.min_height)});
+            size = w->backend().clientToLogical(CBox{0, 0, sc<double>(H.min_width), sc<double>(H.min_height)}, w->m_monitor.lock()).size();
             return true;
         }
-        if (!w->m_xdgSurface || !w->m_xdgSurface->m_toplevel)
+        const auto XDG = xdgOf(w);
+        if (!XDG || !XDG->m_toplevel)
             return false;
         // The sizes as the program gave them -- window geometry, the size of
         // the window Hyprland draws -- not layoutMinSize/layoutMaxSize, which
@@ -223,8 +236,8 @@ namespace Hyprdrive::OwnSizeTile {
         // around a box 20 px bigger (XPS, 2026-11-13: "two mismatched rounded
         // shapes"). Tiled, GTK drops the shadow and the offset is 0 again --
         // too late, the tile already had its size.
-        const Vector2D MIN = w->m_xdgSurface->m_toplevel->m_current.minSize;
-        const Vector2D MAX = w->m_xdgSurface->m_toplevel->m_current.maxSize;
+        const Vector2D MIN = XDG->m_toplevel->m_current.minSize;
+        const Vector2D MAX = XDG->m_toplevel->m_current.maxSize;
         if (MIN.x < 1 || MIN.y < 1 || std::abs(MAX.x - MIN.x) >= 1 || std::abs(MAX.y - MIN.y) >= 1)
             return false;
         size = MIN;

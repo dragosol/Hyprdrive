@@ -55,8 +55,10 @@ namespace Hyprdrive::SizeAck {
             const auto& SZ  = W->sizeAnimation();
             const auto& POS = W->positionAnimation();
             Vector2D    geom;
-            if (const auto XDG = W->m_xdgSurface.lock())
-                geom = XDG->m_current.geometry.size();
+            if (!W->backend().isX11())
+                geom = W->backend().geometry().box.size();
+            const size_t ACKS = W->backend().isX11() ? 0 : sc<Desktop::View::CWaylandBackend&>(W->backend()).m_configureAcks.m_pending.size();
+            const auto   PENDING = Hyprdrive::Priv::pendingReportedSize(*W).value_or(Vector2D{});
             // Every surface of the window, breadth first: GTK4 may draw its
             // content into a subsurface.
             std::string subs;
@@ -76,8 +78,8 @@ namespace Hyprdrive::SizeAck {
                                "pending {:.0f}x{:.0f} unacked {} xf={}{}{}{} surfaces{}",
                                OFF && !SZ->isBeingAnimated() && !POS->isBeingAnimated() ? "!! " : "", W->metadata().appID(), W->m_workspace ? Hyprdrive::Compat::id(W->m_workspace) : -1, SZ->value().x,
                                SZ->value().y, SZ->goal().x, SZ->goal().y, POS->value().x, POS->value().y, POS->goal().x, POS->goal().y,
-                               SZ->isBeingAnimated() || POS->isBeingAnimated() ? " ANIM" : "", geom.x, geom.y, W->m_reportedSize.x, W->m_reportedSize.y,
-                               W->m_pendingReportedSize.x, W->m_pendingReportedSize.y, W->m_pendingSizeAcks.size(), W->m_transformers.size(), W->m_suspended ? " SUSP" : "",
+                               SZ->isBeingAnimated() || POS->isBeingAnimated() ? " ANIM" : "", geom.x, geom.y, W->backend().reportedSize().x, W->backend().reportedSize().y,
+                               PENDING.x, PENDING.y, ACKS, Hyprdrive::Priv::transformers(*W).size(), Hyprdrive::Priv::suspended(*W) ? " SUSP" : "",
                                W->isHidden() ? " HIDDEN" : "", W->isFloating() ? " float" : "", subs);
         }
         return out;

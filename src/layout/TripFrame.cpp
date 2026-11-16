@@ -107,7 +107,12 @@ namespace Hyprdrive::TripFrame {
         // the pending size over), so a client that redraws late seemed never
         // to have been sent the trip's size (TripFrameRule.hpp).
         Vector2D sentSize(const PHLWINDOW& w) {
-            return w->m_pendingReportedSize.x > 0 && w->m_pendingReportedSize.y > 0 ? w->m_pendingReportedSize : w->getReportedSize();
+            const auto& PENDING = Hyprdrive::Priv::pendingReportedSize(*w);
+            return PENDING && PENDING->x > 0 && PENDING->y > 0 ? *PENDING : w->backend().reportedSize();
+        }
+        // X11 only: the position last sent in a configure; a Wayland window has none.
+        Vector2D reportedPosition(const PHLWINDOW& w) {
+            return w->backend().isX11() ? sc<Desktop::View::CX11Backend&>(w->backend()).m_reportedPosition : Vector2D{};
         }
         SHeld* find(const PHLWINDOW& w) {
             for (auto& H : g_held)
@@ -128,19 +133,18 @@ namespace Hyprdrive::TripFrame {
                 float                roundingPower = 2.F;
             };
             explicit CTripFramePassElement(const SData& d) : m_d(d) {}
-            std::vector<UP<IPassElement>> draw() override {
-                const auto MON = g_pHyprRenderer->m_renderData.pMonitor.lock();
+            std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override {
+                const auto MON = ctx.m_data.pMonitor.lock();
                 if (!MON || !m_d.tex || !m_d.tex->ok() || !finiteBox(m_d.box) || !finiteBox(m_d.src) || m_d.texSize.x < 2 || m_d.texSize.y < 2)
                     return {};
-                CRegion damage{g_pHyprRenderer->m_renderData.damage};
+                CRegion damage{ctx.m_data.damage};
                 damage.intersect(m_d.box);
                 if (damage.empty())
                     return {};
-                const auto SAVEDCLIP = g_pHyprRenderer->m_renderData.clipBox;
+                const auto SAVEDCLIP = ctx.m_data.clipBox;
                 if (!m_d.clip.empty())
-                    g_pHyprRenderer->m_renderData.clipBox = m_d.clip;
-                g_pHyprRenderer->pushMonitorTransformEnabled(true);
-                Render::GL::g_pHyprOpenGL->renderTexture(m_d.tex, m_d.box,
+                    ctx.m_data.clipBox = m_d.clip;
+                Render::GL::g_pHyprOpenGL->renderTexture(ctx, m_d.tex, m_d.box,
                                                          Render::GL::CHyprOpenGLImpl::STextureRenderData{
                                                              .damage                      = &damage,
                                                              .a                           = m_d.alpha,
@@ -151,26 +155,25 @@ namespace Hyprdrive::TripFrame {
                                                              .primarySurfaceUVTopLeft     = m_d.src.pos() / m_d.texSize,
                                                              .primarySurfaceUVBottomRight = (m_d.src.pos() + m_d.src.size()) / m_d.texSize,
                                                          });
-                g_pHyprRenderer->popMonitorTransformEnabled();
-                g_pHyprRenderer->m_renderData.clipBox = SAVEDCLIP;
+                ctx.m_data.clipBox = SAVEDCLIP;
                 return {};
             }
             ePassElementType type() override {
                 return EK_CUSTOM;
             }
-            bool needsLiveBlur() override {
+            bool needsLiveBlur(Render::CRenderContext&) override {
                 return false;
             }
-            bool needsPrecomputeBlur() override {
+            bool needsPrecomputeBlur(Render::CRenderContext&) override {
                 return false;
             }
-            std::optional<CBox> boundingBox() override {
-                const auto MON = g_pHyprRenderer->m_renderData.pMonitor.lock();
+            std::optional<CBox> boundingBox(Render::CRenderContext& ctx) override {
+                const auto MON = ctx.m_data.pMonitor.lock();
                 if (!MON || MON->m_scale <= 0)
                     return std::nullopt;
                 return m_d.box.copy().scale(1.F / MON->m_scale).round();
             }
-            CRegion opaqueRegion() override {
+            CRegion opaqueRegion(Render::CRenderContext&) override {
                 return {};
             }
             const char* passName() override {
@@ -261,9 +264,9 @@ namespace Hyprdrive::TripFrame {
             const double REP = repainted(RES);
             // Moved since its last commit, its size the same: the X server's
             // re-commit of what it has (TripFrameRule.hpp).
-            const bool MOVED = W->backend().isX11() && near(SENT, H->cSize) && !near(W->m_reportedPosition, H->cPos);
+            const bool MOVED = W->backend().isX11() && near(SENT, H->cSize) && !near(reportedPosition(W), H->cPos);
             H->cSize         = SENT;
-            H->cPos          = W->m_reportedPosition;
+            H->cPos          = reportedPosition(W);
             if (AT && H->state.resized)
                 trace(std::format("{} commit at {}x{} after {:.0f} ms, {:.0f}% repainted{}", W->metadata().appID(), SENT.x, SENT.y, msSince(H->at), REP * 100,
                                   MOVED ? " (only moved since its last: not a frame)" : ""));
@@ -317,15 +320,15 @@ namespace Hyprdrive::TripFrame {
 
         // RENDER_PRE_WINDOW / RENDER_POST_WINDOW: the window's main surface,
         // drawn from the snapshot.
-        void onStage(eRenderStage stage) {
-            if (g_held.empty() || g_pHyprRenderer->m_bRenderingSnapshot)
+        void onStage(eRenderStage stage, Render::CRenderContext& ctx) {
+            if (g_held.empty() || ctx.m_renderingSnapshot)
                 return;
             if (stage == RENDER_PRE_WINDOW) {
-                const auto W = g_pHyprRenderer->m_renderData.currentWindow.lock();
+                const auto W = ctx.m_data.currentWindow.lock();
                 g_open       = {};
                 if (SHeld* H = W ? find(W) : nullptr) {
                     ++H->seen;
-                    g_open = {.win = W, .pass = &g_pHyprRenderer->currentPass(), .start = g_pHyprRenderer->currentPass().m_passElements.size()};
+                    g_open = {.win = W, .pass = &Render::IHyprRenderer::currentPass(ctx), .start = Render::IHyprRenderer::currentPass(ctx).m_passElements.size()};
                 }
                 return;
             }
@@ -335,10 +338,10 @@ namespace Hyprdrive::TripFrame {
             auto*      PASS = g_open.pass;
             const auto START = g_open.start;
             g_open           = {};
-            if (!W || !PASS || PASS != &g_pHyprRenderer->currentPass() || W != g_pHyprRenderer->m_renderData.currentWindow.lock())
+            if (!W || !PASS || PASS != &Render::IHyprRenderer::currentPass(ctx) || W != ctx.m_data.currentWindow.lock())
                 return;
             SHeld*     H   = find(W);
-            const auto MON = g_pHyprRenderer->m_renderData.pMonitor.lock();
+            const auto MON = ctx.m_data.pMonitor.lock();
             if (!H || !MON || H->mon.lock() != MON || !H->fb || !H->fb->getTexture() || !H->fb->getTexture()->ok() || openScrollOverviewForMonitor(MON))
                 return;
             if (msSince(H->at) >= TripFrameRule::TIMEOUT_MS) // its timer is a few ms late: never past the timeout
@@ -365,7 +368,7 @@ namespace Hyprdrive::TripFrame {
             H->state = {};
             H->sent  = sentSize(w);
             H->cSize = H->sent;
-            H->cPos  = w->m_reportedPosition;
+            H->cPos  = reportedPosition(w);
             trace(std::format("{} held again (it has not drawn since)", w->metadata().appID()));
             armTimer();
             return;
@@ -373,7 +376,7 @@ namespace Hyprdrive::TripFrame {
         // Where renderWindow draws it (Renderer.cpp renderWindow), in the
         // snapshot's monitor px.
         const Vector2D POS = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + (Hyprdrive::Compat::pinned(w) ? Vector2D{} : w->m_workspace->m_renderOffset->value()) +
-            w->m_floatingOffset;
+            w->presentation().floatingOffset();
         const Vector2D SIZE = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         const CBox     SRC{(POS - MON->m_position) * MON->m_scale, SIZE * MON->m_scale};
         if (!finiteBox(SRC))
@@ -381,7 +384,7 @@ namespace Hyprdrive::TripFrame {
         auto fb = g_pHyprRenderer->makeSnapshotFB(w);
         if (!fb || !fb->isAllocated() || !fb->getTexture() || !fb->getTexture()->ok() || fb->m_size.x < 2 || fb->m_size.y < 2)
             return;
-        g_held.push_back({.win = w, .mon = MON, .fb = std::move(fb), .src = SRC, .snapSize = SIZE, .sent = sentSize(w), .cSize = sentSize(w), .cPos = w->m_reportedPosition, .at = Clock::now()});
+        g_held.push_back({.win = w, .mon = MON, .fb = std::move(fb), .src = SRC, .snapSize = SIZE, .sent = sentSize(w), .cSize = sentSize(w), .cPos = reportedPosition(w), .at = Clock::now()});
         const PHLWINDOWREF REF = w;
         g_held.back().commit   = w->wlSurface()->resource()->m_events.commit.listen([REF] { onCommit(REF); });
         trace(std::format("{} held at {}x{} (its last good frame)", w->metadata().appID(), SIZE.x, SIZE.y));
@@ -389,7 +392,10 @@ namespace Hyprdrive::TripFrame {
     }
 
     void init() {
-        g_stage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) { onStage(stage); });
+        g_stage = Event::bus()->m_events.render.stage.listen([](Event::SRenderStageEvent e) {
+            if (e.context)
+                onStage(e.stage, e.context->get());
+        });
     }
 
     void shutdown() {
@@ -403,11 +409,11 @@ namespace Hyprdrive::TripFrame {
         // Its pass element type lives in this object: none may outlive it.
         // (A transformed window keeps its elements in a pass of its own.)
         if (g_pHyprRenderer) {
-            for (auto& E : g_pHyprRenderer->m_renderPass.m_passElements)
+            for (auto& E : g_pHyprRenderer->context().m_pass.m_passElements)
                 if (E.element && E.element->type() == EK_TRANSFORMED_WINDOW)
                     if (auto* const T = dynamic_cast<CTransformedWindowPassElement*>(E.element.get()); T && T->m_data.pass)
                         T->m_data.pass->removeAllOfType(CTripFramePassElement::PASS_NAME);
-            g_pHyprRenderer->m_renderPass.removeAllOfType(CTripFramePassElement::PASS_NAME);
+            g_pHyprRenderer->context().m_pass.removeAllOfType(CTripFramePassElement::PASS_NAME);
         }
     }
 }
