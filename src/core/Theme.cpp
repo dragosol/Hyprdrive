@@ -219,8 +219,11 @@ static bool setByUser(SSetByUser& s) {
     if (s.generation != g_themeGeneration) {
         s.generation = g_themeGeneration;
         s.value      = false;
+        // 0.57: setByUser is a `const bool*` (ConfigManager.hpp), and a bare
+        // pointer converts to true -- every key read as the user's.
         if (const auto& MGR = ::Config::mgr())
-            s.value = MGR->getConfigValue(s.key).setByUser;
+            if (const auto* SET = MGR->getConfigValue(s.key).setByUser)
+                s.value = *SET;
     }
     return s.value;
 }
