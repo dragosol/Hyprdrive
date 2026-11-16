@@ -17,6 +17,10 @@
 #include "HyprCompat.hpp"
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/Context.hpp>
+#include <hyprland/src/render/OpenGL.hpp>
+#include <hyprland/src/desktop/view/window/WindowEffectsController.hpp>
+#include <hyprland/src/render/transformer/TransformerList.hpp>
 #include <hyprland/src/render/pass/ClearPassElement.hpp>
 #include <hyprland/src/render/pass/Pass.hpp>
 #include <hyprland/src/render/pass/TexPassElement.hpp>
@@ -43,22 +47,31 @@ namespace Hyprdrive::Genie {
 
         class CGenieTransformer : public Render::IWindowTransformer {
           public:
-            SP<Render::IFramebuffer> transform(SP<Render::IFramebuffer> in) override {
-                const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
-                if (!m_active || !MONITOR || !in || !in->getTexture() || m_window.w < 2 || m_window.h < 2)
+            Render::SWindowTransformBuffer transform(Render::CRenderContext& ctx, const Render::SWindowTransformBuffer& in, const Render::SWindowTransformContext& context) override {
+                const auto MONITOR = context.monitor.lock();
+                if (!m_active || !MONITOR || !in.framebuffer || !in.framebuffer->getTexture() || m_window.w < 2 || m_window.h < 2)
                     return in;
-                const auto OUT = MONITOR->resources()->getUnusedWorkBuffer();
+                const auto CANVAS = Render::pixelBoxForLogical(context.outputBox, MONITOR->m_scale);
+                if (CANVAS.empty())
+                    return in;
+                const auto OUT = g_pHyprRenderer->getWorkBuffer(ctx, CANVAS.size());
                 if (!OUT)
-                    return in;
+                    return {.framebuffer = in.framebuffer, .box = in.box, .success = false};
 
-                const auto     TEX  = in->getTexture();
+                const auto     TEX  = in.framebuffer->getTexture();
                 const Vector2D SIZE = TEX->m_size;
                 if (SIZE.x < 1 || SIZE.y < 1)
                     return in;
 
-                auto          guard = g_pHyprRenderer->bindTempFB(OUT);
-                const CRegion ALL{0, 0, sc<int>(MONITOR->m_transformedSize.x), sc<int>(MONITOR->m_transformedSize.y)};
-                g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor(0, 0, 0, 0)});
+                // The input is cropped to in.box and the output to CANVAS: both offsets below.
+                Render::GL::CFramebufferBindingGuard bindings{g_pHyprRenderer->glBackend()};
+                auto                                 state = ctx.saveDrawState();
+                g_pHyprRenderer->bindFB(ctx, OUT);
+                ctx.m_data.damage = CRegion{0, 0, sc<int>(CANVAS.w), sc<int>(CANVAS.h)};
+                ctx.m_data.fbSize = CANVAS.size();
+                g_pHyprRenderer->setProjectionType(ctx, Render::RPT_EXPORT);
+                const CRegion ALL{0, 0, sc<int>(CANVAS.w), sc<int>(CANVAS.h)};
+                g_pHyprRenderer->draw(ctx, CClearPassElement::SClearData{CHyprColor(0, 0, 0, 0)});
 
                 const CBox& W = m_window;
                 const CBox& I = m_icon;
@@ -72,7 +85,7 @@ namespace Hyprdrive::Genie {
                 const auto PINCH = [&](float v) { return smooth((G * (1.F + PINCH_LEAD) - (1.F - v) * PINCH_LEAD) * 1.6F); };
                 const float ALPHA = G <= FADE_FROM ? 1.F : 1.F - smooth((G - FADE_FROM) / (1.F - FADE_FROM));
                 if (ALPHA <= 0.F)
-                    return OUT;
+                    return {.framebuffer = OUT, .box = CANVAS};
 
                 const int STRIPS = std::clamp(sc<int>(std::ceil(W.h / STRIP_PX)), STRIPS_MIN, STRIPS_MAX);
                 for (int i = 0; i < STRIPS; ++i) {
@@ -85,22 +98,32 @@ namespace Hyprdrive::Genie {
                         continue;
 
                     // The strip's source rows, in the buffer's own UV.
-                    g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft     = Vector2D{W.x / SIZE.x, (W.y + V0 * W.h) / SIZE.y};
-                    g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = Vector2D{(W.x + W.w) / SIZE.x, (W.y + V1 * W.h) / SIZE.y};
+                    ctx.m_data.primarySurfaceUVTopLeft     = Vector2D{(W.x - in.box.x) / SIZE.x, (W.y + V0 * W.h - in.box.y) / SIZE.y};
+                    ctx.m_data.primarySurfaceUVBottomRight = Vector2D{(W.x + W.w - in.box.x) / SIZE.x, (W.y + V1 * W.h - in.box.y) / SIZE.y};
                     CTexPassElement::SRenderData strip;
                     strip.tex           = TEX;
                     // A hair taller than its slot so neighbours overlap: no seam
                     // of background between strips at fractional positions.
-                    strip.box           = CBox{X0, Y0, X1 - X0, (Y1 - Y0) + 0.75F};
+                    strip.box           = CBox{X0 - CANVAS.x, Y0 - CANVAS.y, X1 - X0, (Y1 - Y0) + 0.75F};
                     strip.a             = ALPHA;
                     strip.allowCustomUV = true;
-                    g_pHyprRenderer->draw(strip, ALL);
+                    g_pHyprRenderer->draw(ctx, strip, ALL);
                 }
-                g_pHyprRenderer->m_renderData.primarySurfaceUVTopLeft     = Vector2D(-1, -1);
-                g_pHyprRenderer->m_renderData.primarySurfaceUVBottomRight = Vector2D(-1, -1);
-                return OUT;
+                ctx.m_data.primarySurfaceUVTopLeft     = Vector2D(-1, -1);
+                ctx.m_data.primarySurfaceUVBottomRight = Vector2D(-1, -1);
+                return {.framebuffer = OUT, .box = CANVAS};
             }
 
+            // Genie draws outside the window: window and icon, logical px.
+            CBox transformedExtents(const CBox& currentBox) const override {
+                if (!m_active || m_scale <= 0.F)
+                    return currentBox;
+                const double X0 = std::min(m_window.x, m_icon.x) / m_scale, Y0 = std::min(m_window.y, m_icon.y) / m_scale;
+                const double X1 = std::max(m_window.x + m_window.w, m_icon.x + m_icon.w) / m_scale, Y1 = std::max(m_window.y + m_window.h, m_icon.y + m_icon.h) / m_scale;
+                return CBox{X0, Y0, X1 - X0, Y1 - Y0};
+            }
+
+            float m_scale = 1.F;
             bool  m_active = false;
             CBox  m_window, m_icon; // monitor-local render px
             float m_g = 0.F;
@@ -109,22 +132,18 @@ namespace Hyprdrive::Genie {
         CGenieTransformer* transformerOf(const PHLWINDOW& window) {
             if (!window)
                 return nullptr;
-            for (const auto& t : window->m_transformers)
-                if (auto* G = dynamic_cast<CGenieTransformer*>(t.get()))
-                    return G;
-            return nullptr;
+            return window->effects().transformers()->get<CGenieTransformer>();
         }
 
         CGenieTransformer* ensure(const PHLWINDOW& window) {
             if (auto* G = transformerOf(window))
                 return G;
-            window->m_transformers.emplace_back(makeUnique<CGenieTransformer>());
-            return dynamic_cast<CGenieTransformer*>(window->m_transformers.back().get());
+            return window->effects().transformers()->emplace<CGenieTransformer>();
         }
 
         void detach(const PHLWINDOW& window) {
             if (window)
-                std::erase_if(window->m_transformers, [](const auto& t) { return dynamic_cast<CGenieTransformer*>(t.get()) != nullptr; });
+                std::erase_if(Priv::transformers(*window), [](const auto& t) { return dynamic_cast<CGenieTransformer*>(t.get()) != nullptr; });
         }
 
         void feed(CGenieTransformer* t, const CBox& windowBox, const CBox& iconBox, float g) {
@@ -145,18 +164,20 @@ namespace Hyprdrive::Genie {
     void drawProxy(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const CBox& iconBox, float g, const std::function<void()>& drawAtWindow) {
         if (!monitor || !window)
             return;
+        auto& ctx = g_pHyprRenderer->context();
         feed(ensure(window), windowBox, iconBox, g);
+        ensure(window)->m_scale = std::max(monitor->m_scale, 0.01F);
 
         auto nested = makeUnique<Render::CRenderPass>();
         {
-            auto restore = g_pHyprRenderer->redirectPass(nested.get());
+            auto restore = g_pHyprRenderer->redirectPass(ctx, nested.get());
             drawAtWindow();
         }
         if (nested->empty())
             return;
 
         const double SCALE = std::max(monitor->m_scale, 0.01F);
-        g_pHyprRenderer->addPassElement(makeUnique<CTransformedWindowPassElement>(CTransformedWindowPassElement::SData{
+        g_pHyprRenderer->addPassElement(ctx, makeUnique<CTransformedWindowPassElement>(CTransformedWindowPassElement::SData{
             .pass       = std::move(nested),
             .window     = window,
             .currentBox = windowBox.copy().scale(1.0 / SCALE),

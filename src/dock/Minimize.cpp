@@ -17,6 +17,7 @@
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 #undef private
 
 namespace Hyprdrive::Minimize {
@@ -58,7 +59,7 @@ PHLWORKSPACE stash(PHLMONITOR monitor) {
     if (!monitor)
         return nullptr;
 
-    g_stash = State::workspaceState()->create(State::workspaceState()->newSpecialID(), monitor->m_id, STASH_NAME);
+    g_stash = State::workspaceState()->createSpecial(STASH_NAME, monitor);
     return g_stash;
 }
 
@@ -369,6 +370,16 @@ CBox originalBox(PHLWINDOW window) {
     return IT == g_entries.end() ? CBox{} : IT->box;
 }
 
+// 0.57 has no id+name create(): numbered entries and special ones are made differently.
+PHLWORKSPACE recreate(WORKSPACEID id, MONITORID monitorId, const std::string& name) {
+    const auto MON = State::monitorState()->query().id(monitorId).run();
+    if (!MON)
+        return nullptr;
+    if (id < 0 || name.starts_with("special:"))
+        return State::workspaceState()->createSpecial(name, MON);
+    return State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(id)}, MON, name);
+}
+
 bool showOriginalWorkspace(PHLWINDOW window) {
     const auto IT = entryFor(window);
     if (IT == g_entries.end())
@@ -376,7 +387,7 @@ bool showOriginalWorkspace(PHLWINDOW window) {
 
     auto WORKSPACE = workspaceByID(IT->workspace);
     if (!WORKSPACE)
-        WORKSPACE = State::workspaceState()->create(IT->workspace, IT->monitor, IT->workspaceName);
+        WORKSPACE = recreate(IT->workspace, IT->monitor, IT->workspaceName);
     if (!WORKSPACE)
         return false;
 
@@ -451,7 +462,7 @@ PHLWORKSPACE putBack(PHLWINDOW window, const SEntry& ENTRY) {
     // the stash with no way back. Measured: leave the workspace and it is gone.
     auto WORKSPACE = workspaceByID(ENTRY.workspace);
     if (!WORKSPACE)
-        WORKSPACE = State::workspaceState()->create(ENTRY.workspace, ENTRY.monitor, ENTRY.workspaceName);
+        WORKSPACE = recreate(ENTRY.workspace, ENTRY.monitor, ENTRY.workspaceName);
 
     if (!WORKSPACE)
         return nullptr;

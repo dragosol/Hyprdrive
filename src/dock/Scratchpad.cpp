@@ -210,7 +210,7 @@ PHLWORKSPACE ensureDefault(const PHLMONITOR& monitor) {
     // Same creation Minimize uses for its stash, and the same name Omarchy's own
     // SUPER+grave binding toggles, so a window parked here lands where the
     // keybinding will look for it.
-    return State::workspaceState()->create(State::workspaceState()->newSpecialID(), monitor->m_id, "special:scratchpad");
+    return State::workspaceState()->createSpecial("special:scratchpad", monitor);
 }
 
 void show(const PHLWORKSPACE& workspace) {
