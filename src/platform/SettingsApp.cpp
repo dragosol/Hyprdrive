@@ -25,8 +25,8 @@
 
 namespace Hyprdrive::SettingsApp {
     namespace {
-        SP<SHyprCtlCommand> g_hyprctl;
-        SP<SHyprCtlCommand> g_hyprctlBinds;
+        SP<IPC::Socket1::SCommand> g_hyprctl;
+        SP<IPC::Socket1::SCommand> g_hyprctlBinds;
         CHyprSignalListener g_preReload;
 
         bool executable(const std::string& path) {
@@ -64,7 +64,7 @@ namespace Hyprdrive::SettingsApp {
         // overview's text colours on it. The plate's alpha is the dock's frost
         // opacity; the app is an opaque window and composites it over its own
         // base, so it is passed through rather than forced to 1.
-        std::string themeReply(eHyprCtlOutputFormat format) {
+        std::string themeReply(IPC::Socket1::eOutputFormat format) {
             const auto        BG     = Config::dockBackgroundColor();
             const auto        FG     = Config::themeForeground();
             const auto        MUTED  = Config::themeMutedText();
@@ -75,7 +75,7 @@ namespace Hyprdrive::SettingsApp {
             const std::string FONT   = Config::themeFontFamily();
             const int         ROUND  = Config::themeRounding();
             const bool        LIGHT  = Config::isLightTheme();
-            if (format == FORMAT_JSON)
+            if (format == IPC::Socket1::FORMAT_JSON)
                 return std::format(R"({{"background": "{}", "foreground": "{}", "muted": "{}", "accent": "{}", "accentText": "{}", "selection": "{}", "urgent": "{}", )"
                                    R"("font": "{}", "rounding": {}, "light": {}, "integration": "{}"}})",
                                    qtColor(BG), qtColor(FG), qtColor(MUTED), qtColor(ACCENT), qtColor(ON_ACC), qtColor(SEL), qtColor(URGENT), jsonEscape(FONT), ROUND,
@@ -92,8 +92,8 @@ namespace Hyprdrive::SettingsApp {
         // instead of an "ok" that opened nothing. The arguments are sh's "$@",
         // never part of the script: an app id is one argument whatever is in it.
         // Hyprland's modifier bits, named as a bind is written (SUPER + ALT).
-        std::string modNames(uint32_t mask) {
-            static constexpr std::pair<uint32_t, const char*> NAMES[] = {
+        std::string modNames(Input::ModifierMask mask) {
+            static constexpr std::pair<Input::eKeyboardModifiers, const char*> NAMES[] = {
                 {HL_MODIFIER_META, "SUPER"}, {HL_MODIFIER_CTRL, "CTRL"}, {HL_MODIFIER_ALT, "ALT"}, {HL_MODIFIER_SHIFT, "SHIFT"},
                 {HL_MODIFIER_CAPS, "CAPS"},  {HL_MODIFIER_MOD2, "MOD2"}, {HL_MODIFIER_MOD3, "MOD3"}, {HL_MODIFIER_MOD5, "MOD5"},
             };
@@ -108,29 +108,29 @@ namespace Hyprdrive::SettingsApp {
         // dispatcher, as Hyprland holds it right now -- what the settings'
         // Keybinds pane lists. `hyprctl binds` cannot say it: under Lua each
         // bind is an opaque `__lua` ref (Config::boundAction resolves ours).
-        std::string bindsReply(eHyprCtlOutputFormat format) {
-            std::string out = format == FORMAT_JSON ? "[" : "";
+        std::string bindsReply(IPC::Socket1::eOutputFormat format) {
+            std::string out = format == IPC::Socket1::FORMAT_JSON ? "[" : "";
             bool        first = true;
-            if (g_pKeybindManager) {
-                for (const auto& KB : g_pKeybindManager->m_keybinds) {
-                    if (!KB || KB->handler != "__lua")
+            if (Keybinds::mgr()) {
+                for (const auto& KB : Keybinds::mgr()->registry().binds()) {
+                    if (!KB)
                         continue;
-                    const auto ACTION = Config::boundAction(KB->arg);
+                    const auto ACTION = Config::boundAction(KB->metadata().argument);
                     if (!ACTION)
                         continue;
-                    const std::string MODS = modNames(KB->modmask);
-                    const std::string KEY  = KB->key.empty() ? KB->displayKey : KB->key;
-                    if (format == FORMAT_JSON) {
+                    const std::string MODS = modNames(KB->modifierMask());
+                    const std::string KEY  = KB->keyNames().size() == 1 ? KB->keyNames()[0] : KB->metadata().displayKey;
+                    if (format == IPC::Socket1::FORMAT_JSON) {
                         out += std::format(R"({}{{"mods": "{}", "key": "{}", "submap": "{}", "mouse": {}, "description": "{}", "dispatcher": "{}", "arg": "{}"}})", first ? "" : ",",
-                                           jsonEscape(MODS), jsonEscape(KEY), jsonEscape(KB->submap.name), KB->mouse ? "true" : "false", jsonEscape(KB->description),
+                                           jsonEscape(MODS), jsonEscape(KEY), jsonEscape(KB->metadata().submap), KB->hasFlag(Keybinds::BIND_FLAG_MOUSE) ? "true" : "false", jsonEscape(KB->metadata().description.value_or("")),
                                            jsonEscape(ACTION->first), jsonEscape(ACTION->second));
                     } else
                         out += std::format("{}{}{} -> hyprdrive:{} {}{}\n", MODS, MODS.empty() ? "" : " + ", KEY, ACTION->first, ACTION->second,
-                                           KB->submap.name.empty() ? "" : " (submap " + KB->submap.name + ")");
+                                           KB->metadata().submap.empty() ? "" : " (submap " + KB->metadata().submap + ")");
                     first = false;
                 }
             }
-            if (format == FORMAT_JSON)
+            if (format == IPC::Socket1::FORMAT_JSON)
                 out += "]";
             return out;
         }
@@ -244,20 +244,8 @@ namespace Hyprdrive::SettingsApp {
     }
 
     void init() {
-        g_hyprctl = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE, SHyprCtlCommand{
-                                                                                   .name  = "hyprdrive-theme",
-                                                                                   .exact = true,
-                                                                                   .fn    = [](eHyprCtlOutputFormat format, std::string) -> std::string {
-                                                                                       return themeReply(format);
-                                                                                   },
-                                                                               });
-        g_hyprctlBinds = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE, SHyprCtlCommand{
-                                                                                        .name  = "hyprdrive-binds",
-                                                                                        .exact = true,
-                                                                                        .fn    = [](eHyprCtlOutputFormat format, std::string) -> std::string {
-                                                                                            return bindsReply(format);
-                                                                                        },
-                                                                                    });
+        g_hyprctl = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE, IPC::Socket1::SCommand{.name = "hyprdrive-theme", .match = IPC::Socket1::COMMAND_MATCH_EXACT, .handler = [](const IPC::Socket1::SRequest& r) { return IPC::Socket1::SResponse{themeReply(r.format)}; }});
+        g_hyprctlBinds = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE, IPC::Socket1::SCommand{.name = "hyprdrive-binds", .match = IPC::Socket1::COMMAND_MATCH_EXACT, .handler = [](const IPC::Socket1::SRequest& r) { return IPC::Socket1::SResponse{bindsReply(r.format)}; }});
         // The Lua state the bind refs live in is rebuilt by every reload.
         g_preReload = Event::bus()->m_events.config.preReload.listen([] { Config::forgetBindActions(); });
     }

@@ -31,7 +31,7 @@ namespace Hyprdrive::Integration {
         std::atomic<int>      g_desktop{-1}; // -1 = never evaluated
         std::atomic<uint64_t> g_generation{0};
         SDecision             g_decision;
-        SP<SHyprCtlCommand>   g_hyprctl;
+        SP<IPC::Socket1::SCommand> g_hyprctl;
 
         // `command -v omarchy` without a shell: every PATH entry, an executable
         // regular file. Hyprland reaps its own children (Omarchy's helpers.lua
@@ -173,16 +173,16 @@ namespace Hyprdrive::Integration {
     void init() {
         reevaluate();
         g_hyprctl = HyprlandAPI::registerHyprCtlCommand(HYPRDRIVE_HANDLE,
-                                                        SHyprCtlCommand{
-                                                            .name  = "hyprdrive-integration",
-                                                            .exact = true,
-                                                            .fn =
-                                                                [](eHyprCtlOutputFormat format, std::string) -> std::string {
+                                                        IPC::Socket1::SCommand{
+                                                            .name    = "hyprdrive-integration",
+                                                            .match   = IPC::Socket1::COMMAND_MATCH_EXACT,
+                                                            .handler =
+                                                                [](const IPC::Socket1::SRequest& r) {
                                                                     const auto& D = decision();
-                                                                    if (format == FORMAT_JSON)
-                                                                        return std::format(R"({{"integration": "{}", "source": "{}", "reason": "{}"}})",
-                                                                                           name(D.desktop), name(D.source), jsonEscape(D.reason));
-                                                                    return std::format("{}\nsource: {}\nreason: {}\n", name(D.desktop), name(D.source), D.reason);
+                                                                    if (r.format == IPC::Socket1::FORMAT_JSON)
+                                                                        return IPC::Socket1::SResponse{std::format(R"({{"integration": "{}", "source": "{}", "reason": "{}"}})",
+                                                                                           name(D.desktop), name(D.source), jsonEscape(D.reason))};
+                                                                    return IPC::Socket1::SResponse{std::format("{}\nsource: {}\nreason: {}\n", name(D.desktop), name(D.source), D.reason)};
                                                                 },
                                                         });
     }
