@@ -72,11 +72,11 @@ namespace Hyprdrive::AppIdentity {
             f.x11          = W->backend().isX11();
             f.contentGame  = W->getContentType() == NContentType::CONTENT_TYPE_GAME;
             f.pid          = W->backend().pid();
-            f.hasParent    = W->parent() != nullptr;
+            f.hasParent    = W->backend().parent() != nullptr;
             if (W->backend().isX11()) {
-                f.overrideRedirect = W->isX11OverrideRedirect();
-                f.hasParent        = f.hasParent || W->x11Parent() != nullptr;
-                if (const auto XS = W->m_xwaylandSurface.lock()) {
+                f.overrideRedirect = W->backend().traits().overrideRedirect;
+                f.hasParent        = f.hasParent || W->backend().parent() != nullptr;
+                if (const auto XS = Hyprdrive::Priv::xsurface(W)) {
                     f.xid = XS->m_xID;
                     f.w   = static_cast<int>(XS->m_geometry.width);
                     f.h   = static_cast<int>(XS->m_geometry.height);
