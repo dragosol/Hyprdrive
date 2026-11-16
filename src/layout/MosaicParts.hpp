@@ -751,12 +751,12 @@ namespace Hyprdrive::Mosaic {
             // The window being configured: the one in its initial commit.
             PHLWINDOW w;
             for (const auto& W : Desktop::windowState()->windows())
-                if (W && !W->mapped() && !W->backend().isX11() && W->m_xdgSurface && W->m_xdgSurface->m_initialCommit)
+                if (W && !W->mapped() && !W->backend().isX11() && W->backend().initialCommit())
                     w = W;
             if (!w)
                 return std::nullopt;
             loadSizes();
-            const auto IT = g_sizes.find(!w->metadata().initialAppID().empty() ? w->metadata().initialAppID() : w->fetchClass());
+            const auto IT = g_sizes.find(!w->metadata().initialAppID().empty() ? w->metadata().initialAppID() : w->backend().metadata().appID);
             if (IT == g_sizes.end() || IT->second.x < MIN_SIDE || IT->second.y < MIN_SIDE)
                 return std::nullopt;
             const Vector2D N = IT->second;
@@ -3052,9 +3052,9 @@ namespace Hyprdrive::Mosaic {
                 if (!W)
                     continue;
                 if (on)
-                    *W->m_dimPercent = DIM;
+                    W->presentation().setDimPercent(DIM);
                 else
-                    W->updateDecorationValues();
+                    W->presentation().refreshValues();
             }
         }
 
