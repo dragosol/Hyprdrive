@@ -4,6 +4,7 @@
 // call launchApp/activateItem with default arguments.
 #include "DockParts.hpp"
 #include "IdentityLive.hpp"
+#include <hyprland/src/state/workspace/Resolver.hpp>
 
 namespace Hyprdrive::Dock {
 using namespace DockDetail;
@@ -400,18 +401,20 @@ void launchApp(PHLMONITOR monitor, const SItem& item, PHLWORKSPACE onWorkspace =
 void launchInEmptyWorkspace(PHLMONITOR monitor, const SItem& item) {
     if (!monitor || item.stack || item.scratchpad)
         return;
-    const auto TARGET = getWorkspaceIDNameFromString("emptym");
+    const auto  TARGETRES = State::Workspace::resolver()->getWorkspaceTargetFromString("emptym", monitor);
+    const auto* NUM       = TARGETRES.valid() ? std::get_if<Workspace::SWorkspaceNumberedID>(&*TARGETRES.id) : nullptr;
+    const WORKSPACEID TARGETID = NUM ? sc<WORKSPACEID>(NUM->value) : WORKSPACE_INVALID;
     // A location (the Trash): its file manager window, opened on the empty
     // desktop -- it opens where the user is, so go there first.
     if (!item.uri.empty()) {
         if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
             OVERVIEW->close();
-        if (TARGET.id != WORKSPACE_INVALID && (!monitor->m_activeWorkspace || Hyprdrive::Compat::id(monitor->m_activeWorkspace) != TARGET.id))
-            (void)::Config::Actions::changeWorkspace(std::to_string(TARGET.id));
+        if (TARGETID != WORKSPACE_INVALID && (!monitor->m_activeWorkspace || Hyprdrive::Compat::id(monitor->m_activeWorkspace) != TARGETID))
+            (void)::Config::Actions::changeWorkspace(std::to_string(TARGETID));
         Locations::activate(item.uri);
         return;
     }
-    if (TARGET.id == WORKSPACE_INVALID) {
+    if (TARGETID == WORKSPACE_INVALID) {
         launchApp(monitor, item, nullptr, true);
         return;
     }
@@ -419,9 +422,9 @@ void launchInEmptyWorkspace(PHLMONITOR monitor, const SItem& item) {
     // the user cannot see.
     if (const auto OVERVIEW = scrollOverviewForMonitor(monitor); OVERVIEW)
         OVERVIEW->close();
-    if (!monitor->m_activeWorkspace || Hyprdrive::Compat::id(monitor->m_activeWorkspace) != TARGET.id)
-        (void)::Config::Actions::changeWorkspace(std::to_string(TARGET.id));
-    launchApp(monitor, item, nullptr, true, "workspace " + std::to_string(TARGET.id));
+    if (!monitor->m_activeWorkspace || Hyprdrive::Compat::id(monitor->m_activeWorkspace) != TARGETID)
+        (void)::Config::Actions::changeWorkspace(std::to_string(TARGETID));
+    launchApp(monitor, item, nullptr, true, "workspace " + std::to_string(TARGETID));
 }
 
 // OPEN IN SCRATCHPAD (user, 2026-10-13): a new window of the app, born on the
@@ -525,7 +528,7 @@ void moveToEmptyWorkspace(PHLMONITOR monitor, const PHLWINDOW& WINDOW) {
             target = WORKSPACE;
     }
     if (!target)
-        target = State::workspaceState()->create(ID, MONITOR->m_id, std::to_string(ID));
+        target = State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(ID)}, MONITOR);
     if (!target)
         return;
 
