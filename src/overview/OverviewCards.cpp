@@ -67,6 +67,7 @@ void COverview::renderCardBody(PHLMONITOR monitor, const CBox& box, float render
         const CRegion DMG{BOXPX};
 
         g_pHyprRenderer->draw(
+            g_pHyprRenderer->context(),
             CTexPassElement::SRenderData{
                 .tex           = frost.cardWallpaperFB->getTexture(),
                 .box           = BOXPX,
@@ -74,7 +75,6 @@ void COverview::renderCardBody(PHLMONITOR monitor, const CBox& box, float render
                 .damage        = DMG,
                 .round         = CARDROUND.rounding,
                 .roundingPower = CARDROUND.power,
-                .flipEndFrame  = true,
             },
             DMG);
     } else if (alpha > 0.001F)
@@ -105,7 +105,7 @@ void COverview::renderCardBody(PHLMONITOR monitor, const CBox& box, float render
         border.borderSize    = BORDERSIZE + sc<int>(std::ceil(FOCUS * sc<float>(BORDERSIZE)));
         border.round         = CARDROUND.rounding;
         border.roundingPower = CARDROUND.power;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CBorderPassElement>(border));
         if (INORDER)
             OverviewRender::flushPass(monitor);
 
@@ -514,6 +514,7 @@ void COverview::renderClosingTiles(PHLMONITOR monitor, size_t cardIdx, const Tim
 
         CRegion damageRegion{TILE};
         g_pHyprRenderer->draw(
+            g_pHyprRenderer->context(),
             CTexPassElement::SRenderData{
                 .tex     = TEX,
                 .box     = DRAW,
