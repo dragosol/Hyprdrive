@@ -215,12 +215,12 @@ namespace Hyprdrive::Rows {
     Row of(const PHLMONITOR& monitor) {
         if (!blocks() || !monitor)
             return {};
-        if (const auto IT = g_blocks.find(monitor->displayName()); IT != g_blocks.end())
+        if (const auto IT = g_blocks.find(monitor->m_name); IT != g_blocks.end())
             return blockRow(IT->second, false);
         // Not in Omarchy's file yet: the bar's fallback, the block of what it shows.
         const auto SHOWN = monitor->m_activeWorkspace;
         if (SHOWN && ordinary(SHOWN))
-            return blockRow(std::clamp<Row::Id>(blockOfId(SHOWN->m_id), 0, 99), true);
+            return blockRow(std::clamp<Row::Id>(blockOfId(Hyprdrive::Compat::id(SHOWN)), 0, 99), true);
         return blockRow(0, true);
     }
 
@@ -252,7 +252,7 @@ namespace Hyprdrive::Rows {
         for (const auto& REF : State::workspaceState()->workspaces())
             if (const auto WS = REF.lock(); ordinary(WS) && row.contains(Hyprdrive::Compat::id(WS)) && sameRow(ofWorkspace(WS), row))
                 out.push_back(WS);
-        std::ranges::sort(out, [&](const PHLWORKSPACE& a, const PHLWORKSPACE& b) { return row.slot(a->m_id) < row.slot(b->m_id); });
+        std::ranges::sort(out, [&](const PHLWORKSPACE& a, const PHLWORKSPACE& b) { return row.slot(Hyprdrive::Compat::id(a)) < row.slot(Hyprdrive::Compat::id(b)); });
         return out;
     }
 
@@ -324,7 +324,7 @@ namespace Hyprdrive::Rows {
         for (const auto& [WS, TO] : moves)
             if (WS && g_merged.contains(Hyprdrive::Compat::id(WS)))
                 left += std::format(" {}", Hyprdrive::Compat::id(WS));
-        Log::logger->log(left.empty() ? Log::INFO : Log::ERR, "[hyprdrive] rows: Omarchy dropped its merged records under{} (adopted){}", told,
+        LOG(left.empty() ? Log::INFO : Log::ERR, "[hyprdrive] rows: Omarchy dropped its merged records under{} (adopted){}", told,
                          left.empty() ? std::string{} : " -- still recorded:" + left);
     }
 
@@ -334,7 +334,7 @@ namespace Hyprdrive::Rows {
             n = sc<long long>(lua_tointeger(L, 1));
         n = std::clamp<long long>(n, 0, 100);
         if (n != g_slots) {
-            Log::logger->log(Log::INFO, "[hyprdrive] rows: workspace blocks {} -> {}", g_slots, n);
+            LOG(Log::INFO, "[hyprdrive] rows: workspace blocks {} -> {}", g_slots, n);
             g_slots = n;
             if (g_live) {
                 watch();
@@ -423,7 +423,7 @@ namespace Hyprdrive::Rows {
             if (!MON)
                 continue;
             const Row R = of(MON);
-            s += std::format("\n  {}: row base {} capacity {} overflow {}{}", MON->displayName(), R.base, R.capacity, R.overflow, R.provisional ? " PROVISIONAL" : "");
+            s += std::format("\n  {}: row base {} capacity {} overflow {}{}", MON->m_name, R.base, R.capacity, R.overflow, R.provisional ? " PROVISIONAL" : "");
             s += "\n    members:";
             for (const auto& WS : members(R))
                 s += std::format(" {}={}{}{}", Hyprdrive::Compat::id(WS), label(WS), WS->getWindowCount() ? "" : "(empty)", guest(Hyprdrive::Compat::id(WS)) ? "(guest)" : "");

@@ -117,30 +117,33 @@ namespace Hyprdrive::DesktopOrder {
                 const WORKSPACEID FROM = Hyprdrive::Compat::id(WS);
                 if (FROM == TO)
                     continue;
-                Hyprdrive::Compat::id(WS) = TO;
+                const bool NUMERIC = WS->displayName() == std::to_string(FROM);
+                if (TO <= 0 || !WS->numberedID())
+                    continue;
+                WS->changeID(Workspace::SWorkspaceNumberedID{sc<Workspace::WorkspaceIDContainer>(TO)});
                 // A numeric name is the number; a name the user gave stays.
-                if (WS->displayName() == std::to_string(FROM))
-                    WS->m_name = std::to_string(TO);
+                if (NUMERIC && WS->displayName() != std::to_string(TO))
+                    WS->rename(std::to_string(TO));
             }
         });
         // (Each monitor's "previous workspace" stack holds numbers too, but
         // Hyprland keeps it private: right after a move, "workspace previous"
         // can land on the neighbour of the desktop it meant.)
         // Bars: the old numbers went, the new ones came; then what each monitor shows.
-        if (g_pEventManager) {
+        {
             for (const auto& D : done) {
-                g_pEventManager->postEvent(SHyprIPCEvent{"destroyworkspace", D.oldName});
-                g_pEventManager->postEvent(SHyprIPCEvent{"destroyworkspacev2", std::format("{},{}", D.from, D.oldName)});
+                Hyprdrive::Compat::postEvent("destroyworkspace", D.oldName);
+                Hyprdrive::Compat::postEvent("destroyworkspacev2", std::format("{},{}", D.from, D.oldName));
             }
             for (const auto& D : done) {
-                g_pEventManager->postEvent(SHyprIPCEvent{"createworkspace", D.ws->displayName()});
-                g_pEventManager->postEvent(SHyprIPCEvent{"createworkspacev2", std::format("{},{}", Hyprdrive::Compat::id(D.ws), D.ws->displayName())});
+                Hyprdrive::Compat::postEvent("createworkspace", D.ws->displayName());
+                Hyprdrive::Compat::postEvent("createworkspacev2", std::format("{},{}", Hyprdrive::Compat::id(D.ws), D.ws->displayName()));
             }
             for (const auto& MON : State::monitorState()->monitors())
                 if (MON && MON->m_activeWorkspace) {
                     const auto& WS = MON->m_activeWorkspace;
-                    g_pEventManager->postEvent(SHyprIPCEvent{"workspace", WS->displayName()});
-                    g_pEventManager->postEvent(SHyprIPCEvent{"workspacev2", std::format("{},{}", Hyprdrive::Compat::id(WS), WS->displayName())});
+                    Hyprdrive::Compat::postEvent("workspace", WS->displayName());
+                    Hyprdrive::Compat::postEvent("workspacev2", std::format("{},{}", Hyprdrive::Compat::id(WS), WS->displayName()));
                 }
         }
         overviewDesktopsRenumbered();
@@ -209,27 +212,27 @@ namespace Hyprdrive::DesktopOrder {
         std::vector<std::pair<WORKSPACEID, WORKSPACEID>>  row;
         std::string                                       before, after;
         for (size_t i = 0; i < ALL.size(); ++i) {
-            WORKSPACEID to = ALL[i]->m_id;
+            WORKSPACEID to = Hyprdrive::Compat::id(ALL[i]);
             for (const auto& M : PLAN)
                 if (M.key == rooms[i].key)
                     to = M.to;
-            if (to != ALL[i]->m_id)
+            if (to != Hyprdrive::Compat::id(ALL[i]))
                 moves.emplace_back(ALL[i], to);
             if (rooms[i].populated)
-                row.emplace_back(ALL[i]->m_id, to);
+                row.emplace_back(Hyprdrive::Compat::id(ALL[i]), to);
         }
         // (Listed in the old order, so before and after read side by side.)
         std::vector<size_t> byOld(ALL.size());
         for (size_t i = 0; i < byOld.size(); ++i)
             byOld[i] = i;
-        std::ranges::sort(byOld, [&](size_t a, size_t b) { return ALL[a]->m_id < ALL[b]->m_id; });
+        std::ranges::sort(byOld, [&](size_t a, size_t b) { return Hyprdrive::Compat::id(ALL[a]) < Hyprdrive::Compat::id(ALL[b]); });
         for (const size_t I : byOld) {
-            WORKSPACEID to = ALL[I]->m_id;
+            WORKSPACEID to = Hyprdrive::Compat::id(ALL[I]);
             for (const auto& [WS, TO] : moves)
                 if (WS == ALL[I])
                     to = TO;
             const char* tag = rooms[I].populated ? "" : rooms[I].shown ? "(shown, empty)" : "(empty)";
-            before += std::format("{}{}{}", before.empty() ? "" : " ", ALL[I]->m_id, tag);
+            before += std::format("{}{}{}", before.empty() ? "" : " ", Hyprdrive::Compat::id(ALL[I]), tag);
             after += std::format("{}{}{}", after.empty() ? "" : " ", to, tag);
         }
         note(std::format("{}: no empty desktops between: {} -> {}", why, before, after));

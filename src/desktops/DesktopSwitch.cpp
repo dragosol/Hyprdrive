@@ -20,6 +20,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/keybinds/Manager.hpp>
+#include <hyprland/src/keybinds/Resolver.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -157,7 +158,7 @@ namespace Hyprdrive::DesktopSwitch {
         }
 
         bool bindRunning() {
-            return g_pKeybindManager && g_pKeybindManager->m_currentKeybind;
+            return Hyprdrive::Compat::currentBind() != nullptr;
         }
 
         // The wheel bind is running: this call is one wheel event, which pays
@@ -165,8 +166,8 @@ namespace Hyprdrive::DesktopSwitch {
         bool wheelBindRunning() {
             if (!bindRunning())
                 return false;
-            const auto& KEY = g_pKeybindManager->m_currentKeybind->key;
-            return KEY == "mouse_down" || KEY == "mouse_up";
+            const auto KEYS = Hyprdrive::Compat::currentBind()->keyNames();
+            return KEYS.size() == 1 && (KEYS[0] == "mouse_down" || KEYS[0] == "mouse_up");
         }
 
         // Would Hyprland animate this workspace at all? animations:enabled and
@@ -360,10 +361,10 @@ namespace Hyprdrive::DesktopSwitch {
     bool overviewWheelSwitchesDesktops(const IPointer::SAxisEvent& e) {
         if (e.source != WL_POINTER_AXIS_SOURCE_WHEEL || e.axis != WL_POINTER_AXIS_VERTICAL_SCROLL || !Config::getScrollDesktops())
             return false;
-        if (!g_pInputManager || !g_pKeybindManager)
+        if (!g_pInputManager || !Keybinds::mgr())
             return false;
-        const auto WANT = g_pKeybindManager->stringToModMask(Config::getScrollDesktopsMods());
-        return WANT != 0 && g_pInputManager->getModsFromAllKBs() == WANT;
+        const auto WANT = Keybinds::modMaskFromString(Config::getScrollDesktopsMods());
+        return WANT != Input::HL_MODIFIER_NONE && g_pInputManager->getModsFromAllKBs() == WANT;
     }
 
     void preRender(PHLMONITOR monitor) {
