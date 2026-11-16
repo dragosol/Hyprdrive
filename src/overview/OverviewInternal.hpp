@@ -258,7 +258,7 @@ inline bool isOverviewSubmapName(const std::string& name) {
 
 // The name this config actually binds, preferring the new one when both exist.
 inline const char* boundOverviewSubmap() {
-    if (g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) { return keybind && keybind->submap.name == OVERVIEW_SUBMAP; }))
+    if (Keybinds::mgr() && std::ranges::any_of(Keybinds::mgr()->registry().binds(), [](const auto& keybind) { return keybind && keybind->metadata().submap == OVERVIEW_SUBMAP; }))
         return OVERVIEW_SUBMAP;
     return OVERVIEW_SUBMAP_LEGACY;
 }
@@ -297,7 +297,7 @@ inline xkb_keysym_t getOverviewKeysym(const IKeyboard::SKeyEvent& event) {
 }
 
 inline bool hasOverviewSubmap() {
-    return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) { return keybind && isOverviewSubmapName(keybind->submap.name); });
+    return Keybinds::mgr() && std::ranges::any_of(Keybinds::mgr()->registry().binds(), [](const auto& keybind) { return keybind && isOverviewSubmapName(keybind->metadata().submap); });
 }
 
 // Whether the submap binds any KEY, as opposed to only mouse buttons.
@@ -306,13 +306,14 @@ inline bool hasOverviewSubmap() {
 // flag alone counted this rice's two click binds as keyboard binds and kept the
 // keyboard hook uninstalled -- measured 2026-08-01, arrows and Return dead.
 inline bool hasOverviewSubmapKeyBinds() {
-    return g_pKeybindManager && std::ranges::any_of(g_pKeybindManager->m_keybinds, [](const auto& keybind) {
-        return keybind && isOverviewSubmapName(keybind->submap.name) && !keybind->mouse && !keybind->key.starts_with("mouse");
+    return Keybinds::mgr() && std::ranges::any_of(Keybinds::mgr()->registry().binds(), [](const auto& keybind) {
+        return keybind && isOverviewSubmapName(keybind->metadata().submap) && !keybind->hasFlag(Keybinds::BIND_FLAG_MOUSE) &&
+            !(keybind->keyNames().size() == 1 && keybind->keyNames()[0].starts_with("mouse"));
     });
 }
 
 inline bool isOverviewSubmapActive() {
-    return g_pKeybindManager && isOverviewSubmapName(g_pKeybindManager->getCurrentSubmap().name);
+    return Keybinds::mgr() && isOverviewSubmapName(std::string{Keybinds::mgr()->currentSubmap()});
 }
 
 // The overview is not a Wayland client. Clear seat keyboard focus so keys
@@ -459,10 +460,14 @@ inline bool isPointerOnTopLayer(PHLMONITOR monitor) {
     // notification toasts (Omapager, Omarchy's notifications) are popups of a
     // layer whose own input region does not cover them, so the plain surface
     // test missed them and the overview ate every hover, click and swipe.
-    const auto& HIT = Desktop::viewState()->hitTest();
+    // 0.57's layerPopupSurfaceAt walks all four layers; keep the overlay+top-only walk.
     for (const auto LAYER : {ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, ZWLR_LAYER_SHELL_V1_LAYER_TOP}) {
-        if (HIT.layerPopupSurfaceAt(MOUSECOORDS, &monitor->m_layerSurfaceLayers[LAYER], &surfaceCoords, &layerSurface))
-            return true;
+        for (const auto& ls : monitor->m_layerSurfaceLayers[LAYER] | std::views::reverse) {
+            if (!ls || !ls->mapped() || !ls->acceptsInput())
+                continue;
+            if (const auto SURFACEAT = ls->popupHead()->at(MOUSECOORDS, true); SURFACEAT && SURFACEAT->wlSurface()->resource())
+                return true;
+        }
     }
 
     if (Desktop::viewState()->hitTest().layerSurfaceAt(MOUSECOORDS, &monitor->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &layerSurface))
@@ -1349,9 +1354,11 @@ inline bool windowHasOverviewAnimation(const PHLWINDOW& window) {
     if (!window)
         return false;
 
-    return window->positionAnimation()->isBeingAnimated() || window->sizeAnimation()->isBeingAnimated() || window->m_alpha.isBeingAnimated() ||
-        window->m_borderFadeAnimationProgress->isBeingAnimated() || window->m_borderAngleAnimationProgress->isBeingAnimated() || window->m_dimPercent->isBeingAnimated() ||
-        window->m_shadowFadeAnimationProgress->isBeingAnimated();
+    return window->positionAnimation()->isBeingAnimated() || window->sizeAnimation()->isBeingAnimated() || window->alpha().isBeingAnimated() ||
+        (Hyprdrive::Priv::borderGradient(window) && (Hyprdrive::Priv::borderGradient(window)->m_fadeProgress->isBeingAnimated() ||
+                                                     Hyprdrive::Priv::borderGradient(window)->m_angleProgress->isBeingAnimated())) ||
+        Hyprdrive::Priv::dimPercent(*window)->isBeingAnimated() ||
+        (Hyprdrive::Priv::shadowGradient(window) && Hyprdrive::Priv::shadowGradient(window)->m_fadeProgress->isBeingAnimated());
 }
 
 inline bool layerHasOverviewAnimation(const PHLLS& layer) {
@@ -2526,7 +2533,7 @@ inline void blockOverviewLayerBlurOptimization(size_t firstElement) {
     if (!Hyprdrive::Config::getValue<bool>("plugin:hyprdrive:live_layer_frost"))
         return;
 
-    auto& passElements = g_pHyprRenderer->m_renderPass.m_passElements;
+    auto& passElements = g_pHyprRenderer->context().m_pass.m_passElements;
     for (size_t i = firstElement; i < passElements.size(); ++i) {
         const auto& passElement = passElements[i];
         if (!passElement.element)
@@ -2557,7 +2564,7 @@ inline void renderOverviewLayerLevel(PHLMONITOR monitor, uint32_t layer, const C
             modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, renderScale);
             modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_TRANSLATE, workspaceBox.pos());
 
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = modif}));
             pushedRenderHints = true;
         }
 
@@ -2568,14 +2575,14 @@ inline void renderOverviewLayerLevel(PHLMONITOR monitor, uint32_t layer, const C
 			lsAlpha->setValueAndWarp(previousAlpha * std::clamp(alpha, 0.F, 1.F));
 		}
 
-        g_pHyprRenderer->renderLayer(LAYER, monitor, now);
+        g_pHyprRenderer->renderLayer(g_pHyprRenderer->context(), LAYER, monitor, now);
 
         if (MODULATEALPHA && lsAlpha->value())
 			lsAlpha->setValueAndWarp(previousAlpha);
     }
 
     if (pushedRenderHints)
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
 }
 
 inline void focusOverviewFullscreenWindowIfActiveWorkspace(const PHLWINDOW& fullscreenWindow_, const PHLWORKSPACE& workspace, PHLMONITOR monitor) {
