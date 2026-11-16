@@ -1,4 +1,5 @@
 #include "PluginParts.hpp"
+#include <hyprland/src/layout/target/WindowTarget.hpp>
 using namespace PluginDetail;
 
 typedef void (*origRenderWorkspace)(void*, Render::CRenderContext&, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
@@ -63,8 +64,10 @@ void setDockCursor(bool on) {
         Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
 }
 
+// Hooked on Layout::CWindowTarget::sendWindowSize (main.cpp): on 0.57 the
+// target's updatePos configures through it directly, past CWindow's.
 void hkSendWindowSize(void* thisptr, bool force) {
-    if (Hyprdrive::ConfigureHold::intercept(sc<Desktop::View::CWindow*>(thisptr), force))
+    if (const auto WINDOW = sc<Layout::CWindowTarget*>(thisptr)->window(); WINDOW && Hyprdrive::ConfigureHold::intercept(WINDOW.get(), force))
         return;
     rc<origSendWindowSize>(g_pSendWindowSizeHook->m_original)(thisptr, force);
 }

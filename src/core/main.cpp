@@ -3,6 +3,7 @@
 #include "WindowPlacement.hpp"
 #include "Workers.hpp"
 #include "TerminateLog.hpp"
+#include <hyprland/src/layout/target/WindowTarget.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 using namespace PluginDetail;
 
@@ -222,7 +223,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pMouseButtonHook = Hyprdrive::FunctionHooks::required("main", "onMouseButton", {"CInputManager::onMouseButton("}, rc<void*>(hkOnMouseButton));
     g_pMouseButtonHook->hook();
 
-    g_pSendWindowSizeHook = Hyprdrive::FunctionHooks::required("main", "sendWindowSize", {"CWindow::sendWindowSize("}, rc<void*>(hkSendWindowSize));
+    g_pSendWindowSizeHook = Hyprdrive::FunctionHooks::required("main", "sendWindowSize", {"Layout::CWindowTarget::sendWindowSize("}, rc<void*>(hkSendWindowSize));
     g_pSendWindowSizeHook->hook();
 
     // ONE hook that DockRoom and OwnSizeTile both ride (Hooks.cpp, hkTargetPlace).
@@ -230,7 +231,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pTargetPlaceHook->hook();
     Hyprdrive::ConfigureHold::setSender([](Desktop::View::CWindow* window, bool force) {
         if (g_pSendWindowSizeHook)
-            rc<origSendWindowSize>(g_pSendWindowSizeHook->m_original)(window, force);
+            if (const auto TARGET = window->layoutTarget())
+                rc<origSendWindowSize>(g_pSendWindowSizeHook->m_original)(sc<Layout::CWindowTarget*>(TARGET.get()), force);
     });
     g_pShouldRenderWindowHook = Hyprdrive::FunctionHooks::required("main", "shouldRenderWindow", {"shouldRenderWindow(Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>, Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>)"}, rc<void*>(hkShouldRenderWindow));
     g_pShouldRenderWindowHook->hook();
