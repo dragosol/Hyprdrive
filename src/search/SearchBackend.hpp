@@ -63,6 +63,9 @@ struct SHost {
     bool (*omarchy)()                 = nullptr;
     std::string (*terminalTemplate)() = nullptr;
     std::string (*appTerminal)()      = nullptr;
+    // Omarchy's menu file. Null: the installed one. A test points it at its
+    // own, so it passes on a machine with no Omarchy.
+    std::string (*systemMenu)()       = nullptr;
 };
 void setHost(const SHost& host);
 

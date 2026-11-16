@@ -100,7 +100,7 @@ for p in pacman dnf zypper apt-get; do have $p && { PM=$p; break; }; done
 LUA=$(sh "$HERE/scripts/lua_pc.sh" 2>/dev/null || echo lua)
 MODS="pixman-1 libdrm pangocairo cairo fontconfig libinput libudev wayland-server xkbcommon libsystemd gio-2.0 gio-unix-2.0
       xcb $LUA aquamarine hyprcursor hyprgraphics hyprlang hyprutils egl xcb-render xcb-xfixes xcb-icccm xcb-composite xcb-res xcb-errors"
-TOOLS="c++ make pkg-config readelf python3"
+TOOLS="c++ make pkg-config readelf python3 jq curl" # jq: the layout switcher and the fragments; curl: the search tools
 # Headers Hyprland's own headers include without hyprland.pc naming them.
 HEADERS="glslang/Include/glslang_c_interface.h"
 hdr_ok() { have c++ && printf '#include <%s>\n' "$1" | c++ -std=c++2b -E -x c++ - >/dev/null 2>&1; }

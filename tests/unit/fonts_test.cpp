@@ -117,7 +117,10 @@ static int runMode(const std::string& mode) {
             CHECK(Fonts::familyCovers(FAM, 0xF07C));
         }
         CHECK(Fonts::iconFamily("builtin").empty() && !Fonts::iconCovers("builtin", 0xF07C));
-        CHECK(!Fonts::matchFamily("monospace").empty());
+        // A machine with fonts resolves "monospace" to one of them; one with
+        // no font at all (a bare server or container) has nothing to resolve to.
+        if (const auto SET = FcConfigGetFonts(nullptr, FcSetSystem); SET && SET->nfont > 0)
+            CHECK(!Fonts::matchFamily("monospace").empty());
         Fonts::reset();
         CHECK(Fonts::iconFamily("auto") == FAM); // deterministic across a reset
         std::printf("host icon font: \"%s\" (%zu/%zu), monospace = \"%s\"\n", FAM.c_str(), Fonts::iconCoverage("auto"), Glyphs::named().size(),
