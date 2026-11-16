@@ -25,7 +25,7 @@
 #define protected public
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/protocols/CursorShape.hpp>
-#include <hyprland/src/managers/EventManager.hpp>
+#include <hyprland/src/ipc/s2/S2.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #undef protected
 #undef private

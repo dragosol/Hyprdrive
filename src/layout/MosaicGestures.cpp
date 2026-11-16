@@ -106,8 +106,8 @@ namespace Hyprdrive::Mosaic {
                 Desktop::viewState()->hitTest().windowAt(p, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
             const bool TOPFLOATS = TOP && TOP->layoutTarget() && TOP->layoutTarget()->floating();
             const auto TRY       = [&](const PHLWINDOW& w) -> Layout::eRectCorner {
-                if (!w || !w->m_isMapped || w->isHidden() || !w->m_workspace || !w->m_workspace->isVisible() || Fullscreen::controller()->isFullscreen(w) ||
-                    (w->m_isX11 && w->isX11OverrideRedirect()) || !w->layoutTarget())
+                if (!w || !w->mapped() || w->isHidden() || !w->m_workspace || !w->m_workspace->visible() || Fullscreen::controller()->isFullscreen(w) ||
+                    (w->backend().isX11() && w->isX11OverrideRedirect()) || !w->layoutTarget())
                     return Layout::CORNER_NONE;
                 if (TOPFLOATS && TOP != w)
                     return Layout::CORNER_NONE;
@@ -366,7 +366,7 @@ namespace Hyprdrive::Mosaic {
             else if (SHOWN) {
                 const auto FS = Fullscreen::controller()->getFullscreenWindow(SHOWN);
                 for (const auto& W : Desktop::windowState()->windows()) {
-                    if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != SHOWN || (FS && W != FS && !W->m_isFloating))
+                    if (!W || !W->mapped() || W->isHidden() || W->m_workspace != SHOWN || (FS && W != FS && !W->isFloating()))
                         continue;
                     if (MODE == "hover" && W != HOVER)
                         continue;
@@ -393,7 +393,7 @@ namespace Hyprdrive::Mosaic {
 
         for (const auto& f : g_labelFades) {
             const auto W = f.window.lock();
-            if (W->m_monitor != monitor || !W->m_isMapped)
+            if (W->m_monitor != monitor || !W->mapped())
                 continue;
             // On the zoomed canvas under the zoom's own fade; elsewhere only a
             // window on the desktop shown, as it is.
@@ -1031,7 +1031,7 @@ namespace Hyprdrive::Mosaic {
         if (!MON || !MON->m_activeWorkspace || MON->m_activeSpecialWorkspace)
             return;
         const auto W = Desktop::viewState()->hitTest().windowAt(P, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
-        if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != MON->m_activeWorkspace || W == Desktop::focusState()->window())
+        if (!W || !W->mapped() || W->isHidden() || W->m_workspace != MON->m_activeWorkspace || W == Desktop::focusState()->window())
             return;
         Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
     }
@@ -1069,12 +1069,12 @@ namespace Hyprdrive::Mosaic {
         if (pointerOnChrome(P) || pointerInDockBand(P) || pointerAtOuterEdge(P))
             return false;
         const auto W = Desktop::viewState()->hitTest().windowAt(P, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
-        if (!W || !W->m_isMapped || W->isHidden() || W == Desktop::focusState()->window())
+        if (!W || !W->mapped() || W->isHidden() || W == Desktop::focusState()->window())
             return false;
         if (vetoHoverFocus(W))
             return false;
         g_hoverStale = false;
-        trace(std::format("hover refresh: {} under the pointer takes the focus", W->m_class));
+        trace(std::format("hover refresh: {} under the pointer takes the focus", W->metadata().appID()));
         Desktop::focusState()->fullWindowFocus(W, Desktop::FOCUS_REASON_FFM);
         return true;
     }

@@ -12,7 +12,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Group.hpp>
 #include <hyprland/src/desktop/view/Popup.hpp>
@@ -122,14 +122,14 @@ struct SDeferredWindowGeometry {
         applied           = true;
         prevPos           = WINDOW->positionAnimation()->value();
         prevSize          = WINDOW->sizeAnimation()->value();
-        prevAnimatingIn   = WINDOW->m_animatingIn;
+        prevAnimatingIn   = WINDOW->presentation().animatingIn();
         prevPosAnimating  = WINDOW->positionAnimation()->isBeingAnimated();
         prevSizeAnimating = WINDOW->sizeAnimation()->isBeingAnimated();
         COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->positionAnimation().get(), true);
         COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->sizeAnimation().get(), true);
         WINDOW->positionAnimation()->value() = pos;
         WINDOW->sizeAnimation()->value()     = size;
-        WINDOW->m_animatingIn                = true;
+        WINDOW->presentation().setAnimatingIn(true);
         if (const auto WS = workspace.lock(); WS && zeroWorkspaceOffset) {
             prevOffset                = WS->m_renderOffset->value();
             WS->m_renderOffset->value() = {};
@@ -145,7 +145,7 @@ struct SDeferredWindowGeometry {
         applied                              = false;
         WINDOW->positionAnimation()->value() = prevPos;
         WINDOW->sizeAnimation()->value()     = prevSize;
-        WINDOW->m_animatingIn                = prevAnimatingIn;
+        WINDOW->presentation().setAnimatingIn(prevAnimatingIn);
         COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->positionAnimation().get(), prevPosAnimating);
         COverviewAnimatedVariableAccess::setBeingAnimated(WINDOW->sizeAnimation().get(), prevSizeAnimating);
         if (const auto WS = workspace.lock(); WS && zeroWorkspaceOffset)
@@ -195,8 +195,8 @@ static PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     if (!window)
         return nullptr;
 
-    if (window->m_group)
-        return window->m_group->current();
+    if (window->grouping().group())
+        return window->grouping().group()->current();
 
     return window;
 }
@@ -493,8 +493,8 @@ static void roundStandaloneWindowPassElements(const PHLWINDOW& window, PHLMONITO
     if (roundingPx < 0 && Fullscreen::controller()->isFullscreen(window))
         return;
 
-    const int   rounding      = roundingPx >= 0 ? roundingPx : sc<int>(std::round(window->rounding() * monitor->m_scale * renderScale));
-    const float roundingPower = window->roundingPower();
+    const int   rounding      = roundingPx >= 0 ? roundingPx : sc<int>(std::round(window->presentation().rounding() * monitor->m_scale * renderScale));
+    const float roundingPower = window->presentation().roundingPower();
 
     if (rounding <= 0)
         return;
@@ -527,7 +527,7 @@ static SHyprbarGlobalStateMirror* getOverviewHyprbarGlobalState() {
     for (const auto* plugin : g_pPluginSystem->getAllPlugins()) {
         if (!plugin)
             continue;
-        if (plugin->m_name == "hyprbars" || plugin->m_path.contains("hyprbars")) {
+        if (plugin->displayName() == "hyprbars" || plugin->m_path.contains("hyprbars")) {
             hyprbarsHandle = plugin->m_handle;
             break;
         }
@@ -639,11 +639,11 @@ static SOverviewWindowMetrics getOverviewWindowMetrics(PHLMONITOR monitor, const
         return metrics;
 
     metrics.pxScale                 = monitor->m_scale * renderScale;
-    metrics.borderSize              = window->getRealBorderSize();
+    metrics.borderSize              = window->presentation().borderSize();
     metrics.borderPx                = sc<int>(std::round(metrics.borderSize * monitor->m_scale));
     metrics.borderPxScaled          = metrics.borderSize * metrics.pxScale;
-    metrics.roundingBase            = window->rounding();
-    metrics.roundingPower           = window->roundingPower();
+    metrics.roundingBase            = window->presentation().rounding();
+    metrics.roundingPower           = window->presentation().roundingPower();
     metrics.correctionOffset        = metrics.borderSize * (M_SQRT2 - 1) * std::max(2.0 - metrics.roundingPower, 0.0);
     metrics.outerRound              = metrics.roundingBase > 0 ? (metrics.roundingBase + metrics.borderSize) - metrics.correctionOffset : 0.F;
     metrics.roundingPx              = sc<int>(std::round(metrics.roundingBase * metrics.pxScale));
@@ -666,7 +666,7 @@ static std::optional<SDecorationPositioningReply> getOverviewTopStickyDecoration
         return std::nullopt;
 
     const float HEIGHT  = std::max(0.F, sc<float>(INFO.desiredExtents.topLeft.y) * heightScale);
-    const float BORDER  = sc<float>(window->getRealBorderSize());
+    const float BORDER  = sc<float>(window->presentation().borderSize());
     const bool  PRECEDE = shouldOverviewBorderIncludeHyprbar(window);
     const float WIDTH   = PRECEDE ? window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT).x : window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT).x + BORDER * 2.F;
     const float YOFFSET = PRECEDE ? 0.F : BORDER;
@@ -719,11 +719,11 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
     const Vector2D previousWindowPos       = window->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
     const Vector2D previousWindowSize      = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
     const auto     WORKSPACE               = window->m_workspace;
-    const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !window->m_pinned;
+    const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !Hyprdrive::Compat::pinned(window);
     const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
     const auto     previousReplyData       = g_pDecorationPositioner->getDataFor(decoration, window);
     const auto     previousReply           = previousReplyData ? previousReplyData->lastReply : SDecorationPositioningReply{};
-    const auto     previousRounding        = window->m_ruleApplicator->rounding();
+    const auto     previousRounding        = window->m_ruleApplicator->presentation().rounding();
     const auto     previousBorderSize      = window->m_ruleApplicator->borderSize();
     const bool     previousBorderCacheDirty = window->m_borderSizeCacheDirty;
     const int      previousCachedBorderSize = window->m_cachedBorderSize;
@@ -750,9 +750,9 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
         }
     };
 
-    const auto scaledRounding   = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->m_ruleApplicator->rounding().valueOrDefault() * metrics.renderScale)));
-    const auto scaledBorderSize = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->getRealBorderSize() * metrics.renderScale)));
-    window->m_ruleApplicator->rounding().set(scaledRounding, Desktop::Types::PRIORITY_SET_PROP);
+    const auto scaledRounding   = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->m_ruleApplicator->presentation().rounding().valueOrDefault() * metrics.renderScale)));
+    const auto scaledBorderSize = std::max<Config::INTEGER>(0, sc<Config::INTEGER>(std::round(window->presentation().borderSize() * metrics.renderScale)));
+    window->m_ruleApplicator->presentation().rounding().set(scaledRounding, Desktop::Types::PRIORITY_SET_PROP);
     window->m_ruleApplicator->borderSize().set(scaledBorderSize, Desktop::Types::PRIORITY_SET_PROP);
     window->m_borderSizeCacheDirty = true;
 
@@ -796,7 +796,7 @@ static void renderOverviewHyprbarDecoration(SOverviewCustomDecorationRenderState
 }
 
 static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const SOverviewWindowMetrics& metrics, bool selected) {
-    if (!monitor || !window || (!window->m_isMapped))
+    if (!monitor || !window || (!window->mapped()))
         return;
 
     const auto PSHADOWS      = Hyprdrive::Config::getValue<int>("decoration:shadow:enabled");
@@ -845,7 +845,7 @@ static void renderOverviewWindowShadow(PHLMONITOR monitor, const PHLWINDOW& wind
 }
 
 static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const SOverviewWindowMetrics& metrics, bool selected) {
-    if (!monitor || !window || (!window->m_isMapped))
+    if (!monitor || !window || (!window->mapped()))
         return;
 
     // The ring fades between the window's own border and the highlight on
@@ -930,7 +930,7 @@ static void renderOverviewWindowBorder(PHLMONITOR monitor, const PHLWINDOW& wind
 }
 
 static void renderOverviewGroupTabIndicators(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const SOverviewWindowMetrics& metrics, float alpha) {
-    if (!monitor || !window || !window->m_group || window->m_group->size() < 1)
+    if (!monitor || !window || !window->grouping().group() || window->grouping().group()->size() < 1)
         return;
 
     const auto PINDICATORHEIGHT = Hyprdrive::Config::getValue<int>("group:groupbar:indicator_height");
@@ -947,8 +947,8 @@ static void renderOverviewGroupTabIndicators(PHLMONITOR monitor, const PHLWINDOW
     if (PINDICATORHEIGHT <= 0)
         return;
 
-    const bool  groupLocked  = window->m_group->locked() || g_pKeybindManager->m_groupsLocked;
-    const auto  groupWindows = window->m_group->windows();
+    const bool  groupLocked  = window->grouping().group()->locked() || g_pKeybindManager->m_groupsLocked;
+    const auto  groupWindows = window->grouping().group()->windows();
     const auto  focusedWindow = Desktop::focusState()->window();
     const float indicatorH   = sc<float>(PINDICATORHEIGHT) * metrics.pxScale;
     const float outerGap     = sc<float>(POUTERGAP) * metrics.pxScale;
@@ -1003,7 +1003,7 @@ static void renderOverviewGroupTabIndicators(PHLMONITOR monitor, const PHLWINDOW
 }
 
 static void renderOverviewGroupTabTitles(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& windowBox, const SOverviewWindowMetrics& metrics, float alpha) {
-    if (!monitor || !window || !window->m_group || window->m_group->size() < 1 || alpha <= 0.F)
+    if (!monitor || !window || !window->grouping().group() || window->grouping().group()->size() < 1 || alpha <= 0.F)
         return;
 
     const auto PRENDERTITLES            = Hyprdrive::Config::getValue<bool>("group:groupbar:render_titles");
@@ -1024,8 +1024,8 @@ static void renderOverviewGroupTabTitles(PHLMONITOR monitor, const PHLWINDOW& wi
     if (!PRENDERTITLES || PHEIGHT <= 0)
         return;
 
-    const bool  groupLocked  = window->m_group->locked() || g_pKeybindManager->m_groupsLocked;
-    const auto  groupWindows = window->m_group->windows();
+    const bool  groupLocked  = window->grouping().group()->locked() || g_pKeybindManager->m_groupsLocked;
+    const auto  groupWindows = window->grouping().group()->windows();
     const auto  focusedWindow = Desktop::focusState()->window();
     const float outerGap     = sc<float>(POUTERGAP) * metrics.pxScale;
     const float innerGap     = sc<float>(PINNERGAP) * metrics.pxScale;
@@ -1086,7 +1086,7 @@ static void renderOverviewGroupTabTitles(PHLMONITOR monitor, const PHLWINDOW& wi
 
         const int maxWidth = std::max(1, sc<int>(std::round(box.width - textPadding * 2.F)));
         auto      titleTex =
-            OverviewRender::text(member->m_title, textColor, fontSizePx, false, FONTFAMILY, maxWidth, isCurrent ? FONTWEIGHTACTIVE->m_value : FONTWEIGHTINACTIVE->m_value);
+            OverviewRender::text(member->metadata().title(), textColor, fontSizePx, false, FONTFAMILY, maxWidth, isCurrent ? FONTWEIGHTACTIVE->m_value : FONTWEIGHTINACTIVE->m_value);
         if (!titleTex || !titleTex->ok())
             continue;
 
@@ -1112,7 +1112,7 @@ static SOverviewCustomDecorationRenderState renderOverviewCustomDecorations(PHLM
     if (!monitor || !window)
         return state;
 
-    window->updateWindowDecos();
+    window->presentation().updateDecorations();
 
     Render::SRenderModifData modif;
     modif.modifs.emplace_back(Render::SRenderModifData::RMOD_TYPE_SCALE, metrics.renderScale);
@@ -1172,7 +1172,7 @@ static bool overviewWorkspaceBoxReadyForPrecomputedBlur(PHLMONITOR monitor, cons
 }
 
 bool shouldUsePrecomputedBlur(const PHLWINDOW& window, PHLMONITOR monitor, const CBox* workspaceBox, const CBox* windowBox, bool dragged) {
-    return !dragged && Hyprdrive::Config::getValue<bool>("decoration:blur:new_optimizations") && overviewShowsWindow(window) && !window->m_isFloating && shouldBlurBackground(window) &&
+    return !dragged && Hyprdrive::Config::getValue<bool>("decoration:blur:new_optimizations") && overviewShowsWindow(window) && !window->isFloating() && shouldBlurBackground(window) &&
         overviewWindowFitsWorkspaceBox(workspaceBox, windowBox) && overviewWorkspaceBoxReadyForPrecomputedBlur(monitor, workspaceBox);
 }
 
@@ -1241,7 +1241,7 @@ void forceDecoRecalc(const PHLWINDOW& window) {
         return;
 
     g_pDecorationPositioner->forceRecalcFor(WINDOW);
-    WINDOW->updateWindowDecos();
+    WINDOW->presentation().updateDecorations();
 }
 
 void renderOverviewWindow(const SRenderParams& params) {
@@ -1309,8 +1309,8 @@ void renderOverviewWindow(const SRenderParams& params) {
                 COverviewBlurPassElement::SData frost;
                 // The window's own letterboxed rect in the cell, not the cell.
                 frost.box           = CBox{sc<double>(OFFX + sc<float>(REALPX.x) * S), sc<double>(OFFY + sc<float>(REALPX.y) * S), sc<double>(SCALEDW), sc<double>(SCALEDH)}.round();
-                frost.rounding      = params.previewRoundingPx >= 0 ? params.previewRoundingPx : sc<int>(std::round(WINDOW->rounding() * MONITOR->m_scale * S));
-                frost.roundingPower = WINDOW->roundingPower();
+                frost.rounding      = params.previewRoundingPx >= 0 ? params.previewRoundingPx : sc<int>(std::round(WINDOW->presentation().rounding() * MONITOR->m_scale * S));
+                frost.roundingPower = WINDOW->presentation().roundingPower();
                 frost.alpha         = 1.F;
                 g_pHyprRenderer->addPassElement(makeUnique<COverviewBlurPassElement>(frost));
             }
@@ -1396,11 +1396,11 @@ void renderOverviewWindow(const SRenderParams& params) {
 
     const Vector2D previousWindowPos       = params.window->m_realPosition->value();
     const Vector2D previousWindowSize      = params.window->m_realSize->value();
-    const bool     previousAnimatingIn     = params.window->m_animatingIn;
+    const bool     previousAnimatingIn     = params.window->presentation().animatingIn();
     const bool     previousSizeAnimating   = params.window->sizeAnimation()->isBeingAnimated();
     const bool     previousPosAnimating    = params.window->positionAnimation()->isBeingAnimated();
     const auto     WORKSPACE               = params.window->m_workspace;
-    const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !params.window->m_pinned;
+    const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !Hyprdrive::Compat::pinned(params.window);
     const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
 
     // Mark BOTH animated before writing current. Writing position while the
@@ -1411,7 +1411,7 @@ void renderOverviewWindow(const SRenderParams& params) {
     COverviewAnimatedVariableAccess::setBeingAnimated(params.window->sizeAnimation().get(), true);
     params.window->positionAnimation()->value() = params.monitor->m_position + params.windowBox.pos() / params.monitor->m_scale - params.window->m_floatingOffset;
     params.window->sizeAnimation()->value()     = params.windowBox.size() / params.monitor->m_scale;
-    params.window->m_animatingIn                 = true;
+    params.window->presentation().setAnimatingIn(true);
     if (g_midDrawProbe)
         g_midDrawProbe(params.window);
     if (OVERRIDEWORKSPACEOFFSET)
@@ -1433,7 +1433,7 @@ void renderOverviewWindow(const SRenderParams& params) {
     auto restoreWindowGeometry = Hyprutils::Utils::CScopeGuard([&] {
         params.window->positionAnimation()->value() = previousWindowPos;
         params.window->sizeAnimation()->value()     = previousWindowSize;
-        params.window->m_animatingIn                 = previousAnimatingIn;
+        params.window->presentation().setAnimatingIn(previousAnimatingIn);
         COverviewAnimatedVariableAccess::setBeingAnimated(params.window->positionAnimation().get(), previousPosAnimating);
         COverviewAnimatedVariableAccess::setBeingAnimated(params.window->sizeAnimation().get(), previousSizeAnimating);
         if (OVERRIDEWORKSPACEOFFSET && WORKSPACE)

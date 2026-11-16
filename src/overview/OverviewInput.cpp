@@ -1,4 +1,4 @@
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include "Integration.hpp"
 #include "OverviewInternal.hpp"
 #include "DockInput.hpp"
@@ -799,7 +799,7 @@ void COverview::onWindowActive(PHLWINDOW window, Desktop::eFocusReason) {
         const auto overviewWindow = getOverviewWindowToShow(window);
         const auto fullscreenWindow = overviewWindow && overviewWindow->m_workspace ? getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(overviewWindow->m_workspace)) : PHLWINDOW{};
 
-        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == overviewWindow->m_workspace && overviewWindow->m_isFloating)
+        if (shouldShowOverviewWindow(fullscreenWindow) && fullscreenWindow->m_workspace == overviewWindow->m_workspace && overviewWindow->isFloating())
             emitFullscreenVisibilityState(fullscreenWindow, true);
         else
             emitFullscreenVisibilityState(overviewWindow, true);

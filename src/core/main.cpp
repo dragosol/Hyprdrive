@@ -280,7 +280,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             // scratchpad opening or closing over it) is drawn natively, through
             // the renderer the blur rides (user, 2026-09-30).
             Hyprdrive::FlightBlur::trackLayoutMotion(monitor, [&FLYING](const PHLWINDOW& w) {
-                return FLYING(w) || !w->m_workspace || !w->m_workspace->m_isSpecialWorkspace;
+                return FLYING(w) || !w->m_workspace || !Hyprdrive::Compat::isSpecial(w->m_workspace);
             });
         }
     });

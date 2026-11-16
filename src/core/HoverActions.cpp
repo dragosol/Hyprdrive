@@ -6,8 +6,9 @@
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 
 #include <optional>

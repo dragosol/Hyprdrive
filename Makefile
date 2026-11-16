@@ -50,7 +50,7 @@ endif
 # Goals that compile nothing ask pkg-config nothing: install-only runs as a user
 # who may not have the SDK on PKG_CONFIG_PATH at all (see install-only).
 ifneq ($(if $(MAKECMDGOALS),$(filter-out install-only uninstall clean,$(MAKECMDGOALS)),all),)
-CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build $(SRC_INC) --embed-dir=. \
+CXXFLAGS := -fPIC $(OPT) -g -std=c++2b -Wno-narrowing -I.build $(SRC_INC) -include src/core/HyprCompat.hpp --embed-dir=. \
             $(shell pkg-config --cflags $(PKGS))
 # fontconfig: Fonts.cpp asks it which family "monospace" is and whether an icon
 # font covers the UI glyphs. Hyprland's pango already loads it; linking it

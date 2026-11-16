@@ -21,7 +21,8 @@
 #include <hyprland/src/helpers/time/Time.hpp>
 
 #define private public
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/RectPassElement.hpp>
@@ -280,7 +281,7 @@ void drawCaption(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBo
     const auto DOCK = Dock::layout(monitor).pill;
     if (!DOCK.empty() && plateBottom > sc<float>(DOCK.y))
         plateBottom = sc<float>(DOCK.y) - CAPTION_GAP * scale;
-    OverviewRender::labelPill(monitor, window->m_title, sc<float>(tileBox.x + tileBox.w / 2.0), plateBottom, A, scale);
+    OverviewRender::labelPill(monitor, window->metadata().title(), sc<float>(tileBox.x + tileBox.w / 2.0), plateBottom, A, scale);
 }
 
 }

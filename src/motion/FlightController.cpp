@@ -53,11 +53,12 @@
 #define private public
 #define protected public
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
@@ -438,10 +439,10 @@ CBox offscreenAimBox(PHLMONITOR monitor, const PHLWINDOW& window) {
     // where it came from -- Minimize recorded that and is the only honest source.
     WORKSPACEID home = Minimize::originalWorkspace(window);
     if (home == WORKSPACE_INVALID && window->m_workspace)
-        home = window->m_workspace->m_id;
+        home = Hyprdrive::Compat::id(window->m_workspace);
 
     const auto ACTIVE = monitor->m_activeWorkspace;
-    const bool LEFT   = ACTIVE && home != WORKSPACE_INVALID && home < ACTIVE->m_id;
+    const bool LEFT   = ACTIVE && home != WORKSPACE_INVALID && home < Hyprdrive::Compat::id(ACTIVE);
 
     const float BW = W * 0.25F;
     const float BH = H * 0.25F;
@@ -508,7 +509,7 @@ void landingSanity(SFlight& flight, PHLMONITOR monitor, const char* reason) {
     flight.hidden.release();
     // A driven flight drew the window "animating in" (renderFlights).
     if (flight.isDriven())
-        WINDOW->m_animatingIn = false;
+        WINDOW->presentation().setAnimatingIn(false);
 
     if (!flight.isRestore()) {
         // A MINIMIZE landed. The window kept focus for the whole flight so the
@@ -532,7 +533,7 @@ void landingSanity(SFlight& flight, PHLMONITOR monitor, const char* reason) {
         // the anim vars -- landing without this write-back left the target at its
         // pre-flight record, and the SECOND cycle restored to stale geometry
         // (900x600 on screen, 500x495 captured).
-        if (WINDOW->m_isFloating) {
+        if (WINDOW->isFloating()) {
             if (const auto TARGET = WINDOW->layoutTarget(); TARGET) {
                 TARGET->setPositionGlobal(CBox{POS.x, POS.y, SZ.x, SZ.y});
                 TARGET->warpPositionSize();
@@ -548,7 +549,7 @@ void landingSanity(SFlight& flight, PHLMONITOR monitor, const char* reason) {
     // write above put that into the VALUE while the sibling's return had moved
     // the GOAL to half: value != goal with no animation left to close the gap,
     // so it stayed. Warp to the goal and make the client match.
-    if (!WINDOW->m_isFloating) {
+    if (!WINDOW->isFloating()) {
         WINDOW->m_realPosition->setValueAndWarp(WINDOW->m_realPosition->goal());
         WINDOW->m_realSize->setValueAndWarp(WINDOW->m_realSize->goal());
         WINDOW->sendWindowSize(true);
@@ -567,7 +568,7 @@ void landingSanity(SFlight& flight, PHLMONITOR monitor, const char* reason) {
     const float EPS     = 1.F;
     bool        ok      = !WINDOW->isHidden() && std::abs(PV.x - PG.x) <= EPS && std::abs(PV.y - PG.y) <= EPS && std::abs(SV.x - SG.x) <= EPS && std::abs(SV.y - SG.y) <= EPS;
     float       targetDx = 0.F, targetDy = 0.F;
-    if (WINDOW->m_isFloating) {
+    if (WINDOW->isFloating()) {
         if (const auto TARGET = WINDOW->layoutTarget(); TARGET) {
             const auto TB = TARGET->position();
             targetDx      = sc<float>(std::abs(TB.x - PV.x));
@@ -577,7 +578,7 @@ void landingSanity(SFlight& flight, PHLMONITOR monitor, const char* reason) {
     }
 
     zdbg("land id=%llu kind=%s reason=%s float=%d hidden=%d ok=%d value=%.1f,%.1f goal=%.1f,%.1f size=%.1f,%.1f/%.1f,%.1f target=%.1f,%.1f\n", (unsigned long long)flight.id,
-         kindName(flight.kind), reason, (int)WINDOW->m_isFloating, (int)WINDOW->isHidden(), (int)ok, PV.x, PV.y, PG.x, PG.y, SV.x, SV.y, SG.x, SG.y, targetDx, targetDy);
+         kindName(flight.kind), reason, (int)WINDOW->isFloating(), (int)WINDOW->isHidden(), (int)ok, PV.x, PV.y, PG.x, PG.y, SV.x, SV.y, SG.x, SG.y, targetDx, targetDy);
 }
 
 // Land it NOW and take it out of the list. Used by a reversal that arrives
@@ -713,7 +714,7 @@ EReverse reverse(PHLMONITOR monitor, const PHLWINDOW& window, bool restoring) {
         }
         window->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(1.F);
         if (old.isDriven())
-            window->m_animatingIn = false;
+            window->presentation().setAnimatingIn(false);
         old.hidden.release();
         Minimize::minimize(window, false); // keep focus: the flight hands off at landing
         // Z14, for the reversal too (user, 2026-09-30: spam-minimizing left the
@@ -867,7 +868,7 @@ void restore(PHLMONITOR monitor, PHLWINDOW window) {
         const auto HOME = Minimize::originalWorkspace(window);
         for (const auto& w : State::workspaceState()->workspaces()) {
             const auto WS = w.lock();
-            if (!WS || WS->m_id != HOME || WS->m_isSpecialWorkspace)
+            if (!WS || Hyprdrive::Compat::id(WS) != HOME || Hyprdrive::Compat::isSpecial(WS))
                 continue;
             if (const auto HOMEMON = WS->m_monitor.lock(); HOMEMON && HOMEMON->m_enabled)
                 monitor = HOMEMON;
@@ -892,7 +893,7 @@ void restore(PHLMONITOR monitor, PHLWINDOW window) {
     // says which desktop a tile is on.
     if (!overviewOpenFor(monitor)) {
         const auto HOME = Minimize::originalWorkspace(window);
-        if (HOME != WORKSPACE_INVALID && monitor->m_activeWorkspace && monitor->m_activeWorkspace->m_id != HOME)
+        if (HOME != WORKSPACE_INVALID && monitor->m_activeWorkspace && Hyprdrive::Compat::id(monitor->m_activeWorkspace) != HOME)
             Minimize::showOriginalWorkspace(window);
     }
 
@@ -997,7 +998,7 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
         // would otherwise match by class.
         auto ITEM = WINDOW ? std::ranges::find_if(layout.items,
                                                   [&](const SItem& item) {
-                                                      return !item.uri.empty() && !item.stack && !item.locationName.empty() && WINDOW->m_title == item.locationName &&
+                                                      return !item.uri.empty() && !item.stack && !item.locationName.empty() && WINDOW->metadata().title() == item.locationName &&
                                                           Locations::openWindows(item.uri);
                                                   }) :
                              layout.items.end();
@@ -1079,7 +1080,7 @@ void renderFlights(PHLMONITOR monitor, const SLayout& layout, const Time::steady
             // smaller than the client's size (calculateUVForSurface) instead of
             // scaling it -- the same bit the overview's tiles set. Cleared at
             // landing (landingSanity) and on a reversal.
-            WINDOW->m_animatingIn = true;
+            WINDOW->presentation().setAnimatingIn(true);
             WINDOW->alpha()[Desktop::View::WINDOW_ALPHA_FADE]->setValueAndWarp(alpha);
             // Motion blur rides the real window's next draw (FlightBlur.hpp) --
             // not under a genie, whose window does not move.

@@ -38,7 +38,8 @@
 #include <unordered_set>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/render/OpenGL.hpp>
 #include <string>
 #include <string_view>
@@ -446,7 +447,7 @@ namespace {
             push(TOOL);
         push("window-close-symbolic");
         for (const auto& W : Desktop::windowState()->windows())
-            if (W && W->m_isMapped)
+            if (W && W->mapped())
                 push(AppSearch::iconForClass(Hyprdrive::AppIdentity::groupKey(W)));
         // The dock's icons at the size each monitor draws them (an autohidden
         // dock's first slide-in decoded them on its opening frames otherwise).

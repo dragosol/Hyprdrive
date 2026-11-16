@@ -8,7 +8,7 @@
 #include "globals.hpp"
 
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprutils/os/Process.hpp>
 

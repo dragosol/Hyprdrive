@@ -24,7 +24,7 @@ static std::vector<PHLMONITOR> overviewTargetMonitors(const std::string& target)
 
     if (!target.empty()) {
         const auto& MONITORS = State::monitorState()->monitors();
-        const auto  IT       = std::ranges::find_if(MONITORS, [&target](const auto& monitor) { return monitor && monitor->m_name == target; });
+        const auto  IT       = std::ranges::find_if(MONITORS, [&target](const auto& monitor) { return monitor && monitor->displayName() == target; });
         return IT == MONITORS.end() ? std::vector<PHLMONITOR>{} : std::vector<PHLMONITOR>{*IT};
     }
 
@@ -39,7 +39,7 @@ static bool openOverviewOne(PHLMONITOR monitor);
 // other one, so no path -- the dock's Show Overview, a query open -- leaves a
 // monitor on the desktop while another shows the overview.
 static bool openOverview(PHLMONITOR monitor) {
-    OpenProf::begin(monitor ? monitor->m_name.c_str() : "?");
+    OpenProf::begin(monitor ? monitor->displayName().c_str() : "?");
     // Cheap (two config reads) and catches a `hyprctl keyword` toggle that no
     // reload announced.
     Hyprdrive::FramePacing::apply();

@@ -32,7 +32,8 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/animation/AnimationManager.hpp>
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/output/Monitor.hpp>
@@ -45,7 +46,7 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <limits>
 #include <hyprland/src/managers/input/UnifiedWorkspaceSwipeGesture.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
@@ -613,7 +614,7 @@ namespace Hyprdrive::Mosaic {
                 m_pushedAway    = false; // the focused window is the one under the pointer now
                 m_pushFocused   = W;     // revealed once the push is over (tick)
                 armCanvasTick();
-                trace(std::format("push brought {} under the pointer: focused", W->m_class));
+                trace(std::format("push brought {} under the pointer: focused", W->metadata().appID()));
             }
         }
         // BACK ON THE WINDOW (user, 2026-11-08: "if I push but then put my
@@ -750,17 +751,17 @@ namespace Hyprdrive::Mosaic {
             // The window being configured: the one in its initial commit.
             PHLWINDOW w;
             for (const auto& W : Desktop::windowState()->windows())
-                if (W && !W->m_isMapped && !W->m_isX11 && W->m_xdgSurface && W->m_xdgSurface->m_initialCommit)
+                if (W && !W->mapped() && !W->backend().isX11() && W->m_xdgSurface && W->m_xdgSurface->m_initialCommit)
                     w = W;
             if (!w)
                 return std::nullopt;
             loadSizes();
-            const auto IT = g_sizes.find(!w->m_initialClass.empty() ? w->m_initialClass : w->fetchClass());
+            const auto IT = g_sizes.find(!w->metadata().initialAppID().empty() ? w->metadata().initialAppID() : w->fetchClass());
             if (IT == g_sizes.end() || IT->second.x < MIN_SIDE || IT->second.y < MIN_SIDE)
                 return std::nullopt;
             const Vector2D N = IT->second;
             // The box is the window with its border; the client gets the inside.
-            const Vector2D BORDER = Vector2D{2.0, 2.0} * w->getRealBorderSize();
+            const Vector2D BORDER = Vector2D{2.0, 2.0} * w->presentation().borderSize();
             std::vector<MosaicPack::SRect> sizes;
             for (const auto& E : m_entries)
                 if (!E.target.expired())
@@ -881,7 +882,7 @@ namespace Hyprdrive::Mosaic {
             return true;
         }
         static MosaicTripHold::SApp tripApp(const PHLWINDOW& w) {
-            return w ? MosaicTripHold::SApp{.pid = w->getPID(), .cls = appOf(w)} : MosaicTripHold::SApp{};
+            return w ? MosaicTripHold::SApp{.pid = w->backend().pid(), .cls = appOf(w)} : MosaicTripHold::SApp{};
         }
         static MosaicTripHold::SKey tripKey(const SMosaicEntry& e) {
             const auto T = e.target.lock();
@@ -1667,7 +1668,7 @@ namespace Hyprdrive::Mosaic {
                 // just re-arranged): the rest of their gap, on the pan's curve.
                 // Not a window popping in (followPan's), nor one in flight.
                 const auto WIN = T->window();
-                if (warp && m_pan.on && i < m_panCarry.size() && m_panCarry[i].on && WIN && !WIN->m_animatingIn && !Hyprdrive::Flight::hasFlight(WIN) &&
+                if (warp && m_pan.on && i < m_panCarry.size() && m_panCarry[i].on && WIN && !WIN->presentation().animatingIn() && !Hyprdrive::Flight::hasFlight(WIN) &&
                     !Hyprdrive::Flight::restoringForFlight(WIN)) {
                     const double LEFT = 1.0 - std::clamp(m_panE, 0.0, 1.0);
                     const auto&  C    = m_panCarry[i];
@@ -2329,7 +2330,7 @@ namespace Hyprdrive::Mosaic {
             for (const auto& E : m_entries) {
                 const auto T = E.target.lock();
                 const auto W = T ? T->window() : PHLWINDOW{};
-                if (!T || T == old || !W || !W->m_isMapped || W->isHidden())
+                if (!T || T == old || !W || !W->mapped() || W->isHidden())
                     continue;
                 const CBox   B  = T->position();
                 const double DX = std::max({B.x - at.x, 0.0, at.x - (B.x + B.w)});
@@ -2379,8 +2380,8 @@ namespace Hyprdrive::Mosaic {
                 if (FOCALMON != WSMON) {
                     if (*PFALLBACK && FOCALMON && FOCALMON->m_activeWorkspace) {
                         if (t->window())
-                            t->window()->setAnimationsToMove();
-                        t->assignToSpace(FOCALMON->m_activeWorkspace->m_space, FOCAL);
+                            t->window()->presentation().setAnimationsToMove();
+                        t->assignToSpace(FOCALMON->m_activeWorkspace->space(), FOCAL);
                     }
                     return;
                 }
@@ -2388,7 +2389,7 @@ namespace Hyprdrive::Mosaic {
                 if (m_tree.towardLoneSibling(ID, sc<int>(dir), *AREA, treeOpts()))
                     m_overrideDir = dir;
                 if (t->window())
-                    t->window()->setAnimationsToMove();
+                    t->window()->presentation().setAnimationsToMove();
                 const Vector2D ORIGIN = t->position().middle();
                 m_tree.remove(ID);
                 placeInTiles(t, FOCAL.value_or(ORIGIN), false);
@@ -2431,8 +2432,8 @@ namespace Hyprdrive::Mosaic {
             const auto PMONINDIR = State::monitorState()->query().relativeTo(PMONITOR).inDirection(dir).run();
             if (PMONINDIR && PMONINDIR != PMONITOR && PMONINDIR->m_activeWorkspace) {
                 if (t->window())
-                    t->window()->setAnimationsToMove();
-                t->assignToSpace(PMONINDIR->m_activeWorkspace->m_space, focalPointForDir(t, dir));
+                    t->window()->presentation().setAnimationsToMove();
+                t->assignToSpace(PMONINDIR->m_activeWorkspace->space(), focalPointForDir(t, dir));
             }
         }
 
@@ -2625,7 +2626,7 @@ namespace Hyprdrive::Mosaic {
             for (const auto& E : m_entries) {
                 const auto T = E.target.lock();
                 const auto W = T ? T->window() : PHLWINDOW{};
-                if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != ws || W->m_isFloating)
+                if (!W || !W->mapped() || W->isHidden() || W->m_workspace != ws || W->isFloating())
                     continue;
                 const auto B = W->getFullWindowBoundingBox();
                 if (B.intersection(MB).empty())
@@ -2642,7 +2643,7 @@ namespace Hyprdrive::Mosaic {
             for (const auto& E : m_entries) {
                 const auto T = E.target.lock();
                 const auto W = T ? T->window() : PHLWINDOW{};
-                if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != ws || W->m_isFloating)
+                if (!W || !W->mapped() || W->isHidden() || W->m_workspace != ws || W->isFloating())
                     continue;
                 const auto B = W->getFullWindowBoundingBox();
                 if (B.intersection(MB).empty())
@@ -2668,7 +2669,7 @@ namespace Hyprdrive::Mosaic {
             for (const auto& E : m_entries) {
                 const auto T = E.target.lock();
                 const auto W = T ? T->window() : PHLWINDOW{};
-                if (!W || !W->m_isMapped || W->isHidden() || W->m_workspace != WS || W->m_isFloating)
+                if (!W || !W->mapped() || W->isHidden() || W->m_workspace != WS || W->isFloating())
                     continue;
                 const auto B = W->getFullWindowBoundingBox();
                 if (B.intersection(MB).empty())

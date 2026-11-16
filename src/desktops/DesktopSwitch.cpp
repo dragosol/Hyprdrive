@@ -15,10 +15,11 @@
 #include <hyprland/src/animation/WorkspaceAnimationController.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -76,9 +77,9 @@ namespace Hyprdrive::DesktopSwitch {
                 f.current = current;
             for (const auto& REF : State::workspaceState()->workspaces()) {
                 const auto WS = REF.lock();
-                if (!WS || WS->m_isSpecialWorkspace || WS->m_id < DesktopRow::FIRST || !ROW.contains(WS->m_id))
+                if (!WS || Hyprdrive::Compat::isSpecial(WS) || Hyprdrive::Compat::id(WS) < DesktopRow::FIRST || !ROW.contains(Hyprdrive::Compat::id(WS)))
                     continue;
-                const int PLACE = sc<int>(ROW.slot(WS->m_id));
+                const int PLACE = sc<int>(ROW.slot(Hyprdrive::Compat::id(WS)));
                 if (WS->m_monitor.lock() != monitor) {
                     f.elsewhere.push_back(PLACE);
                     continue;
@@ -123,7 +124,7 @@ namespace Hyprdrive::DesktopSwitch {
             PHLWORKSPACE out;
             for (const auto& REF : State::workspaceState()->workspaces()) {
                 const auto WS = REF.lock();
-                if (!WS || WS == in || WS->m_isSpecialWorkspace || WS->m_monitor != MONITOR || !WS->m_renderOffset || !WS->m_renderOffset->isBeingAnimated())
+                if (!WS || WS == in || Hyprdrive::Compat::isSpecial(WS) || WS->m_monitor != MONITOR || !WS->m_renderOffset || !WS->m_renderOffset->isBeingAnimated())
                     continue;
                 const Vector2D GOAL = WS->m_renderOffset->goal();
                 if (std::abs(GOAL.x + START.x) > 1.0 || std::abs(GOAL.y + START.y) > 1.0)
@@ -175,7 +176,7 @@ namespace Hyprdrive::DesktopSwitch {
             static auto PENABLED = CConfigValue<::Config::INTEGER>("animations:enabled");
             if (!*PENABLED)
                 return false;
-            const std::string NAME = std::format("{}{}", ws->m_isSpecialWorkspace ? "specialWorkspace" : "workspaces",
+            const std::string NAME = std::format("{}{}", Hyprdrive::Compat::isSpecial(ws) ? "specialWorkspace" : "workspaces",
                                                  type == Animation::Workspace::ANIMATION_TYPE_IN ? "In" : "Out");
             const auto        CFG  = ::Config::animationTree()->getAnimationPropertyConfig(NAME);
             if (!CFG)
@@ -188,7 +189,7 @@ namespace Hyprdrive::DesktopSwitch {
             const auto MONITOR = ws->m_monitor.lock();
             SSnapFacts facts{
                 .cause            = classify(g_ownDispatch > 0, bindRunning(), g_focusDepth > 0),
-                .special          = ws->m_isSpecialWorkspace,
+                .special          = Hyprdrive::Compat::isSpecial(ws),
                 .overview         = MONITOR && scrollOverviewForMonitor(MONITOR) != nullptr,
                 .animationEnabled = hyprlandAnimates(ws, type),
                 .animateKeyboard  = Config::getAnimateDesktopKeyboard(),
@@ -196,10 +197,10 @@ namespace Hyprdrive::DesktopSwitch {
             };
             const bool SNAP = snap(facts);
             // Recorded for the switch's IN half, which is the desktop arriving.
-            if (type == Animation::Workspace::ANIMATION_TYPE_IN && !ws->m_isSpecialWorkspace) {
+            if (type == Animation::Workspace::ANIMATION_TYPE_IN && !Hyprdrive::Compat::isSpecial(ws)) {
                 g_lastCause = facts.cause;
                 g_lastSnap  = SNAP;
-                g_lastWs    = ws->m_id;
+                g_lastWs    = Hyprdrive::Compat::id(ws);
                 ++(SNAP ? g_snaps : g_animated);
             }
             return SNAP;
@@ -221,12 +222,12 @@ namespace Hyprdrive::DesktopSwitch {
         using origStartAnimation = void (*)(PHLWORKSPACE, Animation::Workspace::eAnimationType, bool, bool, std::optional<std::string>);
         void hkStartAnimation(PHLWORKSPACE ws, Animation::Workspace::eAnimationType type, bool left, bool instant, std::optional<std::string> style) {
             const bool IN  = type == Animation::Workspace::ANIMATION_TYPE_IN;
-            const auto MON = ws && !ws->m_isSpecialWorkspace ? ws->m_monitor.lock() : PHLMONITOR{};
+            const auto MON = ws && !Hyprdrive::Compat::isSpecial(ws) ? ws->m_monitor.lock() : PHLMONITOR{};
             int        to  = 0;
             if (!instant && MON && MON->m_activeWorkspace) {
-                to = sc<int>(MON->m_activeWorkspace->m_id);
+                to = sc<int>(Hyprdrive::Compat::id(MON->m_activeWorkspace));
                 if (!IN) {
-                    g_switchFrom       = sc<int>(ws->m_id);
+                    g_switchFrom       = sc<int>(Hyprdrive::Compat::id(ws));
                     g_switchFromOffset = ws->m_renderOffset ? ws->m_renderOffset->value() : Vector2D{};
                 }
             }
@@ -246,7 +247,7 @@ namespace Hyprdrive::DesktopSwitch {
                     DesktopStrip::take(MON, FROM, to, g_switchFromOffset, jumpThrough());
                 g_switchFrom = 0;
             }
-            if (instant || !ws || ws->m_isSpecialWorkspace || !ws->m_renderOffset)
+            if (instant || !ws || Hyprdrive::Compat::isSpecial(ws) || !ws->m_renderOffset)
                 return;
             if (IN)
                 continueFromHere(ws);
@@ -320,7 +321,7 @@ namespace Hyprdrive::DesktopSwitch {
             const auto MONITOR = Desktop::focusState()->monitor();
             if (!MONITOR || !MONITOR->m_activeWorkspace)
                 return {};
-            const int CURRENT = sc<int>(MONITOR->m_activeWorkspace->m_id);
+            const int CURRENT = sc<int>(Hyprdrive::Compat::id(MONITOR->m_activeWorkspace));
             const int TARGET  = DesktopRow::neighbour(rowOn(MONITOR, CURRENT), CURRENT, dir);
             if (TARGET == CURRENT)
                 return {};

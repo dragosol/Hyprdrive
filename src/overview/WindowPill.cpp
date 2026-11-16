@@ -24,9 +24,10 @@
 #define protected public
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -173,7 +174,7 @@ std::vector<PHLWINDOW> desktopWindows(PHLMONITOR monitor) {
         return out;
 
     for (const auto& WINDOW : Desktop::windowState()->windows()) {
-        if (!WINDOW || !WINDOW->m_isMapped || WINDOW->isHidden())
+        if (!WINDOW || !WINDOW->mapped() || WINDOW->isHidden())
             continue;
         if (WINDOW->m_workspace != WORKSPACE)
             continue;

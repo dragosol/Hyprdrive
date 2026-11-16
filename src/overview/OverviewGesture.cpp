@@ -22,7 +22,8 @@
 #include <cstdlib>
 #include <optional>
 #include <unordered_map>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
 #include <ranges>
 #include <string_view>
 #include <vector>
@@ -33,7 +34,7 @@
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/input/UnifiedWorkspaceSwipeGesture.hpp>
@@ -1045,7 +1046,7 @@ void CScratchpadGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e)
     const auto MONITOR = Desktop::focusState()->monitor();
     if (!m_show && MONITOR) {
         if (const auto SHOWN = Hyprdrive::Scratchpad::shownOn(MONITOR); SHOWN && SHOWN->m_monitor) {
-            if (const auto IT = g_closedLook.find(SHOWN->m_name); IT != g_closedLook.end()) {
+            if (const auto IT = g_closedLook.find(SHOWN->displayName()); IT != g_closedLook.end()) {
                 const auto  MON = SHOWN->m_monitor.lock();
                 const auto& C   = IT->second;
                 giveBackBegun(MON->m_specialFade, C.fade);
@@ -1065,7 +1066,7 @@ void CScratchpadGesture::begin(const ITrackpadGesture::STrackpadGestureBegin& e)
     if (m_show && m_native && MONITOR)
         if (const auto WS = Hyprdrive::Scratchpad::shownOn(MONITOR); WS && WS->m_monitor) {
             const auto MON         = WS->m_monitor.lock();
-            g_closedLook[WS->m_name] = SClosedLook{
+            g_closedLook[WS->displayName()] = SClosedLook{
                 .fade   = MON->m_specialFade->begun(),
                 .dim    = MON->m_specialDim->begun(),
                 .blur   = MON->m_specialBlur->begun(),
@@ -1086,7 +1087,7 @@ ITrackpadGesture* CScratchpadGesture::pick() {
         return nullptr;
 
     // The native gesture looks the workspace up as "special:" + name.
-    std::string name = TARGET->m_name;
+    std::string name = TARGET->displayName();
     if (name.starts_with("special:"))
         name = name.substr(8);
     m_native = std::make_unique<CSpecialWorkspaceGesture>(name);

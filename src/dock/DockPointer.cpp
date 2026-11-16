@@ -230,10 +230,10 @@ bool scroll(PHLMONITOR monitor, const Vector2D& point, bool up) {
         if (!ACTIVE)
             return true;
 
-        const WORKSPACEID WANTED = ACTIVE->m_id + (up ? -1 : 1);
+        const WORKSPACEID WANTED = Hyprdrive::Compat::id(ACTIVE) + (up ? -1 : 1);
         for (const auto& CANDIDATE : State::workspaceState()->workspaces()) {
             const auto TARGET = CANDIDATE.lock();
-            if (TARGET && TARGET->m_id == WANTED && TARGET != ACTIVE) {
+            if (TARGET && Hyprdrive::Compat::id(TARGET) == WANTED && TARGET != ACTIVE) {
                 monitor->changeWorkspace(TARGET, false, true, true);
                 break;
             }
@@ -867,7 +867,7 @@ std::string debugMenuReport(PHLMONITOR monitor) {
         out += std::format(" pane {}{}", BOX(g_hover.drawn), g_hover.panel->out ? " (out)" : "");
         for (const auto& [B, W] : g_hover.cells)
             if (const auto L = W.lock())
-                out += std::format("\n cell \"{}\" {}", L->m_title, BOX(B));
+                out += std::format("\n cell \"{}\" {}", L->metadata().title(), BOX(B));
     } else
         out += " no pane";
     if (!g_menu || g_menu->monitor != monitor->m_id)
@@ -887,7 +887,7 @@ std::string debugMenuReport(PHLMONITOR monitor) {
     // state (shown / waiting out the grace / leaving).
     if (const auto& P = g_menu->rowPeek; P)
         if (const auto W = P->window.lock())
-            out += std::format("\n peek \"{}\" {} {}{}", W->m_title, BOX(P->drawn), P->left ? "left" : "right", P->out ? " (out)" : P->leaving ? " (grace)" : "");
+            out += std::format("\n peek \"{}\" {} {}{}", W->metadata().title(), BOX(P->drawn), P->left ? "left" : "right", P->out ? " (out)" : P->leaving ? " (grace)" : "");
     return out + icons;
 }
 
@@ -1044,7 +1044,7 @@ bool menuClick(PHLMONITOR monitor, const Vector2D& point) {
             const auto MINE   = ROW->window.lock();
             const bool OTHERS = std::ranges::any_of(g_menu->rows, [&](const SRow& r) {
                 const auto W = r.kind == ERow::Window ? r.window.lock() : PHLWINDOW{};
-                return W && W != MINE && W->m_isMapped;
+                return W && W != MINE && W->mapped();
             });
             if (OTHERS) {
                 g_menu->guarded    = true;

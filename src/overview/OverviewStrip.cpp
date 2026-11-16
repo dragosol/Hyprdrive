@@ -385,7 +385,7 @@ static std::string overviewMonitorLabel(const PHLMONITOR& monitor) {
     if (!monitor)
         return {};
 
-    const auto& NAME = monitor->m_name;
+    const auto& NAME = monitor->displayName();
     if (NAME.starts_with("eDP") || NAME.starts_with("LVDS") || NAME.starts_with("DSI"))
         return "Built-in Display";
 
@@ -519,13 +519,13 @@ void COverview::renderAltStrips(PHLMONITOR monitor, float renderScale, const Tim
                 (!DRAGGED || WIMG->pWorkspace != dragContext->drag.originalWorkspace.lock());
             // Tint and outline fade in and out on Hyprland's `border` animation,
             // as a window's border does when it takes focus (BorderFade.hpp).
-            const uint64_t CELLKEY = (sc<uint64_t>(monitor->m_id) << 40) ^ (sc<uint64_t>(OTHERMON->m_id) << 32) ^ sc<uint64_t>(sc<uint32_t>(WIMG->pWorkspace->m_id));
+            const uint64_t CELLKEY = (sc<uint64_t>(monitor->m_id) << 40) ^ (sc<uint64_t>(OTHERMON->m_id) << 32) ^ sc<uint64_t>(sc<uint32_t>(Hyprdrive::Compat::id(WIMG->pWorkspace)));
             const float    HOTMIX  = Hyprdrive::BorderFade::mix(monitor, Hyprdrive::BorderFade::key("strip-alt-hot", CELLKEY), HOT);
             if (HOTMIX > 0.F)
                 renderStripCellRect(CELL, Hyprdrive::Config::highlightColor().modifyA(0.22F * FADE * HOTMIX), ATLEFT, ATRIGHT, STYLE);
 
             // That monitor's active desktop, marked the way its own strip marks it.
-            const bool ACTIVE = OTHERMON->m_activeWorkspace && WIMG->pWorkspace->m_id == OTHERMON->m_activeWorkspace->m_id;
+            const bool ACTIVE = OTHERMON->m_activeWorkspace && Hyprdrive::Compat::id(WIMG->pWorkspace) == Hyprdrive::Compat::id(OTHERMON->m_activeWorkspace);
             renderStripCellBorder(monitor, CELL, ATLEFT, ATRIGHT, STYLE,
                                   Hyprdrive::BorderFade::mix(monitor, Hyprdrive::BorderFade::key("strip-alt-ring", CELLKEY), HOT || ACTIVE));
         }
@@ -1152,7 +1152,7 @@ void COverview::renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, const C
     // Follow the detent while one is running; it is the same index the card
     // ring and the badge use, so all three move together.
     const bool ISACTIVE = trackpadDetentActive ? workspaceIdx == trackpadDetentWorkspace :
-                                                 (monitor->m_activeWorkspace && wimg->pWorkspace->m_id == monitor->m_activeWorkspace->m_id);
+                                                 (monitor->m_activeWorkspace && Hyprdrive::Compat::id(wimg->pWorkspace) == Hyprdrive::Compat::id(monitor->m_activeWorkspace));
     // X3 delta 3: the reference borders the hovered cell as well as tinting
     // it. One outline for both: drawn after the tint and after the minis, so
     // the drop target reads as a target even over a cell full of previews.
@@ -1262,7 +1262,7 @@ void COverview::renderDetentBadge(PHLMONITOR monitor, float renderScale) {
         return;
 
     // (a numeric name is the number: the row's place, Rows::label)
-    const auto NAME = wimg->pWorkspace->m_name.empty() || wimg->pWorkspace->m_name == std::to_string(wimg->pWorkspace->m_id) ? Hyprdrive::Rows::label(wimg->pWorkspace) : wimg->pWorkspace->m_name;
+    const auto NAME = wimg->pWorkspace->displayName().empty() || wimg->pWorkspace->displayName() == std::to_string(Hyprdrive::Compat::id(wimg->pWorkspace)) ? Hyprdrive::Rows::label(wimg->pWorkspace) : wimg->pWorkspace->displayName();
     const int  SIZE = std::max(1, sc<int>(std::round(sc<float>(CELL.height) * DETENT_BADGE_FRACTION)));
     const auto TEX  = OverviewRender::text(NAME, Hyprdrive::Config::themeForeground().modifyA(1.F), SIZE, false, "", 0, 700);
     if (!TEX || !TEX->ok())
@@ -1549,19 +1549,19 @@ bool COverview::stripCellLabelLive(PHLMONITOR monitor, float renderScale, std::s
     size_t                   windows = 0;
     for (const auto& REF : images[idx]->windows) {
         const auto W = REF.lock();
-        if (!W || !W->m_isMapped)
+        if (!W || !W->mapped())
             continue;
         ++windows;
         auto NAME = AppSearch::appNameForClass(Hyprdrive::AppIdentity::groupKey(W));
         if (NAME.empty())
-            NAME = W->m_class;
+            NAME = W->metadata().appID();
         if (!NAME.empty() && std::ranges::find(names, NAME) == names.end())
             names.push_back(NAME);
     }
     if (windows == 0)
         return false;
 
-    std::string label = "Desktop " + images[idx]->pWorkspace->m_name;
+    std::string label = "Desktop " + images[idx]->pWorkspace->displayName();
     for (size_t i = 0; i < names.size() && i < 3; ++i)
         label += (i == 0 ? "  ·  " : ", ") + names[i];
     if (names.size() > 3)
@@ -1632,7 +1632,7 @@ bool COverview::stripCellLabelLive(PHLMONITOR monitor, float renderScale, std::s
         pillNudgeWant          = std::clamp(RESTBOTTOM + G - LABELTOP, 0.F, PUB.pillMaxUp);
     }
 
-    keyOut    = std::to_string(images[idx]->pWorkspace->m_id);
+    keyOut    = std::to_string(images[idx]->Hyprdrive::Compat::id(pWorkspace));
     labelOut  = label;
     cxOut     = CX;
     bottomOut = bottom;

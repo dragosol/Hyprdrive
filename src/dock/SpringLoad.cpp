@@ -13,9 +13,10 @@
 #include <cmath>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/desktop/state/FocusState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
@@ -133,7 +134,7 @@ namespace Hyprdrive::SpringLoad {
         void syncPin() {
             const auto WINDOW = draggedWindow();
             if (WINDOW && swipeInFlight()) {
-                if (!g_pinned && WINDOW->m_isFloating && !WINDOW->m_pinned) {
+                if (!g_pinned && WINDOW->isFloating() && !Hyprdrive::Compat::pinned(WINDOW)) {
                     WINDOW->m_pinned = true;
                     g_pinned         = WINDOW;
                 }
@@ -478,8 +479,8 @@ namespace Hyprdrive::SpringLoad {
                 // The window was carried while its old desktop went hidden: the
                 // client may still be suspended (Ghostty then never draws its
                 // new size) or never have been told the size it was tiled to.
-                if (const auto W = g_releaseWindow.lock(); W && W->m_isMapped) {
-                    if (W->m_workspace && W->m_workspace->isVisible())
+                if (const auto W = g_releaseWindow.lock(); W && W->mapped()) {
+                    if (W->m_workspace && W->m_workspace->visible())
                         W->setSuspended(false);
                     W->sendWindowSize(true);
                 }

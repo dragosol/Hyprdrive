@@ -217,7 +217,7 @@ namespace OpenProf {
             g_overviewNs             = 0;
             const auto   LASTPRES = g_lastPresent.contains(monitor->m_id) ? g_lastPresent[monitor->m_id] : clock::time_point{};
             const double PHASE    = LASTPRES != clock::time_point{} ? std::chrono::duration<double, std::milli>(NOW - LASTPRES).count() : -1.0;
-            g_lines.push_back(std::format("  +{:7.1f}  mon {} gap {:6.1f}  phase {:6.1f}  gpuclk {:4d}", msSince(g_t0), monitor->m_name, gap, PHASE, gpuMHz()));
+            g_lines.push_back(std::format("  +{:7.1f}  mon {} gap {:6.1f}  phase {:6.1f}  gpuclk {:4d}", msSince(g_t0), monitor->displayName(), gap, PHASE, gpuMHz()));
             g_frames.push_back({.mon = monitor->m_id, .line = g_lines.size() - 1, .pre = NOW, .lastPresentAtPre = LASTPRES,
                                 .periodMs = monitor->m_refreshRate > 1.F ? 1000.0 / monitor->m_refreshRate : 16.667});
         });

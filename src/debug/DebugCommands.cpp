@@ -60,7 +60,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         if (!OV)
             return {.success = false, .error = "hyprdrive:debug tile: no open overview"};
         for (const auto& W : Desktop::windowState()->windows()) {
-            if (!W || !W->m_isMapped || W->m_class != CLASS)
+            if (!W || !W->mapped() || W->metadata().appID() != CLASS)
                 continue;
             const auto B = OV->tileBox(W);
             if (B.width < 1 || B.height < 1)
@@ -79,7 +79,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         if (!OV)
             return {.success = false, .error = "hyprdrive:debug drawn: no open overview"};
         for (const auto& W : Desktop::windowState()->windows()) {
-            if (!W || !W->m_isMapped || W->m_class != CLASS)
+            if (!W || !W->mapped() || W->metadata().appID() != CLASS)
                 continue;
             const auto B = OV->drawnTileBox(W);
             if (B.width < 1 || B.height < 1)
@@ -207,7 +207,7 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         std::string report    = std::format("hyprdrive mem: prefilter {} entries {:.1f} MiB", N, BYTES / 1048576.0);
         for (const auto& M : State::monitorState()->monitors())
             if (M)
-                report += std::format("  | {} {}x{} full-screen RGBA8 = {:.1f} MiB", M->m_name, (int)M->m_transformedSize.x, (int)M->m_transformedSize.y,
+                report += std::format("  | {} {}x{} full-screen RGBA8 = {:.1f} MiB", M->displayName(), (int)M->m_transformedSize.x, (int)M->m_transformedSize.y,
                                       M->m_transformedSize.x * M->m_transformedSize.y * 4.0 / 1048576.0);
         report += Hyprdrive::wallpaperStashReport();
         return {.success = false, .error = report};
@@ -228,8 +228,8 @@ SDispatchResult onDebugDispatcher(std::string arg) {
                     continue;
                 }
                 const auto MON = LS->m_monitor.lock();
-                const pid_t pid = LS->getPID();
-                report += std::format(" | ns={} pid={} mon={} mapped={} layer={} box={},{} {}x{}", LS->m_namespace, pid, MON ? MON->m_name : std::string{"(none)"},
+                const pid_t pid = LS->backend().pid();
+                report += std::format(" | ns={} pid={} mon={} mapped={} layer={} box={},{} {}x{}", LS->m_namespace, pid, MON ? MON->displayName() : std::string{"(none)"},
                                       LS->m_mapped ? 1 : 0, LS->m_layer, (int)LS->m_geometry.x, (int)LS->m_geometry.y, (int)LS->m_geometry.width, (int)LS->m_geometry.height);
             }
         return {.success = false, .error = report};
@@ -276,14 +276,14 @@ SDispatchResult onDebugDispatcher(std::string arg) {
         if (!monitor)
             continue;
 
-        report += "\n  " + monitor->m_name + std::format(" @{:.2f}Hz: ", monitor->m_refreshRate) + COverview::frameCadence(monitor->m_id);
+        report += "\n  " + monitor->displayName() + std::format(" @{:.2f}Hz: ", monitor->m_refreshRate) + COverview::frameCadence(monitor->m_id);
 
         if (const auto OVERVIEW = scrollOverviewForMonitor(monitor)) {
             report += "\n  " + OVERVIEW->frameDebugLine();
             continue;
         }
 
-        std::string line = "\n  " + monitor->m_name + " [desktop]";
+        std::string line = "\n  " + monitor->displayName() + " [desktop]";
         if (const auto DOCK = Hyprdrive::Dock::frameReason(monitor))
             line += std::string(" dock:") + DOCK;
         else

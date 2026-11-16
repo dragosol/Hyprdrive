@@ -134,8 +134,8 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
     // monitor-local RENDERED px, hence the m_scale on the way in.
     if (const float DOCK = std::clamp(IN.dock, 0.F, 1.F); DOCK > 0.001F) {
         float dockTopL = overviewTopChromeBottomL(MONITOR);
-        if (const auto WS = MONITOR->m_activeWorkspace; WS && WS->m_space) {
-            if (const auto WA = WS->m_space->workArea(); WA.w > 1 && WA.h > 1)
+        if (const auto WS = MONITOR->m_activeWorkspace; WS && WS->space()) {
+            if (const auto WA = WS->space()->workArea(); WA.w > 1 && WA.h > 1)
                 dockTopL = std::max(dockTopL, sc<float>(WA.y)); // a bar that DOES reserve
         }
 
@@ -201,8 +201,8 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
     // under the bar, which is as high as the pill ever goes.
     {
         float dockTopL = overviewTopChromeBottomL(MONITOR);
-        if (const auto WS = MONITOR->m_activeWorkspace; WS && WS->m_space) {
-            if (const auto WA = WS->m_space->workArea(); WA.w > 1 && WA.h > 1)
+        if (const auto WS = MONITOR->m_activeWorkspace; WS && WS->space()) {
+            if (const auto WA = WS->space()->workArea(); WA.w > 1 && WA.h > 1)
                 dockTopL = std::max(dockTopL, sc<float>(WA.y));
         }
         const float CEIL = (dockTopL - sc<float>(MONITOR->m_position.y) + OVERVIEW_SEARCH_DOCKPADL) * sc<float>(MONITOR->m_scale);
@@ -491,8 +491,8 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
                 out.inspector.subtitle = ROW.app->generic;
             if (LIVE) {
                 out.inspector.status = "Open";
-                if (!LIVE->m_title.empty())
-                    out.inspector.detail1 = LIVE->m_title;
+                if (!LIVE->metadata().title().empty())
+                    out.inspector.detail1 = LIVE->metadata().title();
                 if (LIVE->m_workspace)
                     out.inspector.detail2 = "Workspace " + Hyprdrive::Rows::label(LIVE->m_workspace);
                 out.inspector.shortcutHint  = "Enter  Switch to window";

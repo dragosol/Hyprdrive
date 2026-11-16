@@ -24,8 +24,9 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/GlobalWindowController.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
@@ -33,7 +34,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <xkbcommon/xkbcommon.h>

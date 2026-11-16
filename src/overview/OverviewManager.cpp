@@ -6,7 +6,7 @@
 
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
-#include <hyprland/src/managers/EventManager.hpp>
+#include <hyprland/src/ipc/s2/S2.hpp>
 
 #include "Compat.hpp"
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>

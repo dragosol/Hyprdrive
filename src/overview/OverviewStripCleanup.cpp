@@ -45,7 +45,7 @@ namespace {
 
     bool populated(const PHLWORKSPACE& ws) {
         for (const auto& W : Desktop::windowState()->windows())
-            if (W && W->m_isMapped && W->m_workspace == ws)
+            if (W && W->mapped() && W->m_workspace == ws)
                 return true;
         return false;
     }
@@ -92,7 +92,7 @@ size_t COverview::stripRemovableEmpties() const {
     for (const auto& I : images) {
         if (!I || !Hyprdrive::DesktopOrder::ordinary(I->pWorkspace))
             continue;
-        desks.push_back({.slot = ROW.slot(I->pWorkspace->m_id), .populated = populated(I->pWorkspace), .shown = MON->m_activeWorkspace == I->pWorkspace});
+        desks.push_back({.slot = ROW.slot(Hyprdrive::Compat::id(I->pWorkspace)), .populated = populated(I->pWorkspace), .shown = MON->m_activeWorkspace == I->pWorkspace});
     }
     return SC::removable(desks);
 }
@@ -356,13 +356,13 @@ bool COverview::stripCleanupClick() {
     long long         last = 0;
     for (const auto& I : images)
         if (I && Hyprdrive::DesktopOrder::ordinary(I->pWorkspace) && populated(I->pWorkspace))
-            last = std::max(last, ROW.slot(I->pWorkspace->m_id));
+            last = std::max(last, ROW.slot(Hyprdrive::Compat::id(I->pWorkspace)));
     std::vector<CBox> gone;
     for (size_t i = 0; i < images.size(); ++i) {
         const auto& I = images[i];
         if (!I || !Hyprdrive::DesktopOrder::ordinary(I->pWorkspace))
             continue;
-        const auto SLOT = ROW.slot(I->pWorkspace->m_id);
+        const auto SLOT = ROW.slot(Hyprdrive::Compat::id(I->pWorkspace));
         if (SLOT > 0 && SLOT < last && !populated(I->pWorkspace) && MON->m_activeWorkspace != I->pWorkspace)
             gone.push_back(stripCellLogicalBox(i));
     }
@@ -399,6 +399,6 @@ std::string overviewStripCleanupReport(PHLMONITOR monitor) {
     std::string out;
     for (const auto& OV : scrollOverviews())
         if (auto* O = dynamic_cast<COverview*>(OV.get()); O && (!monitor || O->pMonitor.lock() == monitor))
-            out += (out.empty() ? "" : "\n") + std::format("monitor {}: ", O->pMonitor.lock() ? O->pMonitor.lock()->m_name : "?") + O->stripCleanupReport();
+            out += (out.empty() ? "" : "\n") + std::format("monitor {}: ", O->pMonitor.lock() ? O->pMonitor.lock()->displayName() : "?") + O->stripCleanupReport();
     return out.empty() ? "stripclean: no overview" : out;
 }

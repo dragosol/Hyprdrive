@@ -15,10 +15,11 @@
 #include <string_view>
 
 #define private public
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/desktop/state/GlobalWindowController.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
 #undef private
@@ -26,7 +27,7 @@
 namespace Hyprdrive::Scratchpad {
 
 bool isScratchpad(const PHLWORKSPACE& workspace) {
-    return workspace && workspace->m_isSpecialWorkspace && !Minimize::isStash(workspace);
+    return workspace && Hyprdrive::Compat::isSpecial(workspace) && !Minimize::isStash(workspace);
 }
 
 std::vector<PHLWORKSPACE> workspaces() {
@@ -46,7 +47,7 @@ std::vector<PHLWINDOW> windowsOn(const PHLWORKSPACE& workspace) {
         return out;
 
     for (const auto& WINDOW : Desktop::windowState()->windows()) {
-        if (WINDOW && WINDOW->m_isMapped && WINDOW->m_workspace == workspace)
+        if (WINDOW && WINDOW->mapped() && WINDOW->m_workspace == workspace)
             out.emplace_back(WINDOW);
     }
 
@@ -93,7 +94,7 @@ std::string shortName(const PHLWORKSPACE& workspace) {
         return "";
 
     constexpr std::string_view PREFIX = "special:";
-    const std::string&         NAME   = workspace->m_name;
+    const std::string&         NAME   = workspace->displayName();
 
     return NAME.starts_with(PREFIX) ? NAME.substr(PREFIX.size()) : NAME;
 }

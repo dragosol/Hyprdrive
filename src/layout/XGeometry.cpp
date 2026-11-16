@@ -16,12 +16,13 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/managers/EventManager.hpp>
+#include <hyprland/src/ipc/s2/S2.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/managers/XWaylandManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
@@ -111,7 +112,7 @@ namespace Hyprdrive::XGeometry {
                 return;
             g_lastSend = NOW;
 
-            Log::logger->log(Log::DEBUG, "[hyprdrive] X has {} {}x{} at {},{}, Hyprland draws it {}x{} at {},{}: telling X again", window->m_class, HAS.width,
+            Log::logger->log(Log::DEBUG, "[hyprdrive] X has {} {}x{} at {},{}, Hyprland draws it {}x{} at {},{}: telling X again", window->metadata().appID(), HAS.width,
                              HAS.height, HAS.x, HAS.y, SIZE.x, SIZE.y, POS.x, POS.y);
             window->sendWindowSize(true);
         }
@@ -159,7 +160,7 @@ namespace Hyprdrive::XGeometry {
                 xcb_flush(g_pXWayland->m_wm->getConnection());
             }
             ++g_n.refocus;
-            Log::logger->log(Log::DEBUG, "[hyprdrive] {}: its clip went back after a move, focus away and back", window->m_class);
+            Log::logger->log(Log::DEBUG, "[hyprdrive] {}: its clip went back after a move, focus away and back", window->metadata().appID());
             g_refocusWindow = window;
             if (!g_refocusTimer)
                 g_refocusTimer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, refocusBack, nullptr);
@@ -227,7 +228,7 @@ namespace Hyprdrive::XGeometry {
                 if (a && g && a->_class == XCB_WINDOW_CLASS_INPUT_ONLY && a->override_redirect && a->map_state == XCB_MAP_STATE_VIEWABLE &&
                     inside(PX, PY, g->x, g->y, g->width, g->height) && !inside(CX, CY, g->x, g->y, g->width, g->height)) {
                     Log::logger->log(Log::DEBUG, "[hyprdrive] {} clips the pointer to {}x{} at {},{} (X pointer {},{}, cursor {},{}): clipping to {}x{} at {},{}",
-                                     window->m_class, g->width, g->height, g->x, g->y, PX, PY, CX, CY, BOX.width, BOX.height, BOX.x, BOX.y);
+                                     window->metadata().appID(), g->width, g->height, g->x, g->y, PX, PY, CX, CY, BOX.width, BOX.height, BOX.x, BOX.y);
                     if (STUCK) {
                         // Moved a moment ago and back again: Wine holds it there.
                         free(a);
@@ -260,7 +261,7 @@ namespace Hyprdrive::XGeometry {
         }
 
         const auto WINDOW = Desktop::focusState()->window();
-        if (!WINDOW || !WINDOW->m_isX11 || !WINDOW->m_isMapped || !Fullscreen::controller()->isFullscreen(WINDOW)) {
+        if (!WINDOW || !WINDOW->backend().isX11() || !WINDOW->mapped() || !Fullscreen::controller()->isFullscreen(WINDOW)) {
             ++g_n.window;
             return;
         }
@@ -324,13 +325,13 @@ namespace Hyprdrive::XGeometry {
             if (!xs)
                 return nullptr;
             for (const auto& W : Desktop::windowState()->windows())
-                if (W && W->m_isX11 && W->m_xwaylandSurface.lock() == xs)
+                if (W && W->backend().isX11() && W->m_xwaylandSurface.lock() == xs)
                     return W;
             return nullptr;
         }
 
         XStateRequest::eMode clientMode(const PHLWINDOW& w) {
-            if (!w || !w->m_isMapped || !w->m_workspace || !Fullscreen::controller())
+            if (!w || !w->mapped() || !w->m_workspace || !Fullscreen::controller())
                 return XStateRequest::eMode::NONE;
             const auto C = Fullscreen::controller()->getFullscreenModes(w).client;
             return (C & Fullscreen::FSMODE_FULLSCREEN) ? XStateRequest::eMode::FULLSCREEN :
@@ -343,7 +344,7 @@ namespace Hyprdrive::XGeometry {
         // (Wine) asks again, forever. Kept in step with the window's client mode;
         // the state is sent again when it changed.
         void tellMaximized(const PHLWINDOW& w) {
-            if (!w || !w->m_isX11 || !g_pXWayland || !g_pXWayland->m_wm)
+            if (!w || !w->backend().isX11() || !g_pXWayland || !g_pXWayland->m_wm)
                 return;
             const auto XS = w->m_xwaylandSurface.lock();
             if (!XS || XS->m_overrideRedirect)
@@ -380,7 +381,7 @@ namespace Hyprdrive::XGeometry {
             PHLWINDOW                  window = NETSTATE && xs && xs->m_mapped ? windowOf(xs) : nullptr;
             auto                       before = XStateRequest::eMode::NONE;
             bool                       judged = false;
-            if (window && window->m_isMapped) {
+            if (window && window->mapped()) {
                 auto       names = [&](xcb_atom_t a) { return a != XCB_ATOM_NONE && (msg.data.data32[1] == a || msg.data.data32[2] == a); };
                 const bool MAXI  = names(g_atomMaxVert) || names(g_atomMaxHorz);
                 const bool FULL  = names(g_atomFullscreen);
@@ -407,7 +408,7 @@ namespace Hyprdrive::XGeometry {
 
             if (judged) {
                 // The window may have gone in Hyprland's handling of it.
-                if (window && window->m_isMapped) {
+                if (window && window->mapped()) {
                     const auto AFTER = clientMode(window);
                     if (AFTER != before) {
                         ++g_xs.flips;
@@ -415,7 +416,7 @@ namespace Hyprdrive::XGeometry {
                         if (g_storms[e->window].noteFlip(NOW)) {
                             ++g_xs.storms;
                             Log::logger->log(Log::WARN, "[hyprdrive] {} flipped its own maximize/fullscreen more than {} times in {} ms: its requests are ignored for {} ms",
-                                             window->m_class, XStateRequest::CStormGuard::FLIPS, XStateRequest::CStormGuard::WINDOW,
+                                             window->metadata().appID(), XStateRequest::CStormGuard::FLIPS, XStateRequest::CStormGuard::WINDOW,
                                              XStateRequest::CStormGuard::BLOCK);
                         }
                     }
@@ -436,15 +437,15 @@ namespace Hyprdrive::XGeometry {
             if (!XS || !XS->m_mapped)
                 return;
             for (const auto& W : Desktop::windowState()->windows()) {
-                if (!W || !W->m_isMapped || W->m_xwaylandSurface.lock() != XS)
+                if (!W || !W->mapped() || W->m_xwaylandSurface.lock() != XS)
                     continue;
                 const uint32_t ACTION = e->data.data32[0]; // 0 remove, 1 add, 2 toggle
-                const bool     WANT   = ACTION == 1 || (ACTION == 2 && !W->m_isUrgent);
+                const bool     WANT   = ACTION == 1 || (ACTION == 2 && !Hyprdrive::Compat::urgent(W));
                 if (!WANT) {
                     W->m_isUrgent = false;
                     break;
                 }
-                if (W->m_isUrgent || Desktop::focusState()->window() == W)
+                if (Hyprdrive::Compat::urgent(W) || Desktop::focusState()->window() == W)
                     break; // already asking, or already in front of you
                 W->m_isUrgent = true;
                 g_pEventManager->postEvent(SHyprIPCEvent{.event = "urgent", .data = std::format("{:x}", rc<uintptr_t>(W.get()))});
@@ -494,7 +495,7 @@ namespace Hyprdrive::XGeometry {
         const auto W = Desktop::focusState()->window();
         if (!W)
             return s + "no focused window";
-        s += std::format("focused={} x11={} mapped={} fs={} hold={} posAnim={} sizeAnim={}", W->m_class, W->m_isX11, W->m_isMapped,
+        s += std::format("focused={} x11={} mapped={} fs={} hold={} posAnim={} sizeAnim={}", W->metadata().appID(), W->backend().isX11(), W->mapped(),
                          Fullscreen::controller()->isFullscreen(W), ConfigureHold::held(), W->positionAnimation()->isBeingAnimated(),
                          W->sizeAnimation()->isBeingAnimated());
         // The pointer constraints Hyprland holds for this window's surface: a

@@ -321,7 +321,7 @@ std::vector<PHLWINDOW> peekWindowsOn(PHLMONITOR monitor, const std::vector<PHLWI
     if (!monitor)
         return out;
     for (const auto& WINDOW : windows) {
-        if (!WINDOW || !WINDOW->m_isMapped || WINDOW->m_monitor != monitor || !WINDOW->m_workspace)
+        if (!WINDOW || !WINDOW->mapped() || WINDOW->m_monitor != monitor || !WINDOW->m_workspace)
             continue;
         // A window in flight keeps its label: it rides the flight.
         if (Flight::hasFlight(WINDOW)) {
@@ -349,7 +349,7 @@ void renderWindowPeek(PHLMONITOR monitor, float alpha) {
         // A flight armed but not drawn yet has no box to ride; its window's real
         // box is where it is NOT (a restore parks it at alpha 0).
         const bool ARMED  = WINDOW && !FLIGHT && Flight::hasFlight(WINDOW);
-        if (!WINDOW || !WINDOW->m_isMapped || ARMED || (!FLIGHT && Minimize::isMinimized(WINDOW)) || WINDOW->m_monitor != monitor) {
+        if (!WINDOW || !WINDOW->mapped() || ARMED || (!FLIGHT && Minimize::isMinimized(WINDOW)) || WINDOW->m_monitor != monitor) {
             if (WINDOW)
                 s_lastFlyingPlate.erase(WINDOW.get());
             continue;
@@ -357,8 +357,8 @@ void renderWindowPeek(PHLMONITOR monitor, float alpha) {
 
         std::string app = AppSearch::appNameForClass(Hyprdrive::AppIdentity::groupKey(WINDOW));
         if (app.empty())
-            app = WINDOW->m_class;
-        std::string title = WINDOW->m_title;
+            app = WINDOW->metadata().appID();
+        std::string title = WINDOW->metadata().title();
         if (title.size() > PEEK_TITLE_MAX) {
             size_t cut = PEEK_TITLE_MAX - 1;
             while (cut > 0 && (sc<unsigned char>(title[cut]) & 0xC0) == 0x80)
@@ -873,11 +873,11 @@ void onWindowOpen(const PHLWINDOW& window) {
     if (!window)
         return;
     const auto ID      = AppSearch::idForClass(Hyprdrive::AppIdentity::groupKey(window));
-    const bool SPECIAL = !window->m_workspace || window->m_workspace->m_isSpecialWorkspace;
+    const bool SPECIAL = !window->m_workspace || Hyprdrive::Compat::isSpecial(window->m_workspace);
     const bool MAIN    = Hyprdrive::WindowPlacement::mainWindow(window); // (as Placement placed it)
     const bool EMPTY   = MAIN && opensInEmptyDesktop(ID);
     const bool FULL    = MenuModel::shouldOpenFullscreen({.listed   = opensInFullscreen(ID),
-                                                          .floating = window->m_isFloating,
+                                                          .floating = window->isFloating(),
                                                           .child    = window->parent() != nullptr,
                                                           .modal    = window->isModal(),
                                                           .special  = SPECIAL,
@@ -889,11 +889,11 @@ void onWindowOpen(const PHLWINDOW& window) {
     // Next turn of the loop: not from inside the window's own map.
     g_pEventLoopManager->doLater([REF = PHLWINDOWREF{window}, EMPTY, FULL] {
         const auto W = REF.lock();
-        if (!W || !W->m_isMapped || !W->m_workspace || W->m_workspace->m_isSpecialWorkspace)
+        if (!W || !W->mapped() || !W->m_workspace || Hyprdrive::Compat::isSpecial(W->m_workspace))
             return;
         if (EMPTY) {
             const bool ALONE = std::ranges::none_of(Desktop::windowState()->windows(), [&](const PHLWINDOW& O) {
-                return O && O != W && O->m_isMapped && !O->isHidden() && O->m_workspace == W->m_workspace;
+                return O && O != W && O->mapped() && !O->isHidden() && O->m_workspace == W->m_workspace;
             });
             if (!ALONE)
                 if (const auto MONITOR = W->m_workspace->m_monitor.lock()) {
@@ -903,7 +903,7 @@ void onWindowOpen(const PHLWINDOW& window) {
                     moveToEmptyWorkspace(MONITOR, W);
                 }
         }
-        if (FULL && W->m_isMapped && !::Fullscreen::controller()->isFullscreen(W, ::Fullscreen::FSMODE_FULLSCREEN))
+        if (FULL && W->mapped() && !::Fullscreen::controller()->isFullscreen(W, ::Fullscreen::FSMODE_FULLSCREEN))
             (void)::Config::Actions::fullscreenWindow(::Fullscreen::FSMODE_FULLSCREEN, true, W);
     });
 }
@@ -1549,7 +1549,7 @@ void render(PHLMONITOR monitor) {
     else if (Stacks::isOpen())
         renderTooltip(monitor, LAYOUT, CBox{}, "");
     else if (CELL)
-        renderTooltip(monitor, LAYOUT, CELL->first, CELL->second->m_title, sc<float>(g_hover.drawn.y), tooltipSubject(CELL->second),
+        renderTooltip(monitor, LAYOUT, CELL->first, CELL->second->metadata().title(), sc<float>(g_hover.drawn.y), tooltipSubject(CELL->second),
                       peekWindowsOn(monitor, {CELL->second}));
     else if (HASHOVER) {
         const float ABOVE = (panelOn(monitor) && g_hover.drawn.height >= 1) ? sc<float>(g_hover.drawn.y) : 0.F;

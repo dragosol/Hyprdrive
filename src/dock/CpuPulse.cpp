@@ -14,7 +14,8 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 
@@ -98,9 +99,9 @@ namespace Hyprdrive::CpuPulse {
             std::set<int> busy;
             const float   LIMIT = threshold();
             for (const auto& W : Desktop::windowState()->windows()) {
-                if (!W || !W->m_isMapped)
+                if (!W || !W->mapped())
                     continue;
-                const int ROOT = sc<int>(W->getPID());
+                const int ROOT = sc<int>(W->backend().pid());
                 if (ROOT <= 0 || g_tree.contains(ROOT))
                     continue;
                 float            sum = 0.F;
@@ -177,7 +178,7 @@ namespace Hyprdrive::CpuPulse {
             return 0.F;
         bool busy = false;
         for (const auto& W : windows)
-            if (W && g_busy.contains(sc<int>(W->getPID()))) {
+            if (W && g_busy.contains(sc<int>(W->backend().pid()))) {
                 busy = true;
                 break;
             }

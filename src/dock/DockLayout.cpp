@@ -564,7 +564,7 @@ bool onMonitor(PHLMONITOR monitor) {
             return false;
         if (WANT.starts_with("desc:"))
             return m->m_description.starts_with(std::string_view{WANT}.substr(5));
-        return m->m_name == WANT;
+        return m->displayName() == WANT;
     };
     if (MATCHES(monitor))
         return true;

@@ -263,7 +263,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITOR monitor_) 
     // so the bind is still current here; onWorkspaceChange pans the cards on
     // the next frame and KEYPAN reads this.
     workspaceActiveHook = Event::bus()->m_events.workspace.active.listen([this](PHLWORKSPACE workspace) {
-        if (workspace && !workspace->m_isSpecialWorkspace && workspace->m_monitor == pMonitor && g_pKeybindManager && g_pKeybindManager->m_currentKeybind)
+        if (workspace && !Hyprdrive::Compat::isSpecial(workspace) && workspace->m_monitor == pMonitor && g_pKeybindManager && g_pKeybindManager->m_currentKeybind)
             (currentBindIsWheel() ? wheelPanAt : keyPanAt) = Time::steadyNow();
     });
     activateSubmapIfConfigured();
@@ -285,8 +285,8 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITOR monitor_) 
     // the others open after the keyboard is gone and would read the same one.
     if (scrollOverviews().size() <= 1)
         OvInternal::g_focusAtOpen = Desktop::focusState()->window();
-    Hyprdrive::Stacks::traceEvent(std::format("locks: open on {} (overviews={}) focusAtOpen={}", pMonitor ? pMonitor->m_name : "?", scrollOverviews().size(),
-                                                   OvInternal::g_focusAtOpen.lock() ? OvInternal::g_focusAtOpen->m_class : "-"));
+    Hyprdrive::Stacks::traceEvent(std::format("locks: open on {} (overviews={}) focusAtOpen={}", pMonitor ? pMonitor->displayName() : "?", scrollOverviews().size(),
+                                                   OvInternal::g_focusAtOpen.lock() ? OvInternal::g_focusAtOpen->metadata().appID() : "-"));
     rememberSelection(Desktop::focusState()->window());
     viewportCurrentWorkspace = activeWorkspaceIndex();
     syncSelectionToViewport();
@@ -405,8 +405,8 @@ void COverview::close() {
     // candidate (its last focused window), or -- an empty desktop -- no window
     // at all, on this monitor (the `!closeOnWindow` branch below).
     const auto ORIGINWORKSPACEID =
-        focusSyncedFromWorkspaceID != WORKSPACE_INVALID ? focusSyncedFromWorkspaceID : (pMonitor->m_activeWorkspace ? pMonitor->m_activeWorkspace->m_id : WORKSPACE_INVALID);
-    const bool LEFTFORDESKTOP = !closeOnWindow && SELECTEDWORKSPACE && !SELECTEDWORKSPACE->m_isSpecialWorkspace && SELECTEDWORKSPACE->m_id != ORIGINWORKSPACEID;
+        focusSyncedFromWorkspaceID != WORKSPACE_INVALID ? focusSyncedFromWorkspaceID : (pMonitor->m_activeWorkspace ? Hyprdrive::Compat::id(pMonitor->m_activeWorkspace) : WORKSPACE_INVALID);
+    const bool LEFTFORDESKTOP = !closeOnWindow && SELECTEDWORKSPACE && !Hyprdrive::Compat::isSpecial(SELECTEDWORKSPACE) && Hyprdrive::Compat::id(SELECTEDWORKSPACE) != ORIGINWORKSPACEID;
     if (LEFTFORDESKTOP) {
         const auto CANDIDATE = getOverviewWindowToShow(SELECTEDWORKSPACE->getFocusCandidate());
         if (CANDIDATE && CANDIDATE->m_workspace == SELECTEDWORKSPACE && shouldShowOverviewWindow(CANDIDATE))
@@ -465,7 +465,7 @@ void COverview::close() {
             if (!images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
                 continue;
 
-            if (images[workspaceIdx]->pWorkspace->m_id == focusSyncedFromWorkspaceID)
+            if (images[workspaceIdx]->Hyprdrive::Compat::id(pWorkspace) == focusSyncedFromWorkspaceID)
                 sourceIdx = workspaceIdx;
             if (images[workspaceIdx]->pWorkspace == FINALWORKSPACE)
                 targetIdx = workspaceIdx;
@@ -523,7 +523,7 @@ void COverview::close() {
             const auto FINALPITCH = getWorkspaceLogicalPitch(pMonitor.lock(), 1.F, layout);
 
             for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
-                if (!images[workspaceIdx] || !images[workspaceIdx]->pWorkspace || images[workspaceIdx]->pWorkspace->m_id != focusSyncedFromWorkspaceID)
+                if (!images[workspaceIdx] || !images[workspaceIdx]->pWorkspace || images[workspaceIdx]->Hyprdrive::Compat::id(pWorkspace) != focusSyncedFromWorkspaceID)
                     continue;
 
                 viewOffset->setValueAndWarp(axisOffsetVector(workspaceOverviewLogicalOffset(workspaceIdx, ACTIVEIDX, FINALPITCH), layout));
@@ -763,7 +763,7 @@ void COverview::onWorkspaceChange() {
     const bool PREVIOUSISOURS = previousStartedOn &&
         (previousStartedOn == trailingWorkspace ||
          std::find(gapWorkspaces.begin(), gapWorkspaces.end(), previousStartedOn) != gapWorkspaces.end());
-    const bool LEFTEMPTY = previousStartedOn && previousStartedOn != NEWWORKSPACE && !PREVIOUSISOURS && !previousStartedOn->m_isSpecialWorkspace &&
+    const bool LEFTEMPTY = previousStartedOn && previousStartedOn != NEWWORKSPACE && !PREVIOUSISOURS && !Hyprdrive::Compat::isSpecial(previousStartedOn) &&
         !previousStartedOn->isPersistent() && previousStartedOn->getWindowCount() == 0;
     // THE EMPTY DESKTOP YOU LEFT IS THE SPARE ANYWAY (user, 2026-11-03: swiping
     // off it, the top strip "glitches for a frame"). The empty desktop at the
@@ -1266,11 +1266,11 @@ void COverview::superChanged() {
 bool COverview::deskMovable(size_t idx) const {
     if (idx >= images.size() || !images[idx] || !Hyprdrive::DesktopOrder::ordinary(images[idx]->pWorkspace))
         return false;
-    if (!Hyprdrive::Rows::of(pMonitor.lock()).contains(images[idx]->pWorkspace->m_id))
+    if (!Hyprdrive::Rows::of(pMonitor.lock()).contains(images[idx]->Hyprdrive::Compat::id(pWorkspace)))
         return false; // a visitor: outside this monitor's row
     return std::ranges::any_of(images[idx]->windows, [](const PHLWINDOWREF& r) {
         const auto W = r.lock();
-        return W && W->m_isMapped;
+        return W && W->mapped();
     });
 }
 
@@ -1290,10 +1290,10 @@ bool COverview::moveDesktop(size_t from, size_t to) {
     for (const auto& I : images) {
         if (!I || !Hyprdrive::DesktopOrder::ordinary(I->pWorkspace))
             return false;
-        if (!ROW.contains(I->pWorkspace->m_id))
+        if (!ROW.contains(Hyprdrive::Compat::id(I->pWorkspace)))
             continue;
         order.push_back(I->pWorkspace);
-        ids.push_back(I->pWorkspace->m_id);
+        ids.push_back(Hyprdrive::Compat::id(I->pWorkspace));
     }
     if (from >= order.size())
         return false;
@@ -1424,7 +1424,7 @@ void OvInternal::handPointerTo(const PHLWINDOW& window, const SP<CWLSurfaceResou
     // overview over a game) gives it the lock back.
     if (const auto HLSURF = surface ? Desktop::View::CWLSurface::fromResource(surface) : nullptr; HLSURF && HLSURF->constraint()) {
         HLSURF->constraint()->activate();
-        Hyprdrive::Stacks::traceEvent(std::format("locks: handed back to {} active={}", window->m_class, HLSURF->constraint()->isActive() ? 1 : 0));
+        Hyprdrive::Stacks::traceEvent(std::format("locks: handed back to {} active={}", window->metadata().appID(), HLSURF->constraint()->isActive() ? 1 : 0));
         return;
     }
 
@@ -1446,13 +1446,13 @@ void OvInternal::handPointerTo(const PHLWINDOW& window, const SP<CWLSurfaceResou
         const CBox BOX{FINAL->m_realPosition->goal(), FINAL->m_realSize->goal()};
         if (BOX.width < 1 || BOX.height < 1 || (!CENTRE && BOX.containsPoint(g_pInputManager->getMouseCoordsInternal())))
             return;
-        Hyprdrive::Stacks::traceEvent(std::format("locks: warp into {}", FINAL->m_class));
+        Hyprdrive::Stacks::traceEvent(std::format("locks: warp into {}", FINAL->metadata().appID()));
         Pointer::pointerController()->warpTo(BOX.middle(), true);
     });
 }
 
 void OvInternal::traceHandback(const char* who, const PHLWINDOW& asked, const PHLWINDOW& target, const PHLWINDOW& before) {
-    const auto NAME = [](const PHLWINDOW& w) { return w ? w->m_class : std::string{"-"}; };
+    const auto NAME = [](const PHLWINDOW& w) { return w ? w->metadata().appID() : std::string{"-"}; };
     Hyprdrive::Stacks::traceEvent(std::format("locks: handback {} asked={} target={} before={} after={}", who, NAME(asked), NAME(target), NAME(before),
                                                    NAME(Desktop::focusState()->window())));
 }

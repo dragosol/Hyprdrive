@@ -4,12 +4,13 @@
 #include "DebugPaths.hpp"
 #include "Rows.hpp"
 
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/state/WorkspaceState.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/output/Monitor.hpp>
-#include <hyprland/src/managers/EventManager.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/ipc/s2/S2.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 
@@ -23,7 +24,7 @@
 
 namespace Hyprdrive::DesktopOrder {
     bool ordinary(const PHLWORKSPACE& ws) {
-        return ws && !ws->m_isSpecialWorkspace && ws->m_id >= 1;
+        return ws && !Hyprdrive::Compat::isSpecial(ws) && Hyprdrive::Compat::id(ws) >= 1;
     }
 
     namespace {
@@ -53,7 +54,7 @@ namespace Hyprdrive::DesktopOrder {
         int windowsOn(const PHLWORKSPACE& ws) {
             int n = 0;
             for (const auto& W : Desktop::windowState()->windows())
-                if (W && W->m_isMapped && W->m_workspace == ws)
+                if (W && W->mapped() && W->m_workspace == ws)
                     ++n;
             return n;
         }
@@ -70,13 +71,13 @@ namespace Hyprdrive::DesktopOrder {
             std::vector<DesktopPlan::Desk> out;
             out.reserve(all.size());
             for (const auto& WS : all)
-                out.push_back({keyOf(WS), WS->m_id, counted ? windowsOn(WS) : 0, Rows::ofWorkspace(WS)});
+                out.push_back({keyOf(WS), Hyprdrive::Compat::id(WS), counted ? windowsOn(WS) : 0, Rows::ofWorkspace(WS)});
             return out;
         }
         std::string describe(const std::vector<std::pair<PHLWORKSPACE, WORKSPACEID>>& moves) {
             std::string s;
             for (const auto& [WS, TO] : moves)
-                s += std::format("{}{}->{}", s.empty() ? "" : " ", WS ? WS->m_id : WORKSPACE_INVALID, TO);
+                s += std::format("{}{}->{}", s.empty() ? "" : " ", WS ? Hyprdrive::Compat::id(WS) : WORKSPACE_INVALID, TO);
             return s;
         }
     }
@@ -105,20 +106,20 @@ namespace Hyprdrive::DesktopOrder {
         };
         std::vector<SDone> done;
         for (const auto& [WS, TO] : moves)
-            if (WS->m_id != TO)
-                done.push_back({WS, WS->m_id, WS->m_name});
+            if (Hyprdrive::Compat::id(WS) != TO)
+                done.push_back({WS, Hyprdrive::Compat::id(WS), WS->displayName()});
         if (done.empty())
             return true;
         // (Omarchy's merged records under the numbers that change are
         // dropped by its own rule around it: Rows::renumbering.)
         Rows::renumbering(moves, [&] {
             for (const auto& [WS, TO] : moves) {
-                const WORKSPACEID FROM = WS->m_id;
+                const WORKSPACEID FROM = Hyprdrive::Compat::id(WS);
                 if (FROM == TO)
                     continue;
-                WS->m_id = TO;
+                Hyprdrive::Compat::id(WS) = TO;
                 // A numeric name is the number; a name the user gave stays.
-                if (WS->m_name == std::to_string(FROM))
+                if (WS->displayName() == std::to_string(FROM))
                     WS->m_name = std::to_string(TO);
             }
         });
@@ -132,14 +133,14 @@ namespace Hyprdrive::DesktopOrder {
                 g_pEventManager->postEvent(SHyprIPCEvent{"destroyworkspacev2", std::format("{},{}", D.from, D.oldName)});
             }
             for (const auto& D : done) {
-                g_pEventManager->postEvent(SHyprIPCEvent{"createworkspace", D.ws->m_name});
-                g_pEventManager->postEvent(SHyprIPCEvent{"createworkspacev2", std::format("{},{}", D.ws->m_id, D.ws->m_name)});
+                g_pEventManager->postEvent(SHyprIPCEvent{"createworkspace", D.ws->displayName()});
+                g_pEventManager->postEvent(SHyprIPCEvent{"createworkspacev2", std::format("{},{}", Hyprdrive::Compat::id(D.ws), D.ws->displayName())});
             }
             for (const auto& MON : State::monitorState()->monitors())
                 if (MON && MON->m_activeWorkspace) {
                     const auto& WS = MON->m_activeWorkspace;
-                    g_pEventManager->postEvent(SHyprIPCEvent{"workspace", WS->m_name});
-                    g_pEventManager->postEvent(SHyprIPCEvent{"workspacev2", std::format("{},{}", WS->m_id, WS->m_name)});
+                    g_pEventManager->postEvent(SHyprIPCEvent{"workspace", WS->displayName()});
+                    g_pEventManager->postEvent(SHyprIPCEvent{"workspacev2", std::format("{},{}", Hyprdrive::Compat::id(WS), WS->displayName())});
                 }
         }
         overviewDesktopsRenumbered();
@@ -181,7 +182,7 @@ namespace Hyprdrive::DesktopOrder {
             bool shown = false;
             for (const auto& MON : State::monitorState()->monitors())
                 shown |= MON && MON->m_activeWorkspace == WS;
-            rooms.push_back({keyOf(WS), WS->m_id, windowsOn(WS) > 0, shown});
+            rooms.push_back({keyOf(WS), Hyprdrive::Compat::id(WS), windowsOn(WS) > 0, shown});
             rowOf.push_back(Rows::ofWorkspace(WS));
         }
         // ONCE PER ROW: each row's members from its first place. Visitors

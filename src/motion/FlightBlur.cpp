@@ -42,7 +42,8 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/Pass.hpp>
@@ -53,7 +54,7 @@
 #include <hyprland/src/managers/input/UnifiedWorkspaceSwipeGesture.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/layout/algorithm/tiled/scrolling/ScrollingAlgorithm.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 
@@ -244,11 +245,11 @@ namespace Hyprdrive::FlightBlur {
         bool justFlippedMode(const PHLWINDOW& window, Time::steady_tp now) {
             auto it = std::ranges::find_if(g_modeSeen, [&](const auto& e) { return e.window.lock() == window; });
             if (it == g_modeSeen.end()) {
-                g_modeSeen.push_back({window, window->m_isFloating, {}});
+                g_modeSeen.push_back({window, window->isFloating(), {}});
                 return false;
             }
-            if (it->floating != window->m_isFloating) {
-                it->floating  = window->m_isFloating;
+            if (it->floating != window->isFloating()) {
+                it->floating  = window->isFloating();
                 it->flippedAt = now;
             }
             return it->flippedAt.time_since_epoch().count() != 0 &&
@@ -344,14 +345,14 @@ namespace Hyprdrive::FlightBlur {
 
             // renderWindow's own box and fade (Renderer.cpp, renderWindow).
             const auto WS     = WINDOW->m_workspace;
-            const auto OFFSET = WS && !WINDOW->m_pinned ? WS->m_renderOffset->value() : Vector2D{};
+            const auto OFFSET = WS && !Hyprdrive::Compat::pinned(WINDOW) ? WS->m_renderOffset->value() : Vector2D{};
             const auto POS    = WINDOW->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + OFFSET + WINDOW->m_floatingOffset - MONITOR->m_position;
             CBox       box{POS, WINDOW->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
             box.scale(MONITOR->m_scale).round();
             const float FADE  = WINDOW->alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * WINDOW->alphaValue(Desktop::View::WINDOW_ALPHA_FULLSCREEN) *
-                WINDOW->alphaValue(Desktop::View::WINDOW_ALPHA_LAYOUT) * (WINDOW->m_pinned || !WS ? 1.F : WS->m_alpha->value());
-            const int ROUND = sc<int>(std::max(WINDOW->rounding() * MONITOR->m_scale - 1.F, 0.F));
-            queueFrost(WINDOW, box, ROUND, WINDOW->roundingPower(), FADE, false);
+                WINDOW->alphaValue(Desktop::View::WINDOW_ALPHA_LAYOUT) * (Hyprdrive::Compat::pinned(WINDOW) || !WS ? 1.F : WS->m_alpha->value());
+            const int ROUND = sc<int>(std::max(WINDOW->presentation().rounding() * MONITOR->m_scale - 1.F, 0.F));
+            queueFrost(WINDOW, box, ROUND, WINDOW->presentation().roundingPower(), FADE, false);
         }
     }
 
@@ -661,7 +662,7 @@ namespace Hyprdrive::FlightBlur {
             const auto NOW        = Time::steadyNow();
 
             for (const auto& window : Desktop::windowState()->windows()) {
-                if (!window || !window->m_isMapped || window->isHidden() || window->m_monitor != monitor || !window->m_workspace)
+                if (!window || !window->mapped() || window->isHidden() || window->m_monitor != monitor || !window->m_workspace)
                     continue;
                 const auto& WS        = window->m_workspace;
                 // A special workspace hiding is still drawn while it fades or
@@ -669,27 +670,27 @@ namespace Hyprdrive::FlightBlur {
                 // A desktop switched AWAY from is drawn while its offset slides it
                 // out, as Hyprland's shouldRenderWindow has it: it is moving too
                 // (user, 2026-11-01: only the arriving desktop was smeared).
-                const bool  SHOWN     = WS->isVisible() || WS->m_forceRendering ||
-                    (!WS->m_isSpecialWorkspace && WS->m_monitor == monitor && WS->m_renderOffset->isBeingAnimated()) ||
-                    (WS->m_isSpecialWorkspace && WS->m_alpha->value() > 0.01F && (WS->m_alpha->isBeingAnimated() || WS->m_renderOffset->isBeingAnimated()));
+                const bool  SHOWN     = WS->visible() || WS->m_forceRendering ||
+                    (!Hyprdrive::Compat::isSpecial(WS) && WS->m_monitor == monitor && WS->m_renderOffset->isBeingAnimated()) ||
+                    (Hyprdrive::Compat::isSpecial(WS) && WS->m_alpha->value() > 0.01F && (WS->m_alpha->isBeingAnimated() || WS->m_renderOffset->isBeingAnimated()));
                 const auto  IT        = std::ranges::find_if(g_lastLayoutBox, [&](const auto& e) { return e.window.lock() == window; });
                 const auto& WSOFFSET  = WS->m_renderOffset;
                 // A SPECIAL workspace sliding in (the scratchpad) moves its
                 // windows by the workspace's render offset, not their geometry.
-                const bool  HANDMOVED = WS->m_isSpecialWorkspace && offsetMoved(WS); // asked every frame, so its last offset is never stale
-                const bool  SLIDING   = WS->m_isSpecialWorkspace && !window->m_pinned && (WSOFFSET->isBeingAnimated() || HANDMOVED);
+                const bool  HANDMOVED = Hyprdrive::Compat::isSpecial(WS) && offsetMoved(WS); // asked every frame, so its last offset is never stale
+                const bool  SLIDING   = Hyprdrive::Compat::isSpecial(WS) && !Hyprdrive::Compat::pinned(window) && (WSOFFSET->isBeingAnimated() || HANDMOVED);
                 // An ordinary workspace moved by a trackpad swipe, fingers down
                 // or on the release.
-                const bool  SWIPED    = !WS->m_isSpecialWorkspace && !window->m_pinned && (SWIPING || (SWIPEHOME && WSOFFSET->isBeingAnimated()));
+                const bool  SWIPED    = !Hyprdrive::Compat::isSpecial(WS) && !Hyprdrive::Compat::pinned(window) && (SWIPING || (SWIPEHOME && WSOFFSET->isBeingAnimated()));
                 // AN ORDINARY DESKTOP SWITCH (user, 2026-10-16): Hyprland's
                 // workspaces slide played by a bind, Super+scroll or a dock
                 // click -- the same offset a swipe moves, but on its clock.
                 // The desktop strip (DesktopStrip.hpp) sets the offsets by hand
                 // every frame, no clock at all: moved since last frame is moving.
-                const bool  STRIPPED  = !WS->m_isSpecialWorkspace && DesktopStrip::drives(WS) && offsetMoved(WS);
-                const bool  SWITCHED  = !WS->m_isSpecialWorkspace && !window->m_pinned && !SWIPED && (WSOFFSET->isBeingAnimated() || STRIPPED);
+                const bool  STRIPPED  = !Hyprdrive::Compat::isSpecial(WS) && DesktopStrip::drives(WS) && offsetMoved(WS);
+                const bool  SWITCHED  = !Hyprdrive::Compat::isSpecial(WS) && !Hyprdrive::Compat::pinned(window) && !SWIPED && (WSOFFSET->isBeingAnimated() || STRIPPED);
                 const bool  OFFSETS   = SLIDING || SWIPED || SWITCHED;
-                const auto* SPACE     = WS->m_space.get();
+                const auto* SPACE     = WS->space().get();
                 const bool  SCROLLING = SPACE && SPACE->algorithm() && dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(SPACE->algorithm()->m_tiled.get());
                 const bool  RESIZING  = window->sizeAnimation()->isBeingAnimated();
                 const bool  MOVING    = window->positionAnimation()->isBeingAnimated();

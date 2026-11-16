@@ -59,9 +59,9 @@ namespace WindowPill = Hyprdrive::WindowPill;
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/animation/AnimationManager.hpp>
-#include <hyprland/src/managers/EventManager.hpp>
+#include <hyprland/src/ipc/s2/S2.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/keybinds/Manager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
@@ -72,7 +72,8 @@ namespace WindowPill = Hyprdrive::WindowPill;
 #include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Group.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #include <hyprland/src/desktop/view/WLSurface.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/view/Popup.hpp>
@@ -474,8 +475,8 @@ inline PHLWINDOW getOverviewWindowToShow(const PHLWINDOW& window) {
     if (!window)
         return nullptr;
 
-    if (window->m_group)
-        return window->m_group->current();
+    if (window->grouping().group())
+        return window->grouping().group()->current();
 
     return window;
 }
@@ -826,11 +827,11 @@ inline std::vector<SSearchSection> overviewSearchSections(const std::vector<SSea
 inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry) {
     PHLWINDOW best;
     for (const auto& WINDOW : Desktop::windowState()->windows()) {
-        if (!WINDOW || !WINDOW->m_isMapped)
+        if (!WINDOW || !WINDOW->mapped())
             continue;
         if (WINDOW->isHidden())
             continue;
-        if (SearchBackend::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
+        if (SearchBackend::isOverviewSushiWindow(WINDOW->metadata().appID(), WINDOW->backend().pid()))
             continue;
 
         const auto CLASS = Hyprdrive::AppIdentity::groupKey(WINDOW);
@@ -845,7 +846,7 @@ inline PHLWINDOW overviewWindowForApp(const AppSearch::SEntry& entry) {
         if (!match)
             continue;
 
-        if (WINDOW->m_isUrgent)
+        if (Hyprdrive::Compat::urgent(WINDOW))
             return WINDOW;
         if (!best)
             best = WINDOW;
@@ -1146,8 +1147,8 @@ inline bool overviewSearchMatches(const PHLWINDOW& window) {
 
     // Hyprland numbers regular workspaces from 1, which is what the extension
     // renders as `wsIndex + 1`, so typing "2:" finds desktop 2 on both.
-    std::string haystack = window->m_workspace ? std::format("{}: ", window->m_workspace->m_id) : "";
-    haystack += window->m_title + " " + window->m_class;
+    std::string haystack = window->m_workspace ? std::format("{}: ", Hyprdrive::Compat::id(window->m_workspace)) : "";
+    haystack += window->metadata().title() + " " + window->metadata().appID();
 
     if (const auto APPNAME = AppSearch::appNameForClass(Hyprdrive::AppIdentity::groupKey(window)); !APPNAME.empty())
         haystack += " " + APPNAME;
@@ -1210,7 +1211,7 @@ inline bool overviewMembershipMatches(const PHLWINDOW& WINDOW) {
     const bool LIVE = overviewMembershipMatchesLive(WINDOW);
 
     if (HIT && cached != LIVE)
-        Membership::divergence(WINDOW->m_class, WINDOW->m_title, LIVE);
+        Membership::divergence(WINDOW->metadata().appID(), WINDOW->metadata().title(), LIVE);
 
     Membership::store(WINDOW.get(), LIVE);
     return LIVE;
@@ -1228,7 +1229,7 @@ inline bool overviewMembershipMatches(const PHLWINDOW& WINDOW) {
 inline bool isScreensaverWindow(const PHLWINDOW& window) {
     if (!window)
         return false;
-    return window->m_class == "org.omarchy.screensaver" || window->m_initialClass == "org.omarchy.screensaver";
+    return window->metadata().appID() == "org.omarchy.screensaver" || window->metadata().initialAppID() == "org.omarchy.screensaver";
 }
 
 inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
@@ -1242,13 +1243,13 @@ inline bool shouldShowOverviewWindow(const PHLWINDOW& window) {
     if (!WINDOW)
         return false;
 
-    if (SearchBackend::isOverviewSushiWindow(WINDOW->m_class, WINDOW->getPID()))
+    if (SearchBackend::isOverviewSushiWindow(WINDOW->metadata().appID(), WINDOW->backend().pid()))
         return false;
 
     if (!validMapped(WINDOW))
         return false;
 
-    if (WINDOW->m_pinned && WINDOW->m_isFloating)
+    if (Hyprdrive::Compat::pinned(WINDOW) && WINDOW->isFloating())
         return false;
 
     return overviewMembershipMatches(WINDOW);
@@ -1298,7 +1299,7 @@ inline bool overviewStripMiniShown(const PHLWINDOW& window, const PHLWORKSPACE& 
     if (!workspace || !shouldShowOverviewWindow(window))
         return false;
 
-    return overviewGridHomeWorkspace(window) == workspace->m_id;
+    return overviewGridHomeWorkspace(window) == Hyprdrive::Compat::id(workspace);
 }
 
 inline bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
@@ -1307,7 +1308,7 @@ inline bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
     if (!validMapped(WINDOW))
         return false;
 
-    if (!WINDOW->m_pinned || !WINDOW->m_isFloating)
+    if (!Hyprdrive::Compat::pinned(WINDOW) || !WINDOW->isFloating())
         return false;
 
     return true;
@@ -2028,7 +2029,7 @@ inline CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
         // caller's per-workspace offset or it lands off-screen beside it.
         if (PROMOTED)
             offset = 0.F;
-    } else if (const auto HOME = window->m_workspace; overviewMissionControlOn() && g_search.query.text.empty() && HOME && !HOME->m_isSpecialWorkspace &&
+    } else if (const auto HOME = window->m_workspace; overviewMissionControlOn() && g_search.query.text.empty() && HOME && !Hyprdrive::Compat::isSpecial(HOME) &&
                monitor->m_activeWorkspace && HOME != monitor->m_activeWorkspace && HOME->m_monitor == monitor) {
         // THE NEIGHBOURING CARDS WEAR THE SAME GRID (user, 2026-09-30). Only the
         // active card's windows were laid out as a grid under the strip; the
@@ -2052,7 +2053,7 @@ inline CBox getOverviewDragWindowBox(const PHLWINDOW& window, PHLMONITOR monitor
         return {};
 
     const auto TARGET = window->layoutTarget();
-    if (window->m_group && TARGET)
+    if (window->grouping().group() && TARGET)
         return getOverviewGlobalBox(TARGET->position(), monitor, scale, viewOffset, offset, layout, round);
 
     return getOverviewWindowBox(window, monitor, scale, viewOffset, offset, layout, round);
@@ -2300,10 +2301,10 @@ inline Layout::Tiled::CScrollingAlgorithm* overviewScrollingAlgorithmForTarget(c
 }
 
 inline Layout::Tiled::CScrollingAlgorithm* overviewScrollingAlgorithmForWorkspace(const PHLWORKSPACE& workspace) {
-    if (!workspace || !workspace->m_space || !workspace->m_space->algorithm())
+    if (!workspace || !workspace->space() || !workspace->space()->algorithm())
         return nullptr;
 
-    return dc<Layout::Tiled::CScrollingAlgorithm*>(workspace->m_space->algorithm()->m_tiled.get());
+    return dc<Layout::Tiled::CScrollingAlgorithm*>(workspace->space()->algorithm()->m_tiled.get());
 }
 
 inline bool isWorkspaceScrolling(const PHLWORKSPACE& workspace) {
@@ -2320,10 +2321,10 @@ inline CBox getOverviewWorkspaceUsableBox(const PHLWORKSPACE& workspace, PHLMONI
         return getOverviewBox(USABLE, monitor, scale, viewOffset, offset, layout);
     }
 
-    if (!workspace->m_space)
+    if (!workspace->space())
         return getOverviewWorkspaceBox(monitor, scale, viewOffset, offset, layout);
 
-    auto USABLE = workspace->m_space->workArea();
+    auto USABLE = workspace->space()->workArea();
     USABLE.translate(-monitor->m_position);
     USABLE.w = std::max(USABLE.w, 1.0);
     USABLE.h = std::max(USABLE.h, 1.0);
@@ -2590,10 +2591,10 @@ inline void focusOverviewFullscreenWindowIfActiveWorkspace(const PHLWINDOW& full
 }
 
 inline void syncWorkspaceGeometry(const PHLWORKSPACE& workspace) {
-    if (!workspace || !workspace->m_space)
+    if (!workspace || !workspace->space())
         return;
 
-    for (const auto& targetRef : workspace->m_space->targets()) {
+    for (const auto& targetRef : workspace->space()->targets()) {
         const auto TARGET = targetRef.lock();
         if (TARGET)
             TARGET->warpPositionSize();

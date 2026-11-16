@@ -15,10 +15,11 @@
 // report() only: m_suspended is private (Hyprland has no getter); the std
 // headers above stay clean.
 #define private public
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
 #undef private
 #include <hyprland/src/protocols/XDGShell.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/render/Texture.hpp>
@@ -35,7 +36,7 @@ namespace Hyprdrive::SizeAck {
         window->m_pendingSizeAck = ACKED;
         std::erase_if(acks, [&ACKED](const auto& e) { return e.first <= ACKED.first; });
 
-        if (window->m_isX11)
+        if (window->backend().isX11())
             return;
         const auto RES = window->resource();
         if (!RES)
@@ -49,7 +50,7 @@ namespace Hyprdrive::SizeAck {
     std::string report() {
         std::string out = "hyprdrive windows:";
         for (const auto& W : Desktop::windowState()->windows()) {
-            if (!W || !W->m_isMapped)
+            if (!W || !W->mapped())
                 continue;
             const auto& SZ  = W->sizeAnimation();
             const auto& POS = W->positionAnimation();
@@ -73,11 +74,11 @@ namespace Hyprdrive::SizeAck {
             const bool OFF = SZ->value() != SZ->goal() || POS->value() != POS->goal();
             out += std::format("\n {}{:.24} ws={} size {:.0f}x{:.0f}/goal {:.0f}x{:.0f} pos {:.0f},{:.0f}/goal {:.0f},{:.0f}{} geom {:.0f}x{:.0f} reported {:.0f}x{:.0f} "
                                "pending {:.0f}x{:.0f} unacked {} xf={}{}{}{} surfaces{}",
-                               OFF && !SZ->isBeingAnimated() && !POS->isBeingAnimated() ? "!! " : "", W->m_class, W->m_workspace ? W->m_workspace->m_id : -1, SZ->value().x,
+                               OFF && !SZ->isBeingAnimated() && !POS->isBeingAnimated() ? "!! " : "", W->metadata().appID(), W->m_workspace ? Hyprdrive::Compat::id(W->m_workspace) : -1, SZ->value().x,
                                SZ->value().y, SZ->goal().x, SZ->goal().y, POS->value().x, POS->value().y, POS->goal().x, POS->goal().y,
                                SZ->isBeingAnimated() || POS->isBeingAnimated() ? " ANIM" : "", geom.x, geom.y, W->m_reportedSize.x, W->m_reportedSize.y,
                                W->m_pendingReportedSize.x, W->m_pendingReportedSize.y, W->m_pendingSizeAcks.size(), W->m_transformers.size(), W->m_suspended ? " SUSP" : "",
-                               W->isHidden() ? " HIDDEN" : "", W->m_isFloating ? " float" : "", subs);
+                               W->isHidden() ? " HIDDEN" : "", W->isFloating() ? " float" : "", subs);
         }
         return out;
     }

@@ -42,8 +42,9 @@
 #undef private
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include "HyprCompat.hpp"
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/event/EventBus.hpp>
@@ -185,10 +186,10 @@ namespace Hyprdrive::TripFrame {
         void release(std::vector<SHeld>::iterator it, const char* why) {
             const auto W = it->win.lock();
             if (W)
-                trace(std::format("{} live again after {:.0f} ms: {} ({} commit(s) at {}x{}; {} of {} frames drawn from the snapshot)", W->m_class, msSince(it->at), why,
+                trace(std::format("{} live again after {:.0f} ms: {} ({} commit(s) at {}x{}; {} of {} frames drawn from the snapshot)", W->metadata().appID(), msSince(it->at), why,
                                   it->state.drawn, it->sent.x, it->sent.y, it->frames, it->seen));
             g_held.erase(it);
-            if (W && W->m_isMapped)
+            if (W && W->mapped())
                 g_pHyprRenderer->damageWindow(W, true);
         }
 
@@ -196,7 +197,7 @@ namespace Hyprdrive::TripFrame {
         void review() {
             for (auto it = g_held.begin(); it != g_held.end();) {
                 const auto W = it->win.lock();
-                if (!W || !W->m_isMapped || !W->wlSurface() || !W->wlSurface()->resource()) {
+                if (!W || !W->mapped() || !W->wlSurface() || !W->wlSurface()->resource()) {
                     it = g_held.erase(it);
                     continue;
                 }
@@ -260,11 +261,11 @@ namespace Hyprdrive::TripFrame {
             const double REP = repainted(RES);
             // Moved since its last commit, its size the same: the X server's
             // re-commit of what it has (TripFrameRule.hpp).
-            const bool MOVED = W->m_isX11 && near(SENT, H->cSize) && !near(W->m_reportedPosition, H->cPos);
+            const bool MOVED = W->backend().isX11() && near(SENT, H->cSize) && !near(W->m_reportedPosition, H->cPos);
             H->cSize         = SENT;
             H->cPos          = W->m_reportedPosition;
             if (AT && H->state.resized)
-                trace(std::format("{} commit at {}x{} after {:.0f} ms, {:.0f}% repainted{}", W->m_class, SENT.x, SENT.y, msSince(H->at), REP * 100,
+                trace(std::format("{} commit at {}x{} after {:.0f} ms, {:.0f}% repainted{}", W->metadata().appID(), SENT.x, SENT.y, msSince(H->at), REP * 100,
                                   MOVED ? " (only moved since its last: not a frame)" : ""));
             TripFrameRule::committed(H->state, msSince(H->at), AT && REP >= TripFrameRule::FULL_REPAINT, MOVED);
             review();
@@ -352,7 +353,7 @@ namespace Hyprdrive::TripFrame {
     }
 
     void hold(const PHLWINDOW& w) {
-        if (!w || !w->m_isMapped || !w->m_workspace || !g_pHyprRenderer || !w->wlSurface() || !w->wlSurface()->resource())
+        if (!w || !w->mapped() || !w->m_workspace || !g_pHyprRenderer || !w->wlSurface() || !w->wlSurface()->resource())
             return;
         const auto MON = w->m_monitor.lock();
         if (!MON || MON->m_scale <= 0 || openScrollOverviewForMonitor(MON))
@@ -365,13 +366,13 @@ namespace Hyprdrive::TripFrame {
             H->sent  = sentSize(w);
             H->cSize = H->sent;
             H->cPos  = w->m_reportedPosition;
-            trace(std::format("{} held again (it has not drawn since)", w->m_class));
+            trace(std::format("{} held again (it has not drawn since)", w->metadata().appID()));
             armTimer();
             return;
         }
         // Where renderWindow draws it (Renderer.cpp renderWindow), in the
         // snapshot's monitor px.
-        const Vector2D POS = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + (w->m_pinned ? Vector2D{} : w->m_workspace->m_renderOffset->value()) +
+        const Vector2D POS = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + (Hyprdrive::Compat::pinned(w) ? Vector2D{} : w->m_workspace->m_renderOffset->value()) +
             w->m_floatingOffset;
         const Vector2D SIZE = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         const CBox     SRC{(POS - MON->m_position) * MON->m_scale, SIZE * MON->m_scale};
@@ -383,7 +384,7 @@ namespace Hyprdrive::TripFrame {
         g_held.push_back({.win = w, .mon = MON, .fb = std::move(fb), .src = SRC, .snapSize = SIZE, .sent = sentSize(w), .cSize = sentSize(w), .cPos = w->m_reportedPosition, .at = Clock::now()});
         const PHLWINDOWREF REF = w;
         g_held.back().commit   = w->wlSurface()->resource()->m_events.commit.listen([REF] { onCommit(REF); });
-        trace(std::format("{} held at {}x{} (its last good frame)", w->m_class, SIZE.x, SIZE.y));
+        trace(std::format("{} held at {}x{} (its last good frame)", w->metadata().appID(), SIZE.x, SIZE.y));
         armTimer();
     }
 

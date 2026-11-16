@@ -79,7 +79,7 @@ void CForcedVisibility::forceWindowSurfaces(PHLWINDOW window) {
 
     window->wlSurface()->resource()->breadthfirst([this](SP<CWLSurfaceResource> surface, const Vector2D&, void*) { forceSurface(surface); }, nullptr);
 
-    if (window->m_isX11 || !window->m_popupHead)
+    if (window->backend().isX11() || !window->m_popupHead)
         return;
 
     window->m_popupHead->breadthfirst([this](WP<Desktop::View::CPopup> popup, void*) {
@@ -127,11 +127,11 @@ void CForcedVisibility::forceWindow(PHLWINDOW window) {
     // overview draws, fullscreen included, and it is above the alpha early-out
     // deliberately: a window already parked at alpha 1 still needs waking.
     if (Prof::enabled())
-        ++g_unsuspendCount[window->m_class].first;
+        ++g_unsuspendCount[window->metadata().appID()].first;
 
     if (window->m_suspended) {
         if (Prof::enabled())
-            ++g_unsuspendCount[window->m_class].second;
+            ++g_unsuspendCount[window->metadata().appID()].second;
         window->setSuspended(false);
     }
 
@@ -216,9 +216,9 @@ void CForcedVisibility::restoreWindows() {
         WINDOW->updateFullscreenInputState();
         *WINDOW->alpha(FULLSCREENALPHA) = WINDOW->isBlockedByFullscreen() ? 0.F : 1.F;
 
-        if (WINDOW->m_group) {
-            if (std::ranges::find(groupsToRefresh, WINDOW->m_group) == groupsToRefresh.end())
-                groupsToRefresh.emplace_back(WINDOW->m_group);
+        if (WINDOW->grouping().group()) {
+            if (std::ranges::find(groupsToRefresh, WINDOW->grouping().group()) == groupsToRefresh.end())
+                groupsToRefresh.emplace_back(WINDOW->grouping().group());
             continue;
         }
 
@@ -779,10 +779,10 @@ void COverview::render() {
             g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(dim));
         }
         for (const auto& W : Desktop::windowState()->windows())
-            if (onShownSpecial(W, MONITOR) && !W->m_isFloating)
+            if (onShownSpecial(W, MONITOR) && !W->isFloating())
                 g_pHyprRenderer->renderWindow(W, MONITOR, NOW, true, Render::RENDER_PASS_ALL, false, false);
         for (const auto& W : Desktop::windowState()->windows())
-            if (onShownSpecial(W, MONITOR) && W->m_isFloating)
+            if (onShownSpecial(W, MONITOR) && W->isFloating())
                 g_pHyprRenderer->renderWindow(W, MONITOR, NOW, true, Render::RENDER_PASS_ALL, false, false);
         OverviewRender::flushPass(MONITOR);
     }
