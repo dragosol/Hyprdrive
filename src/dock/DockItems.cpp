@@ -516,7 +516,7 @@ void forcePreviewVisible(const PHLWINDOW& window) {
     // visibility change, so this is re-checked each frame rather than set once.
     if (window->m_suspended)
         window->setSuspended(false);
-    window->alpha(Desktop::View::WINDOW_ALPHA_FULLSCREEN)->setValueAndWarp(1.F);
+    window->presentation().alpha(Desktop::View::WINDOW_ALPHA_FULLSCREEN)->setValueAndWarp(1.F);
 
     if (const auto WORKSPACE = window->m_workspace; WORKSPACE && WORKSPACE->m_alpha) {
         WORKSPACE->m_alpha->setValueAndWarp(1.F);

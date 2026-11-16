@@ -795,7 +795,7 @@ void renderMenuOne(PHLMONITOR monitor, const SLayout& layout, SMenu& M, float OP
         d.clipBox = clipTo(d.clipBox);
         d.a *= ROWA;
         if (!d.clipBox.empty() && d.a > 0.001F)
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(d));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(d));
     };
     const auto ADDRECT = [&](CRectPassElement::SRectData d) {
         if (ROWDY != 0.F) {
@@ -806,7 +806,7 @@ void renderMenuOne(PHLMONITOR monitor, const SLayout& layout, SMenu& M, float OP
         d.clipBox = clipTo(d.clipBox);
         d.color   = d.color.modifyA(d.color.a * ROWA);
         if (!d.clipBox.empty() && d.color.a > 0.001F)
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(d));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(d));
     };
 
     // X13/X29/X86: menu frost -- shared chrome sample in overview, live on desktop.
@@ -1172,7 +1172,7 @@ void renderMenuOne(PHLMONITOR monitor, const SLayout& layout, SMenu& M, float OP
         border.round         = sc<int>(std::round(std::min<double>(MENU_RADIUS * SCALE, VISH / 2.0)));
         border.roundingPower = 2.F;
         if (Stacks::drawableBox(border.box))
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CBorderPassElement>(border));
     }
 
     // The row preview, beside the plate as it is now: one plate travelling
