@@ -234,6 +234,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
     g_pShouldRenderWindowHook = Hyprdrive::FunctionHooks::required("main", "shouldRenderWindow", {"shouldRenderWindow(Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>, Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>)"}, rc<void*>(hkShouldRenderWindow));
     g_pShouldRenderWindowHook->hook();
+    Hyprdrive::Compat::hookInvokeBind();
 
     CursorShape::init();
     OpenProf::init();
