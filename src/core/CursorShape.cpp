@@ -55,10 +55,10 @@ namespace {
         g_pending = false;
         g_seq     = 0;
         const auto NOW = current();
-        if (NOW.empty() || NOW == g_last || !g_pEventManager)
+        if (NOW.empty() || NOW == g_last || !IPC::Socket2::sock())
             return;
         g_last = NOW;
-        g_pEventManager->postEvent(SHyprIPCEvent{.event = "cursorshape", .data = NOW});
+        Hyprdrive::Compat::postEvent("cursorshape", NOW);
     }
 
     // Read AFTER the event is handled: the input manager applies a shape in its own listener,
