@@ -67,7 +67,7 @@ static inline void noteDamageGate(const PHLWINDOW& window, const char* reason) {
 
 std::string COverview::frameDebugLine() const {
     const auto MONITOR = pMonitor.lock();
-    std::string out    = MONITOR ? MONITOR->displayName() : std::string("?");
+    std::string out    = MONITOR ? MONITOR->m_name : std::string("?");
 
     const auto var = [&](const char* name, const auto& v) {
         if (v && v->isBeingAnimated())
