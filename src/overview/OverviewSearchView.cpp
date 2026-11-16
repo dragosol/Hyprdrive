@@ -521,7 +521,7 @@ static SSearchLayout layoutSearch(const SSearchLayoutInputs& IN, const std::vect
 // The output being drawn: drawSearch is handed a layout, not a monitor, and its
 // border fades are per output (two monitors, two search pills).
 static uint64_t renderMonitorId() {
-    const auto MON = g_pHyprRenderer->m_renderData.pMonitor.lock();
+    const auto MON = g_pHyprRenderer->context().m_data.pMonitor.lock();
     return MON ? sc<uint64_t>(MON->m_id) : 0xFFFF;
 }
 
@@ -615,7 +615,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
     badgeBg.round         = BADGEROUND;
     badgeBg.roundingPower = POWER;
     if (DRAWPILL)
-        g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(badgeBg));
+        Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CRectPassElement>(badgeBg));
 
     float      texFade = FADE;
     const auto ADDTEX  = [&](const auto& tex, const CBox& box) {
@@ -623,7 +623,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         data.tex = tex;
         data.box = box;
         data.a   = texFade;
-        g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(data));
+        Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CTexPassElement>(data));
     };
 
     // glyph(), not text(): the magnifier is U+F002, which is the "fl" ligature
@@ -648,7 +648,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
             CRectPassElement::SRectData div;
             div.box   = divBox;
             div.color = Hyprdrive::Config::themeForeground().modifyA(0.12F * FADE);
-            g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(div));
+            Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CRectPassElement>(div));
         }
     }
 
@@ -708,7 +708,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
                 sel.color         = SELFILL.modifyA(SELFILL.a * FADE * LIT);
                 sel.round         = roundFor(ROW);
                 sel.roundingPower = POWER;
-                g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(sel));
+                Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CRectPassElement>(sel));
                 // A quiet fill (a theme whose colours sit close together) gets
                 // a ring too, so the selection is never a guess.
                 if (const auto RING = Hyprdrive::Config::themeSelectedRing(); RING.a > 0.F && ROW.width >= 4 && ROW.height >= 4) {
@@ -719,7 +719,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
                     ring.borderSize    = std::max(1, sc<int>(std::round(1.5F * SCALE)));
                     ring.round         = roundFor(ROW);
                     ring.roundingPower = POWER;
-                    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(ring));
+                    Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CBorderPassElement>(ring));
                 }
             }
 
@@ -812,7 +812,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
                 sel.color          = SELFILL.modifyA(SELFILL.a * FADE * CARD.alpha * LIT);
                 sel.round         = roundFor(ROW);
                 sel.roundingPower = POWER;
-                g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(sel));
+                Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CRectPassElement>(sel));
                 // A quiet fill (a theme whose colours sit close together) gets
                 // a ring too, so the selection is never a guess.
                 if (const auto RING = Hyprdrive::Config::themeSelectedRing(); RING.a > 0.F && ROW.width >= 4 && ROW.height >= 4) {
@@ -823,7 +823,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
                     ring.borderSize    = std::max(1, sc<int>(std::round(1.5F * SCALE)));
                     ring.round         = roundFor(ROW);
                     ring.roundingPower = POWER;
-                    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(ring));
+                    Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CBorderPassElement>(ring));
                 }
             }
 
@@ -900,7 +900,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
             data.box     = box;
             data.a       = texFade;
             data.clipBox = IBOX;
-            g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(data));
+            Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CTexPassElement>(data));
         };
 
         const auto ICONTEX = OverviewRender::appIcon(L.inspector.icon);
@@ -1016,7 +1016,7 @@ static void drawSearch(const SSearchLayout& L, bool pillLit, bool resultsLit, in
         data.box     = box;
         data.a       = texFade * a;
         data.clipBox = FIELD;
-        g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(data));
+        Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CTexPassElement>(data));
     };
 
     // Nothing measured is nothing to fit: the placeholder keeps the rest width.

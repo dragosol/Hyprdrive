@@ -66,7 +66,7 @@ namespace OverviewDetail {
 // O5/B19: the user's keyboard CHORDS too (Super/Ctrl/Alt held) -- the README's
 // own SUPER+TAB toggle could open the overview and never close it. Which binds
 // qualify is SubmapBorrow.hpp's rule (host-tested).
-std::vector<WP<SKeybind>> g_passthroughBinds;
+std::vector<WP<Keybinds::CBind>> g_passthroughBinds;
 }
 
 PHLWINDOWREF OvInternal::g_focusAtOpen;
