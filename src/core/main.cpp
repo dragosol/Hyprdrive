@@ -623,11 +623,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             info.cancelled = true;
     });
 
-    g_pDockRenderHook = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (stage != RENDER_POST_WINDOWS)
+    g_pDockRenderHook = Event::bus()->m_events.render.stage.listen([](Event::SRenderStageEvent e) {
+        if (e.stage != RENDER_POST_WINDOWS)
             return;
 
-        const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
+        const auto MONITOR = e.monitor;
         if (scrollOverviewForMonitor(MONITOR))
             return;
 
@@ -667,10 +667,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // dock: it sits at the very top of the screen (user, 2026-09-24: "bump it
     // all the way to the top"), where the bar lives, and POST_WINDOWS is below
     // the top layer -- the bar would paint over it.
-    g_pScratchExitRenderHook = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (stage != RENDER_LAST_MOMENT)
+    g_pScratchExitRenderHook = Event::bus()->m_events.render.stage.listen([](Event::SRenderStageEvent e) {
+        if (e.stage != RENDER_LAST_MOMENT)
             return;
-        const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
+        const auto MONITOR = e.monitor;
         if (!MONITOR || scrollOverviewForMonitor(MONITOR))
             return;
         Hyprdrive::ScratchpadExit::render(MONITOR);
@@ -1034,7 +1034,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     if (g_pHyprRenderer) {
         for (const char* TYPE : {"COverviewBlurPassElement", "COverviewSplitBorderPassElement", "COverviewShadowPassElement", "CDockLivePreviewPassElement",
                                  "CDockTiltPassElement", "CStackBlurPassElement", Hyprdrive::Ripple::PASS_NAME})
-            g_pHyprRenderer->m_renderPass.removeAllOfType(TYPE);
+            g_pHyprRenderer->context().m_pass.removeAllOfType(TYPE);
     }
 
     // After the purge: nothing queued can reach the tilt shader any more, and

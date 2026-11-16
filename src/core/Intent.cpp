@@ -161,7 +161,7 @@ namespace Hyprdrive::Intent {
                 return "nothing focused"; // nothing to keep focused
             if (since(g_lastPress) < INPUT_S)
                 return "a click or Enter just before";
-            if (w->parent() && w->parent() == F)
+            if (w->backend().parent() && w->backend().parent() == F)
                 return "a dialog of the focused window";
             const bool SAMEAPP = (w->backend().pid() > 0 && w->backend().pid() == F->backend().pid()) || (!w->metadata().appID().empty() && w->metadata().appID() == F->metadata().appID());
             return SAMEAPP && since(g_lastPress) < SAMEAPP_S ? "the focused app, after a click or Enter" : nullptr;
@@ -183,7 +183,7 @@ namespace Hyprdrive::Intent {
                 trace(std::format("{} opened: asked for ({})", w->metadata().appID(), WHY));
                 return;
             }
-            w->m_noInitialFocus = true;
+            w->m_state |= Desktop::View::WINDOW_STATE_NO_INITIAL_FOCUS;
             g_quiet.emplace_back(w);
             trace(std::format("{} opened UNASKED: no focus, the pointer stays", w->metadata().appID()));
             // The pointer rides the window it is on, if the hand is not moving it.

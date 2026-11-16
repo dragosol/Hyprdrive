@@ -79,7 +79,7 @@ namespace Hyprdrive::HoverActions {
             bool found = false;
             auto* hook = FunctionHooks::firstMatch("HoverActions", name, destination, {}, &found);
             if (!found)
-                Log::logger->log(Log::WARN, "[hyprdrive] {} not found: {} on a hovered tile or dock preview acts on the focused window", name, what);
+                Log::logger->log(Log::WARN, Log::logFnName(), "[hyprdrive] {} not found: {} on a hovered tile or dock preview acts on the focused window", name, what);
             if (hook && !hook->hook())
                 hook = nullptr;
             return hook;
@@ -103,7 +103,7 @@ namespace Hyprdrive::HoverActions {
         if (g_own > 0)
             return w;
         const auto FOCUSED = Desktop::focusState()->window();
-        const bool INBIND  = g_pKeybindManager && g_pKeybindManager->m_currentKeybind;
+        const bool INBIND  = !!Hyprdrive::Compat::currentBind();
         const bool NAMED   = w.has_value();
         if (NAMED && !(INBIND && *w && *w == FOCUSED))
             return w; // named, and not "the active window" from a bind: the caller's
