@@ -44,7 +44,7 @@
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
 #include <hyprland/src/managers/input/trackpad/gestures/CursorZoomGesture.hpp>
-#include <hyprland/src/managers/input/trackpad/gestures/DispatcherGesture.hpp>
+#include <hyprland/src/managers/input/trackpad/gestures/LuaFunctionGesture.hpp>
 #include <hyprland/src/managers/input/trackpad/gestures/FloatGesture.hpp>
 #include <hyprland/src/managers/input/trackpad/gestures/FullscreenGesture.hpp>
 #include <hyprland/src/managers/input/trackpad/gestures/MoveGesture.hpp>
