@@ -30,7 +30,7 @@ namespace Hyprdrive::HoverActions {
         constexpr const char* PIN_WINDOW =
             "_ZN6Config7Actions9pinWindowENS0_16eTogglableActionESt8optionalIN9Hyprutils6Memory14CSharedPointerIN7Desktop4View7CWindowEEEE";
         constexpr const char* MOVE_TO_WORKSPACE =
-            "_ZN6Config7Actions15moveToWorkspaceEN9Hyprutils6Memory14CSharedPointerI10CWorkspaceEEbSt8optionalINS3_IN7Desktop4View7CWindowEEEE";
+            "_ZN6Config7Actions15moveToWorkspaceEN9Hyprutils6Memory14CSharedPointerIN9Workspace12CHLWorkspaceEEEbSt8optionalINS3_IN7Desktop4View7CWindowEEEE";
 
         CFunctionHook* g_modeHook  = nullptr;
         CFunctionHook* g_modesHook = nullptr;

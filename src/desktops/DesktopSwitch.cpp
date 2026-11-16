@@ -385,7 +385,7 @@ namespace Hyprdrive::DesktopSwitch {
     void init() {
         DesktopStrip::init(rowOn, [](const PHLMONITOR&, int id) { (void)::Config::Actions::changeWorkspace(std::to_string(id)); });
         g_startAnimHook = hookByMangledName(
-            "_ZN9Animation9Workspace14startAnimationEN9Hyprutils6Memory14CSharedPointerI10CWorkspaceEENS0_14eAnimationTypeEbbSt8optionalINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE",
+            "_ZN9Animation9Workspace14startAnimationEN9Hyprutils6Memory14CSharedPointerIN9Workspace12CHLWorkspaceEEENS0_14eAnimationTypeEbbSt8optionalINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE",
             rc<void*>(hkStartAnimation));
         g_fullFocusHook = hookByMangledName(
             "_ZN7Desktop11CFocusState15fullWindowFocusEN9Hyprutils6Memory14CSharedPointerINS_4View7CWindowEEENS_12eFocusReasonENS3_I18CWLSurfaceResourceEEb",

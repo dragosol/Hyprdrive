@@ -37,8 +37,8 @@ namespace Hyprdrive::OwnSizeTile {
         constexpr const char* FLOAT_WINDOW =
             "_ZN6Config7Actions11floatWindowENS0_16eTogglableActionESt8optionalIN9Hyprutils6Memory14CSharedPointerIN7Desktop4View7CWindowEEEE";
 
-        constexpr const char* ON_X11_CONFIGURE = "_ZN7Desktop4View7CWindow21onX11ConfigureRequestEN9Hyprutils4Math4CBoxE";
-        using TOnX11Configure                  = void (*)(void*, CBox);
+        constexpr const char* ON_X11_CONFIGURE = "_ZN7Desktop4View7CWindow18onConfigureRequestERKN9Hyprutils4Math4CBoxE";
+        using TOnX11Configure                  = void (*)(void*, const CBox&);
 
         CFunctionHook*            g_hook          = nullptr;
         CFunctionHook*            g_configureHook = nullptr;
@@ -136,7 +136,7 @@ namespace Hyprdrive::OwnSizeTile {
         // is the program changing the size it fixes (a bigger board, a login
         // turning into its main window): the tile follows it, or lets go of it
         // when the window can be resized now.
-        void hkOnX11Configure(void* thisptr, CBox box) {
+        void hkOnX11Configure(void* thisptr, const CBox& box) {
             auto* const SELF = sc<Desktop::View::CWindow*>(thisptr);
             const auto  W    = SELF ? SELF->m_self.lock() : PHLWINDOW{};
             if (W && W->mapped() && !W->isFloating() && owned(W)) {
