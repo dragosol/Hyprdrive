@@ -85,6 +85,8 @@
 #                                           (script language: DebugGestureScript.hpp)
 # Needs (hyprtest): pywayland for ptr/vkbd (pip install --user pywayland==0.4.18), wtype, grim, kitty, mutter.
 # Env: HL_STATE (default /tmp/hyprdrive-hl), HL_USER (default hyprtest).
+#      HL_PREFIX=/dir: run the Hyprland and hyprctl in /dir/bin (libraries in
+#      /dir/lib64) instead of the installed ones; must be readable by HL_USER.
 #      HL_NAME=x is HL_STATE=/tmp/hl-x: a second, independent instance (its own
 #      state dir, runtime dir, sockets and outer mutter) so two agents can test
 #      at once. Every command of one run must carry the same name. Kept SHORT on
@@ -138,7 +140,7 @@ if [ "${1:-}" != __inner ]; then
             # to run tests/rig/headless/hl.sh found their shots in the checkout.
             case $out in /*) ;; *) out=$PWD/$out ;; esac
             mkdir -p "$(dirname "$out")"
-            as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
+            as env -i HOME=/nonexistent PATH=${HL_PREFIX:+$HL_PREFIX/bin:}/usr/bin LD_LIBRARY_PATH=${HL_PREFIX:+$HL_PREFIX/lib64} HL_PREFIX="${HL_PREFIX:-}" HL_STATE="$STATE" bash "$STATE/hl.sh" __inner shot "${2:-HEADLESS-1}" > "$out.tmp"
             [ -s "$out.tmp" ] || { rm -f "$out.tmp"; die "empty screenshot"; }
             mv "$out.tmp" "$out"; echo "$out"; exit 0 ;;
     esac
@@ -199,7 +201,7 @@ if [ "${1:-}" != __inner ]; then
     done
     since=$(date '+%Y-%m-%d %H:%M:%S')
     rc=0
-    as env -i HOME=/nonexistent PATH=/usr/bin HL_STATE="$STATE" bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
+    as env -i HOME=/nonexistent PATH=${HL_PREFIX:+$HL_PREFIX/bin:}/usr/bin LD_LIBRARY_PATH=${HL_PREFIX:+$HL_PREFIX/lib64} HL_PREFIX="${HL_PREFIX:-}" HL_STATE="$STATE" bash "$STATE/hl.sh" __inner "$cmd" "$@" || rc=$?
     if [ "$cmd" = stop ]; then
         # THIS instance's cores only. Every instance runs as hyprtest, so the
         # uid alone counted a crash of ANOTHER agent's run (HL_NAME=x) as this
@@ -257,7 +259,7 @@ shift
 REALHOME=$(getent passwd "$(id -un)" | cut -d: -f6)
 set_home() {
     export HOME=$1
-    export PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin
+    export PATH=${HL_PREFIX:+$HL_PREFIX/bin:}$HOME/.local/bin:/usr/local/bin:/usr/bin
 }
 set_home "$(cat "$STATE/home" 2>/dev/null || echo "$REALHOME")"
 # pywayland (vptr/vkbd) is pip --user in the REAL home, whatever HOME is.
