@@ -532,7 +532,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
             icon.tex = TEX;
             icon.box = iconBox;
             icon.a   = FADE;
-            g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(icon));
+            g_pHyprRenderer->addPassElement(g_pHyprRenderer->context(), makeUnique<CTexPassElement>(icon));
         }
     }
 
@@ -595,7 +595,7 @@ void render(PHLMONITOR monitor, const PHLWINDOW& window, const CBox& tileBox, fl
         x.box = CBox{sc<float>(BUTTON.x + BUTTON.w / 2.0) - SIDE / 2.F, sc<float>(BUTTON.y + BUTTON.h / 2.0) - SIDE / 2.F, SIDE, SIDE};
         x.box.round();
         x.a = ALPHA;
-        g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(x));
+        g_pHyprRenderer->addPassElement(g_pHyprRenderer->context(), makeUnique<CTexPassElement>(x));
     }
 }
 
