@@ -96,7 +96,10 @@ fi
 # 2c. (owner, 2026-11-11: "yes" -- the other Super+key actions follow the hover
 # target too) Super+T, Super+P, Super+Alt+F, Super+Shift+3, Omarchy's move,
 # Super+H over the other window's tile: that one; over no tile: the focused one.
-hst() { J clients | jq -r ".[] | select(.class == \"$1\") | \"\(.workspace.id) f\(if .floating then 1 else 0 end) p\(if .pinned then 1 else 0 end) fs\(.fullscreen)\"" | head -1; }
+# A special workspace prints as -1: 0.56 gave it a negative id, 0.57's hyprctl
+# prints no "id" for one at all (ipc/s1/Commands.cpp getWindowData: "id" only
+# when numberedID()), so "on a special workspace" stays "< 0"; none stays "null".
+hst() { J clients | jq -r ".[] | select(.class == \"$1\") | \"\(.workspace.id // (if .workspace.type == \"special\" then -1 else null end)) f\(if .floating then 1 else 0 end) p\(if .pinned then 1 else 0 end) fs\(.fullscreen)\"" | head -1; }
 had() { addr_of "$1"; }
 hov() { local t; t=$(tile_of "$1"); [ -n "$t" ] || return 1; set -- $t; $R ptr move $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )) >/dev/null; sleep 0.4; }
 nohov() { $R ptr move 3 540 >/dev/null; sleep 0.4; }   # the overview's left edge: no tile

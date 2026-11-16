@@ -93,7 +93,8 @@ fi
 
 # 4b. (owner, 2026-11-11: "yes") the other Super+key actions over pB's cell:
 # pB; with the pointer on no preview: pA (lib.sh hover_actions)
-hst() { J clients | jq -r ".[] | select(.title == \"$1\") | \"\(.workspace.id) f\(if .floating then 1 else 0 end) p\(if .pinned then 1 else 0 end) fs\(.fullscreen)\"" | head -1; }
+# A special workspace prints as -1 (0.57's hyprctl gives it no "id"; see overview.sh's hst).
+hst() { J clients | jq -r ".[] | select(.title == \"$1\") | \"\(.workspace.id // (if .workspace.type == \"special\" then -1 else null end)) f\(if .floating then 1 else 0 end) p\(if .pinned then 1 else 0 end) fs\(.fullscreen)\"" | head -1; }
 had() { J clients | jq -r ".[] | select(.title == \"$1\") | .address" | head -1; }
 nohov() { $R ptr move 900 300 >/dev/null; sleep 0.8; }   # off the dock: the pane goes
 hover_binds
