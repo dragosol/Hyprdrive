@@ -1,4 +1,5 @@
 #include "PluginParts.hpp"
+#include <hyprland/src/keybinds/Resolver.hpp>
 using namespace PluginDetail;
 
 namespace {
@@ -33,6 +34,23 @@ class CLockedOutGesture : public ITrackpadGesture {
     UP<ITrackpadGesture> m_inner;
     bool                 m_live = false;
 };
+
+// 0.57 removed CDispatcherTrackpadGesture: runs the dispatcher on end, like it did.
+class CDispatcherGesture : public ITrackpadGesture {
+  public:
+    CDispatcherGesture(const std::string& dispatcher, const std::string& data) : m_dispatcher(dispatcher), m_data(data) {}
+    void begin(const STrackpadGestureBegin& e) override {}
+    void update(const STrackpadGestureUpdate& e) override {}
+    void end(const STrackpadGestureEnd& e) override {
+        if (Hyprdrive::Compat::dispatchOwn(m_dispatcher, m_data))
+            return;
+        // Not ours: the dispatcher/data pair is a Lua dispatcher expression now.
+        Hyprdrive::Compat::dispatchLua(m_data.empty() ? m_dispatcher : m_dispatcher + "," + m_data);
+    }
+
+  private:
+    std::string m_dispatcher, m_data;
+};
 }
 
 namespace PluginDetail {
@@ -47,7 +65,7 @@ std::expected<void, std::string> applyTrackpadGesture(size_t fingerCount, eTrack
         return std::unexpected("Invalid direction");
 
     const auto add = [&](UP<ITrackpadGesture>&& gesture) {
-        return g_pTrackpadGestures->addGesture(makeUnique<CLockedOutGesture>(std::move(gesture)), fingerCount, direction, modMask, deltaScale, disableInhibit);
+        return g_pTrackpadGestures->addGesture(makeUnique<CLockedOutGesture>(std::move(gesture)), fingerCount, direction, Input::ModifierMask{modMask}, deltaScale, disableInhibit);
     };
 
     // The desktop swipe's Super twin (below) goes with it.
@@ -55,8 +73,8 @@ std::expected<void, std::string> applyTrackpadGesture(size_t fingerCount, eTrack
 
     if (action == "unset") {
         if (SUPERTWIN)
-            (void)g_pTrackpadGestures->removeGesture(fingerCount, TRACKPAD_GESTURE_DIR_HORIZONTAL, HL_MODIFIER_META, deltaScale, disableInhibit);
-        return g_pTrackpadGestures->removeGesture(fingerCount, direction, modMask, deltaScale, disableInhibit);
+            (void)g_pTrackpadGestures->removeGesture(fingerCount, TRACKPAD_GESTURE_DIR_HORIZONTAL, Input::ModifierMask{HL_MODIFIER_META}, deltaScale, disableInhibit);
+        return g_pTrackpadGestures->removeGesture(fingerCount, direction, Input::ModifierMask{modMask}, deltaScale, disableInhibit);
     }
 
     if (action == "overview")
@@ -73,7 +91,7 @@ std::expected<void, std::string> applyTrackpadGesture(size_t fingerCount, eTrack
         // exactly). The same swipe with Super down switches desktops too,
         // unless the config binds that one itself (then this add is refused).
         if (RES && SUPERTWIN)
-            (void)g_pTrackpadGestures->addGesture(makeUnique<CLockedOutGesture>(makeUnique<COverviewWorkspaceGesture>()), fingerCount, TRACKPAD_GESTURE_DIR_HORIZONTAL, HL_MODIFIER_META, deltaScale,
+            (void)g_pTrackpadGestures->addGesture(makeUnique<CLockedOutGesture>(makeUnique<COverviewWorkspaceGesture>()), fingerCount, TRACKPAD_GESTURE_DIR_HORIZONTAL, Input::ModifierMask{HL_MODIFIER_META}, deltaScale,
                                                   disableInhibit);
         return RES;
     }
@@ -137,7 +155,7 @@ std::expected<void, std::string> applyTrackpadGesture(size_t fingerCount, eTrack
             while (!data.empty() && (data.front() == ' ' || data.front() == ','))
                 data.erase(data.begin());
         }
-        return add(makeUnique<CDispatcherTrackpadGesture>(dispatcher, data));
+        return add(makeUnique<CDispatcherGesture>(dispatcher, data));
     }
 
     if (action == "keys" || action == "key" || action == "shortcut" || action == "chord") {
@@ -163,8 +181,8 @@ SDispatchResult onRegisterOverviewGesture(size_t fingerCount, const std::string&
         directionNorm = "pinchout";
 
     uint32_t clickMods = 0;
-    if (!mods.empty() && g_pKeybindManager)
-        clickMods = g_pKeybindManager->stringToModMask(mods);
+    if (!mods.empty() && Keybinds::mgr())
+        clickMods = static_cast<uint32_t>(Keybinds::modMaskFromString(mods));
 
     if (directionNorm == "click" || directionNorm == "tap") {
         if (action == "unset")
@@ -221,7 +239,7 @@ Hyprlang::CParseResult overviewGestureKeyword(const char* LHS, const char* RHS) 
     while (true) {
 
         if (data[startDataIdx].starts_with("mod:")) {
-            modMask = g_pKeybindManager->stringToModMask(std::string{data[startDataIdx].substr(4)});
+            modMask = static_cast<uint32_t>(Keybinds::modMaskFromString(std::string{data[startDataIdx].substr(4)}));
             startDataIdx++;
             continue;
         } else if (data[startDataIdx].starts_with("scale:")) {
