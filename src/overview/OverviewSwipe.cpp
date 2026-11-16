@@ -35,7 +35,7 @@ void COverview::moveViewportWorkspace(bool up) {
         closeOnWindow = windowClosestToWorkspaceCenter(viewportCurrentWorkspace);
 
     if (pMonitor && pMonitor->m_activeWorkspace != TARGETWORKSPACEIMAGE->pWorkspace)
-        pMonitor->changeWorkspace(TARGETWORKSPACEIMAGE->pWorkspace, false, true, true);
+        pMonitor->changeWorkspace(TARGETWORKSPACEIMAGE->pWorkspace, false, true, !Hyprdrive::Compat::isSpecial(TARGETWORKSPACEIMAGE->pWorkspace));
 
     damage();
 }

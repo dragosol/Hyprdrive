@@ -234,7 +234,7 @@ bool scroll(PHLMONITOR monitor, const Vector2D& point, bool up) {
         for (const auto& CANDIDATE : State::workspaceState()->workspaces()) {
             const auto TARGET = CANDIDATE.lock();
             if (TARGET && Hyprdrive::Compat::id(TARGET) == WANTED && TARGET != ACTIVE) {
-                monitor->changeWorkspace(TARGET, false, true, true);
+                monitor->changeWorkspace(TARGET, false, true, !Hyprdrive::Compat::isSpecial(TARGET));
                 break;
             }
         }

@@ -28,6 +28,8 @@ struct SEntry {
     PHLWINDOWREF window;
     WORKSPACEID  workspace = WORKSPACE_INVALID;
     std::string  workspaceName;
+    std::string  workspaceAddress; // 0.57: what a named or special workspace is found and made by
+    bool         special = false;
     MONITORID    monitor = MONITOR_INVALID;
     CBox         box;
     bool         floating = false;
@@ -107,7 +109,7 @@ void adoptStashedWindows() {
             continue;
 
         const auto TARGET = WINDOW->layoutTarget();
-        g_entries.emplace_back(SEntry{WINDOW, Hyprdrive::Compat::id(HOME), HOME->displayName(), MONITOR->m_id, TARGET ? TARGET->position() : CBox{}, false});
+        g_entries.emplace_back(SEntry{WINDOW, Hyprdrive::Compat::id(HOME), HOME->displayName(), HOME->addressableName(), Hyprdrive::Compat::isSpecial(HOME), MONITOR->m_id, TARGET ? TARGET->position() : CBox{}, false});
     }
 }
 
@@ -266,7 +268,7 @@ bool minimize(PHLWINDOW window, bool handoffFocus) {
 
     // X41/X42: a workspace move is exactly where geometry gets destroyed
     // silently, so capture the real box first and put it back on restore.
-    g_entries.emplace_back(SEntry{window, Hyprdrive::Compat::id(WORKSPACE), WORKSPACE->displayName(), WORKSPACE->m_monitor ? WORKSPACE->m_monitor->m_id : MONITOR_INVALID, SEEN,
+    g_entries.emplace_back(SEntry{window, Hyprdrive::Compat::id(WORKSPACE), WORKSPACE->displayName(), WORKSPACE->addressableName(), Hyprdrive::Compat::isSpecial(WORKSPACE), WORKSPACE->m_monitor ? WORKSPACE->m_monitor->m_id : MONITOR_INVALID, SEEN,
                                   window->isFloating()});
 
     const CBox STASHBOX = SEEN;
@@ -371,13 +373,15 @@ CBox originalBox(PHLWINDOW window) {
 }
 
 // 0.57 has no id+name create(): numbered entries and special ones are made differently.
-PHLWORKSPACE recreate(WORKSPACEID id, MONITORID monitorId, const std::string& name) {
-    const auto MON = State::monitorState()->query().id(monitorId).run();
+PHLWORKSPACE recreate(const SEntry& entry) {
+    const auto MON = State::monitorState()->query().id(entry.monitor).run();
     if (!MON)
         return nullptr;
-    if (id < 0 || name.starts_with("special:"))
-        return State::workspaceState()->createSpecial(name, MON);
-    return State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(id)}, MON, name);
+    if (entry.special)
+        return State::workspaceState()->createSpecial(entry.workspaceAddress, MON);
+    if (entry.workspace > 0)
+        return State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(entry.workspace)}, MON, entry.workspaceName);
+    return State::workspaceState()->createNamed(entry.workspaceAddress, MON, entry.workspaceName);
 }
 
 bool showOriginalWorkspace(PHLWINDOW window) {
@@ -387,12 +391,12 @@ bool showOriginalWorkspace(PHLWINDOW window) {
 
     auto WORKSPACE = workspaceByID(IT->workspace);
     if (!WORKSPACE)
-        WORKSPACE = recreate(IT->workspace, IT->monitor, IT->workspaceName);
+        WORKSPACE = recreate(*IT);
     if (!WORKSPACE)
         return false;
 
     if (const auto MONITOR = WORKSPACE->m_monitor.lock(); MONITOR && MONITOR->m_activeWorkspace != WORKSPACE)
-        MONITOR->changeWorkspace(WORKSPACE, false, true, true);
+        MONITOR->changeWorkspace(WORKSPACE, false, true, !Hyprdrive::Compat::isSpecial(WORKSPACE)); // 0.56 always focused a special workspace
 
     return true;
 }
@@ -418,7 +422,7 @@ bool restore(PHLWINDOW window) {
         return false;
 
     if (const auto MONITOR = WORKSPACE->m_monitor.lock(); MONITOR && MONITOR->m_activeWorkspace != WORKSPACE)
-        MONITOR->changeWorkspace(WORKSPACE, false, true, true);
+        MONITOR->changeWorkspace(WORKSPACE, false, true, !Hyprdrive::Compat::isSpecial(WORKSPACE)); // 0.56 always focused a special workspace
 
     // X43: focus and stacking are two different things. A restored window that
     // is merely focused can come back underneath whatever was on top of it.
@@ -462,7 +466,7 @@ PHLWORKSPACE putBack(PHLWINDOW window, const SEntry& ENTRY) {
     // the stash with no way back. Measured: leave the workspace and it is gone.
     auto WORKSPACE = workspaceByID(ENTRY.workspace);
     if (!WORKSPACE)
-        WORKSPACE = recreate(ENTRY.workspace, ENTRY.monitor, ENTRY.workspaceName);
+        WORKSPACE = recreate(ENTRY);
 
     if (!WORKSPACE)
         return nullptr;
