@@ -61,7 +61,7 @@ namespace Hyprdrive::WindowPlacement {
             for (const auto& I : g_intents)
                 if (!I.closedAt && I.win.lock() == w)
                     return I.intent;
-            const auto XS = w->backend().isX11() ? w->m_xwaylandSurface.lock() : nullptr;
+            const auto XS = w->backend().isX11() ? Hyprdrive::Priv::xsurface(w) : nullptr;
             if (!XS || !XS->m_xID)
                 return EIntent::None;
             for (auto& I : g_intents)
@@ -74,7 +74,7 @@ namespace Hyprdrive::WindowPlacement {
         }
         void stamp(const PHLWINDOW& w, EIntent intent) {
             std::erase_if(g_intents, [&](const SIntentRec& i) { return !i.closedAt && i.win.lock() == w; });
-            const auto XS = w->backend().isX11() ? w->m_xwaylandSurface.lock() : nullptr;
+            const auto XS = w->backend().isX11() ? Hyprdrive::Priv::xsurface(w) : nullptr;
             g_intents.push_back({.win = w, .intent = intent, .xid = XS ? XS->m_xID : 0, .pid = w->backend().pid()});
         }
 
@@ -139,7 +139,7 @@ namespace Hyprdrive::WindowPlacement {
         // An X11 window's _NET_WM_WINDOW_TYPE, as far as placing it goes.
         enum class EXType { Normal, Passing, Unplaceable };
         EXType xType(const PHLWINDOW& w) {
-            const auto XS = w->m_xwaylandSurface.lock();
+            const auto XS = Hyprdrive::Priv::xsurface(w);
             if (!XS)
                 return EXType::Normal;
             // Never placed: menus, tooltips, notifications, docks -- tiling
@@ -166,15 +166,15 @@ namespace Hyprdrive::WindowPlacement {
             SWindowFacts f;
             const auto   WS = w->m_workspace;
             const auto   XT = w->backend().isX11() ? xType(w) : EXType::Normal;
-            f.placeable     = WS && !Hyprdrive::Compat::isSpecial(WS) && !Hyprdrive::Compat::pinned(w) && XT != EXType::Unplaceable && !(w->backend().isX11() && w->isX11OverrideRedirect());
+            f.placeable     = WS && !Hyprdrive::Compat::isSpecial(WS) && !Hyprdrive::Compat::pinned(w) && XT != EXType::Unplaceable && !(w->backend().isX11() && w->backend().traits().overrideRedirect);
             f.passing       = XT == EXType::Passing;
             f.floating      = w->isFloating();
             f.tagged        = w->m_ruleApplicator && w->m_ruleApplicator->m_tagKeeper.isTagged("hyprdrive-float");
             f.ruleFloat     = w->m_ruleApplicator && w->m_ruleApplicator->static_.floating.value_or(false);
             Vector2D size;
             f.fixedSize = OwnSizeTile::fixedSize(w, size);
-            f.child     = w->parent() || (w->backend().isX11() && w->x11Parent());
-            f.modal     = w->isModal();
+            f.child     = w->backend().parent() || (w->backend().isX11() && w->backend().parent());
+            f.modal     = w->backend().traits().modal;
             return f;
         }
 
@@ -195,7 +195,7 @@ namespace Hyprdrive::WindowPlacement {
         // and the open animation starts from its tile.
         bool tile(const PHLWINDOW& w, bool ownSize) {
             const bool OWN = ownSize && OwnSizeTile::tileAtOwnSize(w);
-            w->m_isFloating = false;
+            w->windowTarget()->setFloatingInitial(false);
             return OWN;
         }
 
@@ -237,7 +237,7 @@ namespace Hyprdrive::WindowPlacement {
                     own = tile(w, o.ownSize);
                 // His float, remembered across a remap: it maps floating again.
                 if (o.kind == EOutcome::Float && o.why == EWhy::Intent && INTENT == EIntent::Float)
-                    w->m_isFloating = true;
+                    w->windowTarget()->setFloatingInitial(true);
                 remember(w, o, own);
             }
             trace(std::format("{} {:x} on {}: {} ({}){}{}", w->metadata().appID(), (uintptr_t)w.get(), FROM ? Hyprdrive::Compat::id(FROM) : -1,
@@ -311,7 +311,7 @@ namespace Hyprdrive::WindowPlacement {
     }
 
     bool mainWindow(const PHLWINDOW& w) {
-        return w && !w->isFloating() && !w->parent() && !w->isModal() && !(w->m_workspace && Hyprdrive::Compat::isSpecial(w->m_workspace));
+        return w && !w->isFloating() && !w->backend().parent() && !w->backend().traits().modal && !(w->m_workspace && Hyprdrive::Compat::isSpecial(w->m_workspace));
     }
 
     SOutcome outcomeOf(const PHLWINDOW& w) {
