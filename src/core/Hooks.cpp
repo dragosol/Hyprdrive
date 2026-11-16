@@ -80,10 +80,6 @@ bool           hkShouldRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR 
     return rc<bool (*)(void*, PHLWINDOW, PHLMONITOR)>(g_pShouldRenderWindowHook->m_original)(thisptr, window, monitor);
 }
 
-void           hkOnAck(void* thisptr, uint32_t serial) {
-    Hyprdrive::SizeAck::onAck(sc<Desktop::View::CWindow*>(thisptr), serial);
-}
-
 void hkTargetPlace(void* thisptr, const Layout::STargetBox& box, uint8_t flags) {
     Hyprdrive::DockRoom::place(thisptr, box, flags, [](void* t, const Layout::STargetBox& b, uint8_t f) {
         Hyprdrive::OwnSizeTile::place(t, b, f, [](void* t2, const Layout::STargetBox& b2, uint8_t f2) {

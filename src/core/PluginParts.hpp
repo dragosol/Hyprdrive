@@ -188,7 +188,6 @@ namespace PluginDetail {
     extern void setDockCursor(bool on);
     extern void hkSendWindowSize(void* thisptr, bool force);
     extern bool hkShouldRenderWindow(void* thisptr, PHLWINDOW window, PHLMONITOR monitor);
-    extern void hkOnAck(void* thisptr, uint32_t serial);
     extern void hkTargetPlace(void* thisptr, const Layout::STargetBox& box, uint8_t flags);
     extern void hkOnMouseMoved(void* thisptr, IPointer::SMotionEvent e);
     extern void hkOnMouseButton(void* thisptr, IPointer::SButtonEvent e, SP<IPointer> pointer);

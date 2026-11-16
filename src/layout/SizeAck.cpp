@@ -25,28 +25,6 @@
 #include <hyprland/src/render/Texture.hpp>
 
 namespace Hyprdrive::SizeAck {
-    void onAck(Desktop::View::CWindow* window, uint32_t serial) {
-        auto&      acks = window->m_pendingSizeAcks;
-        const auto IT   = std::ranges::find_if(acks | std::views::reverse, [serial](const auto& e) { return e.first <= serial; });
-        if (IT == acks.rend())
-            return;
-
-        // The fix: a copy, not a reference into the vector erase_if compacts.
-        const auto ACKED = *IT;
-        window->m_pendingSizeAck = ACKED;
-        std::erase_if(acks, [&ACKED](const auto& e) { return e.first <= ACKED.first; });
-
-        if (window->backend().isX11())
-            return;
-        const auto RES = window->resource();
-        if (!RES)
-            return;
-        // As Hyprland does: the size applies with the commit that follows.
-        RES->m_pending.ackedSize          = ACKED.second;
-        RES->m_pending.updated.bits.acked = true;
-        window->m_pendingSizeAck.reset();
-    }
-
     std::string report() {
         std::string out = "hyprdrive windows:";
         for (const auto& W : Desktop::windowState()->windows()) {

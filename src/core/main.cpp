@@ -48,9 +48,6 @@ CFunctionHook* g_pSendWindowSizeHook = nullptr;
 CFunctionHook* g_pShouldRenderWindowHook = nullptr;
 } // namespace PluginDetail
 
-// SizeAck.hpp: Hyprland's CWindow::onAck, minus its bug. Never calls the original.
-static CFunctionHook* g_pOnAckHook = nullptr;
-
 namespace PluginDetail {
 // DockRoom.hpp: tiled windows make room for a dock that does not hide.
 // OwnSizeTile.hpp, inside it: a fixed-size window's tile has room for it.
@@ -235,8 +232,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (g_pSendWindowSizeHook)
             rc<origSendWindowSize>(g_pSendWindowSizeHook->m_original)(window, force);
     });
-    g_pOnAckHook = Hyprdrive::FunctionHooks::required("main", "onAck", {"CWindow::onAck("}, rc<void*>(hkOnAck));
-    g_pOnAckHook->hook();
     g_pShouldRenderWindowHook = Hyprdrive::FunctionHooks::required("main", "shouldRenderWindow", {"shouldRenderWindow(Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>, Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>)"}, rc<void*>(hkShouldRenderWindow));
     g_pShouldRenderWindowHook->hook();
 
