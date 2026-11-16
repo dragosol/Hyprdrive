@@ -1,0 +1,910 @@
+          • error: use of deleted function ‘std::formatter<_Tp, _CharT>::formatter(const std::formatter<_Tp, _CharT>&) [with _Tp = std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>; _CharT = char]’
+  • error: use of deleted function ‘std::formatter<_Tp, _CharT>::formatter() [with _Tp = std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>; _CharT = char]’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘CDockLivePreviewPassElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘COverviewBlurPassElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘COverviewShadowPassElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘COverviewSplitBorderPassElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘Hyprdrive::DockTilt::CDockTiltPassElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘Hyprdrive::FlightBlur::{anonymous}::CFlightBlurTransformer’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘Hyprdrive::Genie::{anonymous}::CGenieTransformer’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘Hyprdrive::StackBlur::CStackBlurPassElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘Hyprdrive::TripFrame::{anonymous}::CTripFramePassElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘OpenProf::{anonymous}::CGpuMarkElement’
+/home/dragos/sdk/hl057/include/hyprutils/memory/./UniquePtr.hpp:166:34: error: invalid new-expression of abstract class type ‘OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement’
+src/apps/IdentityLive.cpp:75: ‘class Desktop::View::CWindow’ has no member named ‘parent’
+src/apps/IdentityLive.cpp:77: ‘class Desktop::View::CWindow’ has no member named ‘isX11OverrideRedirect’
+src/apps/IdentityLive.cpp:78: ‘class Desktop::View::CWindow’ has no member named ‘x11Parent’
+src/apps/IdentityLive.cpp:79: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/core/ConfigDispatch.cpp:271: ‘g_pKeybindManager’ was not declared in this scope
+src/core/CursorShape.cpp:58: ‘g_pEventManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/core/CursorShape.cpp:61: ‘g_pEventManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/core/CursorShape.cpp:61: ‘SHyprIPCEvent’ was not declared in this scope
+src/core/FunctionHooks.cpp:31: call to consteval function ‘std::basic_format_string<char, const std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, void*&, const std::__cxx11::basic_string<char, std::char_traits<char>, std::alloca
+src/core/HoverActions.cpp:106: ‘g_pKeybindManager’ was not declared in this scope
+src/core/HoverActions.cpp:82: call to consteval function ‘std::basic_format_string<char, const char*&>(name)’ is not a constant expression
+src/core/HyprCompat.hpp:41: request for member ‘get’ in ‘ws’, which is of pointer type ‘Workspace::CHLWorkspace* const’ (maybe you meant to use ‘->’ ?)
+src/core/Intent.cpp:164: ‘class Desktop::View::CWindow’ has no member named ‘parent’
+src/core/Intent.cpp:186: ‘class Desktop::View::CWindow’ has no member named ‘m_noInitialFocus’
+src/core/PluginParts.hpp:47: hyprland/src/managers/input/trackpad/gestures/DispatcherGesture.hpp: No such file or directory
+src/debug/DebugGesture.cpp:110: operands to ‘?:’ have different types ‘Input::ModifierMask’ and ‘int’
+src/debug/OpenProf.cpp:220: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/debug/OpenProf.cpp:224: no matching function for call to ‘Hyprutils::Signal::CSignalT<Event::SRenderStageEvent>::listen(OpenProf::init()::<lambda(eRenderStage)>)’
+src/debug/OpenProf.cpp:364: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > OpenProf::{anonymous}::CGpuMarkElement::draw()’ marked ‘override’, but does not override
+src/debug/OpenProf.cpp:375: ‘bool OpenProf::{anonymous}::CGpuMarkElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/debug/OpenProf.cpp:378: ‘bool OpenProf::{anonymous}::CGpuMarkElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/debug/OpenProf.cpp:387: ‘bool OpenProf::{anonymous}::CGpuMarkElement::undiscardable()’ marked ‘override’, but does not override
+src/debug/OpenProf.cpp:390: ‘bool OpenProf::{anonymous}::CGpuMarkElement::disableSimplification()’ marked ‘override’, but does not override
+src/debug/OpenProf.cpp:407: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/desktops/DesktopOrder.cpp:120: lvalue required as left operand of assignment
+src/desktops/DesktopOrder.cpp:123: ‘std::string Workspace::CHLWorkspace::m_name’ is private within this context
+src/desktops/DesktopOrder.cpp:130: ‘g_pEventManager’ was not declared in this scope
+src/desktops/DesktopOrder.cpp:132: ‘SHyprIPCEvent’ was not declared in this scope
+src/desktops/DesktopOrder.cpp:133: expected ‘)’ before ‘{’ token
+src/desktops/DesktopOrder.cpp:136: ‘SHyprIPCEvent’ was not declared in this scope
+src/desktops/DesktopOrder.cpp:137: expected ‘)’ before ‘{’ token
+src/desktops/DesktopOrder.cpp:142: ‘SHyprIPCEvent’ was not declared in this scope
+src/desktops/DesktopOrder.cpp:143: expected ‘)’ before ‘{’ token
+src/desktops/DesktopOrder.cpp:212: cannot convert ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} to ‘WORKSPACEID’ {aka ‘long int’} in initialization
+src/desktops/DesktopOrder.cpp:212: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/DesktopOrder.cpp:216: no match for ‘operator!=’ (operand types are ‘WORKSPACEID’ {aka ‘long int’} and ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’})
+src/desktops/DesktopOrder.cpp:216: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/DesktopOrder.cpp:219: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/DesktopOrder.cpp:225: no match for call to ‘(const std::ranges::__sort_fn) (std::vector<long unsigned int>&, Hyprdrive::DesktopOrder::compact(const std::string&, const Hyprdrive::Row*)::<lambda(size_t, size_t)>)’
+src/desktops/DesktopOrder.cpp:225: no match for ‘operator<’ (operand types are ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} and ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceN
+src/desktops/DesktopOrder.cpp:225: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/DesktopOrder.cpp:227: cannot convert ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} to ‘WORKSPACEID’ {aka ‘long int’} in initialization
+src/desktops/DesktopOrder.cpp:227: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/DesktopOrder.cpp:232: call to consteval function ‘std::basic_format_string<char, const char*, std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>&, const char*&>("{}{}{}")’ is not a constant expression
+src/desktops/DesktopOrder.cpp:232: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/DesktopSwitch.cpp:160: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/desktops/DesktopSwitch.cpp:168: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/desktops/DesktopSwitch.cpp:363: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/desktops/DesktopSwitch.cpp:365: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/desktops/Rows.cpp:218: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/desktops/Rows.cpp:223: cannot convert ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} to ‘WORKSPACEID’ {aka ‘long int’}
+src/desktops/Rows.cpp:223: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/Rows.cpp:255: cannot convert ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} to ‘Hyprdrive::Row::Id’ {aka ‘long long int’}
+src/desktops/Rows.cpp:255: no match for call to ‘(const std::ranges::__sort_fn) (std::vector<Hyprutils::Memory::CSharedPointer<Workspace::CHLWorkspace> >&, Hyprdrive::Rows::members(const Hyprdrive::Row&)::<lambda(const PHLWORKSPACE&, const PHLWORKSPACE&)>)’
+src/desktops/Rows.cpp:255: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/desktops/Rows.cpp:327: call to consteval function ‘std::basic_format_string<char, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >(told)’ is not a constant expression
+src/desktops/Rows.cpp:337: no matching function for call to ‘Log::CLogger::log(const Hyprutils::CLI::eLogLevel&, const char [44], Hyprdrive::Row::Id&, long long int&)’
+src/desktops/Rows.cpp:426: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/dock/DockActivate.cpp:403: ‘getWorkspaceIDNameFromString’ was not declared in this scope
+src/dock/DockActivate.cpp:528: cannot convert ‘const long int’ to ‘const State::Workspace::STarget&’
+src/dock/Dock.cpp:1080: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1116: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1220: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1247: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1268: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1279: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1316: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1336: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1406: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1441: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1454: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:1495: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:152: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:219: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:225: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:264: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:272: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:395: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/dock/Dock.cpp:396: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/dock/Dock.cpp:839: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/dock/Dock.cpp:841: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/Dock.cpp:879: invalid initialization of reference of type ‘const Hyprdrive::Dock::MenuModel::SOpenedWindow&’ from expression of type ‘<brace-enclosed initializer list>’
+src/dock/Dock.cpp:881: ‘class Desktop::View::CWindow’ has no member named ‘parent’
+src/dock/Dock.cpp:882: ‘class Desktop::View::CWindow’ has no member named ‘isModal’
+src/dock/DockDrop.cpp:602: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/DockItems.cpp:492: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/dock/DockItems.cpp:509: ‘bool Desktop::View::CWindow::m_hidden’ is private within this context
+src/dock/DockItems.cpp:517: ‘bool Desktop::View::CWindow::m_suspended’ is private within this context
+src/dock/DockItems.cpp:519: no matching function for call to ‘Desktop::View::CWindow::alpha(Desktop::View::eWindowAlpha)’
+src/dock/DockLayout.cpp:567: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/dock/DockMenu.cpp:1175: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/DockMenu.cpp:798: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/DockMenu.cpp:809: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/DockPointer.cpp:299: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/dock/DockPointer.cpp:299: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/dock/DockPointer.cpp:392: operands to ‘?:’ have different types ‘Input::ModifierMask’ and ‘int’
+src/dock/DockPointer.cpp:393: no match for ‘operator&’ (operand types are ‘const uint32_t’ {aka ‘const unsigned int’} and ‘Input::ModifierMask’)
+src/dock/DockPointer.cpp:402: no match for ‘operator&’ (operand types are ‘const uint32_t’ {aka ‘const unsigned int’} and ‘Input::eKeyboardModifiers’)
+src/dock/DockPointer.cpp:522: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/dock/DockPointer.cpp:522: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/dock/DockPointer.cpp:523: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/dock/DockPointer.cpp:523: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/dock/DockPointer.cpp:524: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/dock/DockPointer.cpp:524: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/dock/DockPreview.cpp:125: ‘bool Workspace::CHLWorkspace::m_visible’ is private within this context
+src/dock/DockPreview.cpp:130: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/dock/DockPreview.cpp:151: ‘bool Workspace::CHLWorkspace::m_visible’ is private within this context
+src/dock/DockPreview.cpp:171: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/dock/DockPreview.cpp:172: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/dock/DockPreview.cpp:546: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/dock/DockPreview.cpp:596: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/dock/DockPreview.cpp:59: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<COverviewBlurPassElement>)’
+src/dock/DockPreview.cpp:618: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/dock/DockPreview.cpp:61: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/DockPreview.cpp:636: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/dock/DockPreview.cpp:93: ‘bool Desktop::View::CWindow::m_suspended’ is private within this context
+src/dock/DockTilt.cpp:185: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:190: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:411: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/DockTilt.cpp:415: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/DockTilt.cpp:419: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:426: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:427: cannot convert ‘Hyprutils::Math::CBox’ to ‘Render::CRenderContext&’
+src/dock/DockTilt.cpp:451: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::scissor(const Hyprutils::Math::CBox&)’
+src/dock/DockTilt.cpp:453: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::scissor(std::nullptr_t)’
+src/dock/DockTilt.cpp:477: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:481: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:484: ‘class Render::IHyprRenderer’ has no member named ‘monitorTransformEnabled’
+src/dock/DockTilt.cpp:485: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:489: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:489: no matching function for call to ‘Hyprutils::Math::CRegion::CRegion(<brace-enclosed initializer list>)’
+src/dock/DockTilt.cpp:491: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:492: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.cpp:498: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::renderTexture(const Hyprutils::Memory::CSharedPointer<Render::ITexture>&, Hyprutils::Math::CBox, <brace-enclosed initializer list>)’
+src/dock/DockTilt.cpp:502: cannot convert ‘Hyprutils::Math::CBox’ to ‘Render::CRenderContext&’
+src/dock/DockTilt.cpp:522: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’ [-Wtemplate-body]
+src/dock/DockTilt.cpp:526: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::scissor(std::nullptr_t)’
+src/dock/DockTilt.cpp:541: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/DockTilt.hpp:106: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > Hyprdrive::DockTilt::CDockTiltPassElement::draw()’ marked ‘override’, but does not override
+src/dock/DockTilt.hpp:110: ‘bool Hyprdrive::DockTilt::CDockTiltPassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/dock/DockTilt.hpp:111: ‘bool Hyprdrive::DockTilt::CDockTiltPassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/dock/DockTilt.hpp:112: ‘std::optional<Hyprutils::Math::CBox> Hyprdrive::DockTilt::CDockTiltPassElement::boundingBox()’ marked ‘override’, but does not override
+src/dock/DockTilt.hpp:113: ‘Hyprutils::Math::CRegion Hyprdrive::DockTilt::CDockTiltPassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/dock/Genie.cpp:100: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/Genie.cpp:112: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/dock/Genie.cpp:121: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/dock/Genie.cpp:122: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/dock/Genie.cpp:127: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/dock/Genie.cpp:152: no matching function for call to ‘Render::IHyprRenderer::redirectPass(Render::CRenderPass*)’
+src/dock/Genie.cpp:159: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTransformedWindowPassElement>)’
+src/dock/Genie.cpp:46: ‘SP<Render::IFramebuffer> Hyprdrive::Genie::{anonymous}::CGenieTransformer::transform(SP<Render::IFramebuffer>)’ marked ‘override’, but does not override
+src/dock/Genie.cpp:47: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/Genie.cpp:60: no matching function for call to ‘Hyprutils::Math::CRegion::CRegion(<brace-enclosed initializer list>)’
+src/dock/Genie.cpp:61: no matching function for call to ‘Render::IHyprRenderer::draw(CClearPassElement::SClearData)’
+src/dock/Genie.cpp:88: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/Genie.cpp:89: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/Genie.cpp:97: no matching function for call to ‘Render::IHyprRenderer::draw(CTexPassElement::SRenderData&, const Hyprutils::Math::CRegion&)’
+src/dock/Genie.cpp:99: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/dock/Minimize.cpp:379: cannot convert ‘WORKSPACEID’ {aka ‘long int’} to ‘const State::Workspace::STarget&’
+src/dock/Minimize.cpp:454: cannot convert ‘const WORKSPACEID’ {aka ‘const long int’} to ‘const State::Workspace::STarget&’
+src/dock/Minimize.cpp:61: ‘class State::Workspace::CState’ has no member named ‘newSpecialID’
+src/dock/Scratchpad.cpp:213: ‘class State::Workspace::CState’ has no member named ‘newSpecialID’
+src/dock/ScratchpadExit.cpp:419: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/ScratchpadExit.cpp:441: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/ScratchpadExit.cpp:500: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/SpringLoad.cpp:130: ‘class Desktop::View::CWindow’ has no member named ‘m_pinned’
+src/dock/SpringLoad.cpp:138: ‘class Desktop::View::CWindow’ has no member named ‘m_pinned’
+src/dock/SpringLoad.cpp:177: no match for ‘operator>’ (operand types are ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} and ‘int’)
+src/dock/SpringLoad.cpp:177: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/dock/SpringLoad.cpp:364: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/dock/SpringLoad.cpp:491: no matching function for call to ‘Hyprutils::Signal::CSignalT<Event::SRenderStageEvent>::listen(Hyprdrive::SpringLoad::init()::<lambda(eRenderStage)>)’
+src/dock/SpringLoad.cpp:493: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/FullscreenDesktop.cpp:1008: ‘SUPPRESS_FULLSCREEN’ is not a member of ‘Desktop::View’
+src/layout/FullscreenDesktop.cpp:1016: ‘SUPPRESS_MAXIMIZE’ is not a member of ‘Desktop::View’
+src/layout/FullscreenDesktop.cpp:1019: ‘class Desktop::View::CWindow’ has no member named ‘m_suppressedEvents’
+src/layout/FullscreenDesktop.cpp:1023: ‘SUPPRESS_FULLSCREEN’ is not a member of ‘Desktop::View’
+src/layout/FullscreenDesktop.cpp:1024: ‘class Desktop::View::CWindow’ has no member named ‘m_suppressedEvents’
+src/layout/FullscreenDesktop.cpp:1026: ‘class Desktop::View::CWindow’ has no member named ‘m_suppressedEvents’
+src/layout/FullscreenDesktop.cpp:1050: ‘SUPPRESS_MAXIMIZE’ is not a member of ‘Desktop::View’
+src/layout/FullscreenDesktop.cpp:1178: ‘class Desktop::View::CWindow’ has no member named ‘m_isUrgent’; did you mean ‘markUrgent’?
+src/layout/FullscreenDesktop.cpp:1385: no matching function for call to ‘std::vector<Hyprdrive::FullscreenDesktop::{anonymous}::SOrigin>::push_back(<brace-enclosed initializer list>)’
+src/layout/FullscreenDesktop.cpp:1385: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/layout/FullscreenDesktop.cpp:1440: ‘class Desktop::View::CWindow’ has no member named ‘m_noInitialFocus’
+src/layout/FullscreenDesktop.cpp:241: no matching function for call to ‘Desktop::View::CWindow::alpha(Desktop::View::eWindowAlpha)’
+src/layout/FullscreenDesktop.cpp:242: no matching function for call to ‘Desktop::View::CWindow::alpha(Desktop::View::eWindowAlpha)’
+src/layout/FullscreenDesktop.cpp:243: ‘class Desktop::View::CWindow’ has no member named ‘m_monitorMovedFrom’
+src/layout/FullscreenDesktop.cpp:360: operands to ‘?:’ have different types ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} and ‘const WORKSPACEID’ {aka ‘const long int’}
+src/layout/FullscreenDesktop.cpp:360: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/layout/FullscreenDesktop.cpp:446: cannot convert ‘const WORKSPACEID’ {aka ‘const long int’} to ‘const State::Workspace::STarget&’
+src/layout/FullscreenDesktop.cpp:501: no match for ‘operator-’ (operand types are ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’} and ‘WORKSPACEID’ {aka ‘long int’})
+src/layout/FullscreenDesktop.cpp:501: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/layout/FullscreenDesktop.cpp:571: cannot convert ‘const WORKSPACEID’ {aka ‘const long int’} to ‘const State::Workspace::STarget&’
+src/layout/FullscreenDesktop.cpp:776: cannot convert ‘const WORKSPACEID’ {aka ‘const long int’} to ‘const State::Workspace::STarget&’
+src/layout/FullscreenDesktop.cpp:800: ‘class Desktop::View::CWindow’ has no member named ‘m_noInitialFocus’
+src/layout/FullscreenDesktop.cpp:806: ‘class Desktop::View::CWindow’ has no member named ‘m_noInitialFocus’
+src/layout/FullscreenDesktop.cpp:830: ‘class Desktop::View::CWindow’ has no member named ‘m_allowedOverFullscreen’; did you mean ‘isAllowedOverFullscreen’?
+src/layout/FullscreenDesktop.cpp:832: no matching function for call to ‘Desktop::View::CWindow::alpha(Desktop::View::eWindowAlpha)’
+src/layout/FullscreenDesktop.cpp:844: ‘class Desktop::View::CWindow’ has no member named ‘m_isUrgent’; did you mean ‘markUrgent’?
+src/layout/FullscreenDesktop.cpp:845: ‘g_pEventManager’ was not declared in this scope
+src/layout/FullscreenDesktop.cpp:845: ‘SHyprIPCEvent’ was not declared in this scope
+src/layout/Mosaic.cpp:462: ‘SP<Layout::CWindowTarget> Desktop::View::CWindow::m_target’ is private within this context
+src/layout/Mosaic.cpp:465: cannot convert ‘CSharedPointer<Layout::CWindowTarget>’ to ‘CSharedPointer<Layout::ITarget>’
+src/layout/Mosaic.cpp:465: ‘SP<Layout::CWindowTarget> Desktop::View::CWindow::m_target’ is private within this context
+src/layout/Mosaic.cpp:466: cannot convert ‘CSharedPointer<Layout::CWindowTarget>’ to ‘CSharedPointer<Layout::ITarget>’
+src/layout/Mosaic.cpp:466: ‘SP<Layout::CWindowTarget> Desktop::View::CWindow::m_target’ is private within this context
+src/layout/Mosaic.cpp:475: ‘SP<Layout::CWindowTarget> Desktop::View::CWindow::m_target’ is private within this context
+src/layout/Mosaic.cpp:490: ‘SP<Layout::CWindowTarget> Desktop::View::CWindow::m_target’ is private within this context
+src/layout/Mosaic.cpp:546: ‘SP<Layout::CWindowTarget> Desktop::View::CWindow::m_target’ is private within this context
+src/layout/Mosaic.cpp:566: ‘SP<Layout::CWindowTarget> Desktop::View::CWindow::m_target’ is private within this context
+src/layout/MosaicDrive.cpp:24: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:24: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:28: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:29: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:35: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/layout/MosaicDrive.cpp:35: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:36: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/layout/MosaicDrive.cpp:36: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:46: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:46: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:48: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:48: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:53: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:53: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:56: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/layout/MosaicDrive.cpp:56: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:57: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/layout/MosaicDrive.cpp:57: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:58: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:59: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:63: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:63: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:71: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicDrive.cpp:71: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/layout/MosaicDrive.cpp:72: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/MosaicGestures.cpp:1103: no match for ‘operator==’ (operand types are ‘const int’ and ‘Input::eKeyboardModifiers’)
+src/layout/MosaicGestures.cpp:1104: no match for ‘operator==’ (operand types are ‘const int’ and ‘Input::eKeyboardModifiers’)
+src/layout/MosaicGestures.cpp:110: ‘class Desktop::View::CWindow’ has no member named ‘isX11OverrideRedirect’
+src/layout/MosaicGestures.cpp:533: no match for ‘operator!=’ (operand types are ‘const int’ and ‘Input::eKeyboardModifiers’)
+src/layout/MosaicGestures.cpp:535: no match for ‘operator==’ (operand types are ‘const int’ and ‘Input::eKeyboardModifiers’)
+src/layout/MosaicGestures.cpp:807: no match for ‘operator&’ (operand types are ‘const int’ and ‘Input::eKeyboardModifiers’)
+src/layout/MosaicGestures.cpp:812: no match for ‘operator!=’ (operand types are ‘const int’ and ‘Input::eKeyboardModifiers’)
+src/layout/MosaicGestures.cpp:933: ‘SKeybind’ was not declared in this scope; did you mean ‘Keybinds’?
+src/layout/MosaicGestures.cpp:933: template argument 1 is invalid
+src/layout/MosaicGestures.cpp:934: base operand of ‘->’ is not a pointer
+src/layout/MosaicGestures.cpp:941: ‘SKeybind’ was not declared in this scope; did you mean ‘Keybinds’?
+src/layout/MosaicGestures.cpp:941: template argument 1 is invalid
+src/layout/MosaicGestures.cpp:942: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/layout/MosaicGestures.cpp:943: cannot convert ‘std::nullptr_t’ to ‘int’ in return
+src/layout/MosaicGestures.cpp:944: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/layout/MosaicGestures.cpp:950: cannot convert ‘std::nullptr_t’ to ‘int’ in return
+src/layout/MosaicGestures.cpp:969: cannot convert ‘Input::ModifierMask’ to ‘const uint32_t’ {aka ‘const unsigned int’} in initialization
+src/layout/MosaicGestures.cpp:970: no match for ‘operator&’ (operand types are ‘const uint32_t’ {aka ‘const unsigned int’} and ‘Input::eKeyboardModifiers’)
+src/layout/MosaicGestures.cpp:980: no match for ‘operator&’ (operand types are ‘const uint32_t’ {aka ‘const unsigned int’} and ‘Input::ModifierMask’)
+src/layout/MosaicGestures.cpp:981: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/layout/MosaicGestures.cpp:996: no match for ‘operator&’ (operand types are ‘const uint32_t’ {aka ‘const unsigned int’} and ‘Input::ModifierMask’)
+src/layout/MosaicGestures.cpp:999: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/layout/MosaicParts.hpp:3055: ‘class Desktop::View::CWindow’ has no member named ‘m_dimPercent’
+src/layout/MosaicParts.hpp:3057: ‘class Desktop::View::CWindow’ has no member named ‘updateDecorationValues’
+src/layout/MosaicParts.hpp:754: ‘class Desktop::View::CWindow’ has no member named ‘m_xdgSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/MosaicParts.hpp:759: ‘class Desktop::View::CWindow’ has no member named ‘fetchClass’
+src/layout/OwnSizeTile.cpp:140: ‘class Desktop::View::CWindow’ has no member named ‘m_reportedSize’
+src/layout/OwnSizeTile.cpp:206: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/OwnSizeTile.cpp:212: ‘class Desktop::View::CWindow’ has no member named ‘xwaylandSizeToReal’
+src/layout/OwnSizeTile.cpp:212: no matching function for call to ‘Hyprutils::Math::Vector2D::Vector2D(<brace-enclosed initializer list>)’
+src/layout/OwnSizeTile.cpp:215: ‘class Desktop::View::CWindow’ has no member named ‘m_xdgSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/OwnSizeTile.cpp:226: ‘class Desktop::View::CWindow’ has no member named ‘m_xdgSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/OwnSizeTile.cpp:227: ‘class Desktop::View::CWindow’ has no member named ‘m_xdgSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/ShowDesktop.cpp:129: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/ShowDesktop.cpp:131: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/layout/ShowDesktop.cpp:131: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/ShowDesktop.cpp:162: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/ShowDesktop.cpp:163: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/layout/ShowDesktop.cpp:163: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/ShowDesktop.cpp:224: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/ShowDesktop.cpp:228: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/layout/SizeAck.cpp:29: ‘class Desktop::View::CWindow’ has no member named ‘m_pendingSizeAcks’
+src/layout/SizeAck.cpp:36: ‘class Desktop::View::CWindow’ has no member named ‘m_pendingSizeAck’
+src/layout/SizeAck.cpp:37: ‘ACKED’ is not captured [-Wtemplate-body]
+src/layout/SizeAck.cpp:47: ‘class Desktop::View::CWindow’ has no member named ‘m_pendingSizeAck’
+src/layout/SizeAck.cpp:58: ‘class Desktop::View::CWindow’ has no member named ‘m_xdgSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/SizeAck.cpp:79: ‘class Desktop::View::CWindow’ has no member named ‘m_reportedSize’
+src/layout/SizeAck.cpp:80: ‘bool Desktop::View::CWindow::m_suspended’ is private within this context
+src/layout/SizeAck.cpp:80: ‘class Desktop::View::CWindow’ has no member named ‘m_pendingReportedSize’
+src/layout/SizeAck.cpp:80: ‘class Desktop::View::CWindow’ has no member named ‘m_pendingSizeAcks’
+src/layout/SizeAck.cpp:80: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/layout/TripFrame.cpp:110: ‘class Desktop::View::CWindow’ has no member named ‘getReportedSize’
+src/layout/TripFrame.cpp:110: ‘class Desktop::View::CWindow’ has no member named ‘m_pendingReportedSize’
+src/layout/TripFrame.cpp:131: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > Hyprdrive::TripFrame::{anonymous}::CTripFramePassElement::draw()’ marked ‘override’, but does not override
+src/layout/TripFrame.cpp:132: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:135: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:135: no matching function for call to ‘Hyprutils::Math::CRegion::CRegion(<brace-enclosed initializer list>)’
+src/layout/TripFrame.cpp:139: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:141: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:142: ‘class Render::IHyprRenderer’ has no member named ‘pushMonitorTransformEnabled’
+src/layout/TripFrame.cpp:143: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::renderTexture(SP<Render::ITexture>&, Hyprutils::Math::CBox&, Render::GL::CHyprOpenGLImpl::STextureRenderData)’
+src/layout/TripFrame.cpp:154: ‘class Render::IHyprRenderer’ has no member named ‘popMonitorTransformEnabled’
+src/layout/TripFrame.cpp:155: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:161: ‘bool Hyprdrive::TripFrame::{anonymous}::CTripFramePassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/layout/TripFrame.cpp:164: ‘bool Hyprdrive::TripFrame::{anonymous}::CTripFramePassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/layout/TripFrame.cpp:167: ‘std::optional<Hyprutils::Math::CBox> Hyprdrive::TripFrame::{anonymous}::CTripFramePassElement::boundingBox()’ marked ‘override’, but does not override
+src/layout/TripFrame.cpp:168: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:173: ‘Hyprutils::Math::CRegion Hyprdrive::TripFrame::{anonymous}::CTripFramePassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/layout/TripFrame.cpp:264: ‘class Desktop::View::CWindow’ has no member named ‘m_reportedPosition’; did you mean ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’? (not accessible from this context)
+src/layout/TripFrame.cpp:266: ‘class Desktop::View::CWindow’ has no member named ‘m_reportedPosition’; did you mean ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’? (not accessible from this context)
+src/layout/TripFrame.cpp:321: ‘class Render::IHyprRenderer’ has no member named ‘m_bRenderingSnapshot’
+src/layout/TripFrame.cpp:324: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:328: no match for ‘operator=’ (operand types are ‘Hyprdrive::TripFrame::{anonymous}::SOpen’ and ‘<brace-enclosed initializer list>’)
+src/layout/TripFrame.cpp:328: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/layout/TripFrame.cpp:338: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:338: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/layout/TripFrame.cpp:341: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/layout/TripFrame.cpp:368: ‘class Desktop::View::CWindow’ has no member named ‘m_reportedPosition’; did you mean ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’? (not accessible from this context)
+src/layout/TripFrame.cpp:376: ‘class Desktop::View::CWindow’ has no member named ‘m_floatingOffset’
+src/layout/TripFrame.cpp:384: ‘class Desktop::View::CWindow’ has no member named ‘m_reportedPosition’; did you mean ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’? (not accessible from this context)
+src/layout/TripFrame.cpp:384: no matching function for call to ‘std::vector<Hyprdrive::TripFrame::{anonymous}::SHeld>::push_back(<brace-enclosed initializer list>)’
+src/layout/TripFrame.cpp:392: no matching function for call to ‘Hyprutils::Signal::CSignalT<Event::SRenderStageEvent>::listen(Hyprdrive::TripFrame::init()::<lambda(eRenderStage)>)’
+src/layout/TripFrame.cpp:406: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/layout/TripFrame.cpp:410: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/layout/WindowPlacement.cpp:142: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/WindowPlacement.cpp:169: ‘class Desktop::View::CWindow’ has no member named ‘isX11OverrideRedirect’
+src/layout/WindowPlacement.cpp:176: ‘class Desktop::View::CWindow’ has no member named ‘parent’
+src/layout/WindowPlacement.cpp:176: ‘class Desktop::View::CWindow’ has no member named ‘x11Parent’
+src/layout/WindowPlacement.cpp:177: ‘class Desktop::View::CWindow’ has no member named ‘isModal’
+src/layout/WindowPlacement.cpp:198: ‘class Desktop::View::CWindow’ has no member named ‘m_isFloating’; did you mean ‘isFloating’?
+src/layout/WindowPlacement.cpp:240: ‘class Desktop::View::CWindow’ has no member named ‘m_isFloating’; did you mean ‘isFloating’?
+src/layout/WindowPlacement.cpp:314: ‘class Desktop::View::CWindow’ has no member named ‘isModal’
+src/layout/WindowPlacement.cpp:314: ‘class Desktop::View::CWindow’ has no member named ‘parent’
+src/layout/WindowPlacement.cpp:64: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/WindowPlacement.cpp:77: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/WindowPlacement.cpp:78: no matching function for call to ‘std::vector<Hyprdrive::WindowPlacement::{anonymous}::SIntentRec>::push_back(<brace-enclosed initializer list>)’
+src/layout/XGeometry.cpp:105: ‘class Desktop::View::CWindow’ has no member named ‘realToReportPosition’
+src/layout/XGeometry.cpp:106: ‘class Desktop::View::CWindow’ has no member named ‘realToReportSize’
+src/layout/XGeometry.cpp:126: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/XGeometry.cpp:231: call to consteval function ‘std::basic_format_string<char, short unsigned int&, short unsigned int&, short int&, short int&, const int&, const int&, const int&, const int&, const double&, const double&, const double&, const double
+src/layout/XGeometry.cpp:231: call to non-‘constexpr’ function ‘const std::string& Desktop::View::CWindowMetadata::appID() const’
+src/layout/XGeometry.cpp:273: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/XGeometry.cpp:328: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/XGeometry.cpp:349: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/XGeometry.cpp:419: call to consteval function ‘std::basic_format_string<char, const int&, const long int&, const long int&>((* &(& window.Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>::operator->()->Desktop::View::CWindow::metadata())->D
+src/layout/XGeometry.cpp:419: call to non-‘constexpr’ function ‘const std::string& Desktop::View::CWindowMetadata::appID() const’
+src/layout/XGeometry.cpp:440: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/layout/XGeometry.cpp:445: ‘class Desktop::View::CWindow’ has no member named ‘m_isUrgent’; did you mean ‘markUrgent’?
+src/layout/XGeometry.cpp:450: ‘class Desktop::View::CWindow’ has no member named ‘m_isUrgent’; did you mean ‘markUrgent’?
+src/layout/XGeometry.cpp:451: ‘g_pEventManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/layout/XGeometry.cpp:451: ‘SHyprIPCEvent’ was not declared in this scope
+src/layout/XGeometry.cpp:508: ‘class Desktop::View::CWindow’ has no member named ‘m_xwaylandSurface’; did you mean ‘SP<Desktop::View::CWLSurface> Desktop::View::IView::m_wlSurface’? (not accessible from this context)
+src/motion/FlightBlur.cpp:132: ‘SP<Render::IFramebuffer> Hyprdrive::FlightBlur::{anonymous}::CFlightBlurTransformer::transform(SP<Render::IFramebuffer>)’ marked ‘override’, but does not override
+src/motion/FlightBlur.cpp:136: ‘void Hyprdrive::FlightBlur::{anonymous}::CFlightBlurTransformer::amendTransformedRenderData(const Hyprutils::Math::CBox&, SMotionBlurData*)’ marked ‘override’, but does not override
+src/motion/FlightBlur.cpp:268: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:293: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:295: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:299: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:302: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:320: no matching function for call to ‘Render::IHyprRenderer::shouldUseNewBlurOptimizations(std::nullptr_t, const PHLWINDOW&)’
+src/motion/FlightBlur.cpp:321: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<COverviewBlurPassElement>)’
+src/motion/FlightBlur.cpp:331: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/motion/FlightBlur.cpp:332: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/motion/FlightBlur.cpp:341: ‘class Render::IHyprRenderer’ has no member named ‘shouldBlur’
+src/motion/FlightBlur.cpp:350: no matching function for call to ‘Hyprutils::Math::CBox::CBox(<brace-enclosed initializer list>)’
+src/motion/FlightBlur.cpp:370: no matching function for call to ‘Render::IHyprRenderer::redirectPass(Render::CRenderPass*)’
+src/motion/FlightBlur.cpp:410: no matching function for call to ‘Render::IHyprRenderer::addPassElement(std::remove_reference<Hyprutils::Memory::CUniquePointer<IPassElement>&>::type)’
+src/motion/FlightBlur.cpp:427: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTransformedWindowPassElement>)’
+src/motion/FlightBlur.cpp:478: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:819: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:837: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightBlur.cpp:843: no matching function for call to ‘Hyprutils::Signal::CSignalT<Event::SRenderStageEvent>::listen(Hyprdrive::FlightBlur::init()::<lambda(eRenderStage)>)’
+src/motion/FlightBlur.cpp:858: ‘class Desktop::View::CWindow’ has no member named ‘m_transformers’
+src/motion/FlightController.cpp:1070: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:1070: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:1071: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:1071: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:1077: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/motion/FlightController.cpp:1077: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:1078: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/motion/FlightController.cpp:1078: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:1127: ‘class Desktop::View::CWindow’ has no member named ‘m_realBorderColor’
+src/motion/FlightController.cpp:1155: ‘class Desktop::View::CWindow’ has no member named ‘m_realBorderColor’
+src/motion/FlightController.cpp:1159: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/motion/FlightController.cpp:1197: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:1198: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:345: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:346: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:419: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:420: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:530: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:530: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:531: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:531: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:553: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:554: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:564: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:565: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:566: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:567: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:604: ‘class Desktop::View::CWindow’ has no member named ‘updateDecorationValues’
+src/motion/FlightController.cpp:605: ‘class Desktop::View::CWindow’ has no member named ‘m_borderFadeAnimationProgress’
+src/motion/FlightController.cpp:606: ‘class Desktop::View::CWindow’ has no member named ‘m_borderFadeAnimationProgress’
+src/motion/FlightController.cpp:607: ‘class Desktop::View::CWindow’ has no member named ‘m_dimPercent’
+src/motion/FlightController.cpp:608: ‘class Desktop::View::CWindow’ has no member named ‘m_dimPercent’
+src/motion/FlightController.cpp:629: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:630: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:643: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:643: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:644: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:644: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:707: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:708: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:708: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:709: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:709: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:712: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:712: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:713: ‘Hyprutils::Math::Vector2D Hyprutils::Animation::CGenericAnimatedVariable<Hyprutils::Math::Vector2D, SAnimationContext>::m_Value’ is private within this context
+src/motion/FlightController.cpp:713: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/motion/FlightController.cpp:726: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/motion/FlightController.cpp:726: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/motion/FlightController.cpp:727: ‘bool Hyprutils::Animation::CBaseAnimatedVariable::m_bIsBeingAnimated’ is protected within this context
+src/motion/FlightController.cpp:727: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/DropIndicator.cpp:142: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/GridLayout.cpp:177: ‘class Desktop::View::CWindow’ has no member named ‘m_stableID’; did you mean ‘m_state’?
+src/overview/GridLayout.cpp:177: could not convert ‘{false, 0, <expression error>}’ from ‘<brace-enclosed initializer list>’ to ‘std::tuple<bool, long unsigned int, long unsigned int>’
+src/overview/GridLayout.cpp:179: ‘class Desktop::View::CWindow’ has no member named ‘m_stableID’; did you mean ‘m_state’?
+src/overview/GridLayout.cpp:447: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/GridLayout.cpp:449: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/GridLayout.cpp:496: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/GridLayout.cpp:502: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/GridLayout.cpp:506: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/GridLayout.cpp:509: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/GridLayout.cpp:661: ‘Hyprdrive::Compat::id’ is not a class member
+src/overview/GridLayout.cpp:661: ‘m_workspace’ was not declared in this scope; did you mean ‘workspace’?
+src/overview/GridLayout.cpp:887: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/HotCorner.cpp:134: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/HotCorner.cpp:136: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewBackdrop.cpp:197: no matching function for call to ‘Render::IHyprRenderer::renderBackground(PHLMONITOR&)’
+src/overview/OverviewBackdrop.cpp:206: no matching function for call to ‘Render::IHyprRenderer::renderLayer(Hyprutils::Memory::CSharedPointer<Desktop::View::CLayerSurface>, PHLMONITOR&, const Time::steady_tp&)’
+src/overview/OverviewBackdrop.cpp:261: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:316: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:326: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:340: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:352: no matching function for call to ‘Render::IHyprRenderer::bindTempFB(SP<Render::IFramebuffer>&)’
+src/overview/OverviewBackdrop.cpp:357: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:358: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:359: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:359: ‘SAVEDDAMAGE’ is not captured
+src/overview/OverviewBackdrop.cpp:361: no matching function for call to ‘Render::IHyprRenderer::draw(CClearPassElement::SClearData, const Hyprutils::Math::CRegion&)’
+src/overview/OverviewBackdrop.cpp:366: no matching function for call to ‘Render::IHyprRenderer::renderBackground(PHLMONITOR&)’
+src/overview/OverviewBackdrop.cpp:372: no matching function for call to ‘Render::IHyprRenderer::renderLayer(Hyprutils::Memory::CSharedPointer<Desktop::View::CLayerSurface>, PHLMONITOR&, const Time::steady_tp&)’
+src/overview/OverviewBackdrop.cpp:382: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:416: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:428: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewBackdrop.cpp:453: no matching function for call to ‘Render::IHyprRenderer::bindTempFB(SP<Render::IFramebuffer>&)’
+src/overview/OverviewBackdrop.cpp:454: no matching function for call to ‘Render::IHyprRenderer::draw(CClearPassElement::SClearData, const Hyprutils::Math::CRegion&)’
+src/overview/OverviewBackdrop.cpp:458: no matching function for call to ‘Render::IHyprRenderer::draw(CRectPassElement::SRectData, const Hyprutils::Math::CRegion&)’
+src/overview/OverviewBackdrop.cpp:497: no matching function for call to ‘Render::IHyprRenderer::blurFramebuffer(SP<Render::IFramebuffer>&, float, Hyprutils::Math::CRegion*)’
+src/overview/OverviewBackdrop.cpp:502: no matching function for call to ‘Render::IHyprRenderer::bindTempFB(SP<Render::IFramebuffer>&)’
+src/overview/OverviewBackdrop.cpp:503: no matching function for call to ‘Render::IHyprRenderer::draw(CClearPassElement::SClearData, const Hyprutils::Math::CRegion&)’
+src/overview/OverviewBackdrop.cpp:507: ‘BLURREDTEX’ is not captured
+src/overview/OverviewBackdrop.cpp:507: ‘SAVEDTRANSFORM’ is not captured
+src/overview/OverviewBackdrop.cpp:509: ‘class Render::IHyprRenderer’ has no member named ‘pushMonitorTransformEnabled’
+src/overview/OverviewBackdrop.cpp:510: ‘class Render::IHyprRenderer’ has no member named ‘popMonitorTransformEnabled’
+src/overview/OverviewBackdrop.cpp:521: no matching function for call to ‘Render::IHyprRenderer::draw(CRectPassElement::SRectData, const Hyprutils::Math::CRegion&)’
+src/overview/OverviewBackdrop.cpp:541: ‘CTexPassElement::SRenderData’ has no non-static data member named ‘flipEndFrame’
+src/overview/OverviewCards.cpp:108: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewCards.cpp:168: ‘bool Workspace::CHLWorkspace::m_visible’ is private within this context
+src/overview/OverviewCards.cpp:172: ‘bool Workspace::CHLWorkspace::m_visible’ is private within this context
+src/overview/OverviewCards.cpp:26: ‘bool Workspace::CHLWorkspace::m_visible’ is private within this context
+src/overview/OverviewCards.cpp:30: ‘bool Workspace::CHLWorkspace::m_visible’ is private within this context
+src/overview/OverviewCards.cpp:516: no matching function for call to ‘Render::IHyprRenderer::draw(CTexPassElement::SRenderData, Hyprutils::Math::CRegion&)’
+src/overview/OverviewCards.cpp:78: ‘CTexPassElement::SRenderData’ has no non-static data member named ‘flipEndFrame’
+src/overview/OverviewChrome.hpp:127: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<COverviewShadowPassElement>)’
+src/overview/Overview.cpp:103: ‘bool Desktop::View::CWindow::m_hidden’ is private within this context
+src/overview/Overview.cpp:106: ‘bool Desktop::View::CWindow::m_hidden’ is private within this context
+src/overview/Overview.cpp:132: ‘bool Desktop::View::CWindow::m_suspended’ is private within this context
+src/overview/Overview.cpp:141: no matching function for call to ‘Desktop::View::CWindow::alpha(const Desktop::View::eWindowAlpha&)’
+src/overview/Overview.cpp:167: ‘class Desktop::View::CLayerSurface’ has no member named ‘m_aboveFullscreen’
+src/overview/Overview.cpp:167: no matching function for call to ‘std::vector<CForcedVisibility::SLayer>::push_back(<brace-enclosed initializer list>)’
+src/overview/Overview.cpp:169: ‘class Desktop::View::CLayerSurface’ has no member named ‘m_aboveFullscreen’
+src/overview/Overview.cpp:170: ‘class Desktop::View::CLayerSurface’ has no member named ‘m_aboveFullscreen’
+src/overview/Overview.cpp:217: no matching function for call to ‘Desktop::View::CWindow::alpha(const Desktop::View::eWindowAlpha&)’
+src/overview/Overview.cpp:225: ‘bool Desktop::View::CWindow::m_hidden’ is private within this context
+src/overview/Overview.cpp:242: ‘class Desktop::View::CLayerSurface’ has no member named ‘m_aboveFullscreen’
+src/overview/Overview.cpp:252: ‘class Desktop::View::CLayerSurface’ has no member named ‘m_aboveFullscreen’
+src/overview/Overview.cpp:456: ‘g_pEventManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/overview/Overview.cpp:456: ‘SHyprIPCEvent’ was not declared in this scope
+src/overview/Overview.cpp:511: ‘class Render::IHyprRenderer’ has no member named ‘m_bBlockSurfaceFeedback’
+src/overview/Overview.cpp:512: ‘class Render::IHyprRenderer’ has no member named ‘m_bBlockSurfaceFeedback’
+src/overview/Overview.cpp:513: ‘class Render::IHyprRenderer’ has no member named ‘m_bBlockSurfaceFeedback’
+src/overview/Overview.cpp:554: no matching function for call to ‘Render::IHyprRenderer::draw(CClearPassElement::SClearData, <brace-enclosed initializer list>)’
+src/overview/Overview.cpp:556: cannot convert ‘eRenderStage’ to ‘Hyprutils::Signal::CSignalT<Event::SRenderStageEvent>::RefArg<Event::SRenderStageEvent>’ {aka ‘const Event::SRenderStageEvent&’}
+src/overview/Overview.cpp:597: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/Overview.cpp:659: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/Overview.cpp:765: cannot convert ‘const Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>’ to ‘Render::CRenderContext&’
+src/overview/Overview.cpp:779: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/Overview.cpp:783: cannot convert ‘const Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>’ to ‘Render::CRenderContext&’
+src/overview/Overview.cpp:786: cannot convert ‘const Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>’ to ‘Render::CRenderContext&’
+src/overview/Overview.cpp:797: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/Overview.cpp:803: no matching function for call to ‘Render::IHyprRenderer::renderLayer(Hyprutils::Memory::CSharedPointer<Desktop::View::CLayerSurface>, const Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>&, const std::chrono::time_point<std:
+src/overview/Overview.cpp:82: ‘SP<Desktop::View::CPopup> Desktop::View::CPopupOwner::m_popupHead’ is private within this context
+src/overview/Overview.cpp:831: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/Overview.cpp:837: no matching function for call to ‘Render::IHyprRenderer::renderLayer(Hyprutils::Memory::CSharedPointer<Desktop::View::CLayerSurface>, const Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>&, const std::chrono::time_point<std:
+src/overview/Overview.cpp:849: cannot convert ‘Hyprutils::Memory::CSharedPointer<Desktop::View::CLayerSurface>’ to ‘Render::CRenderContext&’
+src/overview/Overview.cpp:85: ‘SP<Desktop::View::CPopup> Desktop::View::CPopupOwner::m_popupHead’ is private within this context
+src/overview/Overview.cpp:86: ‘class Desktop::View::CPopup’ has no member named ‘aliveAndVisible’
+src/overview/Overview.cpp:893: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewDrag.cpp:690: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/OverviewDrag.cpp:705: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewDrag.cpp:761: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewDrag.cpp:769: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewDrag.cpp:812: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/overview/OverviewDrag.cpp:812: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/OverviewDrag.cpp:813: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/overview/OverviewDrag.cpp:813: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/OverviewFrames.cpp:134: ‘bool Desktop::View::CWindow::m_suspended’ is private within this context
+src/overview/OverviewFrames.cpp:70: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/OverviewFrames.cpp:739: ‘bool Desktop::View::CWindow::m_suspended’ is private within this context
+src/overview/OverviewGesture.cpp:531: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewGesture.cpp:533: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewGesture.cpp:606: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewGesture.cpp:613: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewGesture.cpp:692: operands to ‘?:’ have different types ‘Input::ModifierMask’ and ‘int’
+src/overview/OverviewGesture.cpp:847: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewGesture.cpp:865: no matching function for call to ‘pass(uint32_t&, const uint32_t&, const std::nullopt_t&)’
+src/overview/OverviewHit.cpp:111: ‘Hyprdrive::Compat::id’ is not a class member
+src/overview/OverviewHit.cpp:111: ‘pWorkspace’ was not declared in this scope; did you mean ‘Workspace’?
+src/overview/OverviewHit.cpp:755: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewHit.cpp:755: ‘SKeybind’ was not declared in this scope; did you mean ‘Keybinds’?
+src/overview/OverviewHit.cpp:755: template argument 1 is invalid
+src/overview/OverviewHit.cpp:84: ‘Hyprdrive::Compat::id’ is not a class member
+src/overview/OverviewHit.cpp:84: ‘pWorkspace’ was not declared in this scope; did you mean ‘Workspace’?
+src/overview/OverviewInput.cpp:769: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/overview/OverviewInput.cpp:769: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/OverviewInput.cpp:855: no match for ‘operator==’ (operand types are ‘uint32_t’ {aka ‘unsigned int’} and ‘Input::eKeyboardModifiers’)
+src/overview/OverviewInput.cpp:856: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewInput.cpp:864: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewInput.cpp:899: no match for ‘operator!=’ (operand types are ‘Input::ModifierMask’ and ‘int’)
+src/overview/OverviewInput.cpp:904: no match for ‘operator!=’ (operand types are ‘const Input::ModifierMask’ and ‘int’)
+src/overview/OverviewInput.cpp:907: no match for ‘operator!=’ (operand types are ‘const Input::ModifierMask’ and ‘int’)
+src/overview/OverviewInput.cpp:914: no match for ‘operator!=’ (operand types are ‘const Input::ModifierMask’ and ‘int’)
+src/overview/OverviewInput.cpp:931: cannot convert ‘const Input::ModifierMask’ to ‘uint32_t’ {aka ‘unsigned int’}
+src/overview/OverviewInternal.hpp:1352: ‘class Desktop::View::CWindow’ has no member named ‘m_alpha’; did you mean ‘alpha’?
+src/overview/OverviewInternal.hpp:1353: ‘class Desktop::View::CWindow’ has no member named ‘m_borderAngleAnimationProgress’
+src/overview/OverviewInternal.hpp:1353: ‘class Desktop::View::CWindow’ has no member named ‘m_borderFadeAnimationProgress’
+src/overview/OverviewInternal.hpp:1353: ‘class Desktop::View::CWindow’ has no member named ‘m_dimPercent’
+src/overview/OverviewInternal.hpp:1354: ‘class Desktop::View::CWindow’ has no member named ‘m_shadowFadeAnimationProgress’
+src/overview/OverviewInternal.hpp:2529: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewInternal.hpp:2560: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewInternal.hpp:2571: no matching function for call to ‘Render::IHyprRenderer::renderLayer(const Hyprutils::Memory::CSharedPointer<Desktop::View::CLayerSurface>&, PHLMONITOR&, const Time::steady_tp&)’
+src/overview/OverviewInternal.hpp:2578: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewInternal.hpp:261: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewInternal.hpp:300: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewInternal.hpp:309: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewInternal.hpp:315: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewInternal.hpp:464: cannot convert ‘std::array<std::vector<Hyprutils::Memory::CWeakPointer<Desktop::View::CLayerSurface> >, 4>::value_type*’ {aka ‘std::vector<Hyprutils::Memory::CWeakPointer<Desktop::View::CLayerSurface> >*’} to ‘PHLMONITOR’
+src/overview/OverviewKeys.cpp:220: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/OverviewKeys.cpp:253: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/OverviewLifecycle.cpp:1094: no match for ‘operator==’ (operand types are ‘const uint32_t’ {aka ‘const unsigned int’} and ‘Input::eKeyboardModifiers’)
+src/overview/OverviewLifecycle.cpp:1095: no match for ‘operator==’ (operand types are ‘const uint32_t’ {aka ‘const unsigned int’} and ‘Input::eKeyboardModifiers’)
+src/overview/OverviewLifecycle.cpp:1098: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1101: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1107: ‘g_passthroughBinds’ was not declared in this scope
+src/overview/OverviewLifecycle.cpp:1112: ‘g_passthroughBinds’ was not declared in this scope
+src/overview/OverviewLifecycle.cpp:1116: ‘g_passthroughBinds’ was not declared in this scope
+src/overview/OverviewLifecycle.cpp:1120: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1123: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1151: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1153: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1158: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1161: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1171: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1177: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:1192: ‘g_pKeybindManager’ is not captured
+src/overview/OverviewLifecycle.cpp:1192: ‘PREVIOUSKEYBIND’ is not captured
+src/overview/OverviewLifecycle.cpp:1200: ‘class Config::Lua::CConfigManager’ has no member named ‘callLuaFn’
+src/overview/OverviewLifecycle.cpp:1269: ‘Hyprdrive::Compat::id’ is not a class member
+src/overview/OverviewLifecycle.cpp:1269: ‘pWorkspace’ was not declared in this scope; did you mean ‘Workspace’?
+src/overview/OverviewLifecycle.cpp:1446: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/overview/OverviewLifecycle.cpp:1446: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/OverviewLifecycle.cpp:254: ‘struct Event::CEventBus::<unnamed struct>::<unnamed>’ has no member named ‘created’
+src/overview/OverviewLifecycle.cpp:266: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:288: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/OverviewLifecycle.cpp:468: ‘Hyprdrive::Compat::id’ is not a class member
+src/overview/OverviewLifecycle.cpp:468: ‘pWorkspace’ was not declared in this scope; did you mean ‘Workspace’?
+src/overview/OverviewLifecycle.cpp:526: ‘Hyprdrive::Compat::id’ is not a class member
+src/overview/OverviewLifecycle.cpp:526: ‘pWorkspace’ was not declared in this scope; did you mean ‘Workspace’?
+src/overview/OverviewLifecycle.cpp:72: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:74: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewLifecycle.cpp:767: ‘class Workspace::CHLWorkspace’ has no member named ‘isPersistent’
+src/overview/OverviewLifecycle.cpp:778: no match for ‘operator==’ (operand types are ‘const long int’ and ‘Workspace::WorkspaceID’ {aka ‘std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>’})
+src/overview/OverviewLifecycle.cpp:778: ‘Workspace::WorkspaceID Workspace::CHLWorkspace::m_id’ is private within this context
+src/overview/OverviewLifecycle.cpp:97: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/OverviewManager.cpp:32: ‘g_pEventManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/overview/OverviewManager.cpp:35: ‘g_pEventManager’ was not declared in this scope; did you mean ‘g_pSeatManager’?
+src/overview/OverviewManager.cpp:35: ‘SHyprIPCEvent’ was not declared in this scope
+src/overview/OverviewManager.cpp:39: expected ‘)’ before ‘{’ token
+src/overview/OverviewParts.hpp:200: ‘SKeybind’ was not declared in this scope; did you mean ‘Keybinds’?
+src/overview/OverviewParts.hpp:200: template argument 1 is invalid
+src/overview/OverviewParts.hpp:200: template argument 2 is invalid
+src/overview/OverviewPassElement.cpp:102: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:175: no matching function for call to ‘Render::IHyprRenderer::blurMainFramebuffer(float, Hyprutils::Math::CRegion*)’
+src/overview/OverviewPassElement.cpp:190: ‘class Render::IHyprRenderer’ has no member named ‘pushMonitorTransformEnabled’
+src/overview/OverviewPassElement.cpp:191: ‘class Render::IHyprRenderer’ has no member named ‘popMonitorTransformEnabled’
+src/overview/OverviewPassElement.cpp:193: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::renderTexture(SP<Render::ITexture>&, const Hyprutils::Math::CBox&, Render::GL::CHyprOpenGLImpl::STextureRenderData)’
+src/overview/OverviewPassElement.cpp:220: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:240: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::renderBorder(Hyprutils::Math::CBox&, Config::CGradientValueData&, <brace-enclosed initializer list>)’
+src/overview/OverviewPassElement.cpp:262: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:263: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:263: ‘SAVEDCLIP’ is not captured
+src/overview/OverviewPassElement.cpp:283: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:299: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:326: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:336: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:337: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:338: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:339: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:341: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:341: ‘SAVEDDAMAGE’ is not captured
+src/overview/OverviewPassElement.cpp:342: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:342: ‘SAVEDCURRENTWINDOW’ is not captured
+src/overview/OverviewPassElement.cpp:358: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::renderRoundedShadow(Hyprutils::Math::CBox&, int&, float&, int&, Config::CGradientValueData&, const float&)’
+src/overview/OverviewPassElement.cpp:391: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:407: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:408: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:409: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:410: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:413: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:413: ‘SAVEDCLIP’ is not captured
+src/overview/OverviewPassElement.cpp:414: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:414: ‘SAVEDMODIF’ is not captured
+src/overview/OverviewPassElement.cpp:415: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:415: ‘SAVEDDAMAGE’ is not captured
+src/overview/OverviewPassElement.cpp:416: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:416: ‘SAVEDFINAL’ is not captured
+src/overview/OverviewPassElement.cpp:417: ‘MONITOR’ is not captured
+src/overview/OverviewPassElement.cpp:421: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.cpp:423: no matching function for call to ‘Hyprutils::Math::CBox::CBox(<brace-enclosed initializer list>)’
+src/overview/OverviewPassElement.cpp:423: no matching function for call to ‘Hyprutils::Math::CRegion::CRegion(<brace-enclosed initializer list>)’
+src/overview/OverviewPassElement.cpp:436: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewPassElement.hpp:122: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > COverviewShadowPassElement::draw()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:126: ‘bool COverviewShadowPassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:127: ‘bool COverviewShadowPassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:128: ‘std::optional<Hyprutils::Math::CBox> COverviewShadowPassElement::boundingBox()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:129: ‘Hyprutils::Math::CRegion COverviewShadowPassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:155: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > CDockLivePreviewPassElement::draw()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:159: ‘bool CDockLivePreviewPassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:160: ‘bool CDockLivePreviewPassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:161: ‘std::optional<Hyprutils::Math::CBox> CDockLivePreviewPassElement::boundingBox()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:162: ‘Hyprutils::Math::CRegion CDockLivePreviewPassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:163: ‘bool CDockLivePreviewPassElement::disableSimplification()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:164: ‘bool CDockLivePreviewPassElement::undiscardable()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:45: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > COverviewBlurPassElement::draw()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:49: ‘bool COverviewBlurPassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:50: ‘bool COverviewBlurPassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:51: ‘std::optional<Hyprutils::Math::CBox> COverviewBlurPassElement::boundingBox()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:52: ‘Hyprutils::Math::CRegion COverviewBlurPassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:84: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > COverviewSplitBorderPassElement::draw()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:88: ‘bool COverviewSplitBorderPassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:89: ‘bool COverviewSplitBorderPassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:90: ‘std::optional<Hyprutils::Math::CBox> COverviewSplitBorderPassElement::boundingBox()’ marked ‘override’, but does not override
+src/overview/OverviewPassElement.hpp:91: ‘Hyprutils::Math::CRegion COverviewSplitBorderPassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/overview/OverviewRender.cpp:103: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewRender.cpp:1151: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewRender.cpp:1154: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewRender.cpp:1155: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewRender.cpp:116: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewRender.cpp:1186: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewRender.cpp:1202: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewRender.cpp:1209: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewRender.cpp:1214: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewRender.cpp:1245: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/overview/OverviewRender.cpp:1255: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/overview/OverviewRender.cpp:1260: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewRender.cpp:1269: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/overview/OverviewRender.cpp:1330: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/overview/OverviewRender.cpp:136: no matching function for call to ‘Render::IHyprRenderer::blurMainFramebuffer(float, Hyprutils::Math::CRegion*)’
+src/overview/OverviewRender.cpp:142: no matching function for call to ‘Render::IHyprRenderer::bindTempFB(Hyprutils::Memory::CSharedPointer<Render::IFramebuffer>&)’
+src/overview/OverviewRender.cpp:144: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewRender.cpp:145: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewRender.cpp:146: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewRender.cpp:146: ‘SAVEDDAMAGE’ is not captured
+src/overview/OverviewRender.cpp:148: no matching function for call to ‘Render::IHyprRenderer::draw(CClearPassElement::SClearData, Hyprutils::Math::CRegion&)’
+src/overview/OverviewRender.cpp:152: ‘BLURRED’ is not captured
+src/overview/OverviewRender.cpp:152: ‘SAVEDTRANSFORM’ is not captured
+src/overview/OverviewRender.cpp:154: ‘class Render::IHyprRenderer’ has no member named ‘pushMonitorTransformEnabled’
+src/overview/OverviewRender.cpp:155: ‘class Render::IHyprRenderer’ has no member named ‘popMonitorTransformEnabled’
+src/overview/OverviewRender.cpp:98: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewSearchView.cpp:1019: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/overview/OverviewSearchView.cpp:524: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/OverviewSearchView.cpp:618: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/overview/OverviewSearchView.cpp:626: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’ [-Wtemplate-body]
+src/overview/OverviewSearchView.cpp:651: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/overview/OverviewSearchView.cpp:711: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/overview/OverviewSearchView.cpp:722: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/overview/OverviewSearchView.cpp:815: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/overview/OverviewSearchView.cpp:826: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/overview/OverviewSearchView.cpp:903: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/overview/OverviewState.cpp:69: ‘SKeybind’ was not declared in this scope; did you mean ‘Keybinds’?
+src/overview/OverviewState.cpp:69: template argument 1 is invalid
+src/overview/OverviewState.cpp:69: template argument 2 is invalid
+src/overview/OverviewStripCleanup.cpp:271: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStripCleanup.cpp:285: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStripCleanup.cpp:293: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStripCleanup.cpp:306: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStripCleanup.cpp:402: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/OverviewStrip.cpp:1001: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStrip.cpp:1017: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStrip.cpp:1051: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStrip.cpp:1103: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStrip.cpp:1314: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStrip.cpp:1635: ‘Hyprdrive::Compat::id’ is not a class member
+src/overview/OverviewStrip.cpp:1635: ‘pWorkspace’ was not declared in this scope; did you mean ‘Workspace’?
+src/overview/OverviewStrip.cpp:388: ‘class Monitor::CMonitor’ has no member named ‘displayName’
+src/overview/OverviewStrip.cpp:498: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewStrip.cpp:592: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/OverviewWorkspaces.cpp:158: no matching function for call to ‘id(const Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>&)’
+src/overview/OverviewWorkspaces.cpp:180: cannot convert ‘WORKSPACEID’ {aka ‘long int’} to ‘const State::Workspace::STarget&’
+src/overview/Ripple.cpp:150: ‘class Render::IHyprRenderer’ has no member named ‘monitorTransformEnabled’
+src/overview/Ripple.cpp:151: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Ripple.cpp:152: cannot convert ‘const Hyprutils::Math::CBox’ to ‘Render::CRenderContext&’
+src/overview/Ripple.cpp:174: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’ [-Wtemplate-body]
+src/overview/Ripple.cpp:177: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::scissor(std::nullptr_t)’
+src/overview/Ripple.cpp:186: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > Hyprdrive::Ripple::{anonymous}::CRipplePassElement::draw()’ marked ‘override’, but does not override
+src/overview/Ripple.cpp:187: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Ripple.cpp:188: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Ripple.cpp:205: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Ripple.cpp:205: no matching function for call to ‘Hyprutils::Math::CRegion::CRegion(<brace-enclosed initializer list>)’
+src/overview/Ripple.cpp:225: no matching function for call to ‘Render::IHyprRenderer::bindTempFB(SP<Render::IFramebuffer>&)’
+src/overview/Ripple.cpp:239: ‘bool Hyprdrive::Ripple::{anonymous}::CRipplePassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/overview/Ripple.cpp:242: ‘bool Hyprdrive::Ripple::{anonymous}::CRipplePassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/overview/Ripple.cpp:245: ‘std::optional<Hyprutils::Math::CBox> Hyprdrive::Ripple::{anonymous}::CRipplePassElement::boundingBox()’ marked ‘override’, but does not override
+src/overview/Ripple.cpp:246: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Ripple.cpp:255: ‘Hyprutils::Math::CRegion Hyprdrive::Ripple::{anonymous}::CRipplePassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/overview/Ripple.cpp:267: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Ripple.cpp:270: no match for call to ‘(const std::ranges::__find_if_fn) (std::vector<Hyprdrive::Ripple::{anonymous}::SRipple>&, Hyprdrive::Ripple::{anonymous}::onLastMoment()::<lambda(const Hyprdrive::Ripple::{anonymous}::SRipple&)>)’
+src/overview/Ripple.cpp:279: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/Ripple.cpp:287: no matching function for call to ‘Hyprutils::Signal::CSignalT<Event::SRenderStageEvent>::listen(Hyprdrive::Ripple::init()::<lambda(eRenderStage)>)’
+src/overview/TileChrome.cpp:535: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/overview/TileChrome.cpp:598: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/overview/Window.cpp:1001: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/overview/Window.cpp:1027: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/Window.cpp:1104: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/overview/Window.cpp:1122: ‘class Desktop::View::CWindow’ has no member named ‘m_windowDecorations’
+src/overview/Window.cpp:1132: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRendererHintsPassElement>)’
+src/overview/Window.cpp:1142: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRendererHintsPassElement>)’
+src/overview/Window.cpp:1150: ‘class Render::IHyprRenderer’ has no member named ‘shouldBlur’
+src/overview/Window.cpp:1308: ‘class Render::IHyprRenderer’ has no member named ‘shouldBlur’
+src/overview/Window.cpp:1315: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<COverviewBlurPassElement>)’
+src/overview/Window.cpp:1317: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRendererHintsPassElement>)’
+src/overview/Window.cpp:1324: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/overview/Window.cpp:1330: cannot convert ‘const Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>’ to ‘Render::CRenderContext&’
+src/overview/Window.cpp:1346: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRendererHintsPassElement>)’
+src/overview/Window.cpp:1360: no matching function for call to ‘Render::IHyprRenderer::redirectPass(Render::CRenderPass*)’
+src/overview/Window.cpp:1363: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CDockLivePreviewPassElement>)’
+src/overview/Window.cpp:1397: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/overview/Window.cpp:1398: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/Window.cpp:1412: ‘class Desktop::View::CWindow’ has no member named ‘m_floatingOffset’
+src/overview/Window.cpp:1430: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement>)’
+src/overview/Window.cpp:1469: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/overview/Window.cpp:1474: cannot convert ‘const PHLWINDOW’ {aka ‘const Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>’} to ‘Render::CRenderContext&’
+src/overview/Window.cpp:1487: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/overview/Window.cpp:1516: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement>)’
+src/overview/Window.cpp:165: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement::draw()’ marked ‘override’, but does not override
+src/overview/Window.cpp:170: ‘bool OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/overview/Window.cpp:173: ‘bool OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/overview/Window.cpp:182: ‘bool OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement::undiscardable()’ marked ‘override’, but does not override
+src/overview/Window.cpp:185: ‘bool OverviewWindow::{anonymous}::CDeferredWindowGeometryPassElement::disableSimplification()’ marked ‘override’, but does not override
+src/overview/Window.cpp:300: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Window.cpp:303: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Window.cpp:307: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/overview/Window.cpp:346: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Window.cpp:419: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Window.cpp:431: no matching function for call to ‘Render::IHyprRenderer::bindTempFB(SP<Render::IFramebuffer>&)’
+src/overview/Window.cpp:441: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/overview/Window.cpp:449: no matching function for call to ‘Render::IHyprRenderer::setProjectionType(Render::eRenderProjectionType)’
+src/overview/Window.cpp:452: ‘OLDFBSIZE’ is not captured
+src/overview/Window.cpp:452: ‘RD’ is not captured
+src/overview/Window.cpp:453: ‘OLDTRANSFDMG’ is not captured
+src/overview/Window.cpp:453: ‘RD’ is not captured
+src/overview/Window.cpp:454: ‘OLDPROJ’ is not captured
+src/overview/Window.cpp:458: no matching function for call to ‘Render::IHyprRenderer::draw(CClearPassElement::SClearData, const Hyprutils::Math::CRegion&)’
+src/overview/Window.cpp:502: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/overview/Window.cpp:530: ‘const class CPlugin’ has no member named ‘displayName’
+src/overview/Window.cpp:554: ‘class Desktop::View::CWindow’ has no member named ‘m_windowDecorations’
+src/overview/Window.cpp:591: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/overview/Window.cpp:609: ‘class Desktop::View::CWindow’ has no member named ‘getReportedSize’
+src/overview/Window.cpp:614: no matching function for call to ‘Render::IHyprRenderer::currentPass()’
+src/overview/Window.cpp:724: ‘CDecorationPositioner::SWindowPositioningData* CDecorationPositioner::getDataFor(IHyprWindowDecoration*, PHLWINDOW)’ is private within this context
+src/overview/Window.cpp:726: ‘class Desktop::Rule::CWindowRuleApplicator’ has no member named ‘presentation’
+src/overview/Window.cpp:728: ‘class Desktop::View::CWindow’ has no member named ‘m_borderSizeCacheDirty’
+src/overview/Window.cpp:729: ‘class Desktop::View::CWindow’ has no member named ‘m_cachedBorderSize’
+src/overview/Window.cpp:743: ‘previousRounding’ is not captured
+src/overview/Window.cpp:745: ‘class Desktop::View::CWindow’ has no member named ‘m_borderSizeCacheDirty’
+src/overview/Window.cpp:746: ‘class Desktop::View::CWindow’ has no member named ‘m_cachedBorderSize’
+src/overview/Window.cpp:753: ‘class Desktop::Rule::CWindowRuleApplicator’ has no member named ‘presentation’
+src/overview/Window.cpp:755: ‘class Desktop::Rule::CWindowRuleApplicator’ has no member named ‘presentation’
+src/overview/Window.cpp:757: ‘class Desktop::View::CWindow’ has no member named ‘m_borderSizeCacheDirty’
+src/overview/Window.cpp:759: ‘class Desktop::View::CWindow’ has no member named ‘m_floatingOffset’
+src/overview/Window.cpp:777: no matching function for call to ‘IHyprWindowDecoration::draw(PHLMONITOR&, float)’
+src/overview/Window.cpp:810: ‘class Desktop::View::CWindow’ has no member named ‘isX11OverrideRedirect’
+src/overview/Window.cpp:810: ‘class Desktop::View::CWindow’ has no member named ‘m_X11DoesntWantBorders’
+src/overview/Window.cpp:829: ‘class Desktop::View::CWindow’ has no member named ‘m_realShadowColor’
+src/overview/Window.cpp:862: ‘class Desktop::View::CWindow’ has no member named ‘m_realBorderColor’
+src/overview/Window.cpp:901: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/overview/Window.cpp:918: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/overview/Window.cpp:922: ‘class Desktop::View::CWindow’ has no member named ‘m_borderFadeAnimationProgress’
+src/overview/Window.cpp:924: ‘class Desktop::View::CWindow’ has no member named ‘m_realBorderColorPrevious’
+src/overview/Window.cpp:926: ‘class Desktop::View::CWindow’ has no member named ‘m_borderFadeAnimationProgress’
+src/overview/Window.cpp:929: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/overview/Window.cpp:950: ‘g_pKeybindManager’ was not declared in this scope; did you mean ‘g_pXWaylandManager’?
+src/overview/WindowPill.cpp:156: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realPosition’ is protected within this context
+src/overview/WindowPill.cpp:157: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/overview/WindowPill.cpp:351: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/overview/WindowPill.cpp:361: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/platform/Integration.cpp:176: ‘SHyprCtlCommand’ was not declared in this scope
+src/platform/Integration.cpp:192: could not convert ‘Hyprdrive::Integration::{anonymous}::g_hyprctl’ from ‘int’ to ‘SP<IPC::Socket1::SCommand>’ {aka ‘Hyprutils::Memory::CSharedPointer<IPC::Socket1::SCommand>’}
+src/platform/Integration.cpp:193: request for member ‘reset’ in ‘Hyprdrive::Integration::{anonymous}::g_hyprctl’, which is of non-class type ‘int’
+src/platform/Integration.cpp:34: ‘SHyprCtlCommand’ was not declared in this scope
+src/platform/Integration.cpp:34: template argument 1 is invalid
+src/platform/SettingsApp.cpp:111: ‘eHyprCtlOutputFormat’ was not declared in this scope
+src/platform/SettingsApp.cpp:111: expected ‘,’ or ‘;’ before ‘{’ token
+src/platform/SettingsApp.cpp:247: ‘SHyprCtlCommand’ was not declared in this scope
+src/platform/SettingsApp.cpp:254: expected ‘)’ before ‘{’ token
+src/platform/SettingsApp.cpp:267: could not convert ‘Hyprdrive::SettingsApp::{anonymous}::g_hyprctl’ from ‘int’ to ‘SP<IPC::Socket1::SCommand>’ {aka ‘Hyprutils::Memory::CSharedPointer<IPC::Socket1::SCommand>’}
+src/platform/SettingsApp.cpp:268: request for member ‘reset’ in ‘Hyprdrive::SettingsApp::{anonymous}::g_hyprctl’, which is of non-class type ‘int’
+src/platform/SettingsApp.cpp:270: could not convert ‘Hyprdrive::SettingsApp::{anonymous}::g_hyprctlBinds’ from ‘int’ to ‘SP<IPC::Socket1::SCommand>’ {aka ‘Hyprutils::Memory::CSharedPointer<IPC::Socket1::SCommand>’}
+src/platform/SettingsApp.cpp:271: request for member ‘reset’ in ‘Hyprdrive::SettingsApp::{anonymous}::g_hyprctlBinds’, which is of non-class type ‘int’
+src/platform/SettingsApp.cpp:28: ‘SHyprCtlCommand’ was not declared in this scope
+src/platform/SettingsApp.cpp:28: template argument 1 is invalid
+src/platform/SettingsApp.cpp:29: ‘SHyprCtlCommand’ was not declared in this scope
+src/platform/SettingsApp.cpp:29: template argument 1 is invalid
+src/platform/SettingsApp.cpp:67: ‘eHyprCtlOutputFormat’ was not declared in this scope
+src/platform/SettingsApp.cpp:67: expected ‘,’ or ‘;’ before ‘{’ token
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_ALT, "ALT"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_ALT, "ALT"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_CAPS, "CAPS"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_CAPS, "CAPS"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_CTRL, "CTRL"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_CTRL, "CTRL"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_META, "SUPER"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_META, "SUPER"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_MOD2, "MOD2"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_MOD2, "MOD2"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_MOD3, "MOD3"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_MOD3, "MOD3"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_MOD5, "MOD5"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_MOD5, "MOD5"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_SHIFT, "SHIFT"}’ from ‘<brace-enclosed initializer list>’ to ‘const std::pair<unsigned int, const char*>’
+src/platform/SettingsApp.cpp:99: could not convert ‘{Input::eKeyboardModifiers::HL_MODIFIER_SHIFT, "SHIFT"}’ from ‘<brace-enclosed initializer list>’ to ‘std::pair<unsigned int, const char*>’
+src/search/KeyboardCat.cpp:409: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/search/KeyboardCat.cpp:417: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/stacks/StackBlur.cpp:104: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::scissor(const Hyprutils::Math::CBox&)’
+src/stacks/StackBlur.cpp:112: no matching function for call to ‘Hyprutils::Math::CBox::CBox(<brace-enclosed initializer list>)’
+src/stacks/StackBlur.cpp:114: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::scissor(std::nullptr_t)’
+src/stacks/StackBlur.cpp:118: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/stacks/StackBlur.cpp:118: no matching function for call to ‘Hyprutils::Math::CRegion::CRegion(<brace-enclosed initializer list>)’
+src/stacks/StackBlur.cpp:121: no matching function for call to ‘Hyprutils::Math::CBox::CBox(<brace-enclosed initializer list>)’
+src/stacks/StackBlur.cpp:34: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/stacks/StackBlur.cpp:51: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/stacks/StackBlur.cpp:58: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/stacks/StackBlur.cpp:59: ‘class Render::IHyprRenderer’ has no member named ‘m_renderData’
+src/stacks/StackBlur.cpp:80: no matching function for call to ‘Render::GL::CHyprOpenGLImpl::scissor(std::nullptr_t)’
+src/stacks/StackBlur.hpp:45: ‘std::vector<Hyprutils::Memory::CUniquePointer<IPassElement> > Hyprdrive::StackBlur::CStackBlurPassElement::draw()’ marked ‘override’, but does not override
+src/stacks/StackBlur.hpp:49: ‘bool Hyprdrive::StackBlur::CStackBlurPassElement::needsLiveBlur()’ marked ‘override’, but does not override
+src/stacks/StackBlur.hpp:52: ‘bool Hyprdrive::StackBlur::CStackBlurPassElement::needsPrecomputeBlur()’ marked ‘override’, but does not override
+src/stacks/StackBlur.hpp:55: ‘std::optional<Hyprutils::Math::CBox> Hyprdrive::StackBlur::CStackBlurPassElement::boundingBox()’ marked ‘override’, but does not override
+src/stacks/StackBlur.hpp:56: ‘Hyprutils::Math::CRegion Hyprdrive::StackBlur::CStackBlurPassElement::opaqueRegion()’ marked ‘override’, but does not override
+src/stacks/StackIcon.cpp:180: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/stacks/StackIcon.cpp:202: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/stacks/StackIcon.cpp:268: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/stacks/StackPopup.cpp:226: ‘PHLANIMVAR<Hyprutils::Math::Vector2D> Desktop::View::CGeometricMovableAnimated::m_realSize’ is protected within this context
+src/stacks/StackRender.cpp:163: ‘class Render::IHyprRenderer’ has no member named ‘m_renderPass’; did you mean ‘startRenderPass’?
+src/stacks/StackRender.cpp:197: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/stacks/StackRender.cpp:250: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CBorderPassElement>)’
+src/stacks/StackRender.cpp:289: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/stacks/StackRender.cpp:313: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CRectPassElement>)’
+src/stacks/StackRender.cpp:325: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/stacks/StackRender.cpp:335: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/stacks/StackRender.cpp:707: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+src/stacks/StackRender.cpp:97: no matching function for call to ‘Render::IHyprRenderer::addPassElement(Hyprutils::Memory::CUniquePointer<CTexPassElement>)’
+/usr/include/c++/16/bits/alloc_traits.h:716:28: error: no matching function for call to ‘construct_at(std::pair<long int, long int>*&, std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>&, long int&)’
+/usr/include/c++/16/bits/basic_string.h:238:16: error: the value of ‘told’ is not usable in a constant expression
+/usr/include/c++/16/format:4829:25: error: static assertion failed: std::formatter must be specialized for the type of each format arg
+/usr/include/c++/16/format:4840:38: error: no matching function for call to ‘std::basic_format_arg<std::basic_format_context<std::__format::_Sink_iter<char>, char> >::basic_format_arg(std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID
+/usr/include/c++/16/format:5208:10: error: static assertion failed: std::formatter must be specialized for each type being formatted
+/usr/include/c++/16/format:5242:38: error: use of deleted function ‘std::formatter<_Tp, _CharT>::formatter() [with _Tp = std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>; _CharT = char]’
+/usr/include/c++/16/format:5243:42: error: ‘class std::formatter<std::variant<Workspace::SWorkspaceNumberedID, Workspace::SWorkspaceSpecialID>, char>’ has no member named ‘parse’
+/usr/include/c++/16/format:5432:9: error: ‘name’ is not a constant expression
+/usr/include/c++/16/format:5432:9: error: ‘owner’ is not a constant expression
+      /usr/include/c++/16/system_error:318:3:
+        /usr/include/c++/16/system_error:318:33:
+      /usr/include/c++/16/system_error:451:3:
+        /usr/include/c++/16/system_error:451:32:
+      /usr/include/c++/16/system_error:467:3:
+        /usr/include/c++/16/system_error:467:32:
+      /usr/include/c++/16/system_error:482:3:
+        /usr/include/c++/16/system_error:482:37:
+      /usr/include/c++/16/system_error:500:3:
+        /usr/include/c++/16/system_error:500:38:
