@@ -385,7 +385,7 @@ static std::string overviewMonitorLabel(const PHLMONITOR& monitor) {
     if (!monitor)
         return {};
 
-    const auto& NAME = monitor->displayName();
+    const auto& NAME = monitor->m_name;
     if (NAME.starts_with("eDP") || NAME.starts_with("LVDS") || NAME.starts_with("DSI"))
         return "Built-in Display";
 
@@ -495,7 +495,7 @@ void COverview::renderAltStrips(PHLMONITOR monitor, float renderScale, const Tim
                                sc<float>(NUMTEX->m_size.y)}
                               .round();
                 num.a = FADE;
-                g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(num));
+                g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(num));
             }
 
             // Drawn by THAT monitor's overview. It already forces these windows
@@ -589,7 +589,7 @@ void COverview::renderScratchpadCell(PHLMONITOR monitor, float renderScale, cons
         label.box = CBox{std::round(sc<float>(CELL.x) + (sc<float>(CELL.width) - sc<float>(TEX->m_size.x)) / 2.F),
                          std::round(sc<float>(CELL.y) + (sc<float>(CELL.height) - sc<float>(TEX->m_size.y)) / 2.F), sc<float>(TEX->m_size.x), sc<float>(TEX->m_size.y)};
         label.a   = FADE;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(label));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(label));
     }
 
     // The parked windows, as live minis -- the same mapping, render scale and
@@ -998,7 +998,7 @@ void COverview::renderStripCellRect(const CBox& cell, const CHyprColor& color, b
         r.color         = color;
         r.round         = largeLeft ? STYLE.round : STYLE.innerRound;
         r.roundingPower = STYLE.power;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(r));
         return;
     }
 
@@ -1014,7 +1014,7 @@ void COverview::renderStripCellRect(const CBox& cell, const CHyprColor& color, b
         r.roundingPower = STYLE.power;
         r.clipBox       = LEFT ? CBox{sc<float>(cell.x), sc<float>(cell.y), MID - sc<float>(cell.x), sc<float>(cell.height)} :
                                  CBox{MID, sc<float>(cell.y), sc<float>(cell.x) + sc<float>(cell.width) - MID, sc<float>(cell.height)};
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(r));
     }
 }
 
@@ -1048,7 +1048,7 @@ void COverview::renderStripCellBorder(PHLMONITOR monitor, const CBox& cell, bool
     // no longer be concentric with the fill's.
     const CBox INNER = cell.copy().expand(-BORDER);
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewSplitBorderPassElement>(COverviewSplitBorderPassElement::SData{
+    g_pHyprRenderer->context().m_pass.add(makeUnique<COverviewSplitBorderPassElement>(COverviewSplitBorderPassElement::SData{
         .box           = INNER,
         .color         = ::Config::CGradientValueData{OUTLINE.modifyA(1.F)},
         .roundLeft     = std::max(0, (largeLeft ? STYLE.round : STYLE.innerRound) - BORDER),
@@ -1100,7 +1100,7 @@ void COverview::renderStripCell(PHLMONITOR monitor, size_t workspaceIdx, const C
         num.tex = NUMTEX;
         num.box = numBox.round();
         num.a   = FADE * NUMFADE;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(num));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(num));
     }
 
     const float MINIRENDERSCALE = renderScale * sc<float>(CELL.height) / std::max(1.F, sc<float>(monitor->m_size.y) * monitor->m_scale);
@@ -1311,7 +1311,7 @@ void COverview::renderDetentBadge(PHLMONITOR monitor, float renderScale) {
     label.discardMode           = DISCARD_ALPHA;
     label.discardOpacity        = 0.f;
     label.ignoreAlpha           = 0.f;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(label)));
+    g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(std::move(label)));
 
     // The pop is timestamped, not a PHLANIMVAR: if the finger stops mid-drag
     // the compositor has no reason to schedule the rest of it. Same pairing
@@ -1632,7 +1632,7 @@ bool COverview::stripCellLabelLive(PHLMONITOR monitor, float renderScale, std::s
         pillNudgeWant          = std::clamp(RESTBOTTOM + G - LABELTOP, 0.F, PUB.pillMaxUp);
     }
 
-    keyOut    = std::to_string(images[idx]->Hyprdrive::Compat::id(pWorkspace));
+    keyOut    = std::to_string(Hyprdrive::Compat::id(images[idx]->pWorkspace));
     labelOut  = label;
     cxOut     = CX;
     bottomOut = bottom;

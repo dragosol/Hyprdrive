@@ -155,7 +155,7 @@ Hyprdrive::WorkspacePlan::SRow workspacePlanFor(const PHLMONITOR& monitor) {
     // Rule 2: `create` quietly moves a rule-bound id to its bound output.
     const WP::BoundMonitor BOUND = [](WP::ID id) -> std::optional<WP::ID> {
         if (const auto BOUNDTO = ::Config::workspaceRuleMgr()->getBoundMonitorForWS(std::to_string(id)); BOUNDTO)
-            return Hyprdrive::Compat::id(BOUNDTO);
+            return BOUNDTO->m_id;
         return std::nullopt;
     };
 
@@ -177,7 +177,7 @@ static PHLWORKSPACE createWorkspaceIfFree(WORKSPACEID id, const PHLMONITOR& moni
             return nullptr;
     }
 
-    const auto CREATED = State::workspaceState()->create(id, monitor->m_id, std::to_string(id));
+    const auto CREATED = State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(id)}, monitor);
     // And a rule that sent it elsewhere after all is not this monitor's to hold.
     if (CREATED && CREATED->m_monitor.lock() != monitor)
         return nullptr;

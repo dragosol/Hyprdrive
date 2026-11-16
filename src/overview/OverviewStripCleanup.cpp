@@ -268,7 +268,7 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
         f.round         = RADIUS;
         f.roundingPower = 2.F;
         if (Hyprdrive::Stacks::drawableBox(f.box))
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(f));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(f));
     }
 
     // The row's content: glyph column, then the label; lifted on hover.
@@ -282,7 +282,7 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
         g.box          = CBox{std::round(TEXTX + (GLYPHCOLW - GW) / 2.F - GLYPHCOLW * 0.15F), std::round(TEXTY + (LH - GH) / 2.F), GW, GH};
         g.a            = A;
         if (g.a > 0.001F)
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(g));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(g));
     }
     {
         CTexPassElement::SRenderData t;
@@ -290,7 +290,7 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
         t.box = CBox{TEXTX + GLYPHCOLW, TEXTY - (LH * GROW - LH) / 2.F, LW * GROW, LH * GROW};
         t.a   = A;
         if (t.a > 0.001F)
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(t));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(t));
     }
 
     // The menu's outline: the theme accent at Hyprland's border weight.
@@ -303,7 +303,7 @@ void COverview::renderStripCleanup(PHLMONITOR monitor, float renderScale, float 
         b.round         = RADIUS;
         b.roundingPower = 2.F;
         if (Hyprdrive::Stacks::drawableBox(b.box) && b.a > 0.001F)
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(b));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CBorderPassElement>(b));
     }
 }
 
@@ -399,6 +399,6 @@ std::string overviewStripCleanupReport(PHLMONITOR monitor) {
     std::string out;
     for (const auto& OV : scrollOverviews())
         if (auto* O = dynamic_cast<COverview*>(OV.get()); O && (!monitor || O->pMonitor.lock() == monitor))
-            out += (out.empty() ? "" : "\n") + std::format("monitor {}: ", O->pMonitor.lock() ? O->pMonitor.lock()->displayName() : "?") + O->stripCleanupReport();
+            out += (out.empty() ? "" : "\n") + std::format("monitor {}: ", O->pMonitor.lock() ? O->pMonitor.lock()->m_name : "?") + O->stripCleanupReport();
     return out.empty() ? "stripclean: no overview" : out;
 }
