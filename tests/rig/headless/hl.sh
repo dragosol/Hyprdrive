@@ -326,6 +326,7 @@ write_config() {
 hl.monitor({ output = "HEADLESS-1", mode = "1920x1080@60", position = "0x0",    scale = 1 })
 hl.monitor({ output = "HEADLESS-2", mode = "1920x1080@60", position = "1920x0", scale = 1 })
 hl.monitor({ output = "WL-1",       mode = "1920x1080@60", position = "-1920x0", scale = 1 })
+hl.monitor({ output = "WAYLAND-1",  mode = "1920x1080@60", position = "-1920x0", scale = 1 }) -- newer aquamarine (0.57 builds) names it WAYLAND-1
 
 hl.config({
     general  = { gaps_in = 5, gaps_out = 10, border_size = 2, layout = "dwindle" },
@@ -426,6 +427,8 @@ start)
     hc output create headless HEADLESS-1 >/dev/null
     for _ in $(seq 25); do hc monitors | grep -q '^Monitor HEADLESS-1' && break; sleep 0.2; done
     hc eval 'hl.monitor({ output = "WL-1", disabled = true })' >/dev/null
+    # newer aquamarine (the 0.57 build under HL_PREFIX) names the nested window WAYLAND-1
+    hc eval 'hl.monitor({ output = "WAYLAND-1", disabled = true })' >/dev/null
     sleep 0.5
     # "started without start-hyprland" toast: expected here (start-hyprland is
     # a crash-restarting watchdog, which would hide crashes from a test)
@@ -445,6 +448,11 @@ start)
         r=$(hc plugin load "$so" 2>&1) || true
         echo "hl: plugin load: $r"
         running || { tail -30 "$STATE/hypr.out"; die "Hyprland died loading the plugin"; }
+        # the plugin reloads the config once its keys are registered, and on
+        # 0.57 that reload drops the eval'd rules above: retire the nested window again
+        sleep 0.5
+        hc eval 'hl.monitor({ output = "WL-1", disabled = true })' >/dev/null
+        hc eval 'hl.monitor({ output = "WAYLAND-1", disabled = true })' >/dev/null
         hc plugin list
     fi
     ours >> "$STATE/pids"
