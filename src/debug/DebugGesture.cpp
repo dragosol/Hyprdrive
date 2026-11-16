@@ -107,7 +107,7 @@ namespace Hyprdrive::DebugGesture {
                     ++open;
             return std::format("hyprdrive gesture: finger model {}, trackpad gesture {}, {} step(s) queued, {} played, {} overview(s) open, mods {}",
                                FingerSwipe::debugMode(), GestureDrive::active() ? "ACTIVE" : "none", g_queue.size(), g_played, open,
-                               g_pInputManager ? g_pInputManager->getModsFromAllKBs() : 0);
+                               g_pInputManager ? static_cast<uint32_t>(g_pInputManager->getModsFromAllKBs()) : 0);
         }
         if (script == "stop") {
             g_queue.clear();

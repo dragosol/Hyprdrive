@@ -217,11 +217,12 @@ namespace OpenProf {
             g_overviewNs             = 0;
             const auto   LASTPRES = g_lastPresent.contains(monitor->m_id) ? g_lastPresent[monitor->m_id] : clock::time_point{};
             const double PHASE    = LASTPRES != clock::time_point{} ? std::chrono::duration<double, std::milli>(NOW - LASTPRES).count() : -1.0;
-            g_lines.push_back(std::format("  +{:7.1f}  mon {} gap {:6.1f}  phase {:6.1f}  gpuclk {:4d}", msSince(g_t0), monitor->displayName(), gap, PHASE, gpuMHz()));
+            g_lines.push_back(std::format("  +{:7.1f}  mon {} gap {:6.1f}  phase {:6.1f}  gpuclk {:4d}", msSince(g_t0), monitor->m_name, gap, PHASE, gpuMHz()));
             g_frames.push_back({.mon = monitor->m_id, .line = g_lines.size() - 1, .pre = NOW, .lastPresentAtPre = LASTPRES,
                                 .periodMs = monitor->m_refreshRate > 1.F ? 1000.0 / monitor->m_refreshRate : 16.667});
         });
-        g_stage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
+        g_stage = Event::bus()->m_events.render.stage.listen([](Event::SRenderStageEvent e) {
+            const auto stage = e.stage;
             if (!g_on)
                 return;
             if (stage == RENDER_BEGIN) {
@@ -361,7 +362,7 @@ namespace OpenProf {
         class CGpuMarkElement : public IPassElement {
           public:
             explicit CGpuMarkElement(const char* name) : m_name(name) {}
-            std::vector<UP<IPassElement>> draw() override {
+            std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override {
                 // The frame's pending entry is the last one begun. The overview's
                 // later sections draw after RENDER_LAST_MOMENT, so "ended" does
                 // not close it to marks; the next RENDER_BEGIN does.
@@ -372,10 +373,10 @@ namespace OpenProf {
                 }
                 return {};
             }
-            bool needsLiveBlur() override {
+            bool needsLiveBlur(Render::CRenderContext&) override {
                 return false;
             }
-            bool needsPrecomputeBlur() override {
+            bool needsPrecomputeBlur(Render::CRenderContext&) override {
                 return false;
             }
             const char* passName() override {
@@ -384,10 +385,10 @@ namespace OpenProf {
             ePassElementType type() override {
                 return EK_CUSTOM;
             }
-            bool undiscardable() override {
+            bool undiscardable(Render::CRenderContext&) override {
                 return true;
             }
-            bool disableSimplification() override {
+            bool disableSimplification(Render::CRenderContext&) override {
                 return true;
             }
 
@@ -404,7 +405,7 @@ namespace OpenProf {
     void gpuMark(const char* name) {
         cpuMark(name);
         if (active() && g_pHyprRenderer)
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CGpuMarkElement>(name));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CGpuMarkElement>(name));
     }
 
     void addOverviewRender(uint64_t ns) {
