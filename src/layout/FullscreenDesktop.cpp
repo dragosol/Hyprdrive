@@ -238,9 +238,9 @@ namespace Hyprdrive::FullscreenDesktop {
             // Hyprland fades a window out of a desktop it leaves on screen, and
             // into one that is on screen; this one travels instead (travel()),
             // seen all the way.
-            w->alpha(Desktop::View::WINDOW_ALPHA_MOVE_TO_WORKSPACE)->setValueAndWarp(1.F);
-            w->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
-            w->m_monitorMovedFrom = -1;
+            w->presentation().alpha(Desktop::View::WINDOW_ALPHA_MOVE_TO_WORKSPACE)->setValueAndWarp(1.F);
+            w->presentation().alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
+            w->presentation().resetMonitorMovedFrom();
             if (keepFullscreen && !fullscreen(w))
                 Fullscreen::controller()->setFullscreenMode(w, Fullscreen::FSMODE_FULLSCREEN, std::nullopt);
             --g_busy;
@@ -357,7 +357,7 @@ namespace Hyprdrive::FullscreenDesktop {
         // shifts (moved).
         WORKSPACEID placeOf(const PHLWORKSPACEREF& ref, WORKSPACEID kept) {
             const auto S = ref.lock();
-            return FullscreenBook::placeOf(S && DesktopOrder::ordinary(S), S ? S->m_id : WORKSPACE_INVALID, kept);
+            return FullscreenBook::placeOf(S && DesktopOrder::ordinary(S), S ? Hyprdrive::Compat::id(S) : WORKSPACE_INVALID, kept);
         }
         template <class T>
         WORKSPACEID placeOf(const T& t) {
@@ -443,7 +443,7 @@ namespace Hyprdrive::FullscreenDesktop {
                 }
             auto space = byId(at);
             if (!space)
-                space = State::workspaceState()->create(at, MON->m_id);
+                space = State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(at)}, MON);
             if (!space) {
                 // No desktop for it after all: it stays where it is, and room
                 // made for it is owed back at once (it was a silent +1).
@@ -498,7 +498,7 @@ namespace Hyprdrive::FullscreenDesktop {
             PHLWORKSPACE best;
             for (const auto& REF : State::workspaceState()->workspaces())
                 if (const auto WS = REF.lock(); DesktopOrder::ordinary(WS) && WS != space && WS->m_monitor.lock() == mon && othersOn(WS, nullptr) > 0 &&
-                    (!best || std::abs(Hyprdrive::Compat::id(WS) - homeAt) < std::abs(best->m_id - homeAt)))
+                    (!best || std::abs(Hyprdrive::Compat::id(WS) - homeAt) < std::abs(Hyprdrive::Compat::id(best) - homeAt)))
                     best = WS;
             return best;
         }
@@ -568,7 +568,7 @@ namespace Hyprdrive::FullscreenDesktop {
                 const auto HMON = MON ? MON : (SPACE ? SPACE->m_monitor.lock() : nullptr);
                 if (t.homeAt >= 1 && HMON) {
                     if (const auto E = byId(t.homeAt); !E)
-                        home = State::workspaceState()->create(t.homeAt, HMON->m_id);
+                        home = State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(t.homeAt)}, HMON);
                     else if (othersOn(E, nullptr) == 0 && !isTripSpace(E))
                         home = E;
                 }
@@ -773,7 +773,7 @@ namespace Hyprdrive::FullscreenDesktop {
                 }
                 space = byId(at);
                 if (!space)
-                    space = State::workspaceState()->create(at, MON->m_id);
+                    space = State::workspaceState()->createNumbered(Workspace::SWorkspaceNumberedID{sc<uint32_t>(at)}, MON);
                 if (!space || space == WS) {
                     if (owes)
                         g_debts.push_back({.at = at, .mon = MON, .beside = true});
@@ -797,13 +797,13 @@ namespace Hyprdrive::FullscreenDesktop {
                 // X11 dialog was left at -10,-10, 21x21: invisible on its
                 // desktop. Hyprland's own focus would switch at once (no
                 // glide); showBesides glides there and focuses it.
-                w->m_noInitialFocus = true;
+                w->m_state |= Desktop::View::WINDOW_STATE_NO_INITIAL_FOCUS;
                 g_asked.emplace_back(w);
             } else {
                 // UNASKED (owner: "not be focused"): it goes quietly, the view
                 // and the pointer stay on the app; the dock and the strip say
                 // it is there (urgent, once it is mapped: showBesides).
-                w->m_noInitialFocus = true;
+                w->m_state |= Desktop::View::WINDOW_STATE_NO_INITIAL_FOCUS;
                 g_unasked.emplace_back(w);
             }
             // SHOWN ON ITS DESKTOP (user, 2026-11-09: "it opens it in the next
@@ -827,9 +827,9 @@ namespace Hyprdrive::FullscreenDesktop {
                 const auto W = REF.lock();
                 if (!W || !W->mapped() || !W->m_workspace || Fullscreen::controller()->hasFullscreen(W->m_workspace))
                     continue;
-                W->m_allowedOverFullscreen = true;
+                W->fullscreenPolicy().setAllowedOverFullscreen(true);
                 W->updateFullscreenInputState();
-                W->alpha(Desktop::View::WINDOW_ALPHA_FULLSCREEN)->setValueAndWarp(1.F);
+                W->presentation().alpha(Desktop::View::WINDOW_ALPHA_FULLSCREEN)->setValueAndWarp(1.F);
                 trace(std::format("{} shown on {}", W->metadata().appID(), Hyprdrive::Compat::id(W->m_workspace)));
             }
             g_besides.clear();
@@ -841,9 +841,7 @@ namespace Hyprdrive::FullscreenDesktop {
                     }
             for (const auto& REF : std::exchange(g_unasked, {}))
                 if (const auto W = REF.lock(); W && W->mapped() && !Hyprdrive::Compat::urgent(W) && Desktop::focusState()->window() != W) {
-                    W->m_isUrgent = true;
-                    g_pEventManager->postEvent(SHyprIPCEvent{.event = "urgent", .data = std::format("{:x}", rc<uintptr_t>(W.get()))});
-                    Event::bus()->m_events.window.urgent.emit(W);
+                    W->markUrgent();
                 }
         }
 
@@ -1002,10 +1000,11 @@ namespace Hyprdrive::FullscreenDesktop {
         bool            maximized(const PHLWINDOW& w) {
             return w && Fullscreen::controller()->getFullscreenModes(w).internal == Fullscreen::FSMODE_MAXIMIZED;
         }
+        constexpr uint64_t HOLD_FULLSCREEN = 1, HOLD_MAXIMIZE = 2;
         struct SHeldOut {
             PHLWINDOWREF    win;
             PHLWORKSPACEREF space;
-            uint64_t        flag = Desktop::View::SUPPRESS_FULLSCREEN;
+            uint64_t        flag = HOLD_FULLSCREEN;
         };
         std::vector<SHeldOut> g_heldOut;
         void releaseHeld(bool all) {
@@ -1013,17 +1012,24 @@ namespace Hyprdrive::FullscreenDesktop {
                 const auto W = h.win.lock();
                 if (!W)
                     return true;
-                const bool IN = h.flag == Desktop::View::SUPPRESS_MAXIMIZE ? maximized(W) : fullscreen(W);
+                const bool IN = h.flag == HOLD_MAXIMIZE ? maximized(W) : fullscreen(W);
                 if (!all && W->mapped() && W->m_workspace == h.space.lock() && !IN && othersOn(W->m_workspace, W) > 0)
                     return false;
-                W->m_suppressedEvents = sc<decltype(W->m_suppressedEvents)>(W->m_suppressedEvents & ~h.flag);
+                auto S = W->fullscreenPolicy().requestSuppression();
+                (h.flag == HOLD_MAXIMIZE ? S.maximize : S.fullscreen) = false;
+                W->fullscreenPolicy().setRequestSuppression(S);
                 return true;
             });
         }
-        void holdOut(const PHLWINDOW& w, uint64_t flag = Desktop::View::SUPPRESS_FULLSCREEN) {
-            if (!w || (w->m_suppressedEvents & flag))
+        void holdOut(const PHLWINDOW& w, uint64_t flag = HOLD_FULLSCREEN) {
+            if (!w)
+                return;
+            auto  S   = w->fullscreenPolicy().requestSuppression();
+            bool& bit = (flag == HOLD_MAXIMIZE) ? S.maximize : S.fullscreen;
+            if (bit)
                 return; // the user's own rule, or ours already
-            w->m_suppressedEvents = sc<decltype(w->m_suppressedEvents)>(w->m_suppressedEvents | flag);
+            bit = true;
+            w->fullscreenPolicy().setRequestSuppression(S);
             g_heldOut.push_back({w, w->m_workspace, flag});
         }
         // Un-maximized by a move, and when: a re-maximize soon after is the client's.
@@ -1047,7 +1053,7 @@ namespace Hyprdrive::FullscreenDesktop {
                     return false;
                 trace(std::format("{} maximized itself again on {}: un-maximized, its requests ignored while it shares the desktop", W->metadata().appID(), Hyprdrive::Compat::id(W->m_workspace)));
                 unmaximize(W);
-                holdOut(W, Desktop::View::SUPPRESS_MAXIMIZE);
+                holdOut(W, HOLD_MAXIMIZE);
                 return true;
             });
         }
@@ -1175,7 +1181,7 @@ namespace Hyprdrive::FullscreenDesktop {
                     L.wanted = true;
                     for (const auto& R : L.wins)
                         if (const auto W = R.lock())
-                            W->m_isUrgent = false;
+                            W->m_hints &= ~Desktop::View::WINDOW_HINT_URGENT;
                 }
                 f.wanted = L.wanted;
                 if (f.any)
@@ -1382,7 +1388,7 @@ namespace Hyprdrive::FullscreenDesktop {
         if (!w || !DesktopOrder::ordinary(origin))
             return;
         std::erase_if(g_origins, [&](const SOrigin& o) { return !o.win || o.win.lock() == w; });
-        g_origins.push_back({.win = w, .origin = origin, .originAt = origin->m_id, .mon = origin->m_monitor});
+        g_origins.push_back({.win = w, .origin = origin, .originAt = Hyprdrive::Compat::id(origin), .mon = origin->m_monitor});
         arm(250);
     }
 
@@ -1437,7 +1443,7 @@ namespace Hyprdrive::FullscreenDesktop {
             join(l, w);
             g_links.push_back(std::move(l));
             trace(std::format("{} opened on owed beside {}: the link again{}", w->metadata().appID(), Hyprdrive::Compat::id(WS), prompted ? "" : " (unasked: not shown)"));
-            w->m_noInitialFocus = true;
+            w->m_state |= Desktop::View::WINDOW_STATE_NO_INITIAL_FOCUS;
             (prompted ? g_asked : g_unasked).emplace_back(w);
             arm(1);
             return;

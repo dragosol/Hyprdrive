@@ -462,8 +462,8 @@ namespace Hyprdrive::Mosaic {
         if (!h || !w || !w->m_target || !FullscreenCarry::validMode(m.internal) || !FullscreenCarry::validMode(m.client))
             return;
         // The handler's own setters: its map only -- no event, no configure.
-        h->setTargetFullscreenModeInternal(w->m_target, Fullscreen::eFullscreenMode(m.internal));
-        h->setTargetFullscreenModeClient(w->m_target, Fullscreen::eFullscreenMode(m.client));
+        h->setTargetFullscreenModeInternal(w->layoutTarget(), Fullscreen::eFullscreenMode(m.internal));
+        h->setTargetFullscreenModeClient(w->layoutTarget(), Fullscreen::eFullscreenMode(m.client));
     }
 
     // Every tiled window that is fullscreen or maximized now.
