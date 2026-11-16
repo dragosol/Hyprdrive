@@ -38,7 +38,7 @@ namespace Hyprdrive::DesktopOrder {
             if (line == last)
                 return;
             last = line;
-            Log::logger->log(Log::ERR, "[hyprdrive] desktops: {}", line);
+            Log::logger->log(Log::ERR, Log::logFnName(), "[hyprdrive] desktops: {}", line);
             if (FILE* const F = DebugPaths::openLog("hyprdrive-desktops.log")) {
                 std::fprintf(F, "%lld desktops %s\n",
                              (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(),

@@ -181,7 +181,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Every worker thread is started through Workers (Workers.hpp). Accepting
     // again matters only to an image an earlier unload had to keep loaded.
-    Hyprdrive::Workers::setLog([](const std::string& line) { Log::logger->log(Log::ERR, "{}", line); });
+    Hyprdrive::Workers::setLog([](const std::string& line) { Log::logger->log(Log::ERR, Log::logFnName(), "{}", line); });
     Hyprdrive::Workers::reopen();
 
     // The debug logs older versions left in /tmp, readable by everyone at

@@ -281,7 +281,7 @@ namespace Hyprdrive::WindowPlacement {
                 if (!IT->budget.spend(nowMs())) {
                     trace(std::format("{} {:x} keeps floating itself: left floating (gave up after {} re-tiles in {} ms)", W->metadata().appID(), (uintptr_t)W.get(), CBudget::RETILES,
                                       CBudget::SPAN));
-                    Log::logger->log(Log::WARN, "[hyprdrive] placement: {} keeps floating itself, left floating", W->metadata().appID());
+                    Log::logger->log(Log::WARN, Log::logFnName(), "[hyprdrive] placement: {} keeps floating itself, left floating", W->metadata().appID());
                     continue;
                 }
                 trace(std::format("{} {:x} floated by its layout or the app: tiled again", W->metadata().appID(), (uintptr_t)W.get()));
@@ -348,7 +348,7 @@ namespace Hyprdrive::WindowPlacement {
             g_floatHook = nullptr;
         if (!g_floatHook) {
             trace("CWindowTarget::setFloating not hooked: decided at the map only");
-            Log::logger->log(Log::WARN, "[hyprdrive] placement: CWindowTarget::setFloating not found ({}): a layout's later float is left alone", found ? "hook failed" : "missing");
+            Log::logger->log(Log::WARN, Log::logFnName(), "[hyprdrive] placement: CWindowTarget::setFloating not found ({}): a layout's later float is left alone", found ? "hook failed" : "missing");
         }
     }
 
