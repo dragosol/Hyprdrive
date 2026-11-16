@@ -139,5 +139,5 @@ void CDropIndicator::renderDropIndicator(const SRenderParams& params) {
     data.round         = indicatorRounding(params);
     data.roundingPower = indicatorRoundingPower(params);
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(data));
+    g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(data));
 }

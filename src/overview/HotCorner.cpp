@@ -131,11 +131,7 @@ namespace Hyprdrive::HotCorner {
             // Outside the motion emit (a fresh overview registers its own motion
             // listener), and through the dispatcher so it is exactly a Super tap:
             // opens it everywhere, or closes it where it is open everywhere.
-            if (!g_pKeybindManager)
-                return;
-            const auto IT = g_pKeybindManager->m_dispatchers.find("hyprdrive:overview");
-            if (IT != g_pKeybindManager->m_dispatchers.end())
-                IT->second("toggle all");
+            Hyprdrive::Compat::dispatchOwn("hyprdrive:overview", "toggle all");
         }
 
         // The screen corner itself (global logical px): where the ripple starts.

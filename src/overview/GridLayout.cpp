@@ -174,9 +174,9 @@ namespace OvInternal {
         // recent walks last used first.
         std::tuple<bool, uint64_t, uint64_t> orderKey(const PHLWINDOW& window) {
             if (orderSnapshot().mode != Hyprdrive::Config::ETileOrder::RECENT)
-                return {false, 0, window->m_stableID};
+                return {false, 0, window->metadata().stableID()};
             const auto* ENTRY = orderEntry(window);
-            return Hyprdrive::GridSolve::recentKey(ENTRY != nullptr, ENTRY ? ENTRY->rank : 0, window->m_stableID);
+            return Hyprdrive::GridSolve::recentKey(ENTRY != nullptr, ENTRY ? ENTRY->rank : 0, window->metadata().stableID());
         }
     }
 
@@ -493,20 +493,20 @@ namespace OvInternal {
                 if (RESULT != ESize::STEADY && RESULT != ESize::FIRST && RESULT != ESize::FOLLOWING) {
                     const char* WHAT = RESULT == ESize::PENDING ? "pending" : RESULT == ESize::ADOPTED ? "adopted" : "rejected";
                     gridTrace(std::format("size {} {} {:.1f}x{:.1f} goal {:.1f}x{:.1f} (since {:.0f} ms) frame {} mon {}", WHAT, window->metadata().appID(), OLD.x, OLD.y, GOAL.x,
-                                          GOAL.y, REAL(entry.track.since), FRAME, monitor->displayName()));
+                                          GOAL.y, REAL(entry.track.since), FRAME, monitor->m_name));
                 }
                 if (FOLLOWED && (!entry.track.following || RESULT == ESize::ADOPTED)) {
                     const auto  WHY  = entry.track.following ? EFollowEnd::DIVERTED : entry.track.followEnd;
                     const char* WHAT = WHY == EFollowEnd::LANDED ? "landed" : WHY == EFollowEnd::CAPPED ? "capped" : "diverted";
                     gridTrace(std::format("size follow-end {} {} holds {:.1f}x{:.1f} after {:.0f} ms (cap {:.0f}) frame {} mon {}", WHAT, window->metadata().appID(), OLD.x, OLD.y,
-                                          REAL(FOLLOWT0), FOLLOWCAP, FRAME, monitor->displayName()));
+                                          REAL(FOLLOWT0), FOLLOWCAP, FRAME, monitor->m_name));
                 }
                 if (entry.track.following && (!FOLLOWED || RESULT == ESize::ADOPTED))
                     gridTrace(std::format("size follow-start {} toward {:.1f}x{:.1f} value {:.1f}x{:.1f} cap {:.0f} ms frame {} mon {}", window->metadata().appID(), GOAL.x, GOAL.y, VALUE.x,
-                                          VALUE.y, FOLLOWCAP, FRAME, monitor->displayName()));
+                                          VALUE.y, FOLLOWCAP, FRAME, monitor->m_name));
                 if (KNOWN && LATCHED != entry.track.latched)
                     gridTrace(std::format("size {} {} {:.1f}x{:.1f} frame {} mon {}", entry.track.latched ? "latch-on" : "latch-off", window->metadata().appID(), entry.track.adopted.x,
-                                          entry.track.adopted.y, FRAME, monitor->displayName()));
+                                          entry.track.adopted.y, FRAME, monitor->m_name));
             }
         }
 
@@ -658,7 +658,7 @@ namespace OvInternal {
             for (size_t i = 0; i < WINDOWS.size(); ++i)
                 for (size_t j = i + 1; j < WINDOWS.size(); ++j)
                     if (WINDOWS[i] == WINDOWS[j])
-                        Membership::renderDivergence("GRIDDUP", Hyprdrive::Compat::id(workspace), WINDOWS[i]->m_workspace ? WINDOWS[i]->Hyprdrive::Compat::id(m_workspace) : WORKSPACE_INVALID,
+                        Membership::renderDivergence("GRIDDUP", Hyprdrive::Compat::id(workspace), WINDOWS[i]->m_workspace ? Hyprdrive::Compat::id(WINDOWS[i]->m_workspace) : WORKSPACE_INVALID,
                                                      WINDOWS[i]->metadata().appID(), WINDOWS[i]->metadata().title());
         }
 
@@ -884,7 +884,7 @@ namespace OvInternal {
                 gridSetReflowActive(monitor);
 
             if (RESULT == EStep::RETARGETED && gridTraceOn())
-                gridTrace(std::format("retarget {} {} -> {} from {} frame {} mon {}", window->metadata().appID(), traceBox(WAS), traceBox(slot), traceBox(out), ASK.frame, monitor->displayName()));
+                gridTrace(std::format("retarget {} {} -> {} from {} frame {} mon {}", window->metadata().appID(), traceBox(WAS), traceBox(slot), traceBox(out), ASK.frame, monitor->m_name));
 
             return out;
         }
