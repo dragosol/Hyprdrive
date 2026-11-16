@@ -815,7 +815,9 @@ def describe(r):
         lines.append("Your Hyprland is %s; the Hyprdrive you have is built for %s." % (r["line"], r["installedLine"]))
     if r["latest"]:
         lines.append("Newest release on GitHub: %s  %s" % (r["latest"]["tag"], r["latest"]["url"]))
-    elif r.get("switch") and not r["error"]:
+    elif not r["error"] and not r.get("disabled"):
+        # Said on the same line too: a line with no release yet (a new
+        # Hyprland's) otherwise reports nothing but the installed version.
         lines.append("Hyprdrive has no release for Hyprland %s on GitHub yet." % r["line"])
     mk = r.get("marketplace")
     if FLAVOR == "omarchy" and mk is not None:

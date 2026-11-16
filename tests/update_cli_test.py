@@ -452,6 +452,16 @@ with contextlib.redirect_stdout(shown), tempfile.TemporaryDirectory() as tmp:
     picked.clear()
     rc, text = said(n.update, {"--yes"})
     expect(rc == 1 and picked == [] and "no release for Hyprland 0.57" in text, "no -hl57 release: nothing installed, and said (%r)" % text)
+    record("1.9.64", "0.57")
+    r = n.check(refresh=True)
+    expect(r["latest"] is None and not r["switch"] and not r["available"], "same line 0.57, no -hl57 release: nothing available")
+    rc, text = said(n.update, {"--check"})
+    expect(rc == 0 and "Hyprdrive has no release for Hyprland 0.57 on GitHub yet." in text,
+           "same line 0.57, no -hl57 release: --check says so (%r)" % text)
+    picked.clear()
+    rc, text = said(n.update, {"--yes"})
+    expect(rc == 0 and picked == [] and "no release for Hyprland 0.57" in text,
+           "same line 0.57, no -hl57 release: nothing installed, and said (%r)" % text)
 
     os.environ["HYPRDRIVE_HYPRLAND_VERSION"] = "0.58.0"
     n.fetch_json = lambda url, limit=0: expect(False, "unsupported: no network") or {}
