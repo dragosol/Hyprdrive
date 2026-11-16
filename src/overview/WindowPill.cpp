@@ -348,7 +348,7 @@ void render(PHLMONITOR monitor, const CBox& frame, float scale, float alpha) {
         disc.color         = CHyprColor{0.93F, 0.93F, 0.93F, 0.95F * A};
         disc.round         = sc<int>(std::round(D / 2.0));
         disc.roundingPower = 2.F;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(disc));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(disc));
 
         if (const auto TEX = OverviewRender::appIcon(ICONS[i])) {
             const float SIDE = D * GLYPH;
@@ -358,7 +358,7 @@ void render(PHLMONITOR monitor, const CBox& frame, float scale, float alpha) {
             glyph.box = CBox{C.x - SIDE / 2.0, C.y - SIDE / 2.0, SIDE, SIDE};
             glyph.box.round();
             glyph.a = A;
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(glyph));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(glyph));
         }
     }
 }
