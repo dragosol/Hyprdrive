@@ -322,11 +322,14 @@ write_config() {
     cat > "$STATE/test.lua" <<'LUA'
 -- hl.sh test config: vanilla Hyprland, nothing from ~/.config/hypr.
 -- HEADLESS-1 is the test output; WL-1 (the nested window in the outer
--- headless mutter) is turned off once HEADLESS-1 exists (see hl.sh start).
+-- headless mutter) is never a monitor: 0.56 never made one of it, and on 0.57
+-- (which does) an enabled one would be monitor 0, take desktop 1 from
+-- HEADLESS-1 and, retired by an eval that the plugin's config reload undoes,
+-- come and go again after the plugin loads -- display changes no test made.
 hl.monitor({ output = "HEADLESS-1", mode = "1920x1080@60", position = "0x0",    scale = 1 })
 hl.monitor({ output = "HEADLESS-2", mode = "1920x1080@60", position = "1920x0", scale = 1 })
-hl.monitor({ output = "WL-1",       mode = "1920x1080@60", position = "-1920x0", scale = 1 })
-hl.monitor({ output = "WAYLAND-1",  mode = "1920x1080@60", position = "-1920x0", scale = 1 }) -- newer aquamarine (0.57 builds) names it WAYLAND-1
+hl.monitor({ output = "WL-1",       disabled = true })
+hl.monitor({ output = "WAYLAND-1",  disabled = true }) -- newer aquamarine (0.57 builds) names it WAYLAND-1
 
 hl.config({
     general  = { gaps_in = 5, gaps_out = 10, border_size = 2, layout = "dwindle" },
