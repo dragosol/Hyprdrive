@@ -702,7 +702,7 @@ namespace {
         r.color         = Hyprdrive::Config::dockBackgroundColor().modifyA(SWAP_DIM_A * a);
         r.round         = round;
         r.roundingPower = Hyprdrive::Config::themeRoundingPower();
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(r));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CRectPassElement>(r));
     }
 }
 
@@ -758,7 +758,7 @@ void COverview::renderSwapLabel(PHLMONITOR monitor) {
         icon.box = CBox{std::round(LEFT), std::round(CY - ICONPX * K / 2.0), ICONPX * K, ICONPX * K};
         icon.a   = POSE.opacity;
         if (swapDrawable(icon.box))
-            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(icon)));
+            g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(std::move(icon)));
     }
 
     CTexPassElement::SRenderData label;
@@ -766,7 +766,7 @@ void COverview::renderSwapLabel(PHLMONITOR monitor) {
     label.box = CBox{std::round(LEFT + (ICONPX + GAP) * K), std::round(CY - TH * K / 2.0), TW * K, TH * K};
     label.a   = POSE.opacity;
     if (swapDrawable(label.box))
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(std::move(label)));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<CTexPassElement>(std::move(label)));
 }
 
 bool COverview::commitSwap(const PHLWINDOW& a, const PHLWINDOW& b) {
