@@ -231,8 +231,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pTargetPlaceHook->hook();
     Hyprdrive::ConfigureHold::setSender([](Desktop::View::CWindow* window, bool force) {
         if (g_pSendWindowSizeHook)
-            if (const auto TARGET = window->layoutTarget())
-                rc<origSendWindowSize>(g_pSendWindowSizeHook->m_original)(sc<Layout::CWindowTarget*>(TARGET.get()), force);
+            // The window's own target: layoutTarget() is the group's for a grouped window.
+            if (const auto TARGET = window->m_target)
+                rc<origSendWindowSize>(g_pSendWindowSizeHook->m_original)(TARGET.get(), force);
     });
     g_pShouldRenderWindowHook = Hyprdrive::FunctionHooks::required("main", "shouldRenderWindow", {"shouldRenderWindow(Hyprutils::Memory::CSharedPointer<Desktop::View::CWindow>, Hyprutils::Memory::CSharedPointer<Monitor::CMonitor>)"}, rc<void*>(hkShouldRenderWindow));
     g_pShouldRenderWindowHook->hook();
