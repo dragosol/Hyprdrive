@@ -389,8 +389,8 @@ static bool clickImpl(PHLMONITOR monitor, const Vector2D& point, bool shift, boo
     // SUPER / ALT / CTRL held: "open it in an empty workspace" when it is not
     // running. Read HERE, not in activateItem -- SUPER+number hotkeys go
     // through activateItem too, with SUPER held by definition.
-    const uint32_t MODS  = g_pInputManager ? g_pInputManager->getModsFromAllKBs() : 0;
-    const bool     EMPTY = ctrl || (MODS & (HL_MODIFIER_META | HL_MODIFIER_ALT | HL_MODIFIER_CTRL)) != 0;
+    const Input::ModifierMask MODS = g_pInputManager ? g_pInputManager->getModsFromAllKBs() : Input::ModifierMask{HL_MODIFIER_NONE};
+    const bool     EMPTY = ctrl || static_cast<bool>(MODS & (HL_MODIFIER_META | HL_MODIFIER_ALT | HL_MODIFIER_CTRL));
     // A folder: the fan (or grid) and the file manager are its two opens, and
     // Super picks the one its view does not (View in Files: click = the file
     // manager, Super+click = the fan; the other views the other way round).
@@ -399,7 +399,7 @@ static bool clickImpl(PHLMONITOR monitor, const Vector2D& point, bool shift, boo
         for (const auto& S : Stacks::all())
             if (S.path == ITEM->stackPath)
                 files = S.view == StackModel::EView::Files;
-        if (((MODS & HL_MODIFIER_META) != 0) != files) {
+        if (static_cast<bool>(MODS & HL_MODIFIER_META) != files) {
             Locations::activate(ITEM->uri);
             return true;
         }

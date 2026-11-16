@@ -56,9 +56,9 @@ void queueDockFrost(PHLMONITOR monitor, const CBox& box, int rounding, float alp
     blur.blurContrast   = Config::getValue<float>(KEY_BLUR_CONTR);
     blur.blurVibrancy   = Config::getValue<float>(KEY_BLUR_VIBR);
     if (currentPass)
-        g_pHyprRenderer->addPassElement(makeUnique<COverviewBlurPassElement>(blur));
+        Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<COverviewBlurPassElement>(blur));
     else
-        g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewBlurPassElement>(blur));
+        g_pHyprRenderer->context().m_pass.add(makeUnique<COverviewBlurPassElement>(blur));
 }
 
 // The staleness windows below read REAL milliseconds (Config::realElapsedMs),
@@ -543,7 +543,7 @@ static void organicPlate(PHLMONITOR monitor, const std::vector<SPanelBand>& band
     d.tex = g_organicPlate.tex;
     d.box = g_organicPlate.box;
     d.a   = TINT.a * alpha;
-    g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(d));
+    Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CTexPassElement>(d));
 }
 
 CBox panelRiseOrigin(const SLayout& layout, const CBox& anchor) {
@@ -593,7 +593,7 @@ static void drawPreviewCell(PHLMONITOR monitor, const PHLWINDOW& WINDOW, const C
         dim.color         = CHyprColor{0.F, 0.F, 0.F, PANEL_PARKED_DIM * ALPHA};
         dim.round         = DIMROUND;
         dim.roundingPower = ROUNDPWR;
-        g_pHyprRenderer->addPassElement(makeUnique<CRectPassElement>(dim));
+        Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CRectPassElement>(dim));
 
         // Deliberately NOT a theme colour, and that is the whole point of
         // the label: it is read over a DARKENED thumbnail, and a dark
@@ -615,7 +615,7 @@ static void drawPreviewCell(PHLMONITOR monitor, const PHLWINDOW& WINDOW, const C
                              std::round(sc<float>(cell.y) + (sc<float>(cell.height) - sc<float>(TEX->m_size.y)) / 2.F), sc<float>(TEX->m_size.x),
                              sc<float>(TEX->m_size.y)};
             label.a   = ALPHA;
-            g_pHyprRenderer->addPassElement(makeUnique<CTexPassElement>(label));
+            Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CTexPassElement>(label));
         }
     }
 
@@ -633,7 +633,7 @@ static void drawPreviewCell(PHLMONITOR monitor, const PHLWINDOW& WINDOW, const C
     border.borderSize    = BORDERSIZE;
     border.round         = ROUND;
     border.roundingPower = ROUNDPWR;
-    g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(border));
+    Render::IHyprRenderer::addPassElement(g_pHyprRenderer->context(), makeUnique<CBorderPassElement>(border));
 }
 
 // Pass an empty class when nothing is hovered; like the tooltip, the panel
