@@ -2,7 +2,7 @@
 
 Scope: `Layout::*`, `g_layoutManager`, drag controller, `Fullscreen::*`, Hyprutils animated variables,
 `Animation::mgr()->createAnimation`, `Config::animationTree()`, window/layer animated members.
-Headers: `NEW = /home/dragos/sdk/hl057/include/hyprland/src`. Include as `<hyprland/src/...>`.
+Headers: `NEW = <SDK>/include/hyprland/src`. Include as `<hyprland/src/...>`.
 
 ## 0. Why the m_realPosition / m_Value / m_bIsBeingAnimated / m_target errors appear (read first)
 

@@ -3,7 +3,7 @@
 Scope: only symbols Hyprdrive uses. Headers: `hl057/include/hyprland/src/...` (written as `<hyprland/src/...>`).
 Hyprland source refs are under `sdk/src/hyprland-0.57.2/src`.
 
-**Caution:** `errors.txt` is incomplete for 8 TUs. They include `src/core/PluginParts.hpp`, which dies on a missing
+**Caution:** the port's first build log (not kept in the tree) is incomplete for 8 TUs. They include `src/core/PluginParts.hpp`, which dies on a missing
 header (`DispatcherGesture.hpp`, see N3). Those TUs are main.cpp, Hooks.cpp, Dispatchers.cpp, DebugCommands.cpp,
 KeyRouter.cpp, GestureBinds.cpp, SearchInput.cpp and OverviewOpen.cpp. They were grepped by hand, and their hits are
 listed below.

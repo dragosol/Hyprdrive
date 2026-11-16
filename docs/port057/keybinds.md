@@ -1,7 +1,7 @@
 # Port 0.56.2 -> 0.57.2: keybinds and input
 
 Scope: `g_pKeybindManager` / `SKeybind` / dispatchers-by-name / modifier masks / trackpad gestures.
-Headers: `/home/dragos/sdk/hl057/include/hyprland/src`. Hyprland's own use: `/home/dragos/sdk/src/hyprland-0.57.2/src`.
+Headers: `<SDK>/include/hyprland/src`. Hyprland's own use: `<hyprland-0.57.2 source>/src`.
 `HyprCompat.hpp` already has `using enum Input::eKeyboardModifiers;`, so bare `HL_MODIFIER_META` etc. still resolve
 (but are now enum values, not `uint32_t`).
 

@@ -2,7 +2,7 @@
 
 Scope: workspace lookup, creation, rename, renumber, visibility, special workspaces, workspace
 animations, monitor workspace state, `g_pCompositor` members. Only symbols Hyprdrive uses.
-Headers are relative to `<hyprland/src/...>`. Error lines are from `docs/port057/errors.txt`.
+Headers are relative to `<hyprland/src/...>`. Error lines are from the port's first build log (not kept in the tree).
 
 Background: `CWorkspace` (0.56, `desktop/Workspace.hpp`) is now `Workspace::CHLWorkspace`
 (`workspace/HLWorkspace.hpp`), with subclasses `CRegularWorkspace` / `CSpecialWorkspace`.
@@ -129,7 +129,7 @@ namespace Animation::Workspace {
 ```
 `PHLWORKSPACE` is now `CSharedPointer<Workspace::CHLWorkspace>`, so the mangled name in
 DesktopSwitch.cpp:387 no longer exists in the binary. Verified with `nm` on
-`/home/dragos/sdk/hl057/bin/Hyprland`:
+`<SDK>/bin/Hyprland`:
 ```
 _ZN9Animation9Workspace14startAnimationEN9Hyprutils6Memory14CSharedPointerIN9Workspace12CHLWorkspaceEEENS0_14eAnimationTypeEbbSt8optionalINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE
 ```

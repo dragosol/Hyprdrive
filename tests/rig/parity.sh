@@ -3,7 +3,7 @@
 #
 # Runs one headless rig instance per side (tests/rig/headless/hl.sh), one after
 # the other so they never compete for the GPU:
-#   0.56: the system Hyprland + P56_SO (default: the hyprland-native checkout's
+#   0.56: the system Hyprland + P56_SO (default: a hyprland-native checkout beside this one, its
 #         hyprdrive.so), HL_NAME=gpar56
 #   0.57: HL_PREFIX=P57_PREFIX (default /tmp/hl057) + P57_SO (default: this
 #         tree's hyprdrive.so), HL_NAME=gpar57
@@ -30,7 +30,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 R=$ROOT/tests/rig/headless/hl.sh
 OUT=${1:-/tmp/hdpar}
-P56_SO=${P56_SO:-/home/dragos/Projects/hyprdrive-native/hyprdrive.so}
+P56_SO=${P56_SO:-$ROOT/../hyprdrive-native/hyprdrive.so}
 P57_SO=${P57_SO:-$ROOT/hyprdrive.so}
 P57_PREFIX=${P57_PREFIX:-/tmp/hl057}
 TOL=${PAR_TOL:-2}

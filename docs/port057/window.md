@@ -3,7 +3,7 @@
 Scope: the `Desktop::View::CWindow` members Hyprdrive touches that moved, went private or were split into
 sub-objects in 0.57 (alpha/dim, decoration fades, transformers, X11/XDG surfaces, reported size, suppression,
 target, suspend/hidden, floating/pinned/urgent writes, fullscreen policy, real pos/size, layer above-FS, rules).
-Header root: `<hyprland/src/...>` (SDK `~/sdk/hl057/include/hyprland/src`). `HyprCompat.hpp` already pulls in
+Header root: `<hyprland/src/...>` (SDK `<SDK>/include/hyprland/src`). `HyprCompat.hpp` already pulls in
 Window, WindowMetadata, WindowPresentation, WindowBackend, WindowEffectsController, WindowFullscreenPolicy.
 
 0.57 splits CWindow into sub-objects, reached through accessors on `CWindow`:
