@@ -114,7 +114,22 @@ int main() {
     // 3. Omarchy Menu Actions Search — must not fork. The old path ran
     // system("bash -c when") for every menu row on the first query and froze
     // the compositor for seconds.
+    // The menu is the test's own file, in Omarchy's schema: the installed one
+    // exists only on Omarchy, and this must pass anywhere.
     {
+        static std::string s_menu;
+        char               tmpl[] = "/tmp/hd-menu-test-XXXXXX";
+        s_menu                    = std::string(mkdtemp(tmpl)) + "/omarchy-menu.jsonc";
+        std::ofstream(s_menu) << "{\n  // a comment, as the real file has\n"
+                                 "  \"install\": {\"icon\":\"\uF249\",\"label\":\"Install\"},\n"
+                                 "  \"system\": {\"icon\":\"\uF249\",\"label\":\"System\"},\n"
+                                 "  \"system.lock\": {\"icon\":\"\uF249\",\"label\":\"Lock\",\"action\":\"true\"},\n"
+                                 "  \"install.package\": {\"icon\":\"\uF249\",\"label\":\"Package\",\"action\":\"true\"},\n"
+                                 "}\n";
+        SearchBackend::SHost host;
+        host.systemMenu = [] { return s_menu; };
+        SearchBackend::setHost(host);
+
         const auto t0 = std::chrono::steady_clock::now();
         auto menuResults = SearchBackend::searchMenu("lock", 5);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -152,6 +167,8 @@ int main() {
         CHECK(hasBack);
         CHECK(hasPackage);
         SearchBackend::resetMenuRoute();
+        SearchBackend::setHost({});
+        std::filesystem::remove_all(std::filesystem::path(s_menu).parent_path());
     }
 
     // 4. File search is idle until a query is issued

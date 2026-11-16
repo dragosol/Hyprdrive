@@ -64,6 +64,10 @@ static bool omarchyMode() {
     return g_host.omarchy ? g_host.omarchy() : true;
 }
 
+static std::string omarchySystemMenu() {
+    return g_host.systemMenu ? g_host.systemMenu() : std::string{"/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc"};
+}
+
 std::string menuRootTitle() {
     return omarchyMode() ? "Omarchy Menu" : "System";
 }
@@ -1656,7 +1660,7 @@ static void reloadMenuIfNeeded() {
 
     const bool        OMARCHY = omarchyMode();
     const char*       home    = std::getenv("HOME");
-    const std::string sysPath = OMARCHY ? "/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc" : "";
+    const std::string sysPath = OMARCHY ? omarchySystemMenu() : "";
     const std::string userPath =
         OMARCHY ? (home ? std::string(home) + "/.config/omarchy/extensions/omarchy-menu.jsonc" : "") : Native::configPath("menu.jsonc");
 
@@ -2278,7 +2282,7 @@ uint64_t searchInputsGeneration() {
 
         struct stat st {};
         if (OMARCHY) {
-            mix(stat("/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc", &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
+            mix(stat(omarchySystemMenu().c_str(), &st) == 0 ? static_cast<uint64_t>(st.st_mtime) : 0);
         } else {
             // Hyprdrive's own menu, and the program-lookup window: an agent
             // or grim installed while Hyprland runs shows up within RESOLVE_TTL.
