@@ -8,6 +8,9 @@
 #include "HyprCompat.hpp"
 #include <hyprland/src/state/WorkspaceState.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/state/workspace/LifecyclePolicyAdapter.hpp>
+#include <hyprland/src/desktop/history/WorkspaceHistoryTracker.hpp>
+#include <hyprland/src/config/supplementary/propRefresher/PropRefresher.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/ipc/s2/S2.hpp>
 #include <hyprland/src/desktop/view/window/Window.hpp>
@@ -120,10 +123,23 @@ namespace Hyprdrive::DesktopOrder {
                 const bool NUMERIC = WS->displayName() == std::to_string(FROM);
                 if (TO <= 0 || !WS->numberedID())
                     continue;
-                WS->changeID(Workspace::SWorkspaceNumberedID{sc<Workspace::WorkspaceIDContainer>(TO)});
+                // Not CHLWorkspace::changeID: on 0.57 it posts
+                // changeworkspaceid>>OLD,NEW per desktop, which Omarchy-style
+                // scripts (and the blocks gates) read as a workspace
+                // renumbering fight. 0.56 wrote the id in place and the bars
+                // got only the destroy/create/workspace burst below; keep that.
+                // Hyprland's own bookkeeping from changeID stays (lifecycle
+                // policy + history follow the number, ext-workspace renames).
+                const auto OLD_IDENTITY = State::Workspace::SWorkspaceIdentity{WS->m_id, WS->addressableName(), WS->type()};
+                WS->m_id              = Workspace::SWorkspaceNumberedID{sc<Workspace::WorkspaceIDContainer>(TO)};
+                WS->m_addressableName = std::to_string(TO);
                 // A numeric name is the number; a name the user gave stays.
-                if (NUMERIC && WS->displayName() != std::to_string(TO))
-                    WS->rename(std::to_string(TO));
+                if (!WS->m_wasRenamed || NUMERIC)
+                    WS->m_name = std::to_string(TO);
+                Config::Supplementary::refresher()->scheduleRefresh(Config::Supplementary::REFRESH_ALL);
+                State::Workspace::workspaceIdentityChanged(OLD_IDENTITY, {WS->m_id, WS->addressableName(), WS->type()});
+                Desktop::History::workspaceTracker()->workspaceIdentityChanged(WS);
+                WS->m_events.idChanged.emit();
             }
         });
         // (Each monitor's "previous workspace" stack holds numbers too, but
