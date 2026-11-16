@@ -1,4 +1,6 @@
-# hyprpm manifest -- `hyprpm add https://github.com/dragosol/Hyprdrive origin/hyprland-native`
+# hyprpm manifest -- `hyprpm add https://github.com/dragosol/Hyprdrive origin/hyprland-0.57`
+# (this branch is the Hyprland 0.57 line; for Hyprland 0.56 add
+# origin/hyprland-native instead)
 # (hyprpm's second argument is a git revision for `git reset --hard` in a fresh
 # clone, so a branch other than the default one needs its origin/ name).
 #
@@ -17,10 +19,14 @@
 #
 # COMMIT PINS map a Hyprland commit to the plugin commit that builds against it,
 # for users on an OLDER Hyprland than this branch's HEAD targets. HEAD targets
-# 0.56.2 (efb50993780079460b0cbed1363e2166a2de1d9f) itself, so it has no pin:
-# pinning the current version would freeze every 0.56.2 user at one commit and
-# hide every fix after it. When HEAD moves to the next Hyprland, add
-#     ["efb50993780079460b0cbed1363e2166a2de1d9f", "<last commit built on 0.56.2>"]
+# 0.57.2 (11cbc6c577b84ffb1edf4df3fc5b6128c3ae6947) itself, so it has no pin:
+# pinning the current version would freeze every 0.57.2 user at one commit and
+# hide every fix after it. Hyprland 0.56.2 gets no pin here either: its line
+# is the hyprland-native branch, which keeps receiving fixes, and a pin would
+# freeze 0.56.2 users at one of its commits. Built on 0.56.2, this branch stops
+# at `make` (scripts/prereqs.sh, exit 3) and names hyprland-native. When HEAD
+# moves to the next Hyprland, add
+#     ["11cbc6c577b84ffb1edf4df3fc5b6128c3ae6947", "<last commit built on 0.57.2>"]
 # to commit_pins below.
 
 [repository]

@@ -6,7 +6,7 @@ A topic that reports something sends the report back as the dispatch **error
 text**, so `hyprctl dispatch` prints it (and it also goes to the Hyprland log).
 `hyprctl eval` drops it.
 
-From a Lua config or `hyprctl` (Hyprland 0.56, Lua):
+From a Lua config or `hyprctl` (Hyprland 0.57, Lua):
 
 ```sh
 hyprctl dispatch 'hl.plugin.hyprdrive.debug("frames")'
@@ -84,7 +84,7 @@ behind it.
 | `button left\|right\|middle down\|up` | one clickpad button edge, from the touchpad |
 | `wait MS` | pause |
 | `swipe F up\|down\|left\|right DIST [STEPS [MS]] [hold]` | begin, then STEPS updates (default 12, 8 ms apart), then end. `hold` leaves the gesture open |
-| `pinch F in\|out [SCALE [STEPS [MS]]] [hold]` | `in`/`out` are the **config** directions `pinchin`/`pinchout`. Hyprland 0.56 maps scale < 1 (fingers closing) to `pinchout`, so `out` runs scale 1 to 0.5 and `in` runs 1 to 2.0 |
+| `pinch F in\|out [SCALE [STEPS [MS]]] [hold]` | `in`/`out` are the **config** directions `pinchin`/`pinchout`. Hyprland (0.56 and 0.57; the gesture code is unchanged between them) maps scale < 1 (fingers closing) to `pinchout`, so `out` runs scale 1 to 0.5 and `in` runs 1 to 2.0 |
 | `keep F DIR MM1 MM2 [STEPS [MS]]` | keep_swipe. F fingers swipe MM1 mm. One finger lifts, so libinput cancels its swipe and starts an (F-1)-finger one. The rest travel MM2 mm more, then lift |
 | `drag F DIR MM [STEPS [MS]]` | swipe_while_dragging. One finger holds the button, F more (3 or 4) land and travel MM mm, lift, then the button is let go. libinput sends no gesture for this, only frames |
 | `click F [MS]` | an F-finger physical click (clickfinger). `hold begin F`, 30 ms, `hold end cancel` (the press cancels the hold). For 1, 2 or 3 fingers the button clickfinger maps them to (left, right, middle) then goes down and comes up MS later (default 40). 4 or more fingers map to no button, so the cancelled hold is all there is, and the click fires after the 80 ms grace |

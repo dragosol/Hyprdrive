@@ -7,13 +7,15 @@ theme.
 
 ![Hyprdrive on native Hyprland: the overview, search, the dock and Mosaic](docs/media/hyprdrive-native.gif)
 
-**Early access** for plain Hyprland 0.56, on any distro: download the
-[latest release](https://github.com/dragosol/Hyprdrive/releases/latest) and
-follow [Install](#install) below. It is in continuous development, so expect
+**Early access** for plain Hyprland 0.57, on any distro: take the newest
+`vX.Y.Z-hl57` release from the
+[release list](https://github.com/dragosol/Hyprdrive/releases) and follow
+[Install](#install) below. For Hyprland 0.56 use the `hyprland-native` branch
+and its releases instead. It is in continuous development, so expect
 regular updates; feedback and bug reports are welcome in the
 [issues](https://github.com/dragosol/Hyprdrive/issues).
 
-This branch (`hyprland-native`) runs on plain Hyprland and adds Mosaic, a
+This branch (`hyprland-0.57`) runs on plain Hyprland 0.57 and adds Mosaic, a
 hybrid layout, alongside the overview, a full dock with stacks and search. On
 [Omarchy](https://omarchy.org/) it notices Omarchy and integrates with it.
 
@@ -21,9 +23,10 @@ hybrid layout, alongside the overview, a full dock with stacks and search. On
 [Demo film on YouTube](https://www.youtube.com/watch?v=RRkIViQvAOY) ·
 [All config keys](docs/CONFIG.md)
 
-> Built and tested against Hyprland **0.56.2** with a **Lua** config
-> (`hyprland.lua`). Other Hyprland versions are not supported: the plugin
-> refuses to load on an ABI mismatch, which shows up as `[he] Version mismatch`.
+> Built and tested against Hyprland **0.57.2**, in a headless test rig, with a
+> **Lua** config (`hyprland.lua`). Other Hyprland versions are not supported by
+> this branch: the plugin refuses to load on an ABI mismatch, which shows up as
+> `[he] Version mismatch`. For Hyprland 0.56 use the `hyprland-native` branch.
 
 ## What it does
 
@@ -258,7 +261,7 @@ switches, the overview, the dock) or turned off.
 
 ## Requirements
 
-- **Hyprland 0.56** (built against 0.56.2) with a **Lua config**,
+- **Hyprland 0.57** (built against 0.57.2) with a **Lua config**,
   `~/.config/hypr/hyprland.lua`. With a hyprlang `hyprland.conf` the plugin
   still loads, and both tap-Super and the dock work. The installed fragments
   (the overview's click submap, the 3-finger gestures, the settings rules) are
@@ -368,17 +371,17 @@ Mosaic sizes) is kept.
 ### With hyprpm
 
 ```bash
-hyprpm add https://github.com/dragosol/Hyprdrive origin/hyprland-native
+hyprpm add https://github.com/dragosol/Hyprdrive origin/hyprland-0.57
 hyprpm enable hyprdrive
 hyprpm reload
 ```
 
-Write the branch as `origin/hyprland-native`. hyprpm's optional second
+Write the branch as `origin/hyprland-0.57`. hyprpm's optional second
 argument is a git revision, not a branch: it clones the repository's default
 branch and then runs `git reset --hard <rev>`. In a fresh clone only the
-default branch exists locally, so a bare `hyprland-native` fails with "Could
+default branch exists locally, so a bare `hyprland-0.57` fails with "Could
 not check out revision". `hyprpm update` clones again and resets to the same
-revision, so `origin/hyprland-native` keeps following the branch.
+revision, so `origin/hyprland-0.57` keeps following the branch.
 
 hyprpm builds and loads only the `.so`. Tap-Super, the dock, the search and
 stacks all work from that alone. What hyprpm cannot install:
@@ -550,8 +553,12 @@ an argument, never through a shell.
 
 ## Honest notes
 
-- **Hyprland 0.56.2 only.** Each Hyprland release changes the plugin ABI, and
-  a new one needs a rebuild at the least, maybe a port.
+- **Hyprland 0.57.2 only, and new.** This branch is the port to Hyprland
+  0.57. It has so far been tested only in a headless test rig (the behaviour
+  gates), not yet in a real session on real hardware. The 0.56 line, which
+  has had that use, lives on branch `hyprland-native`. Each Hyprland release
+  changes the plugin ABI, and a new one needs a rebuild at the least, maybe a
+  port.
 - **Mosaic is experimental**, and so is the standalone settings app.
 - **Genie minimize is broken** for now, so it stays off whatever the setting
   says.
