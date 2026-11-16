@@ -1510,7 +1510,7 @@ void COverview::renderSearch(PHLMONITOR monitor, float renderScale) {
         } else
             drawSearch(SL, PILLLIT, BODYLIT, blurred ? 1 : 0);
         // The easter egg (KeyboardCat.hpp) opens out of the pill, over it.
-        Hyprdrive::KeyboardCat::render(monitor, SL.pill, SL.scale, SL.fade, SL.rounding, SL.roundingPower, SL.bandH);
+        Hyprdrive::KeyboardCat::render(g_pHyprRenderer->context(), monitor, SL.pill, SL.scale, SL.fade, SL.rounding, SL.roundingPower, SL.bandH);
     }
 
     // The letter bounce is timestamped, not a PHLANIMVAR, so the compositor
