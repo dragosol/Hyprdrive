@@ -22,7 +22,7 @@ namespace OvInternal {
 // ---------------------------------------------------------------------------
 
 void COverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
-        auto& S = searchSession();
+        auto& S = m_search;
         const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
         if (INPUTOVERVIEW) {
             const auto INPUTMONITOR = INPUTOVERVIEW->pMonitor.lock();
@@ -58,7 +58,7 @@ void COverview::onMouseMove(Vector2D, Event::SCallbackInfo& info) {
                     S.nav.intent     = ESearchIntent::Typing;
                     damage();
                 }
-            } else if (const auto* ROW = searchRowAt(searchMonitorId(), lastMousePosLocal); ROW) {
+            } else if (const auto* ROW = searchRowAt(searchLayoutHere(), lastMousePosLocal); ROW) {
                 if (S.nav.hoverIndex != ROW->index) {
                     S.nav.hoverIndex = ROW->index;
                     S.nav.selection  = ROW->index;
@@ -240,7 +240,7 @@ void COverview::onTouchMove(ITouch::SMotionEvent, Event::SCallbackInfo& info) {
 }
 
 void COverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
-        auto& S = searchSession();
+        auto& S = m_search;
         const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
         if (closing || (g_pointerGrabOverview && g_pointerGrabOverview != this) || (!g_pointerGrabOverview && INPUTOVERVIEW.get() != this))
             return;
@@ -428,7 +428,7 @@ void COverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo
                 // on that selection would; released anywhere else it is the
                 // user changing their mind, which is a no-op. G12's hold stays
                 // the drag gate -- a click is simply what happens without it.
-                if (const auto* ROW = searchRowAt(searchMonitorId(), lastMousePosLocal); ROW && ROW->index == DRAG.index && activateSearchResult(S, ROW->index)) {
+                if (const auto* ROW = searchRowAt(searchLayoutHere(), lastMousePosLocal); ROW && ROW->index == DRAG.index && activateSearchResult(S, ROW->index)) {
                     if (const auto W = S.nav.pendingFocus.lock()) {
                         closeOnWindow = W;
                         S.nav.pendingFocus.reset();
@@ -462,7 +462,7 @@ void COverview::onMouseButton(IPointer::SButtonEvent event, Event::SCallbackInfo
             // hold makes it a drag, and a plain click over a row is still the
             // panel's to define.
             if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
-                if (const auto* ROW = searchRowAt(searchMonitorId(), lastMousePosLocal); ROW) {
+                if (const auto* ROW = searchRowAt(searchLayoutHere(), lastMousePosLocal); ROW) {
                     S.nav.selection         = ROW->index;
                     S.nav.zone              = EOverviewNavZone::Result;
                     S.nav.intent            = ESearchIntent::Hovering;
@@ -881,7 +881,7 @@ static bool isOverviewCloseChord(xkb_keysym_t keysym, uint32_t mods) {
 }
 
 void COverview::onKeyboardKey(IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
-        auto& S = searchSession();
+        auto& S = m_search;
         if (closing || event.state != WL_KEYBOARD_KEY_STATE_PRESSED || activeScrollOverview().get() != this)
             return;
 
