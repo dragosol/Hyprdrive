@@ -115,6 +115,9 @@ Covered: **37 of 76** rows (30 fully, 7 partly); 39 not covered, each with its r
 | Hot corner toggles overview with a 1 s ripple [10-13] | not covered: off by default; the ripple is pixels (old `x30`-era gates) |
 | Backdrop blur source option (off/static/snapshot/live/auto) [11-03] | not covered: pixels |
 | Search: click-to-open off by default; selection colour distinguishable; easter egg toggle [10-08, 10-24, 11-04] | not covered here: defaults host-tested (`config_defaults_test.py`); old `g1`, `g5` |
+| Search session contract (refactor p3/search): typing lists rows, auto-selects the first app, opens the band and docks the pill; arrows/Tab walk search/results/tiles/desktops; Backspace; Escape clears then closes; no match; the live field; the strip label with results; a fresh session after close + reopen | `search_keys` (state from `hyprdrive:debug search`); controls: one-line builds in `search_controls/` |
+| Search activation: Return focuses a running app's window, launches one that is not running, picks the keyboard's tile; a click on a row | `search_activate` |
+| Search with two outputs: one query/selection, each output its own pane and grid filter, Escape twice clears and closes both | `search_monitors` |
 | Dock fan stacks, scrollbar, type-to-filter [10-08] | not covered: old `v4_stacks` (retired VM share) |
 | Dock preview pane wraps, concentric corners [10-16] | not covered: pixels |
 | Dock context menu entries [10-13, 10-15, 10-30] | not covered: old `x28` (retired VM share) |
