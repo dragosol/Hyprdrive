@@ -63,7 +63,7 @@ inline std::vector<SSearchRow> overviewSearchRowsLive(Search::CSession& S);
 //
 // Nothing about the SELECTION is in here. The rows are what the query and the
 // system are; which one is highlighted is navigation state and lives in
-// g_search.nav, which is exactly why it can be left out of the key.
+// the session's nav, which is exactly why it can be left out of the key.
 //
 // The empty-query browse (the pill focused with nothing typed) IS on the
 // per-frame path now, and it is the only caller of recentFiles(), which stats
