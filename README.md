@@ -569,11 +569,27 @@ an argument, never through a shell.
 
 - **Vaxry** and the [hyprland-plugins](https://github.com/hyprwm/hyprland-plugins)
   contributors. This repository is a fork of that tree, and Hyprland's plugin
-  API is what makes any of this possible (BSD-3-Clause, see `LICENSE`).
+  API is what makes any of this possible (BSD-3-Clause, see `LICENSE.BSD`).
 - **yayuuu**, whose `scrolloverview` plugin Hyprdrive grew from. Old configs
   that use the `scrolloverview` names still load for one release.
-- **dragos**: Hyprdrive itself, the dock, stacks, Mosaic and the Omarchy
+- **dragosol**: Hyprdrive itself, the dock, stacks, Mosaic and the Omarchy
   integration.
 
 Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). The rules there are short
 and every one of them is a crash that already happened.
+
+## License
+
+Hyprdrive is free software under the GNU General Public License, version 3,
+from version 1.9.66 on (`LICENSE`, `NOTICE.md`). Earlier versions were BSD
+3-Clause and stay that way. The parts that come from Hypr Development's plugin
+code, and what other people contributed before 1.9.66, keep their BSD 3-Clause notice (`LICENSE.BSD`).
+
+You may use, study, change and share it. If you share a changed version:
+
+- it stays under the same license, with its source;
+- the settings keep the name "Hyprdrive" and the "by dragosol" signature, as
+  they are;
+- it says it is a modified version, and does not present your changes as mine.
+
+If you want something this does not allow, ask: github.com/dragosol.
