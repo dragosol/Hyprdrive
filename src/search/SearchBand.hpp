@@ -49,7 +49,8 @@ inline constexpr float OVERVIEW_CARD_CELLGAPL     = 4.F;  // that cell's icon ->
 inline constexpr float OVERVIEW_CARD_CELLPX       = 13.F; // that label
 
 inline float overviewResultsLogicalHeight(PHLMONITOR monitor) {
-    return monitor ? std::max(0.F, g_search.layoutOn(monitor->m_id).bandH) : 0.F;
+    auto& S = searchSession();
+    return monitor ? std::max(0.F, S.layoutOn(monitor->m_id).bandH) : 0.F;
 }
 
 // The width the result cards span: the monitor inset by the mission-control
@@ -248,6 +249,7 @@ inline size_t overviewResultsRowCap(PHLMONITOR monitor, size_t gridTiles) {
 }
 
 inline void overviewTrimSectionsToFit(std::vector<SSearchSection>& sections, PHLMONITOR monitor, size_t gridTiles) {
+    auto& S = searchSession();
     if (sections.empty() || !monitor)
         return;
 
@@ -258,7 +260,7 @@ inline void overviewTrimSectionsToFit(std::vector<SSearchSection>& sections, PHL
     // (user, 2026-09-23: "I never saw more than 8 rows in the results pane").
     const size_t MAX_ROWS = overviewResultsRowCap(monitor, gridTiles);
     for (auto& sec : sections) {
-        auto& top = g_search.nav.colTop[std::clamp(sec.column, 0, 2)];
+        auto& top = S.nav.colTop[std::clamp(sec.column, 0, 2)];
         if (sec.rows.size() <= MAX_ROWS) {
             top = 0;
             continue;
@@ -270,7 +272,7 @@ inline void overviewTrimSectionsToFit(std::vector<SSearchSection>& sections, PHL
         // row that was never drawn. The window the column shows is MAX_ROWS
         // long and slides just far enough to hold the selection; a column the
         // selection is not in shows its top. "+N" still counts what is hidden.
-        const auto SEL = g_search.nav.selection >= 0 ? std::ranges::find(sec.rows, sc<size_t>(g_search.nav.selection)) : sec.rows.end();
+        const auto SEL = S.nav.selection >= 0 ? std::ranges::find(sec.rows, sc<size_t>(S.nav.selection)) : sec.rows.end();
         if (SEL == sec.rows.end())
             top = 0;
         else if (const size_t P = sc<size_t>(SEL - sec.rows.begin()); P < top)
