@@ -13,8 +13,7 @@ namespace OvInternal {
 // walk into" question asks this one, so the pane and the keys cannot disagree.
 // The focused-and-empty browse is search:browse_on_click (off by default,
 // user 2026-11-04): off, the pane is up only for a query or a submenu.
-inline bool overviewSearchPaneUp() {
-    auto& S = searchSession();
+inline bool overviewSearchPaneUp(Search::CSession& S) {
     return !S.query.text.empty() || (S.query.active && Hyprdrive::Config::getSearchBrowseOnClick()) || SearchBackend::canNavigateMenuBack();
 }
 
@@ -26,8 +25,7 @@ inline bool overviewSearchPaneUp() {
 // down and a run of Esc never parks the highlight on Lock or Shut Down.
 // The walk up ends in the root browse, not in an empty pane: at the root the
 // search counts as focused-and-empty, which lists the menu's root.
-inline void overviewSettleMenuStep(const std::string& from = {}) {
-    auto& S = searchSession();
+inline void overviewSettleMenuStep(Search::CSession& S, const std::string& from = {}) {
     if (!SearchBackend::canNavigateMenuBack()) {
         if (!Hyprdrive::Config::getSearchBrowseOnClick()) {
             // No root browse to land in: back to the bare search field.
@@ -46,7 +44,7 @@ inline void overviewSettleMenuStep(const std::string& from = {}) {
     S.nav.intent             = ESearchIntent::Browsing;
     S.nav.hoverIndex         = -1;
 
-    const auto NEXT = overviewSearchRows();
+    const auto NEXT = overviewSearchRows(S);
     int        sel  = NEXT.empty() ? -1 : 0;
     for (int i = 0; i < sc<int>(NEXT.size()); ++i) {
         if (NEXT[sc<size_t>(i)].column != 0)
@@ -72,11 +70,10 @@ inline void overviewSettleMenuStep(const std::string& from = {}) {
 // calculator copy, or file open. Submenu navigation returns false so the overview
 // stays open while drilling down into the hierarchy. For an already-open app,
 // Enter focuses that window unless newInstance is set (double-tap Shift).
-void overviewQueryEdited(); // main.cpp
+void overviewQueryEdited(Search::CSession& S); // OverviewOpen.cpp
 
-inline bool activateSearchResult(int index, bool newInstance = false) {
-    auto& S = searchSession();
-    const auto RESULTS = overviewSearchRows();
+inline bool activateSearchResult(Search::CSession& S, int index, bool newInstance = false) {
+    const auto RESULTS = overviewSearchRows(S);
     if (index < 0 || index >= sc<int>(RESULTS.size()))
         return false;
 
@@ -95,7 +92,7 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
         S.nav.hoverIndex         = -1;
         // The rewritten query owes the same trailing work as a typed one --
         // without it no provider (and no lookup) ever saw `define <word>`.
-        overviewQueryEdited();
+        overviewQueryEdited(S);
         return false;
     }
 
@@ -118,7 +115,7 @@ inline bool activateSearchResult(int index, bool newInstance = false) {
                 S.query.text.clear();
                 Membership::bump("menu drill");
             }
-            overviewSettleMenuStep(LEFT);
+            overviewSettleMenuStep(S, LEFT);
             return false;
         }
         return SearchBackend::activate(*ROW.omarchy);

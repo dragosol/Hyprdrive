@@ -236,10 +236,10 @@ bool COverview::tabAcrossMonitors() {
     const auto ENTERSEARCH = [&]() {
         auto& S = searchSession();
         auto&      FIRST   = order.front();
-        const auto RESULTS = overviewSearchRows();
+        const auto RESULTS = overviewSearchRows(S);
         S.nav.keyboardTile = false;
         TileChrome::setHovered(PHLWINDOW{}, false);
-        if (overviewSearchPaneUp() && !RESULTS.empty()) {
+        if (overviewSearchPaneUp(S) && !RESULTS.empty()) {
             S.nav.zone              = EOverviewNavZone::Result;
             S.nav.explicitSelection = true;
             S.nav.intent            = ESearchIntent::Browsing;
@@ -259,7 +259,7 @@ bool COverview::tabAcrossMonitors() {
     // NO RESULTS UP (user, 2026-09-27): "monitor 1 strip -> grid -> monitor 2
     // strip -> grid monitor 2" and round again -- search has nothing to offer,
     // so it is not a stop. Every strip is a stop; a grid with no tiles is not.
-    if (const auto RESULTS = overviewSearchRows(); !(overviewSearchPaneUp() && !RESULTS.empty())) {
+    if (const auto RESULTS = overviewSearchRows(SESSION); !(overviewSearchPaneUp(SESSION) && !RESULTS.empty())) {
         const size_t STOPS = order.size() * 2;
         const size_t FROM  = SESSION.nav.zone == EOverviewNavZone::Desktop ? self * 2 : SESSION.nav.zone == EOverviewNavZone::Tile ? self * 2 + 1 : STOPS - 1;
         for (size_t step = 1; step <= STOPS; ++step) {
@@ -418,7 +418,7 @@ bool COverview::moveSelection(const std::string& direction) {
     // so rows behind "+N" are reachable. The tool pane lays its rows out on
     // its own and keeps the drawn-row walk below.
     if (S.nav.zone == EOverviewNavZone::Result && (UP || DOWN) && S.nav.selection >= 0) {
-        const auto ROWS = overviewSearchRows();
+        const auto ROWS = overviewSearchRows(S);
         if (!ROWS.empty() && ROWS[0].tool == 0) {
             for (const auto& SEC : overviewSearchSections(ROWS)) {
                 const auto IT = std::ranges::find(SEC.rows, sc<size_t>(S.nav.selection));
