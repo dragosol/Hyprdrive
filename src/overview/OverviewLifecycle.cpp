@@ -38,7 +38,7 @@ COverview::~COverview() {
     OverviewWindow::trimTexturePrefilterCache();
     const auto MONITOR = pMonitor.lock();
     const auto WORKSPACE = MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{};
-    emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(WORKSPACE, Desktop::focusState()->window()), false);
+    emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(m_search, WORKSPACE, Desktop::focusState()->window()), false);
     restoreWorkspaceAnimationOverrides();
     restoreInputConfigOverrides();
     // Whatever has focus NOW. Each monitor's overview reaches this when its own
@@ -376,7 +376,7 @@ void COverview::close() {
         viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{};
 
     const auto finishClose = [&](const PHLWORKSPACE& finalWorkspace, const PHLWINDOW& finalWindow) {
-        emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(finalWorkspace, finalWindow), false);
+        emitFullscreenVisibilityState(getOverviewFullscreenVisibilityWindow(m_search, finalWorkspace, finalWindow), false);
 
         useAnimDirection(false);
         *scale = 1.F;
@@ -411,7 +411,7 @@ void COverview::close() {
     const bool LEFTFORDESKTOP = !closeOnWindow && SELECTEDWORKSPACE && !SELECTEDWORKSPACE->m_isSpecialWorkspace && SELECTEDWORKSPACE->m_id != ORIGINWORKSPACEID;
     if (LEFTFORDESKTOP) {
         const auto CANDIDATE = getOverviewWindowToShow(SELECTEDWORKSPACE->getFocusCandidate());
-        if (CANDIDATE && CANDIDATE->m_workspace == SELECTEDWORKSPACE && shouldShowOverviewWindow(CANDIDATE))
+        if (CANDIDATE && CANDIDATE->m_workspace == SELECTEDWORKSPACE && shouldShowOverviewWindow(m_search, CANDIDATE))
             closeOnWindow = CANDIDATE;
     }
 
