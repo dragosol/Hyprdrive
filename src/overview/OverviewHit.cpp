@@ -23,7 +23,7 @@ PHLWINDOW COverview::windowAtOverviewPoint(const Vector2D& point, size_t* hovere
             return window;
         };
 
-        const auto fullscreenWindow = overviewFullscreenPathWindow(wimg->pWorkspace);
+        const auto fullscreenWindow = overviewFullscreenPathWindow(m_search, wimg->pWorkspace);
 
         if (fullscreenWindow) {
             for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
@@ -307,7 +307,7 @@ PHLWINDOW COverview::windowClosestToWorkspaceCenter(size_t workspaceIdx) const {
     const auto  WORKSPACEOFFSET =
         workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, SCALE, layout));
     const auto WORKSPACEBOX = getOverviewWorkspaceBox(MONITOR, SCALE, viewOffset->value(), WORKSPACEOFFSET, layout);
-    const auto FULLSCREENWINDOW  = overviewFullscreenPathWindow(WORKSPACEIMAGE->pWorkspace);
+    const auto FULLSCREENWINDOW  = overviewFullscreenPathWindow(m_search, WORKSPACEIMAGE->pWorkspace);
     const bool HASFULLSCREENPATH = FULLSCREENWINDOW != nullptr;
 
     PHLWINDOW bestWindow;
@@ -315,7 +315,7 @@ PHLWINDOW COverview::windowClosestToWorkspaceCenter(size_t workspaceIdx) const {
 
     for (const auto& windowRef : WORKSPACEIMAGE->windows) {
         const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
-        if (!shouldShowOverviewWindow(WINDOW))
+        if (!shouldShowOverviewWindow(m_search, WINDOW))
             continue;
         if (HASFULLSCREENPATH && WINDOW != FULLSCREENWINDOW && !WINDOW->isFloating())
             continue;
@@ -453,7 +453,7 @@ CDropIndicator::SDropAnchor COverview::dropAnchorAtOverviewCursorOnWorkspace(siz
     float bestDistanceSq = std::numeric_limits<float>::max();
     for (auto it = IMAGE->windows.rbegin(); it != IMAGE->windows.rend(); ++it) {
         const auto WINDOW = getOverviewWindowToShow(it->lock());
-        if (!shouldShowOverviewWindow(WINDOW) || WINDOW == ignoredWindow || WINDOW->isFloating())
+        if (!shouldShowOverviewWindow(m_search, WINDOW) || WINDOW == ignoredWindow || WINDOW->isFloating())
             continue;
 
         const auto [BOX, LOGICALBOX] = boxesForWindow(WINDOW);
@@ -484,7 +484,7 @@ CDropIndicator::SDropAnchor COverview::dropAnchorAtOverviewCursorOnWorkspace(siz
 
     for (const auto& windowRef : IMAGE->windows) {
         const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
-        if (!shouldShowOverviewWindow(WINDOW) || WINDOW == ignoredWindow || WINDOW->isFloating())
+        if (!shouldShowOverviewWindow(m_search, WINDOW) || WINDOW == ignoredWindow || WINDOW->isFloating())
             continue;
 
         const auto [BOX, LOGICALBOX] = boxesForWindow(WINDOW);
@@ -504,7 +504,7 @@ CDropIndicator::SDropAnchor COverview::dropAnchorAtOverviewCursorOnWorkspace(siz
 
     for (const auto& windowRef : IMAGE->windows) {
         const auto WINDOW = getOverviewWindowToShow(windowRef.lock());
-        if (!shouldShowOverviewWindow(WINDOW) || WINDOW == ignoredWindow || WINDOW->isFloating())
+        if (!shouldShowOverviewWindow(m_search, WINDOW) || WINDOW == ignoredWindow || WINDOW->isFloating())
             continue;
 
         const auto [BOX, LOGICALBOX] = boxesForWindow(WINDOW);
@@ -580,7 +580,7 @@ PHLWORKSPACE COverview::workspaceAtOverviewDropPoint(const Vector2D& point, size
         for (const bool floating : {true, false}) {
             for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
                 const auto WINDOW = getOverviewWindowToShow(it->lock());
-                if (!shouldShowOverviewWindow(WINDOW) || WINDOW == draggedWindow || WINDOW->isFloating() != floating)
+                if (!shouldShowOverviewWindow(m_search, WINDOW) || WINDOW == draggedWindow || WINDOW->isFloating() != floating)
                     continue;
 
                 const auto WINDOWBOX = getOverviewDragWindowBox(m_search, WINDOW, MONITOR, scale->value(), viewOffset->value(), WORKSPACEOFFSET, layout);
@@ -697,7 +697,7 @@ void COverview::performPrimaryClickAction() {
     // had the last word and focus never moved to the monitor picked).
     if (const auto HIT = altCellAt(lastMousePosLocal)) {
         const auto LAST = getOverviewWindowToShow(HIT->workspace->getLastFocusedWindow());
-        if (LAST && LAST->m_workspace == HIT->workspace && shouldShowOverviewWindow(LAST) && HIT->overview->selectAndClose(LAST))
+        if (LAST && LAST->m_workspace == HIT->workspace && shouldShowOverviewWindow(m_search, LAST) && HIT->overview->selectAndClose(LAST))
             return;
 
         HIT->overview->focusOverviewWorkspace(HIT->workspace, HIT->workspaceIdx);
@@ -747,7 +747,7 @@ PHLWINDOW COverview::actionTile() {
     if (closing)
         return {};
     const auto WINDOW = selectedOverviewTile();
-    return WINDOW && shouldShowOverviewWindow(WINDOW) ? WINDOW : PHLWINDOW{};
+    return WINDOW && shouldShowOverviewWindow(m_search, WINDOW) ? WINDOW : PHLWINDOW{};
 }
 
 // `window select|close` acts on the overview window under the cursor (README)
@@ -768,7 +768,7 @@ bool COverview::windowDispatcherAction(const std::string& action) {
     } else
         WINDOW = selectedOverviewTile(&workspaceIdx);
 
-    if (!WINDOW || !shouldShowOverviewWindow(WINDOW))
+    if (!WINDOW || !shouldShowOverviewWindow(m_search, WINDOW))
         return false;
 
     if (action == "select")
