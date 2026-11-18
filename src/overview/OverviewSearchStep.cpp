@@ -108,7 +108,7 @@ void COverview::renderSearch(PHLMONITOR monitor, float renderScale) {
     // Enter (query is cleared so children are listed), or while the search is
     // focused with nothing typed (the root browse; see overviewSearchPaneUp).
     auto         FRAME       = Search::frameRows(SESSION, monitor, searchMonitorId(), [this] { return matchingWindowCount(); },
-                                                 [&] { return overviewMainGridWindows(monitor->m_activeWorkspace, monitor).size(); });
+                                                 [&] { return overviewMainGridWindows(m_search, monitor->m_activeWorkspace, monitor).size(); });
     const bool   QUERIED     = FRAME.queried;
     const bool   EMPTYRESULT = FRAME.emptyResult;
     const auto&  RESULTS     = FRAME.results;
