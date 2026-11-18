@@ -62,7 +62,7 @@ void COverview::collectNavTargets(PHLMONITOR MONITOR, std::vector<SOverviewNavTa
     // ONCE PER WINDOW: a window must not come back twice from the grid list.
     std::unordered_set<const Desktop::View::CWindow*> seen;
     if (viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] && images[viewportCurrentWorkspace]->pWorkspace) {
-        for (const auto& WINDOW : overviewMainGridWindows(images[viewportCurrentWorkspace]->pWorkspace, MONITOR)) {
+        for (const auto& WINDOW : overviewMainGridWindows(m_search, images[viewportCurrentWorkspace]->pWorkspace, MONITOR)) {
             if (!WINDOW || !seen.insert(WINDOW.get()).second)
                 continue;
             const CBox BOX = tileBox(WINDOW);
@@ -114,13 +114,13 @@ std::vector<PHLWINDOW> COverview::navTilesOf(const PHLWORKSPACE& workspace) cons
     };
     std::vector<SOrdered> ordered;
 
-    for (const auto& WINDOW : overviewMainGridWindows(workspace, MONITOR)) {
+    for (const auto& WINDOW : overviewMainGridWindows(m_search, workspace, MONITOR)) {
         if (!WINDOW)
             continue;
         // The SLOT, not the drawn box: the drawn box carries the viewport pan,
         // and the desktop being walked ONTO has not been panned to yet.
         CBox slot;
-        if (!overviewGridLayout(workspace, MONITOR, WINDOW, slot) || slot.width <= 1.F || slot.height <= 1.F)
+        if (!overviewGridLayout(m_search, workspace, MONITOR, WINDOW, slot) || slot.width <= 1.F || slot.height <= 1.F)
             continue;
         ordered.push_back({WINDOW, slot});
     }
