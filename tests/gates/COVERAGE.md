@@ -119,6 +119,7 @@ Covered: **37 of 76** rows (30 fully, 7 partly); 39 not covered, each with its r
 | Search session contract (refactor p3/search): typing lists rows, auto-selects the first app, opens the band and docks the pill; arrows/Tab walk search/results/tiles/desktops; Backspace; Escape clears then closes; no match; the live field; the strip label with results; a fresh session after close + reopen | `search_keys` (state from `hyprdrive:debug search`); controls: one-line builds in `search_controls/` (re-aimed at the same product lines after the stage-2 refactor moved them into src/search/) |
 | Search activation: Return focuses a running app's window, launches one that is not running, picks the keyboard's tile; a click on a row | `search_activate` |
 | Search with two outputs: one query/selection, each output its own pane and grid filter, Escape twice clears and closes both | `search_monitors` |
+| Search on a short screen with a top bar (1920x1200 at 1.0667): typing never docks the pill below its rest y; hovering a strip desktop lifts the pill as far as the label needs, even off the screen, and it settles back off the strip [11-19] | `search_short_screen`; control: the build before the fix (32a44d1) |
 | Dock fan stacks, scrollbar, type-to-filter [10-08] | not covered: old `v4_stacks` (retired VM share) |
 | Dock preview pane wraps, concentric corners [10-16] | not covered: pixels |
 | Dock context menu entries [10-13, 10-15, 10-30] | not covered: old `x28` (retired VM share) |
