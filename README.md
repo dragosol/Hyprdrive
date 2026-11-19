@@ -67,6 +67,11 @@ Tap Super (press and release, no other key), or swipe up with 3 fingers:
   default), by the order the windows were opened, or laid out to match where
   the windows sit on the desktop. The order holds still while the overview is
   open.
+- **Sized to the screen** (`ui_scale`, `auto` by default): the search bar, its
+  results and the desktop strip take the same share of a laptop screen as of a
+  4K one, so the windows keep the room. Text and click targets shrink by a
+  tenth at most. A number from 0.5 to 1 picks one size for every monitor; `1`
+  is the full size everywhere, as before.
 - **Keys act on what you point at:** Super+F, Super+T and the other window
   shortcuts act on the hovered tile, and on a hovered window preview in the
   dock.
@@ -493,6 +498,8 @@ All keys are in **[docs/CONFIG.md](docs/CONFIG.md)**, which is generated from
 
 ```lua
 hl.config({ plugin = { hyprdrive = { hot_corner = { enabled = true }, dock = { autohide = false } } } })
+-- the overview's search and strip at one size on every monitor ("auto" fits each screen)
+hl.config({ plugin = { hyprdrive = { ui_scale = 0.8 } } })
 ```
 
 The fragments in `~/.config/hypr/hyprdrive/` load in filename order. Each one
