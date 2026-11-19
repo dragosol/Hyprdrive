@@ -9,7 +9,7 @@ the part named, not all of the row. "Not covered" says why.
 Run all: `make gates` (or `tests/gates/run.sh`). Each gate's header comment
 lists its asserts and the control that makes it fail.
 
-Covered: **37 of 76** rows (30 fully, 7 partly); 39 not covered, each with its reason.
+Covered: **38 of 77** rows (31 fully, 7 partly); 39 not covered, each with its reason.
 
 ## Mosaic (pure)
 
@@ -120,6 +120,7 @@ Covered: **37 of 76** rows (30 fully, 7 partly); 39 not covered, each with its r
 | Search activation: Return focuses a running app's window, launches one that is not running, picks the keyboard's tile; a click on a row | `search_activate` |
 | Search with two outputs: one query/selection, each output its own pane and grid filter, Escape twice clears and closes both | `search_monitors` |
 | Search on a short screen with a top bar (1920x1200 at 1.0667): typing never docks the pill below its rest y; hovering a strip desktop lifts the pill as far as the label needs, even off the screen, and it settles back off the strip [11-19] | `search_short_screen`; control: the build before the fix (2d9fa56) |
+| The overview's proportions (`ui_scale` auto): on every screen from 1280x800 to 4K and portrait, with a top bar, the search row, results and strip stay within their share of the screen (the design's bounds), and pill, strip label, results, plate and grid never overlap; the inspector goes below 1200 logical px of width; 3840x2160 is unchanged [11-19] | `overview_proportions`; control: `ui_scale = 1` (the old fixed sizes) |
 | Dock fan stacks, scrollbar, type-to-filter [10-08] | not covered: old `v4_stacks` (retired VM share) |
 | Dock preview pane wraps, concentric corners [10-16] | not covered: pixels |
 | Dock context menu entries [10-13, 10-15, 10-30] | not covered: old `x28` (retired VM share) |
