@@ -32,6 +32,8 @@
 # card 1 spans x 592..834 at y 145..280, card 2 starts ~840 -- there is no debug
 # hook for cards (tile is for windows). If the strip layout changes, step 4
 # fails with "nothing moved" and the coordinates need re-measuring (COVERAGE.md).
+# Those positions are the full-size strip, so the gate pins ui_scale = 1 (the
+# sizes before the overview fitted the screen, 2026-11-19) on a build that has it.
 # Control (--control): a2 is resized by 20 px while the overview is open, the
 # hovered tile's fullscreen is asked for the FOCUSED window by name (what Super+F
 # did before the fix), and the card drag is done without Super -- 1 (geometry
@@ -43,6 +45,7 @@ source "$(dirname "$0")/lib.sh"
 gate_begin ovw
 rig_start
 cfg '{general={layout="mosaic"}}'
+hq -j getoption plugin:hyprdrive:ui_scale | jq -e .str >/dev/null 2>&1 && cfg '{plugin={hyprdrive={ui_scale="1"}}}'
 ev 'hl.bind("SUPER + F", hl.dsp.window.fullscreen({ action = "toggle" }))'
 go 2; kw b1 700 450; go 1; kw a1 700 450; kw a2 600 400; sleep 0.5
 $R ptr move 700 1000 >/dev/null; settle 3 geom; G0=$(geom); shot "$GOUT/before.png"
