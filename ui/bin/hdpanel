@@ -176,7 +176,7 @@ KEY_META = [
     _k(PLUGIN + "strip_cleanup_button", "bool", "overview", True),
     _k(PLUGIN + "scale", "float", "overview", 0.82, min=0.4, max=0.9),
     _k(PLUGIN + "mission_control_gap", "int", "overview", 40, min=0, max=160),
-    _k(PLUGIN + "ui_scale", "enum", "overview", "auto", options=UI_SCALES),
+    _k(PLUGIN + "ui_scale", "enum", "overview", "1", options=UI_SCALES),
     _k(PLUGIN + "overview_tile_order", "enum", "overview", "recent", options=TILE_ORDERS),
     _k(PLUGIN + "backdrop", "enum", "overview", "snapshot", options=BACKDROPS),
     _k(PLUGIN + "search:dictionary", "bool", "overview", False),
@@ -2206,7 +2206,7 @@ def dump():
         if m["key"] == mon_key:
             return dict(m, options=monitor_options(live.get(mon_key, "")))
         if m["key"] == UI_SCALE_KEY:
-            return dict(m, options=ui_scale_options(live.get(UI_SCALE_KEY, "auto")))
+            return dict(m, options=ui_scale_options(live.get(UI_SCALE_KEY, "1")))
         if m["key"] in (MOSAIC_CYCLE, MOSAIC_FOCUS):
             return dict(m, options=chord_options(m["key"], chord_setting(store, m["key"]) if live.get(m["key"]) is None else (live.get(m["key"]) or "auto")))
         if m["key"] == SCROLL_MODS:
